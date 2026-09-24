@@ -75,6 +75,11 @@ export const CLR37 = "CLR37";
 
 export const ROSTER_REASON = {
   invalid: "prepayment_account_enrolment_invalid",
+  /** #1036 fix round / ADV-04. The loser of a two-session enrolment race, answered by name instead
+   *  of by the bare 23505 `uq_prepayment_account_enrolments_live` it used to get. CLR13, the
+   *  estate's own convergence/conflict class, exactly as 0307/0308/0315 answer their own
+   *  unique_violation. */
+  raced: "prepayment_account_enrolment_raced",
 };
 
 /** The axes the enrolment door answers with. The first five are the SHARED wall's own tokens,

@@ -28,7 +28,7 @@ import {
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 5;
+const EXPECTED_CELLS = 6;
 
 before(async () => {
   ready = await (async () => {
@@ -249,6 +249,81 @@ cell("p940.enrol.refusals — an unknown, control-class, bank-bound, fixed-asset
 // ===========================================================================================
 // AC3 — THE SCHEDULE DOOR ASKS THE ROSTER FIRST, AND THE EXISTING WALL AFTERWARDS.
 // ===========================================================================================
+
+cell("p940.enrol.race — two bookkeepers of one firm enrolling the SAME account concurrently leave exactly ONE live enrolment, and the loser is answered by NAME with the winner's enrolment id rather than a bare 23505; two concurrent RETIREMENTS answer the loser its own typed not_enrolled with no handler needed", async () => {
+  const scene = await statedTermScene("race", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
+  const code = await account(scene.alice, {
+    client: scene.client, code: "19000009", name: "Prepaid licences", type: "asset" });
+  const { getPool, ROLES } = await import("./rig-helpers.mjs");
+  const claims = (sub) => JSON.stringify({ sub, role: "authenticated" });
+
+  // THE BARRIER IS A REAL ONE. The version-forward block does `select … for update` and, with NO
+  // live row, there is nothing to lock: both sessions fall through and the loser meets
+  // `uq_prepayment_account_enrolments_live` at its INSERT. Session A is held open so that is
+  // exactly what happens, rather than the second call seeing A's committed row and version-
+  // forwarding (which is the ordinary, non-racing path the `records` cell already covers).
+  const race = async (fn) => {
+    const c1 = await getPool().connect();
+    const c2 = await getPool().connect();
+    try {
+      await c1.query(`set role ${ROLES.authenticated}`);
+      await c1.query("begin");
+      await c1.query("select set_config('request.jwt.claims', $1, true)", [claims(scene.bob)]);
+      const a = await fn(c1, "a");
+      await c2.query(`set role ${ROLES.authenticated}`);
+      await c2.query("begin");
+      await c2.query("select set_config('request.jwt.claims', $1, true)", [claims(scene.alice)]);
+      const pending = fn(c2, "b").then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
+      await new Promise((r) => setTimeout(r, 300));   // let B reach its INSERT and block
+      await c1.query("commit");
+      const out = await pending;
+      await c2.query(out.ok ? "commit" : "rollback").catch(() => {});
+      return { a: a.rows[0].r, b: out.ok ? out.r.rows[0].r : null, bError: out.ok ? null : out.e };
+    } finally {
+      for (const c of [c1, c2]) {
+        await c.query("rollback").catch(() => {});
+        await c.query("reset role").catch(() => {});
+        c.release();
+      }
+    }
+  };
+
+  const enrolled = await race((c, tag) => c.query(
+    `select clara.enrol_prepayment_account($1::uuid,$2::text,$3::text,$4::text,$5::text) as r`,
+    [scene.client, code, ROSTER_PURPOSE.prepayment,
+      "#940 battery: this account holds prepaid software licences", opk(`p940-race-${tag}`)]));
+
+  assert.ok(enrolled.a && enrolled.a.enrolment_id, "session A did not enrol");
+  assert.ok(enrolled.bError,
+    "the loser SUCCEEDED -- the race did not happen, so this cell measured nothing");
+  assert.equal(enrolled.bError.code, "CLR13",
+    `the loser was answered ${enrolled.bError.code} (${enrolled.bError.constraint ?? "no constraint"}) `
+    + "rather than the lane's own conflict class -- a bare 23505 is unclassifiable by any surface");
+  const detail = JSON.parse(enrolled.bError.detail);
+  assert.equal(detail.reason, ROSTER_REASON.raced);
+  assert.equal(detail.enrolment_id, enrolled.a.enrolment_id,
+    "the refusal does not name the enrolment that actually stands");
+  assert.equal(detail.account_code, code);
+  assert.equal(detail.purpose, ROSTER_PURPOSE.prepayment);
+
+  // THE INVARIANT HELD THROUGHOUT: one live enrolment per (client, account, purpose).
+  assert.equal((await enrolmentsFor(scene.client, code)).filter((x) => x.active).length, 1,
+    "the race left two live enrolments -- the index did not hold");
+
+  // ---- THE RETIREMENT DOOR NEEDS NO HANDLER, and that is measured rather than assumed. It is an
+  // UPDATE with no INSERT, so the loser blocks on the winner's row lock, then matches ZERO rows
+  // and takes the door's own `not_enrolled` arm. Nothing to re-raise; nothing to add.
+  const retired = await race((c, tag) => c.query(
+    `select clara.retire_prepayment_account($1::uuid,$2::text,$3::text,$4::text) as r`,
+    [scene.client, code, ROSTER_PURPOSE.prepayment, opk(`p940-race-ret-${tag}`)]));
+  assert.ok(retired.a && retired.a.enrolment_id, "session A did not retire");
+  assert.ok(retired.bError, "two retirements of one enrolment both succeeded");
+  assert.equal(retired.bError.code, CLR37);
+  assert.equal(JSON.parse(retired.bError.detail).reason, ROSTER_REASON.invalid);
+  assert.equal(JSON.parse(retired.bError.detail).axis, ROSTER_AXIS.notEnrolled,
+    "the retirement loser was answered something other than its own typed not_enrolled");
+  assert.equal((await enrolmentsFor(scene.client, code)).filter((x) => x.active).length, 0);
+});
 
 cell("p940.schedule.roster_gate — an eligible but UNENROLLED prepaid leg is refused by name with the enrolment door and the panel as the remedy and writes nothing; the SAME call succeeds once the account is enrolled; the roster is asked BEFORE the shared wall, so an account that fails both answers the roster; and the wall is still live afterwards for an account enrolled while it was eligible", async () => {
   const scene = await statedTermScene("gate", { cents: 90000, termMonthsBack: 4, termMonths: 3 });

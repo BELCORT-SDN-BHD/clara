@@ -1,24 +1,29 @@
-// F-A4 PR-2a -- Annex A's six-reader wall (W44) and F4's month-scoped receipt key (W32).
+// F-A4 PR-2a -- Annex A's END-TO-END books claim (W35), the self-healable FY refusal (W31), the
+// six-reader wall (W44) and F4's month-scoped receipt key (W32).
 //
-// [#1036] W34 (twin equivalence), W35/W35-mutant ("the books actually close") and W31 (the
-// self-healable FY refusal) are RETIRED, not merely retargeted. All four drove wrapper 12
-// (`wake12`) expecting it to propose a `clara.adjustment_templates` row that a human then SIGNS
-// and the existing occurrence belt then POSTS -- the agent-drafts/human-signs/belt-posts pipeline
-// the 0045 template lane built and #927 began retiring. Migration
-// 0315_prepayment_wake_reroute.sql (#1036) reroutes wrapper 12 onto
-// `clara._prepayment_schedule_core`'s 'wake' lane: it now lands in `clara.prepayment_schedules`,
-// configuration-only, exactly like a person's own call, and never proposes a template at all --
-// there is no draft left for W34 to compare against a human proposal, no live template for W35 to
-// sign and post occurrences against, and W31's FY-past refusal (still a real rule inside the
-// shared core's memo-only lane) now raises rather than returning a `rung_vector`, so its own
-// assertions have no subject either. `prepayment-wake-reroute.test.mjs`'s own cells are the direct
-// successors: `p1036.acted` for W35's claim ("the wake configures a real, inspectable schedule"),
-// `p1036.refusals` for the refusal-parity claim W34 and W31 both carried in different clothes, and
-// `f-a4-pr2a-wrapper.test.mjs`'s `fa4p2a.W13-retired` for the "the agent core's old shape is
-// genuinely gone" claim. See that file's own header for the full accounting.
+// [#1036] W34 (twin equivalence) is RETIRED: it compared the agent core's durable state with the
+// human PROPOSE door's, and #927 (0282) retired that human door to a typed refusal, so there is no
+// door left to be equivalent to.
 //
-// W44 and W32, below, are UNTOUCHED: neither drives wrapper 12 -- W44 mints its own templates
-// directly through `mintTemplate` and W32 drives an unrelated close verb
+// [#1036, THE FIX ROUND 2026-09-24] W35 / W35-mutant / W31 are RETARGETED, not retired. The first
+// cut of this lane deleted all three on the ground that they drove wrapper 12 through the 0045
+// template pipeline (propose -> a human SIGNS -> the belt POSTS), which #1036 dismantles. That is
+// true of their MACHINERY and false of their SUBJECT: W35's subject is an ACCOUNTING claim about
+// the books -- "the prepaid asset reaches EXACTLY zero and the expense side totals the term, with
+// the remainder wholly in the final period" -- and W31's is a LIFECYCLE claim -- "a term running
+// past the fiscal year refuses by name, and the same lane can clear it by opening the successor
+// year". Both rules are alive; only the entrance moved. Deleting them left the prepayment lane
+// with NO end-to-end proof that its schedules close the books at all (measured: after the
+// deletion, a repo-wide grep for a prepaid-to-zero assertion returned only the deferred-revenue
+// side and a tie-out), and no cell anywhere asserting `fiscal_years.successor`. So both are
+// re-driven below through the LIVE human door -- `clara.create_prepayment_schedule`, the plan
+// lane, the catch-up window and the real posting belt -- which is the same evidence the retired
+// pipeline used to give, against the pipeline that actually ships. #927's own release precedent
+// ("every one of those files was retargeted at the retired shape, never deleted, never skipped")
+// is the house rule this follows.
+//
+// W44 and W32 are UNTOUCHED: neither drives wrapper 12 -- W44 mints its own templates directly
+// through `mintTemplate` and W32 drives an unrelated close verb
 // (`clara._agent_mint_month_snapshot_core`, the daily-close month-snapshot wake, not the
 // prepayment limb) -- so neither cell's premise moved.
 
@@ -29,12 +34,192 @@ import { humanQuery } from "./rig-helpers.mjs";
 import { withTxn } from "./rig-txn.mjs";
 import {
   ensurePrepay, prepayGate, prepaidScene, rootQuery, caught, uniq, pair, receiptsForTask, derivedOpKey,
-  MODEL, mintTemplate,
+  MODEL, mintTemplate, opk,
 } from "./f-a4-pr2a-fixtures.mjs";
+import {
+  prepaymentScene, createPrepaymentSchedule, prepaymentLaneReady, statedTermScene,
+  recordStatedTerm, statedTermLaneReady, openDefaultFY, monthEndAfter, PREPAY_REASON,
+  wakeDuePlanOccurrences, requestPlanCatchUp, occurrenceRows, workRow, claimWorkRun,
+  settleWorkRun, mintClientObo, wakeRecordJournalEntry, receiptsForWork,
+} from "./prepayment-stated-term-fixtures.mjs";
 
 let skipped = 0;
 const markSkip = () => { skipped += 1; };
 before(async () => { await ensurePrepay(noteLane); });
+
+/** The LIVE prepayment lane's own frontier (0223), layered on top of the F-A4 one: the retargeted
+ *  cells drive `clara.create_prepayment_schedule`, which a pre-0223 chain does not carry. */
+async function liveLaneGate(t) {
+  if (prepayGate(t, markSkip)) return true;
+  if (!(await prepaymentLaneReady())) {
+    markSkip();
+    t.skip("the live prepayment lane (0223) is absent -- probed at the live catalog");
+    return true;
+  }
+  return false;
+}
+
+/** The net movement on one account across every APPROVED line of a client, in cents. Restored with
+ *  W35: the books claim is asserted on the LEDGER, never on the schedule's own projection. */
+async function accountNet(client, code) {
+  const r = await rootQuery(
+    `select coalesce(sum(jl.debit_cents - jl.credit_cents), 0)::bigint as net
+       from clara.journal_lines jl join clara.journal_entries je on je.id = jl.entry_id
+      where jl.client_id = $1 and jl.account_code = $2 and je.status = 'approved'`, [client, code]);
+  return Number(r.rows[0].net);
+}
+
+/** Admit every period this schedule owes and POST each one through the real belt. Returns the
+ *  posted entry ids, oldest first. */
+async function postEveryPeriod(scene, made, tag) {
+  await wakeDuePlanOccurrences({ limit: 100 });
+  await requestPlanCatchUp(scene.bob, {
+    plan: made.plan_id, from: made.effective_from, to: made.effective_to });
+  const admitted = (await occurrenceRows(made.plan_id)).filter((o) => o.work_id);
+  const obo = await mintClientObo({ firm: scene.firm, obo: scene.bob, client: scene.client });
+  const entries = [];
+  for (const occ of admitted) {
+    const w = await workRow(occ.work_id);
+    await claimWorkRun({ task: w.current_task_id, runId: opk(`${tag}-run`) });
+    const entry = await wakeRecordJournalEntry(obo.secret, {
+      client: scene.client, work: occ.work_id, logicalOpId: w.logical_op_id, basis: w.basis });
+    assert.equal(entry.posted, true, `the period due ${occ.due_date} did not reach the books`);
+    await settleWorkRun({
+      task: w.current_task_id, outcome: "completed", result: { entry_id: entry.entry_id } });
+    const receipts = await receiptsForWork(occ.work_id);
+    assert.equal(receipts.filter((x) => x.outcome === "committed").length, 1,
+      "exactly one committed receipt stands for each period");
+    entries.push(entry.entry_id);
+  }
+  return entries;
+}
+
+// ---------------------------------------------------------------------------------------------
+// W35 (RETARGETED) -- THE BOOKS ACTUALLY CLOSE.
+// ---------------------------------------------------------------------------------------------
+test("fa4p2a.W35 end-to-end over the LIVE prepayment lane: the prepaid asset reaches EXACTLY zero and the expense side totals the term, on a total that does not divide evenly", async (t) => {
+  if (await liveLaneGate(t)) return;
+  // 100000 sen over 3 months does NOT divide evenly (33333 x 3 = 99999), so the final period must
+  // absorb the remainder. A cell run on a total that divided evenly would pass with the remainder
+  // rule broken.
+  const CENTS = 100000;
+  const scene = await prepaymentScene("w35live", { cents: CENTS, termMonthsBack: 4, termMonths: 3 });
+
+  const opened = await accountNet(scene.client, scene.prepaid);
+  assert.equal(opened, CENTS, "the prepaid asset does not open at the amount the entry posted");
+  assert.equal(await accountNet(scene.client, scene.target), 0, "nothing is expense yet");
+
+  const made = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.entry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+  assert.equal(Number(made.total_cents), CENTS);
+  assert.equal(made.period_count, 3);
+
+  const entries = await postEveryPeriod(scene, made, "w35live");
+  assert.equal(entries.length, 3, "the schedule owes three periods and three entries posted");
+
+  // THE ASSERTION THE WHOLE TRAIN EXISTS FOR.
+  const prepaidAfter = await accountNet(scene.client, scene.prepaid);
+  assert.equal(prepaidAfter, 0,
+    `the prepaid asset did not reach zero -- it stands at ${prepaidAfter} sen, so the schedule either under- or over-charged`);
+  assert.equal(await accountNet(scene.client, scene.target), CENTS,
+    "the expense side does not total the term");
+
+  // AND THE REMAINDER IS IN THE FINAL PERIOD, not smeared: periods 1..n-1 carry the base.
+  const perPeriod = await rootQuery(
+    `select jl.debit_cents::bigint as dr
+       from clara.journal_lines jl join clara.journal_entries je on je.id = jl.entry_id
+      where je.id = any($1::uuid[]) and jl.account_code = $2 and jl.debit_cents > 0
+      order by je.posting_date`, [entries, scene.target]);
+  assert.deepEqual(perPeriod.rows.map((r) => Number(r.dr)), [33333, 33333, 33334],
+    "the remainder is not wholly in the final period");
+  noteLane(`W35: prepaid ${opened} -> 0, expense -> ${CENTS}, periods 33333/33333/33334`);
+});
+
+test("fa4p2a.W35-mutant stopping ONE occurrence short leaves the prepaid account NON-ZERO", async (t) => {
+  if (await liveLaneGate(t)) return;
+  // Without this the cell above could be asserting a tautology -- a books read that always says
+  // zero proves nothing about the schedule.
+  const CENTS = 100000;
+  const scene = await prepaymentScene("w35mlive", { cents: CENTS, termMonthsBack: 4, termMonths: 3 });
+  const made = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.entry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+
+  await wakeDuePlanOccurrences({ limit: 100 });
+  await requestPlanCatchUp(scene.bob, {
+    plan: made.plan_id, from: made.effective_from, to: made.effective_to });
+  const admitted = (await occurrenceRows(made.plan_id)).filter((o) => o.work_id);
+  assert.equal(admitted.length, 3);
+  const obo = await mintClientObo({ firm: scene.firm, obo: scene.bob, client: scene.client });
+  for (const occ of admitted.slice(0, 2)) {              // TWO of three, deliberately
+    const w = await workRow(occ.work_id);
+    await claimWorkRun({ task: w.current_task_id, runId: opk("w35m-run") });
+    const entry = await wakeRecordJournalEntry(obo.secret, {
+      client: scene.client, work: occ.work_id, logicalOpId: w.logical_op_id, basis: w.basis });
+    await settleWorkRun({
+      task: w.current_task_id, outcome: "completed", result: { entry_id: entry.entry_id } });
+  }
+  const left = await accountNet(scene.client, scene.prepaid);
+  assert.notEqual(left, 0,
+    "two of three occurrences left the prepaid account at ZERO -- W35 is reading something other than the ledger");
+  assert.equal(left, CENTS - 33333 - 33333);
+});
+
+// ---------------------------------------------------------------------------------------------
+// W31 (RETARGETED) -- THE FY REFUSAL IS SELF-HEALABLE.
+// ---------------------------------------------------------------------------------------------
+test("fa4p2a.W31 a term running past the fiscal year refuses BY NAME on the live door, naming the successor year as what is missing -- and opening that year clears the SAME call", async (t) => {
+  if (await liveLaneGate(t)) return;
+  if (!(await statedTermLaneReady())) {
+    markSkip();
+    t.skip("#939's stated-term lane (0305) is absent -- probed at the live catalog");
+    return;
+  }
+  // The refusal is a SELF-HEALABLE state, not a dead end, and the estate has been bitten by a rung
+  // whose "blocked" state nothing ever drove to resolution. So the cell drives the resolution.
+  const scene = await statedTermScene("w31live", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
+  const fy = await rootQuery(
+    "select to_char(ends_on,'YYYY-MM-DD') as ends from clara.fiscal_years where id = $1", [scene.fy]);
+  const endsOn = fy.rows[0].ends;
+  const year = Number(endsOn.slice(0, 4));
+
+  // A TERM THAT RUNS INTO THE YEAR AFTER THIS ONE, stated through the real door.
+  const past = await monthEndAfter(`${year + 1}-01-01`, 5);
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: scene.termStart, end: past,
+    reason: "#1036 W31: the cover runs into the following financial year" });
+
+  const blocked = await caught(() => createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef, opKey: opk("w31-blocked") }));
+  assert.ok(blocked, "a term past the FY with no successor year open must refuse");
+  const detail = JSON.parse(blocked.detail);
+  assert.equal(detail.reason, PREPAY_REASON.termUnderivable);
+  assert.equal(detail.missing, "fiscal_years.successor",
+    "the refusal must NAME the successor year as the missing thing, so a person knows what to open");
+  assert.equal(detail.fy_ends_on.slice(0, 10), endsOn);
+
+  // MUTANT: the same call again, still refused -- the refusal is the YEAR'S ABSENCE, not a flake.
+  const still = await caught(() => createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef, opKey: opk("w31-still") }));
+  assert.equal(JSON.parse(still.detail).reason, PREPAY_REASON.termUnderivable,
+    "the refusal is not stable -- it was a flake, not a state");
+
+  // ===== THE SELF-HEAL, ACTUALLY DRIVEN. Open the successor year through the estate's own door
+  // and the SAME configuration succeeds. Without this the "self-healable, not a dead end" claim
+  // would be a sentence rather than a demonstration.
+  await openDefaultFY(scene.alice, {
+    client: scene.client, startsOn: `${year + 1}-01-01`, tag: "W31 successor" });
+  const made = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef, opKey: opk("w31-healed") });
+  assert.ok(made.schedule_id, "opening the successor year did not clear the refusal");
+  assert.equal(made.term_end, past, "…and the schedule runs to the term that was refused before");
+  noteLane("W31: fiscal_years.successor refused by name, then cleared by opening the year");
+});
 
 // ---------------------------------------------------------------------------------------------
 // W44 -- the six readers stay ABOUT what posts.

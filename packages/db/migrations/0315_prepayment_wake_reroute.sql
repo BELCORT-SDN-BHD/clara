@@ -131,7 +131,13 @@ declare
     ['clara.get_revenue_recognition_schedule(uuid)',
      '7cb0eb58be588bf0faab283c9ddcfe83f702f7a1f2c2c133b97714cf6a019cad'],
     ['clara.list_revenue_recognition_schedules(uuid)',
-     '075a90ecfe7ee698610716534c5dfdc402ccf56c109f17fb93c03b5d6d031235']
+     '075a90ecfe7ee698610716534c5dfdc402ccf56c109f17fb93c03b5d6d031235'],
+    ['clara.enrol_prepayment_account(uuid,text,text,text,text)',
+     'dc122ca3a216b7eae3d1d4678b2921911a1045f1ea761db5f3467685c8a1f554'],
+    ['clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)',
+     '5f71dbc2fe984a06c9c60f62bbaaefc8d34e3f0db607bfdfdcb9d409a2152b6d'],
+    ['clara.record_prepayment_stated_term(uuid,uuid,date,date,text,text)',
+     '8a7a2fe5a4b274ea5fbe789b02ef97946c927789bd0398863beb8f54d3947f98']
   ];
   v_keep text[][] := array[
     ['clara._propose_adjustment_template_core(jsonb,uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb,text)',
@@ -382,7 +388,7 @@ begin
   -- the one fact that decides it: whether it binds a document. The absent/foreign case answers
   -- with v1's OWN token and sentence, so a caller cannot tell this recut from the body it
   -- replaced on that arm.
-  select je.id, je.status, je.document_id, je.posting_date into v_entry
+  select je.id, je.status, je.document_id, je.posting_date, je.reversed_by into v_entry
     from clara.journal_entries je
    where je.id = p_source_entry and je.client_id = p_client and je.firm_id = p_firm;
   if v_entry.id is null then
@@ -390,6 +396,33 @@ begin
       detail=jsonb_build_object('reason','prepayment_source_unfit',
         'reason_text','the source entry is not this client''s',
         'source_entry', p_source_entry)::text;
+  end if;
+
+  -- ================= #1036 FIX ROUND / ADV-05 — A REVERSED RECOGNITION IS NOT SCHEDULABLE ========
+  --
+  -- WHAT WAS MEASURED. `clara.reverse_entry` leaves the original at status 'approved' and sets
+  -- `reversed_by`, so a REFUNDED advance passed the status wall above. Driven on the rig before
+  -- this arm: a 90000-sen advance was reversed through the real door and
+  -- `clara.create_revenue_recognition_schedule` then returned a schedule of 90000 over 3 periods --
+  -- a plan that would post Dr deferred revenue / Cr revenue against money the client got back,
+  -- driving the liability into a debit balance and recognising revenue on a cancelled performance
+  -- obligation (MFRS 15 / MPERS section 23, the standard this lane's own header names). The
+  -- prepayment twin did the same against a refunded prepaid asset.
+  --
+  -- THE LANE'S TWO HALVES DISAGREED, which is the sharpest evidence this was an oversight rather
+  -- than a decision: `clara.list_revenue_recognition_attention` (0308), `clara.list_prepayment_
+  -- attention` (0305) and #940's own band all filter `je.reversed_by is null`, so the band would
+  -- NEVER offer a receipt this door was accepting. The predicate below is theirs, verbatim.
+  --
+  -- ASKED ABOVE THE DOCUMENT/MEMO BRANCH, so neither carrier can drift from the other: a refunded
+  -- payment is not amortisable whether its term came off an invoice or off a person's statement.
+  if v_entry.reversed_by is not null then
+    raise exception 'this prepayment has been reversed, so there is nothing left to amortise'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','prepayment_source_unfit',
+          'reason_text','this prepayment has been reversed, so there is nothing left to amortise',
+          'axis','source_reversed', 'source_entry', p_source_entry,
+          'reversed_by', v_entry.reversed_by)::text;
   end if;
 
   if v_entry.document_id is not null then
@@ -1483,6 +1516,880 @@ begin
   return jsonb_build_object('client_id', p_client, 'schedules', v_rows);
 end $fn$;
 
+-- =====================================================================================
+-- §F — clara.record_prepayment_stated_term — RECUT: THE THREE CARRIER BOUNDS ARE REFUSED BY NAME.
+--
+-- REVIEW FINDING ADV-03 (major, the fix round of 2026-09-24). 0305's own comment beside
+-- `ck_pst_finite` / `ck_pst_domain` / `ck_pst_max_periods` says "The door refuses these BY NAME so
+-- a caller gets a reason; these exist so no OTHER writer, now or later, can get past them" — and
+-- the door did not. `prepayment-stated-term-fixtures.mjs` has declared `datesNotFinite`,
+-- `datesOutOfDomain` and `termTooLong` since #939, and a repo-wide grep found them in that one
+-- file: nothing raised them and no cell asserted them. Driven as a bookkeeper before the fix:
+-- 1899-01-01 -> SQLSTATE 23514 `ck_pst_domain` with a null detail; 'infinity' -> the same; a
+-- 200-month term -> 23514 `ck_pst_max_periods`. None carries a `detail.reason`, so no surface can
+-- classify them, and all three are reachable from
+-- `apps/web/components/prepayments/prepayment-form.tsx`, which validates presence, order and a
+-- non-blank reason and nothing else.
+--
+-- THE CONSTRAINTS STAY. They are the structural backstop for any OTHER writer; this section is the
+-- door saying the same thing first, in the caller's own vocabulary. The body is 0305's own text
+-- re-emitted whole with the three arms added — never a splice.
+-- =====================================================================================
+
+create or replace function clara.record_prepayment_stated_term(
+    p_client uuid, p_source_entry uuid, p_period_start date, p_period_end date,
+    p_reason text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  v_actor uuid; v_firm uuid; v_client_firm uuid; v_client_status text;
+  v_dedupe jsonb; v_entry record; v_prior uuid; v_new uuid;
+  v_months int;   -- #1036 FIX ROUND / ADV-03
+begin
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'stating a prepayment term requires its idempotency key' using errcode='CLR10',
+      detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
+  end if;
+  select a.actor, a.firm into v_actor, v_firm
+    from clara._human_ctx(clara.role_rank('bookkeeper')) a;
+
+  select c.firm_id, c.status into v_client_firm, v_client_status
+    from clara.clients c where c.id = p_client;
+  if v_client_firm is null or v_client_firm <> v_firm then
+    raise exception 'client not found in your firm' using errcode='CLR11',
+      detail='{"reason":"client_not_found"}';
+  end if;
+  if v_client_status <> 'active' then
+    raise exception 'client is not active -- no new stated prepayment term' using errcode='CLR10',
+      detail='{"reason":"client_inactive"}';
+  end if;
+
+  v_dedupe := clara._reserve_op(v_firm, 'record_prepayment_stated_term', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'source_entry', p_source_entry,
+      'period_start', p_period_start, 'period_end', p_period_end,
+      'reason', btrim(coalesce(p_reason, '')))));
+  if v_dedupe is not null then
+    if v_dedupe ? 'pending' then
+      raise exception 'this stated-term key is held by an in-flight sibling'
+        using errcode='CLR13', detail='{"reason":"operation_in_flight"}';
+    end if;
+    return v_dedupe;
+  end if;
+
+  -- WHO/REASON/WHEN is the ruled trio (ADR-062): a fact without its basis is REFUSED, never
+  -- defaulted. The table CHECK says the same thing; this is the door saying it by name first, so
+  -- the caller gets a reason rather than a constraint violation.
+  if p_reason is null or btrim(p_reason) = '' then
+    raise exception 'a stated prepayment term requires its reason -- who said so, on what grounds'
+      using errcode='CLR10', detail='{"reason":"prepayment_stated_term_reason_missing"}';
+  end if;
+  if p_period_start is null or p_period_end is null then
+    raise exception 'a stated prepayment term requires both of its dates'
+      using errcode='CLR10', detail='{"reason":"prepayment_stated_term_dates_missing"}';
+  end if;
+  -- ================= #1036 FIX ROUND / ADV-03 — THE THREE CARRIER BOUNDS, BY NAME =================
+  --
+  -- WHAT WAS MEASURED. This door validated presence, order, the reason, the entry and the document
+  -- wall, and nothing else, so `ck_pst_finite`, `ck_pst_domain` and `ck_pst_max_periods` answered
+  -- instead — as a bare SQLSTATE 23514 with no `detail.reason`, which no surface can classify.
+  -- Driven as a bookkeeper on the rig: 1899-01-01 -> 23514 ck_pst_domain; 'infinity' -> 23514
+  -- ck_pst_domain; a 200-month term -> 23514 ck_pst_max_periods. The comment ten lines above this
+  -- one already claimed the opposite ("The door refuses these BY NAME so a caller gets a reason"),
+  -- and `prepayment-stated-term-fixtures.mjs` had declared the three tokens since #939 with nothing
+  -- raising them. Reachable from a real surface:
+  -- `apps/web/components/prepayments/prepayment-form.tsx` validates presence, order and a non-blank
+  -- reason, and an `<input type="date">` submits 1899-01-01 and a fifteen-year span happily.
+  --
+  -- THE ORDER IS FINITE -> DOMAIN -> INVERTED -> CAP, and it is not stylistic: 'infinity' is also
+  -- out of domain, so asking finiteness first is what makes the answer say the thing that is
+  -- actually wrong; and the month count below is only meaningful once the dates are finite and in
+  -- order.
+  if not isfinite(p_period_start) or not isfinite(p_period_end) then
+    raise exception 'a stated prepayment term needs two real dates'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','prepayment_stated_term_dates_not_finite',
+          'period_start', case when isfinite(p_period_start) then to_char(p_period_start,'YYYY-MM-DD') else 'infinite' end,
+          'period_end', case when isfinite(p_period_end) then to_char(p_period_end,'YYYY-MM-DD') else 'infinite' end)::text;
+  end if;
+  -- The domain is `clara.document_service_periods`' own (ck_dsp_domain), because the two carriers
+  -- describe the same kind of fact: a term admissible on one lane must be admissible on the other.
+  if p_period_start < date '1900-01-01' or p_period_start > date '2200-12-31'
+     or p_period_end < date '1900-01-01' or p_period_end > date '2200-12-31' then
+    raise exception 'a stated prepayment term must fall between 1900-01-01 and 2200-12-31'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','prepayment_stated_term_dates_out_of_domain',
+          'period_start', to_char(p_period_start,'YYYY-MM-DD'),
+          'period_end', to_char(p_period_end,'YYYY-MM-DD'),
+          'domain_start','1900-01-01', 'domain_end','2200-12-31')::text;
+  end if;
+  if p_period_end < p_period_start then
+    raise exception 'a stated prepayment term ends on or after it starts'
+      using errcode='CLR10', detail='{"reason":"prepayment_stated_term_dates_inverted"}';
+  end if;
+  -- THE CAP BINDS ON THE PERIOD COUNT THE RULED PREDICATE DERIVES, `ck_pst_max_periods`'
+  -- expression verbatim rather than a date subtraction — decision 5 is "the same 120-month cap as
+  -- a document term", and a cap computed a second way would be a second cap. The refusal carries
+  -- the count it made, so a surface can say "you asked for 200 months; the limit is 120" instead
+  -- of "too long".
+  v_months := (extract(year from date_trunc('month', p_period_end))::int * 12
+               + extract(month from date_trunc('month', p_period_end))::int)
+            - (extract(year from case when p_period_start = date_trunc('month', p_period_start)::date
+                                      then date_trunc('month', p_period_start)
+                                      else date_trunc('month', p_period_start) + interval '1 month' end)::int * 12
+               + extract(month from case when p_period_start = date_trunc('month', p_period_start)::date
+                                         then date_trunc('month', p_period_start)
+                                         else date_trunc('month', p_period_start) + interval '1 month' end)::int)
+            + 1;
+  if v_months > 120 then
+    raise exception 'a stated prepayment term charges at most 120 months; this one charges %', v_months
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','prepayment_stated_term_too_long',
+          'period_count', v_months, 'max_periods', 120,
+          'period_start', to_char(p_period_start,'YYYY-MM-DD'),
+          'period_end', to_char(p_period_end,'YYYY-MM-DD'))::text;
+  end if;
+
+  -- THE 0021 RULE (the 0022:203-206 door idiom): absent and foreign answer with ONE refusal, so
+  -- this door is not an existence oracle for another client's entries. The predicate is the FULL
+  -- tenancy triple, which is also what the composite FK below will enforce structurally.
+  select je.id, je.status, je.document_id, je.reversed_by into v_entry
+    from clara.journal_entries je
+   where je.id = p_source_entry and je.client_id = p_client and je.firm_id = v_firm;
+  if v_entry.id is null then
+    raise exception 'recognition entry not found for this client'
+      using errcode='CLR11', detail='{"reason":"prepayment_source_entry_not_found"}';
+  end if;
+  -- A TERM IS STATED OVER A POSTED PAYMENT. 0140's own `prepayment_source_unfit` token, because
+  -- that is exactly what this says — no new vocabulary for an old fact.
+  if v_entry.status <> 'approved' then
+    raise exception 'a prepayment term is stated over a POSTED entry; this one is %', v_entry.status
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','prepayment_source_unfit',
+          'axis','source_not_posted', 'source_entry', p_source_entry,
+          'status', v_entry.status)::text;
+  end if;
+  -- THIS DOOR IS FOR THE MEMO-ONLY LANE ONLY, and that is a wall rather than a convention. A
+  -- document-bound recognition already has a lawful term carrier with its own door, its own
+  -- evidence-region congruence and its own supersession chain; admitting one here would create a
+  -- SECOND live term for one prepayment and no rule for which of them wins.
+  if v_entry.document_id is not null then
+    raise exception 'this recognition binds a document -- record its service period on the document instead'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','prepayment_stated_term_source_has_document',
+          'source_entry', p_source_entry, 'document_id', v_entry.document_id,
+          'remedy', 'clara.record_document_service_period')::text;
+  end if;
+
+  -- #1036 FIX ROUND / ADV-05 — AND THE `reversed_by` THIS DOOR ALREADY READ AND NEVER LOOKED AT.
+  -- A term stated over a refunded payment describes a service nobody is going to receive, and the
+  -- schedule door refuses such a recognition anyway (0315 §B), so stating one could only ever
+  -- produce a row with no lawful use. Same token, same axis, same vocabulary as both create doors.
+  if v_entry.reversed_by is not null then
+    raise exception 'this recognition has been reversed, so its service period no longer describes anything'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','prepayment_source_unfit',
+          'reason_text','this recognition has been reversed, so its service period no longer describes anything',
+          'axis','source_reversed', 'source_entry', p_source_entry,
+          'reversed_by', v_entry.reversed_by)::text;
+  end if;
+
+  -- SUPERSESSION, NEVER UPDATE (0055:610-623's idiom, 0140's spelling). Lock the live predecessor,
+  -- stamp it with the successor's id (the FK is deferred to commit), then insert the successor.
+  select t.id into v_prior from clara.prepayment_stated_terms t
+   where t.source_entry_id = p_source_entry and t.superseded_at is null
+   for update;
+  v_new := gen_random_uuid();
+  if v_prior is not null then
+    update clara.prepayment_stated_terms
+      set superseded_by = v_new, superseded_at = now()
+      where id = v_prior;
+  end if;
+  insert into clara.prepayment_stated_terms(id, firm_id, client_id, source_entry_id,
+      period_start, period_end, reason, stated_by)
+    values (v_new, v_firm, p_client, p_source_entry,
+      p_period_start, p_period_end, btrim(p_reason), v_actor);
+
+  -- args stay REDACTED (ids and dates, never the reason text -- the reason lives on the row, which
+  -- is the record of record; 0002's audit_log doctrine).
+  perform clara._audit(v_firm, v_actor, null, null, 'record_prepayment_stated_term', null,
+    jsonb_build_object('client', p_client, 'source_entry', p_source_entry,
+      'stated_term_id', v_new, 'superseded_id', v_prior,
+      'period_start', p_period_start, 'period_end', p_period_end, 'op_key', p_op_key));
+
+  return clara._finish_op(v_firm, 'record_prepayment_stated_term', p_op_key,
+    jsonb_build_object('stated_term_id', v_new, 'client_id', p_client,
+      'source_entry_id', p_source_entry,
+      'period_start', to_char(p_period_start, 'YYYY-MM-DD'),
+      'period_end', to_char(p_period_end, 'YYYY-MM-DD'),
+      'reason', btrim(p_reason), 'stated_by', v_actor,
+      'superseded_id', v_prior));
+end $$;
+
+-- =====================================================================================
+-- §G — clara._revenue_recognition_core — RECUT: A REVERSED ADVANCE IS NOT RECOGNISABLE.
+--
+-- REVIEW FINDING ADV-05 (minor, the fix round of 2026-09-24), and it is an ACCOUNTING finding
+-- rather than a hygiene one. See the arm's own comment inside the body for what was measured and
+-- driven. The same arm is added to `clara._prepayment_schedule_core` (§B) and to
+-- `clara.record_prepayment_stated_term` (§F), so all three doors and all three attention bands now
+-- agree on one predicate.
+--
+-- THE BODY IS 0308's OWN TEXT re-emitted whole with that one arm added -- never a splice. It also
+-- takes the ONE extra column the arm needs (`je.reversed_by`) into the record the door already
+-- reads once.
+-- =====================================================================================
+
+create or replace function clara._revenue_recognition_core(
+  p_firm uuid, p_client uuid, p_actor uuid, p_lane text, p_source_entry uuid,
+  p_revenue_account text, p_revenue_basis text, p_purpose text, p_authority_ref jsonb,
+  p_op_key text, p_pattern text)
+returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fn$
+declare
+  v_dedupe jsonb; v_sched jsonb; v_refusal text; v_lines jsonb;
+  v_n int; v_total bigint; v_base bigint; v_from date; v_to date;
+  v_deferred text; v_target text; v_basis_text text; v_pattern text;
+  v_acct record; v_breach jsonb; v_entry record; v_existing uuid;
+  v_basis jsonb; v_plan jsonb; v_plan_id uuid; v_rev_id uuid; v_sid uuid;
+  v_eval uuid; v_paired jsonb := '[]'::jsonb; v_x jsonb;
+  v_code text; v_msg text; v_detail text; v_reason text; v_constraint text;
+  v_result jsonb; v_memo text;
+  v_term_source text; v_sp_id uuid; v_st_id uuid; v_doc uuid;
+  v_term_start date; v_term_end date; v_basis_kind text;
+  v_legs int; v_leg record; v_fy record; v_period record; v_st record;
+begin
+  if p_lane is null or p_lane not in ('human', 'obo') then
+    raise exception 'clara._revenue_recognition_core: unknown lane %', coalesce(p_lane, '(null)')
+      using errcode='CLR10', detail='{"reason":"revenue_recognition_lane_unknown"}';
+  end if;
+  if p_purpose is null or btrim(p_purpose) = '' then
+    raise exception 'a revenue recognition schedule needs a purpose' using errcode='CLR10',
+      detail='{"reason":"invalid_purpose","constraint":"nonempty"}';
+  end if;
+
+  -- ---- ONE PATTERN, AND ANYTHING ELSE IS A TYPED REFUSAL (owner decision 2, 2026-09-18). ----
+  --
+  -- Usage-based and milestone recognition need a MEASURE OF PROGRESS — units delivered, stages
+  -- accepted — that this estate does not carry anywhere, and a database that guessed one would be
+  -- choosing a number on a firm's behalf. So the argument exists, its set is closed, and a caller
+  -- that asks for another pattern is told WHICH patterns exist rather than silently given the only
+  -- one. Asked with the purpose, BEFORE the reservation: it is a shape check on the caller's own
+  -- argument, like the purpose, and a reservation taken under a pattern the door cannot honour
+  -- would replay a refusal.
+  v_pattern := coalesce(nullif(btrim(coalesce(p_pattern, '')), ''), 'straight_line');
+  if v_pattern <> 'straight_line' then
+    raise exception 'this estate recognises deferred revenue on a straight line over whole calendar months; % is not offered', v_pattern
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','recognition_pattern_unsupported',
+          'pattern', v_pattern,
+          'supported', jsonb_build_array('straight_line'),
+          'reason_text','usage-based and milestone recognition need a measure of progress this estate does not record')::text;
+  end if;
+
+  -- ---- THE RESERVATION, TAKEN BEFORE THE DUPLICATE CHECK. ----
+  --
+  -- 0223's order and its reasoning: a caller whose response was lost retries with the SAME op key
+  -- and must get the schedule it already created, not CLR13 `..._schedule_exists` — a lost
+  -- response turned into a second question is the exact defect `_reserve_op` exists to prevent.
+  --
+  -- THE PAYLOAD HASH IS OVER THE CALLER'S OWN ARGUMENTS ONLY, never over the derived allocation:
+  -- the key identifies the DECISION a human made, and the term, the period count and the
+  -- allocation are OUTPUTS of that decision. The AUTHOR is deliberately NOT in the hash, which is
+  -- what lets the human door and its OBO twin share one key space (#915's AC3).
+  v_dedupe := clara._reserve_op(p_firm, 'create_revenue_recognition_schedule', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'source_entry', p_source_entry,
+      'revenue_account', nullif(btrim(coalesce(p_revenue_account,'')),''),
+      'revenue_basis', nullif(btrim(coalesce(p_revenue_basis,'')),''),
+      'purpose', btrim(p_purpose), 'authority', p_authority_ref, 'pattern', v_pattern)));
+  if v_dedupe is not null then
+    if v_dedupe ? 'pending' then
+      raise exception 'this recognition-schedule key is held by an in-flight sibling'
+        using errcode='CLR13', detail='{"reason":"operation_in_flight"}';
+    end if;
+    return v_dedupe;
+  end if;
+
+  -- ONE SCHEDULE PER RECEIPT. `uq_revenue_recognition_schedules_source` is the structural
+  -- backstop; this is the typed answer, and it names the schedule that already exists so the
+  -- surface can send the caller there instead of offering a second configuration.
+  select s.id into v_existing from clara.revenue_recognition_schedules s
+   where s.source_entry_id = p_source_entry and s.firm_id = p_firm;
+  if v_existing is not null then
+    raise exception 'this advance is already recognised by an existing schedule'
+      using errcode='CLR13',
+        detail=jsonb_build_object('reason','deferred_revenue_schedule_exists',
+          'schedule_id', v_existing, 'source_entry', p_source_entry)::text;
+  end if;
+
+  -- ---- THE SOURCE. Read ONCE; absent and foreign answer with ONE refusal (the 0021 rule), so
+  -- this door is not an existence oracle for another client's entries. ----
+  select je.id, je.status, je.document_id, je.posting_date, je.reversed_by into v_entry
+    from clara.journal_entries je
+   where je.id = p_source_entry and je.client_id = p_client and je.firm_id = p_firm;
+  if v_entry.id is null then
+    raise exception 'the source entry is not this client''s' using errcode='CLR10',
+      detail=jsonb_build_object('reason','deferred_revenue_source_unfit',
+        'reason_text','the source entry is not this client''s',
+        'source_entry', p_source_entry)::text;
+  end if;
+
+  -- ================= #1036 FIX ROUND / ADV-05 — A REVERSED RECOGNITION IS NOT SCHEDULABLE ========
+  --
+  -- WHAT WAS MEASURED. `clara.reverse_entry` leaves the original at status 'approved' and sets
+  -- `reversed_by`, so a REFUNDED advance passed the status wall above. Driven on the rig before
+  -- this arm: a 90000-sen advance was reversed through the real door and
+  -- `clara.create_revenue_recognition_schedule` then returned a schedule of 90000 over 3 periods --
+  -- a plan that would post Dr deferred revenue / Cr revenue against money the client got back,
+  -- driving the liability into a debit balance and recognising revenue on a cancelled performance
+  -- obligation (MFRS 15 / MPERS section 23, the standard this lane's own header names). The
+  -- prepayment twin did the same against a refunded prepaid asset.
+  --
+  -- THE LANE'S TWO HALVES DISAGREED, which is the sharpest evidence this was an oversight rather
+  -- than a decision: `clara.list_revenue_recognition_attention` (0308), `clara.list_prepayment_
+  -- attention` (0305) and #940's own band all filter `je.reversed_by is null`, so the band would
+  -- NEVER offer a receipt this door was accepting. The predicate below is theirs, verbatim.
+  if v_entry.reversed_by is not null then
+    raise exception 'this advance has been reversed, so there is no obligation left to recognise'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_source_unfit',
+          'reason_text','this advance has been reversed, so there is no obligation left to recognise',
+          'axis','source_reversed', 'source_entry', p_source_entry,
+          'reversed_by', v_entry.reversed_by)::text;
+  end if;
+  if v_entry.status <> 'approved' then
+    raise exception 'a recognition schedule recognises a POSTED receipt; this one is %', v_entry.status
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_source_unfit',
+          'reason_text','a recognition schedule recognises a POSTED receipt; this one is ' || v_entry.status,
+          'axis','source_not_posted',
+          'source_entry', p_source_entry, 'status', v_entry.status)::text;
+  end if;
+
+  -- ---- THE DEFERRED-REVENUE LEG: exactly one CREDITED LIABILITY line that is not the tax leg. ----
+  select count(*)::int into v_legs
+    from clara.journal_lines jl
+    join clara.coa_accounts ca
+      on ca.client_id = jl.client_id and ca.account_code = jl.account_code
+   where jl.entry_id = p_source_entry and jl.credit_cents > 0
+     and ca.account_type = 'liability'
+     and coalesce(ca.special_acc_type, '') <> 'sst_output';
+  if v_legs <> 1 then
+    raise exception '%', case when v_legs = 0 then 'the source entry credits no liability account that could hold deferred revenue'
+                              else 'the source entry credits more than one liability account, so its deferred-revenue leg is ambiguous' end
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_source_unfit',
+          'reason_text', case when v_legs = 0 then 'the source entry credits no liability account that could hold deferred revenue'
+                              else 'the source entry credits more than one liability account, so its deferred-revenue leg is ambiguous' end,
+          'source_entry', p_source_entry, 'candidate_legs', v_legs)::text;
+  end if;
+  select jl.account_code, jl.credit_cents into v_leg
+    from clara.journal_lines jl
+    join clara.coa_accounts ca
+      on ca.client_id = jl.client_id and ca.account_code = jl.account_code
+   where jl.entry_id = p_source_entry and jl.credit_cents > 0
+     and ca.account_type = 'liability'
+     and coalesce(ca.special_acc_type, '') <> 'sst_output';
+  v_deferred := v_leg.account_code;
+
+  -- ---- THE TERM. Two carriers, one shape, and the DOOR chooses between them by the one fact
+  -- that decides it: whether the receipt binds a document. ----
+  --
+  -- THE 120-MONTH CAP IS THE CARRIERS' OWN. `ck_dsp_max_periods` and 0305's `ck_pst_max_periods`
+  -- (the same expression verbatim) refuse a longer term at the recording door, and
+  -- `clara.prepayment_schedule_v2` refuses one it is handed anyway with `term_too_long`. There is
+  -- no third cap here; a cap computed a second way would be a second cap.
+  if v_entry.document_id is not null then
+    v_doc := v_entry.document_id;
+    select sp.id, sp.period_start, sp.period_end, sp.basis_kind into v_period
+      from clara.document_service_periods sp
+     where sp.document_id = v_doc and sp.superseded_at is null;
+    if v_period.id is null then
+      raise exception 'no live service period is recorded for the document this receipt binds'
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','deferred_revenue_term_underivable',
+            'reason_text','no live service period is recorded for the document this receipt binds',
+            'missing','document_service_periods',
+            'remedy','clara.record_document_service_period',
+            'document_id', v_doc, 'source_entry', p_source_entry)::text;
+    end if;
+    v_term_source := 'document_service_period';
+    v_sp_id       := v_period.id;
+    v_st_id       := null;
+    v_term_start  := v_period.period_start;
+    v_term_end    := v_period.period_end;
+    v_basis_kind  := v_period.basis_kind;
+  else
+    select t.id, t.period_start, t.period_end into v_st
+      from clara.prepayment_stated_terms t
+     where t.source_entry_id = p_source_entry and t.superseded_at is null;
+    if v_st.id is null then
+      raise exception 'this receipt binds no document and nobody has stated its service period'
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','deferred_revenue_term_underivable',
+            'reason_text','this receipt binds no document and nobody has stated its service period',
+            'missing','prepayment_stated_terms',
+            'remedy','clara.record_prepayment_stated_term',
+            'source_entry', p_source_entry)::text;
+    end if;
+    v_term_source := 'human_stated';
+    v_sp_id       := null;
+    v_doc         := null;
+    v_st_id       := v_st.id;
+    v_term_start  := v_st.period_start;
+    v_term_end    := v_st.period_end;
+    -- The carrier column keeps its meaning: a HUMAN said this, rather than an extraction having
+    -- read it off a page. The stated-term lane has no 'extracted' arm at all.
+    v_basis_kind  := 'human_stated';
+  end if;
+
+  -- ---- THE FISCAL-YEAR ARM, 0140's third, and a SELF-HEALABLE state rather than a dead end: the
+  -- successor year can be opened and the call retried. ----
+  select fy.id, fy.starts_on, fy.ends_on into v_fy
+    from clara.fiscal_years fy
+   where fy.client_id = p_client
+     and v_entry.posting_date between fy.starts_on and fy.ends_on;
+  if v_fy.id is null then
+    raise exception 'the source entry does not sit inside any opened fiscal year for this client'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_term_underivable',
+          'reason_text','the source entry does not sit inside any opened fiscal year for this client',
+          'missing','fiscal_years','source_entry', p_source_entry)::text;
+  end if;
+  if v_term_end > v_fy.ends_on
+     and not exists (select 1 from clara.fiscal_years nx
+                      where nx.client_id = p_client and nx.starts_on > v_fy.ends_on
+                        and nx.status in ('open', 'reopened')) then
+    raise exception 'the service period runs past this fiscal year and no successor year is open yet'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_term_underivable',
+          'reason_text','the service period runs past this fiscal year and no successor year is open yet',
+          'missing','fiscal_years.successor','fy_ends_on', v_fy.ends_on,
+          'period_end', v_term_end, 'source_entry', p_source_entry)::text;
+  end if;
+
+  -- ---- #939'S FROZEN EVALUATOR, WITH THE RELEASE SIDE THIS LANE NEEDS. ----
+  -- Reached as a DEFINER owned by its own owner role: it is a registered single-member
+  -- `clara.evaluator_versions` closure AND a member of the rig's closed ungranted census, so
+  -- minting a grant to reach it would red the rig and editing it would red the apply. Its
+  -- refusals are RETURNED rather than raised, which is why they can be re-raised here with their
+  -- own payloads intact, under this lane's own token.
+  v_sched := clara.prepayment_schedule_v2(v_leg.credit_cents, v_deferred, 'debit',
+    v_term_start, v_term_end);
+  v_refusal := v_sched ->> 'refusal';
+  if v_refusal is not null then
+    raise exception '%', coalesce(v_sched ->> 'reason', 'this advance cannot be recognised')
+      using errcode='CLR10',
+        detail=(jsonb_build_object('reason', 'deferred_revenue_term_underivable',
+                  'evaluator_refusal', v_refusal,
+                  'reason_text', v_sched ->> 'reason')
+                || (v_sched - 'refusal' - 'reason' - 'schedule_version'))::text;
+  end if;
+
+  v_lines   := v_sched -> 'period_lines';
+  v_n       := (v_sched ->> 'period_count')::int;
+  v_total   := (v_sched ->> 'total_cents')::bigint;
+
+  -- ---- #940'S ROSTER IS ASKED FIRST, AND THE SHARED WALL AFTERWARDS — the same order the
+  -- prepayment core asks them in, for the same reason. ----
+  --
+  -- Every reason an account can NEVER be enrolled (unknown, inactive, control-class, bank-bound,
+  -- reserved) is answered at the ENROLMENT door, where the person is deciding about the account.
+  -- Here the person is recognising an advance, and the one useful answer is "this account is not
+  -- on the roster; here is where to put it". An account that fails both is told about the roster.
+  --
+  -- THE PREDICATE IS THE ONE SPELLING #940 wrote, asked with THIS lane's purpose, so the band, the
+  -- human door and the OBO twin can never drift about which accounts hold deferred revenue.
+  --
+  -- A SCHEDULE ALREADY RUNNING IS NEVER RE-CHECKED. This call is the only place a NEW schedule is
+  -- born; nothing on the plan lane's monthly admission path asks the roster, so retiring an
+  -- account closes the future and leaves the past recognising to term end.
+  if not clara._prepayment_account_enrolled(p_client, v_deferred, 'deferred_revenue') then
+    raise exception 'account % is not enrolled as a deferred-revenue account for this client', v_deferred
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_source_unfit',
+          'reason_text','account ' || v_deferred || ' is not enrolled as a deferred-revenue account for this client',
+          'axis','deferred_account_not_enrolled', 'deferred_account_code', v_deferred,
+          'source_entry', p_source_entry,
+          'remedy','clara.enrol_prepayment_account',
+          'panel','client_registers_prepayment_accounts')::text;
+  end if;
+
+  -- 0042'S SHARED NEGATIVE WALL on the deferred leg, shaped as a DEBIT because that is the side
+  -- every period will actually post against this account. The roster is a POSITIVE statement made
+  -- once; this is the estate's own eligibility rule asked at configuration time, so an account
+  -- enrolled while eligible and bound as something else the next day is still caught.
+  v_breach := clara._adj_line_eligibility_breach(p_client,
+    jsonb_build_array(jsonb_build_object('account_code', v_deferred,
+      'debit_cents', 1, 'credit_cents', 0)));
+  if v_breach is not null then
+    raise exception 'account % holds this receipt''s credited liability, and it cannot carry deferred revenue', v_deferred
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_source_unfit',
+          'axis','deferred_account_ineligible', 'deferred_account_code', v_deferred,
+          'source_entry', p_source_entry, 'breach', v_breach)::text;
+  end if;
+
+  -- ---- THE REVENUE HALF. 0140's three arms, 0042's helper, this lane's tokens. ----
+  v_target := nullif(btrim(coalesce(p_revenue_account, '')), '');
+  if v_target is null then
+    raise exception 'no revenue account was proposed for the recognition'
+      using errcode='CLR10',
+        detail='{"reason":"revenue_target_underivable","axis":"account_missing"}';
+  end if;
+  select ca.account_code, ca.account_type, ca.is_active into v_acct
+    from clara.coa_accounts ca
+   where ca.client_id = p_client and ca.account_code = v_target;
+  if v_acct.account_code is null then
+    raise exception 'this client''s chart holds no account %', v_target using errcode='CLR10',
+      detail=jsonb_build_object('reason','revenue_target_ineligible','axis','account_unknown',
+        'account_code', v_target)::text;
+  end if;
+  if v_acct.account_type <> 'income' then
+    -- Recognising an advance CREDITS revenue. A balance-sheet target would move the liability
+    -- sideways and never recognise anything, and an expense target would recognise it backwards.
+    raise exception 'account % is a % account; recognising deferred revenue credits INCOME', v_target, v_acct.account_type
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','revenue_target_ineligible','axis','not_income_class',
+          'account_code', v_acct.account_code, 'account_type', v_acct.account_type)::text;
+  end if;
+  -- THE SAME HELPER THE EXPENSE HALF USES, so a bank-class, control, inactive or role-reserved
+  -- account refuses by the estate's OWN existing rule rather than a second one written here. The
+  -- line is shaped as a CREDIT because that is the side every period posts against it.
+  v_breach := clara._adj_line_eligibility_breach(p_client,
+    jsonb_build_array(jsonb_build_object('account_code', v_acct.account_code,
+      'debit_cents', 0, 'credit_cents', 1)));
+  if v_breach is not null then
+    raise exception 'account % cannot carry a revenue recognition', v_target using errcode='CLR10',
+      detail=(jsonb_build_object('reason','revenue_target_ineligible') || v_breach)::text;
+  end if;
+  v_basis_text := nullif(btrim(coalesce(p_revenue_basis, '')), '');
+  if v_basis_text is null then
+    -- A judgement with NO RECORDED BASIS is what this wall exists to prevent: refuse rather than
+    -- record an unexplained classification.
+    raise exception 'the revenue account was proposed without its stated grounds'
+      using errcode='CLR10',
+        detail='{"reason":"revenue_target_underivable","axis":"basis_missing"}';
+  end if;
+
+  -- ---- THE PAIRED ALLOCATION. The evaluator's line VERBATIM plus this lane's own pairing. ----
+  for v_x in select value from jsonb_array_elements(v_lines) loop
+    v_paired := v_paired || jsonb_build_array(v_x
+      || jsonb_build_object('amount_cents', (v_x ->> 'debit_cents')::bigint,
+           'deferred_account_code', v_deferred, 'revenue_account_code', v_acct.account_code));
+  end loop;
+
+  -- ---- THE DERIVED CADENCE AND THE PROPOSAL. ----
+  v_from := (v_lines -> 0 ->> 'period_end')::date;
+  v_to   := (v_lines -> (v_n - 1) ->> 'period_end')::date;
+  v_base := (v_lines -> 0 ->> 'debit_cents')::bigint;
+
+  v_memo := 'Deferred revenue recognition: ' || btrim(p_purpose);
+  v_basis := jsonb_build_object(
+    'posting_date', to_char(v_from, 'YYYY-MM-DD'), 'memo', v_memo, 'currency', 'MYR',
+    'lines', jsonb_build_array(
+      jsonb_build_object('account_code', v_deferred, 'debit_cents', v_base,
+        'credit_cents', 0, 'description', 'deferred revenue released'),
+      jsonb_build_object('account_code', v_acct.account_code, 'debit_cents', 0,
+        'credit_cents', v_base, 'description', 'revenue recognised')));
+  begin
+    perform clara._assert_journal_basis(v_basis);
+  exception when others then
+    get stacked diagnostics v_code = returned_sqlstate, v_msg = message_text,
+                            v_detail = pg_exception_detail;
+    begin
+      v_reason := (v_detail::jsonb) ->> 'reason';
+      v_constraint := (v_detail::jsonb) ->> 'constraint';
+    exception when others then
+      v_reason := null; v_constraint := null;
+    end;
+    -- ONE CENT OVER TWO MONTHS truncates to a base of 0, so the first period's derived basis moves
+    -- no money and the shared predicate refuses it. That raw refusal is correct but not
+    -- actionable, so it becomes this lane's typed rung — carrying the predicate's OWN constraint
+    -- and naming it as the owner, so a reader can see this door routed through it rather than
+    -- inventing a second check.
+    if v_reason = 'invalid_basis' and v_base <= 0 then
+      raise exception 'this service period recognises nothing in at least one period: % cents over % periods truncates to a base of 0', v_total, v_n
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','deferred_revenue_amount_below_period_granularity',
+            'constraint', v_constraint, 'owner', 'clara._assert_journal_basis',
+            'total_cents', v_total, 'period_count', v_n, 'base_cents', v_base)::text;
+    end if;
+    raise;
+  end;
+
+  -- ---- THE PLAN, through 0193's OWN door on the human lane and `clara._obo_plan_core` on the
+  -- machine one, for the reason §D states: `clara.create_accounting_plan` resolves its actor from
+  -- a JWT a runtime connection does not have. ----
+  if p_lane = 'human' then
+    v_plan := clara.create_accounting_plan(
+      p_client => p_client, p_kind => 'revenue_recognition_schedule',
+      p_purpose => btrim(p_purpose),
+      p_authority_kind => 'explicit_instruction', p_authority_ref => p_authority_ref,
+      p_frequency => 'monthly', p_day_rule => 'last_day_of_month', p_day_of_month => null,
+      p_timezone => 'Asia/Kuala_Lumpur', p_effective_from => v_from, p_effective_to => v_to,
+      p_basis => v_basis, p_reversal_day_rule => null, p_op_key => p_op_key || ':plan');
+  else
+    v_plan := clara._obo_plan_core(
+      p_kind => 'revenue_recognition_schedule',
+      p_firm => p_firm, p_client => p_client, p_author => p_actor, p_purpose => btrim(p_purpose),
+      p_authority_kind => 'explicit_instruction', p_authority_ref => p_authority_ref,
+      p_frequency => 'monthly', p_day_rule => 'last_day_of_month', p_day_of_month => null,
+      p_timezone => 'Asia/Kuala_Lumpur', p_effective_from => v_from, p_effective_to => v_to,
+      p_basis => v_basis);
+  end if;
+  v_plan_id := (v_plan ->> 'plan_id')::uuid;
+  v_rev_id  := (v_plan ->> 'revision_id')::uuid;
+
+  -- LOCK ORDER RUNG 1: the plan row is the lane's first rung, and a writer that took the schedule
+  -- row first would be the one that later constructs the cycle 0193 exists to prevent.
+  perform 1 from clara.accounting_plans where id = v_plan_id for update;
+
+  -- THE EVALUATOR VERSION ROW THIS SCHEDULE ACTUALLY RODE, resolved by the entrypoint signature
+  -- rather than by a literal.
+  select e.id into v_eval from clara.evaluator_versions e
+   where e.evaluator_name = 'prepayment_schedule'
+     and e.entrypoint_signature = 'clara.prepayment_schedule_v2(bigint,text,text,date,date)'
+   order by e.version desc limit 1;
+
+  -- THE STRUCTURAL BACKSTOP ANSWERS IN THE LANE'S OWN WORDS. The typed duplicate check above
+  -- cannot see a WINNER THAT HAS NOT COMMITTED: two people recognising the same receipt at once
+  -- both pass it, and the loser queues on `uq_revenue_recognition_schedules_source` until the
+  -- winner commits. Without this block that loser would be answered a bare 23505, a sentence with
+  -- no next act. The index is still the authority; this only re-reads the winning row and
+  -- re-raises the SAME CLR13 payload the pre-check raises, so both paths are one answer.
+  begin
+    insert into clara.revenue_recognition_schedules(firm_id, client_id, plan_id, plan_kind,
+        revision, source_entry_id, deferred_account_code, revenue_account_code,
+        revenue_account_basis, service_period_id, document_id, term_start, term_end, basis_kind,
+        period_lines, total_cents, period_count, remainder_placement, recognition_pattern,
+        schedule_version, evaluator_version_id, created_by, term_source, stated_term_id)
+      values (p_firm, p_client, v_plan_id, 'revenue_recognition_schedule',
+        (v_plan ->> 'revision')::int, p_source_entry, v_deferred, v_acct.account_code,
+        v_basis_text, v_sp_id, v_doc, v_term_start, v_term_end, v_basis_kind,
+        v_paired, v_total, v_n, coalesce(v_sched ->> 'remainder_placement', 'final_period'),
+        v_pattern, coalesce(v_sched ->> 'schedule_version', 'v2'), v_eval, p_actor,
+        v_term_source, v_st_id)
+      returning id into v_sid;
+  exception when unique_violation then
+    select s.id into v_existing from clara.revenue_recognition_schedules s
+     where s.source_entry_id = p_source_entry and s.firm_id = p_firm;
+    raise exception 'this advance is already recognised by an existing schedule'
+      using errcode='CLR13',
+        detail=jsonb_build_object('reason','deferred_revenue_schedule_exists',
+          'schedule_id', v_existing, 'source_entry', p_source_entry,
+          'raced', true)::text;
+  end;
+
+  perform clara._audit(p_firm, p_actor, null, null, 'create_revenue_recognition_schedule', null,
+    jsonb_build_object('client', p_client, 'schedule', v_sid, 'plan', v_plan_id,
+      'source_entry', p_source_entry, 'service_period', v_sp_id,
+      'term_source', v_term_source, 'stated_term', v_st_id,
+      'deferred_account', v_deferred, 'revenue_account', v_acct.account_code,
+      'periods', v_n, 'total_cents', v_total, 'pattern', v_pattern,
+      'lane', p_lane, 'op_key', p_op_key));
+
+  v_result := jsonb_build_object(
+    'schedule_id', v_sid, 'plan_id', v_plan_id, 'revision_id', v_rev_id,
+    'revision', (v_plan ->> 'revision')::int, 'status', v_plan ->> 'status',
+    'kind', 'revenue_recognition_schedule',
+    'client_id', p_client, 'source_entry_id', p_source_entry, 'document_id', v_doc,
+    'service_period_id', v_sp_id, 'basis_kind', v_basis_kind,
+    'term_source', v_term_source, 'stated_term_id', v_st_id,
+    'term_start', to_char(v_term_start, 'YYYY-MM-DD'),
+    'term_end', to_char(v_term_end, 'YYYY-MM-DD'),
+    'deferred_account_code', v_deferred, 'revenue_account_code', v_acct.account_code,
+    'revenue_account_basis', v_basis_text,
+    'total_cents', v_total, 'period_count', v_n,
+    'remainder_placement', coalesce(v_sched ->> 'remainder_placement', 'final_period'),
+    'recognition_pattern', v_pattern,
+    'schedule_version', coalesce(v_sched ->> 'schedule_version', 'v2'),
+    'period_lines', v_paired,
+    -- THE DERIVED CADENCE, echoed so the caller can SEE that none of it was theirs to choose.
+    'frequency', 'monthly', 'day_rule', 'last_day_of_month', 'day_of_month', null,
+    'timezone', 'Asia/Kuala_Lumpur',
+    'effective_from', to_char(v_from, 'YYYY-MM-DD'), 'effective_to', to_char(v_to, 'YYYY-MM-DD'),
+    'next_occurrences', v_plan -> 'next_occurrences',
+    'overlap_warning', v_plan -> 'overlap_warning',
+    -- THE BOUNDARY, IN THE DOOR'S OWN ANSWER: accepted configuration is not a posted occurrence.
+    'configuration_only', true);
+  return clara._finish_op(p_firm, 'create_revenue_recognition_schedule', p_op_key, v_result);
+end $fn$;
+
+-- =====================================================================================
+-- §H — clara.enrol_prepayment_account — RECUT: THE ENROLMENT RACE IS ANSWERED BY NAME.
+--
+-- REVIEW FINDING ADV-04 (minor, the fix round of 2026-09-24). See the arm's own comment inside the
+-- body for what was measured and driven. `clara.retire_prepayment_account` needs NO such handler
+-- and is deliberately left byte-unchanged: it is an UPDATE with no INSERT, so a second retirement
+-- blocks on the winner's row lock, then matches zero rows and takes the door's own typed
+-- `not_enrolled` arm -- driven in `p940.enrol.race`'s second half rather than argued.
+--
+-- The body is 0308's own text (0308 recut this door for the deferred-revenue purpose, so 0308's is
+-- the LIVE text) re-emitted whole with the handler added -- never a splice.
+-- =====================================================================================
+
+create or replace function clara.enrol_prepayment_account(
+  p_client uuid, p_account text, p_purpose text, p_reason text, p_op_key text)
+returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fn$
+declare
+  v_actor uuid; v_firm uuid; v_client_firm uuid; v_client_status text;
+  v_dedupe jsonb; v_code text; v_purpose text; v_reason text;
+  v_breach jsonb; v_type text; v_existing record; v_id uuid;
+  -- #941 — the per-purpose positive rule, as data rather than as two copies of one branch.
+  v_want_type text; v_want_axis text; v_want_words text;
+begin
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'enrolling a prepayment account requires its idempotency key' using errcode='CLR10',
+      detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
+  end if;
+  select a.actor, a.firm into v_actor, v_firm
+    from clara._human_ctx(clara.role_rank('bookkeeper')) a;
+
+  select c.firm_id, c.status into v_client_firm, v_client_status from clara.clients c where c.id = p_client;
+  if v_client_firm is null or v_client_firm <> v_firm then
+    raise exception 'client not found in your firm' using errcode='CLR11',
+      detail='{"reason":"client_not_found"}';
+  end if;
+  if v_client_status <> 'active' then
+    raise exception 'client is not active -- no new prepayment-account enrolment' using errcode='CLR10',
+      detail='{"reason":"client_inactive"}';
+  end if;
+
+  v_code    := nullif(btrim(coalesce(p_account, '')), '');
+  v_purpose := nullif(btrim(coalesce(p_purpose, '')), '');
+  v_reason  := nullif(btrim(coalesce(p_reason, '')), '');
+
+  -- RESERVE-BEFORE-MUTABLE-VALIDATION (0305 §B's placement and its reasoning): the replay
+  -- short-circuit sits after identity/authz and before anything reading mutable world state, so a
+  -- retry of a SUCCEEDED call returns its stored receipt even though the chart moved. A FIRST call
+  -- that fails a later validation raises, and the raise rolls the reservation back with it, so the
+  -- caller may fix the input and retry under the SAME key.
+  v_dedupe := clara._reserve_op(v_firm, 'enrol_prepayment_account', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'account', v_code,
+      'purpose', v_purpose, 'reason', v_reason)));
+  if v_dedupe is not null then
+    if v_dedupe ? 'pending' then
+      raise exception 'this prepayment-account enrolment key is held by an in-flight sibling'
+        using errcode='CLR13', detail='{"reason":"operation_in_flight"}';
+    end if;
+    return v_dedupe;
+  end if;
+
+  -- WHO/REASON/WHEN is the ruled trio. A fact without its basis is REFUSED, never defaulted; the
+  -- table CHECK says the same thing, and this is the door saying it by name first.
+  if v_reason is null then
+    raise exception 'enrolling an account as a prepayment account requires its one-line reason'
+      using errcode='CLR37',
+        detail='{"reason":"prepayment_account_enrolment_invalid","axis":"reason_missing"}';
+  end if;
+  if v_purpose is null or v_purpose not in ('prepayment', 'deferred_revenue') then
+    raise exception 'a prepayment-account enrolment has purpose ''prepayment'' or ''deferred_revenue''; got %',
+      coalesce(v_purpose, '<null>') using errcode='CLR37',
+        detail=jsonb_build_object('reason','prepayment_account_enrolment_invalid',
+          'axis','purpose_unknown', 'purpose', v_purpose)::text;
+  end if;
+
+  -- THE SHARED NEGATIVE WALL, ASKED HERE (#940's decision 6). Unknown, inactive, control-class,
+  -- bank and role-reserved accounts are refused at ENROLMENT with the wall's OWN axis carried
+  -- through, so the reason a person reads is the estate's own rather than a paraphrase. It is
+  -- PURPOSE-AGNOSTIC and this file leaves it exactly where 0306 put it.
+  v_breach := clara._adj_line_eligibility_breach(p_client,
+    jsonb_build_array(jsonb_build_object('account_code', v_code,
+      'debit_cents', 0, 'credit_cents', 1)));
+  if v_breach is not null then
+    raise exception 'account % cannot be enrolled as a prepayment account for this client', coalesce(v_code, '<null>')
+      using errcode='CLR37',
+        detail=(jsonb_build_object('reason','prepayment_account_enrolment_invalid',
+                  'account_code', v_code) || v_breach)::text;
+  end if;
+
+  -- …AND THE ONE POSITIVE RULE THE PURPOSE ADDS, NOW A BRANCH (#941).
+  --
+  --   'prepayment'       -> a prepaid ASSET, released by credit (0306's rule, unchanged).
+  --   'deferred_revenue' -> a contract LIABILITY, released by debit. A customer's advance is an
+  --                         obligation to render a service (MFRS 15 / MPERS §23); an asset,
+  --                         expense, income or equity account could never carry one, and the door
+  --                         that would have refused it is three screens away.
+  --
+  -- The CONTROL axis is already discharged by the wall above (`account_class is not null`), so
+  -- this arm adds the TYPE and nothing else — which is why it is one comparison and not a second
+  -- eligibility rule written here.
+  if v_purpose = 'deferred_revenue' then
+    v_want_type := 'liability'; v_want_axis := 'not_liability_class';
+    v_want_words := 'deferred revenue is a contract LIABILITY';
+  else
+    v_want_type := 'asset'; v_want_axis := 'not_asset_class';
+    v_want_words := 'a prepayment is a prepaid ASSET';
+  end if;
+  select ca.account_type into v_type from clara.coa_accounts ca
+   where ca.client_id = p_client and ca.account_code = v_code;
+  if v_type is distinct from v_want_type then
+    raise exception 'account % is a % account; %', v_code, v_type, v_want_words
+      using errcode='CLR37',
+        detail=jsonb_build_object('reason','prepayment_account_enrolment_invalid',
+          'axis', v_want_axis, 'account_code', v_code, 'account_type', v_type,
+          'purpose', v_purpose)::text;
+  end if;
+
+  -- VERSION-FORWARD, NEVER MUTATE (0041's round-3 fold F5b). An unchanged re-enrolment is
+  -- idempotent and must not move the interval under live history; a RESTATED reason retires the
+  -- live row and inserts a fresh one, so the basis a schedule was configured under stays readable
+  -- for as long as the schedule does. Keyed on (client, account, PURPOSE), so the two purposes
+  -- version forward independently and neither can retire the other's enrolment.
+  select * into v_existing from clara.prepayment_account_enrolments
+   where client_id = p_client and account_code = v_code and purpose = v_purpose and active
+   limit 1 for update;
+  if found and v_existing.reason = v_reason then
+    v_id := v_existing.id;
+  else
+    if found then
+      update clara.prepayment_account_enrolments
+         set active = false, retired_by = v_actor, retired_at = now()
+       where id = v_existing.id;
+    end if;
+    -- ================= #1036 FIX ROUND / ADV-04 — THE RACE THE `for update` ABOVE CANNOT COVER ==
+    --
+    -- WHAT WAS MEASURED. The version-forward block locks the LIVE row, and with no live row there
+    -- is nothing to lock: two sessions both fall through and the loser meets
+    -- `uq_prepayment_account_enrolments_live` at this INSERT. Driven with two REAL connections,
+    -- each a distinct bookkeeper of the same firm, the first held open until the second reached
+    -- its insert: session A returned an enrolment, session B returned
+    -- `{"code":"23505","constraint":"uq_prepayment_account_enrolments_live"}` with no detail. The
+    -- invariant HELD -- one live row afterwards -- but the answer was unclassifiable, and every
+    -- sibling door this lane wrote already re-raises typed on exactly this shape (0307:818,
+    -- 0308:1373, 0315 §B, and 0306's own recut schedule door). One door was missed.
+    --
+    -- THE READ RUNS IN THE OUTER TRANSACTION, after the failed subtransaction rolled back, so the
+    -- winner is visible by now. `v_existing` may still be null if some OTHER unique index fired --
+    -- in which case the payload says so by carrying a null enrolment_id rather than pretending.
+    -- The same shape 0315 §B's own duplicate-race handler uses, deliberately.
+    begin
+      insert into clara.prepayment_account_enrolments(firm_id, client_id, account_code, purpose,
+          reason, created_by)
+        values (v_firm, p_client, v_code, v_purpose, v_reason, v_actor)
+        returning id into v_id;
+    exception when unique_violation then
+      select * into v_existing from clara.prepayment_account_enrolments
+       where client_id = p_client and account_code = v_code and purpose = v_purpose and active
+       limit 1;
+      raise exception 'another enrolment of % for this client committed first', v_code
+        using errcode='CLR13',
+          detail=jsonb_build_object('reason','prepayment_account_enrolment_raced',
+            'reason_text','another enrolment of ' || v_code || ' for this client committed first',
+            'enrolment_id', v_existing.id, 'account_code', v_code, 'purpose', v_purpose,
+            'client_id', p_client, 'raced', true)::text;
+    end;
+  end if;
+
+  -- args stay REDACTED (ids and codes, never the reason text -- the reason lives on the row, which
+  -- is the record of record; 0002's audit_log doctrine).
+  perform clara._audit(v_firm, v_actor, null, null, 'enrol_prepayment_account', null,
+    jsonb_build_object('client', p_client, 'account', v_code, 'purpose', v_purpose,
+      'enrolment_id', v_id, 'op_key', p_op_key));
+
+  return clara._finish_op(v_firm, 'enrol_prepayment_account', p_op_key,
+    jsonb_build_object('enrolment_id', v_id, 'client_id', p_client, 'account_code', v_code,
+      'purpose', v_purpose, 'reason', v_reason, 'enrolled_by', v_actor, 'active', true));
+end $fn$;
+
 reset role;
 
 -- =====================================================================================
@@ -1498,7 +2405,10 @@ declare
     'clara.get_prepayment_schedule(uuid)',
     'clara.list_prepayment_schedules(uuid)',
     'clara.get_revenue_recognition_schedule(uuid)',
-    'clara.list_revenue_recognition_schedules(uuid)'
+    'clara.list_revenue_recognition_schedules(uuid)',
+    'clara.record_prepayment_stated_term(uuid,uuid,date,date,text,text)',
+    'clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)',
+    'clara.enrol_prepayment_account(uuid,text,text,text,text)'
   ];
   v_keep text[][] := array[
     ['clara._propose_adjustment_template_core(jsonb,uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb,text)',
@@ -1525,7 +2435,7 @@ declare
      '000c730cd29d6544b014ecb0635fc30d9a238f23cdbd8d224ae8f4331086e2f1']
   ];
 begin
-  -- 1 · THE SEVEN TOUCHED FUNCTIONS RESOLVE AT THEIR EXACT SIGNATURES, this estate's posture:
+  -- 1 · THE TEN TOUCHED FUNCTIONS RESOLVE AT THEIR EXACT SIGNATURES, this estate's posture:
   --     owned by clara_fn_owner, SECURITY DEFINER, search_path pinned.
   foreach v_sig in array v_expect loop
     if to_regprocedure(v_sig) is null then
@@ -1646,6 +2556,52 @@ begin
         using errcode='CLR10';
     end if;
   end loop;
+
+  -- 4e · THE STATING DOOR NAMES THE THREE CARRIER BOUNDS, and the carrier still carries them.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.record_prepayment_stated_term(uuid,uuid,date,date,text,text)'::regprocedure;
+  if position('prepayment_stated_term_dates_not_finite' in v_src) = 0
+     or position('prepayment_stated_term_dates_out_of_domain' in v_src) = 0
+     or position('prepayment_stated_term_too_long' in v_src) = 0 then
+    raise exception '#1036 tail: clara.record_prepayment_stated_term does not refuse all three carrier bounds by name'
+      using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from pg_constraint
+   where conrelid = 'clara.prepayment_stated_terms'::regclass
+     and conname in ('ck_pst_finite','ck_pst_domain','ck_pst_max_periods');
+  if v_n <> 3 then
+    raise exception '#1036 tail: clara.prepayment_stated_terms carries % of its three bound constraints, not 3 -- a door refusal never replaces the structural backstop',
+      v_n using errcode='CLR10';
+  end if;
+
+  -- 4f · THE THREE DOORS AGREE WITH THE THREE BANDS on the reversed predicate. By text on each
+  --      body, because the whole finding was two halves of one lane disagreeing.
+  foreach v_sig in array array[
+      'clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)',
+      'clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)',
+      'clara.record_prepayment_stated_term(uuid,uuid,date,date,text,text)'] loop
+    select p.prosrc into v_src from pg_proc p where p.oid = v_sig::regprocedure;
+    if position('source_reversed' in v_src) = 0 then
+      raise exception '#1036 tail: % does not refuse a reversed source entry by name', v_sig
+        using errcode='CLR10';
+    end if;
+  end loop;
+
+  -- 4g · THE ENROLMENT DOOR ANSWERS ITS OWN RACE, and the retirement door is left byte-unchanged
+  --      at the body 0306 wrote (it needs no handler; `p940.enrol.race` drives both halves).
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.enrol_prepayment_account(uuid,text,text,text,text)'::regprocedure;
+  if position('prepayment_account_enrolment_raced' in v_src) = 0
+     or position('unique_violation' in v_src) = 0 then
+    raise exception '#1036 tail: clara.enrol_prepayment_account does not answer its own enrolment race by name'
+      using errcode='CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
+    from pg_proc p where p.oid = 'clara.retire_prepayment_account(uuid,text,text,text)'::regprocedure;
+  if v_sha <> '5a0fc662384760a5303c1cdffb02793967761013137d859dafe2239f118e8f63' then
+    raise exception '#1036 tail: clara.retire_prepayment_account MOVED (got %) -- this file leaves it alone on purpose', v_sha
+      using errcode='CLR10';
+  end if;
 
   -- 5 · THE RESIDUAL IS CLOSED: NO function anywhere in clara mentions the template core by name.
   select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid=p.pronamespace

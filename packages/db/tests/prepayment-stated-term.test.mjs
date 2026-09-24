@@ -28,7 +28,7 @@ import {
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 8;
+const EXPECTED_CELLS = 10;
 
 before(async () => {
   ready = await (async () => {
@@ -587,6 +587,133 @@ cell("p939.reads.term_source — both schedule reads return a human-stated sched
   const movedRow = movedList.schedules.find((r) => r.schedule_id === memoSchedule.schedule_id);
   assert.equal(movedRow.term_moved, true, "the list says the same thing the detail does");
   assert.equal(movedRow.term_current_start, newStart);
+});
+
+// ===========================================================================================
+// THE FIX ROUND (ADV-05) — A REVERSED RECOGNITION IS NOT AMORTISABLE, ON EITHER CARRIER.
+// ===========================================================================================
+
+cell("p939.create.reversed — a recognition that has been REVERSED is refused by name on both carriers, the stating door refuses it too, nothing is written on any of them, and the refusal matches the predicate the attention band already filters on", async () => {
+  const scene = await statedTermScene("reversed", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
+  const { humanQuery } = await import("./rig-helpers.mjs");
+  const reverse = (entry, tag) => humanQuery(scene.alice,
+    "select clara.reverse_entry($1,$2,$3) as r", [entry, `#939 battery: ${tag}`, opk("p939-rev")]);
+
+  // ---- THE ATTENTION BAND'S OWN PREDICATE, read first, because it is the rule the doors must
+  // match: `clara.list_prepayment_attention` filters `je.reversed_by is null` (0305:1571), so the
+  // band will never advertise a receipt the door was happily accepting.
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#939 battery: the client confirmed the cover on the telephone" });
+  const beforeBand = await listPrepaymentAttention(scene.bob, scene.client);
+  assert.equal(beforeBand.unscheduled.some((r) => r.entry_id === scene.memoEntry), true,
+    "the scene's memo-only recognition is not offered at all -- this cell cannot measure the change");
+
+  await reverse(scene.memoEntry, "the client cancelled and the payment was refunded");
+  const afterBand = await listPrepaymentAttention(scene.bob, scene.client);
+  assert.equal(afterBand.unscheduled.some((r) => r.entry_id === scene.memoEntry), false,
+    "the band still advertises a reversed recognition");
+
+  // ---- THE MEMO-ONLY LANE. A refunded advance put on a schedule would post Dr expense / Cr the
+  // prepaid asset every month against money the client got back, driving the asset into a credit
+  // balance and charging an expense that was never incurred.
+  const memo = await assertPair(CLR.badRequest, PREPAY_REASON.sourceUnfit,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: scene.memoEntry,
+      expenseAccount: scene.target, authorityRef: scene.authorityRef }),
+    "amortising a reversed memo-only recognition");
+  assert.equal(memo.detail.axis, "source_reversed", "the refusal does not name WHICH unfitness");
+  assert.ok(memo.detail.reversed_by, "…nor the reversal that made it unfit");
+  assert.equal(await scheduleCountFor(scene.memoEntry), 0, "a schedule was written anyway");
+
+  // ---- THE DOCUMENT LANE, the same rule from the same body: the check sits above the branch, so
+  // neither carrier can drift from the other.
+  await reverse(scene.entry, "the supplier credited the whole subscription");
+  const doc = await assertPair(CLR.badRequest, PREPAY_REASON.sourceUnfit,
+    () => createPrepaymentSchedule(scene.bob, {
+      client: scene.client, sourceEntry: scene.entry,
+      expenseAccount: scene.target, authorityRef: scene.authorityRef }),
+    "amortising a reversed document-bound recognition");
+  assert.equal(doc.detail.axis, "source_reversed");
+  assert.equal(await scheduleCountFor(scene.entry), 0);
+
+  // ---- AND THE STATING DOOR. It already read `je.reversed_by` into its record and never looked
+  // at it; a term stated over a refunded payment describes a service nobody is going to receive.
+  const memoOnly2 = await (await import("./prepayment-stated-term-fixtures.mjs"))
+    .memoOnlyRecognition(scene, { cents: 45000 });
+  await reverse(memoOnly2.entry, "refunded before the cover began");
+  const stating = await assertPair(CLR.badRequest, PREPAY_REASON.sourceUnfit,
+    () => recordStatedTerm(scene.bob, {
+      client: scene.client, sourceEntry: memoOnly2.entry,
+      start: scene.termStart, end: scene.termEnd }),
+    "stating a term over a reversed recognition");
+  assert.equal(stating.detail.axis, "source_reversed");
+  assert.deepEqual(await statedTermsFor(memoOnly2.entry), [],
+    "a stated term was written for a reversed recognition");
+});
+
+// ===========================================================================================
+// THE FIX ROUND (ADV-03) — THE THREE CARRIER BOUNDS ARE REFUSED BY NAME, NOT BY CONSTRAINT.
+// ===========================================================================================
+
+cell("p939.stated_term.bounds — an out-of-domain date, a non-finite date and a term past the 120-month cap are each refused by the DOOR with the token this battery's own vocabulary declares, carrying the bound they broke, and never as a raw 23514 a surface cannot classify; the carrier's constraints still stand behind them", async () => {
+  const scene = await statedTermScene("bounds", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
+
+  // (a) OUT OF DOMAIN. `ck_pst_domain` admits 1900-01-01 .. 2200-12-31 — the SAME window
+  // `clara.document_service_periods` uses, because the two carriers describe the same kind of fact.
+  // An `<input type="date">` happily submits 1899-01-01 and the web form validates only presence,
+  // order and a non-blank reason, so this arrives from a real surface.
+  const domain = await assertPair(CLR.badRequest, STATED_TERM_REASON.datesOutOfDomain,
+    () => recordStatedTerm(scene.bob, {
+      client: scene.client, sourceEntry: scene.memoEntry,
+      start: "1899-01-01", end: "1899-12-31" }),
+    "a stated term outside the carrier's date domain");
+  assert.equal(domain.detail.domain_start, "1900-01-01", "the refusal names the bound it broke");
+  assert.equal(domain.detail.domain_end, "2200-12-31");
+
+  // (b) NOT FINITE. `date` admits 'infinity', and it is asked BEFORE the domain so the answer says
+  // what is actually wrong rather than "out of range".
+  await assertPair(CLR.badRequest, STATED_TERM_REASON.datesNotFinite,
+    () => recordStatedTerm(scene.bob, {
+      client: scene.client, sourceEntry: scene.memoEntry,
+      start: scene.termStart, end: "infinity" }),
+    "a stated term whose end is infinite");
+  await assertPair(CLR.badRequest, STATED_TERM_REASON.datesNotFinite,
+    () => recordStatedTerm(scene.bob, {
+      client: scene.client, sourceEntry: scene.memoEntry,
+      start: "-infinity", end: scene.termEnd }),
+    "a stated term whose start is infinite");
+
+  // (c) THE 120-MONTH CAP, decision 5's "the same cap as a document term". The count is the RULED
+  // predicate's own — charged whole months — not a date subtraction, so the cell asserts the
+  // number the door computed as well as the cap it compared against.
+  const long = await assertPair(CLR.badRequest, STATED_TERM_REASON.termTooLong,
+    () => recordStatedTerm(scene.bob, {
+      client: scene.client, sourceEntry: scene.memoEntry,
+      start: "2025-01-01", end: "2041-08-31" }),
+    "a 200-month stated term");
+  assert.equal(long.detail.period_count, 200, "the refusal does not say how many months it counted");
+  assert.equal(long.detail.max_periods, 120);
+
+  // …AND 120 EXACTLY IS ADMITTED, so the cap is a boundary rather than a fence in the wrong place.
+  // (The fiscal-year arm belongs to the SCHEDULE door, not to this one: stating a term records a
+  // fact, and a fact outside an opened year is still the fact.)
+  const atCap = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: "2025-01-01", end: "2034-12-31",
+    reason: "#939 battery: a ten-year maintenance contract, the carrier's stated maximum" });
+  assert.ok(atCap.stated_term_id, "exactly 120 charged months is refused -- the cap is off by one");
+
+  // THE CARRIER'S OWN CONSTRAINTS STILL STAND BEHIND THE DOOR. 0305's comment is "the door refuses
+  // these BY NAME so a caller gets a reason; these exist so no OTHER writer, now or later, can get
+  // past them" — so the cell proves the second half too, by writing straight at the table as the
+  // owner and watching the constraint fire.
+  const raw = await rootQuery(
+    `select count(*)::int as n from pg_constraint
+      where conrelid = 'clara.prepayment_stated_terms'::regclass
+        and conname in ('ck_pst_finite','ck_pst_domain','ck_pst_max_periods')`);
+  assert.equal(raw.rows[0].n, 3, "a door refusal replaced the carrier's own constraint");
 });
 
 // ===========================================================================================

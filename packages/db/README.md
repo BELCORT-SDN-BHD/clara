@@ -5309,6 +5309,51 @@ added. Below the floor the three fields come back null and a fifth, `term_reason
 and above" instead of "none", and can never mistake an absent statement for a hidden one. It is a
 FIELD wall, not a narrower read: everything else a viewer could see, they still see.
 
+### §F — the stating door refuses the three carrier bounds by name (ADV-03)
+
+0305's own comment beside `ck_pst_finite` / `ck_pst_domain` / `ck_pst_max_periods` says "The door
+refuses these BY NAME so a caller gets a reason; these exist so no OTHER writer, now or later, can
+get past them" — and the door did not. Driven as a bookkeeper before the fix: `1899-01-01` →
+SQLSTATE 23514 `ck_pst_domain` with a null detail; `'infinity'` → the same; a 200-month term →
+23514 `ck_pst_max_periods`. None carries a `detail.reason`, so no surface can classify them, and
+all three are reachable from `apps/web/components/prepayments/prepayment-form.tsx`, which validates
+presence, order and a non-blank reason and nothing else.
+`prepayment-stated-term-fixtures.mjs` had declared `datesNotFinite`, `datesOutOfDomain` and
+`termTooLong` since #939 with nothing raising them. The door now asks finite → domain → inverted →
+cap, in that order (`'infinity'` is also out of domain, so finiteness first is what makes the
+answer say the thing that is actually wrong), and each refusal carries the bound it broke. The
+constraints stay: they are the backstop for any OTHER writer.
+
+### §G — a reversed source entry is not schedulable, on either lane (ADV-05)
+
+`clara.reverse_entry` leaves the original at status `approved` and sets `reversed_by`, so a
+REFUNDED advance passed the status wall. Driven on the rig: a 90000-sen advance reversed through
+the real door, then `clara.create_revenue_recognition_schedule` returned a schedule of 90000 over
+3 periods — a plan that would post Dr deferred revenue / Cr revenue against money the client got
+back, recognising revenue on a cancelled performance obligation (MFRS 15 / MPERS section 23) and
+driving the liability into a debit balance. The prepayment twin did the same against a refunded
+prepaid asset. The lane's two halves disagreed: `clara.list_revenue_recognition_attention`,
+`clara.list_prepayment_attention` and #940's band all filter `je.reversed_by is null`, so the band
+would never offer a receipt the door was accepting. That predicate is now asked by
+`clara._revenue_recognition_core` (§G), `clara._prepayment_schedule_core` (§B, above the
+document/memo branch so neither carrier can drift) and `clara.record_prepayment_stated_term` (§F,
+which already read `reversed_by` and never looked at it) — one rule, three doors, three bands.
+
+### §H — the enrolment race is answered by name (ADV-04)
+
+`clara.enrol_prepayment_account`'s version-forward block locks the LIVE row, and with no live row
+there is nothing to lock: two sessions both fall through and the loser meets
+`uq_prepayment_account_enrolments_live` at its INSERT. Driven with two real connections, each a
+distinct bookkeeper of the same firm: session A returned an enrolment, session B returned
+`{"code":"23505","constraint":"uq_prepayment_account_enrolments_live"}` with no detail. The
+invariant held — one live row — but the answer was unclassifiable, and every sibling door this lane
+wrote already re-raises typed on exactly this shape. The insert is now wrapped in
+`exception when unique_violation` and re-raised as CLR13 `prepayment_account_enrolment_raced`,
+naming the enrolment that stands. `clara.retire_prepayment_account` is left byte-unchanged and
+pinned: it is an UPDATE with no INSERT, so its loser blocks on the row lock, matches zero rows and
+takes the door's own typed `not_enrolled` arm — driven in `p940.enrol.race`'s second half rather
+than argued.
+
 ### What this file deliberately does not do
 
 - It does not widen `clara.accounting_plans.authority_kind` or touch `clara._authority_ref_refusal`,
@@ -5338,6 +5383,9 @@ their measured pre-image, or a body already carrying `#1036`):
 | `clara.list_prepayment_schedules(uuid)` (§E) | `5e9312153959799fb74aced026513c71efcf1bd89665a71693546c38cafcb671` |
 | `clara.get_revenue_recognition_schedule(uuid)` (§E) | `7cb0eb58be588bf0faab283c9ddcfe83f702f7a1f2c2c133b97714cf6a019cad` |
 | `clara.list_revenue_recognition_schedules(uuid)` (§E) | `075a90ecfe7ee698610716534c5dfdc402ccf56c109f17fb93c03b5d6d031235` |
+| `clara.record_prepayment_stated_term(uuid,uuid,date,date,text,text)` (§F) | `8a7a2fe5a4b274ea5fbe789b02ef97946c927789bd0398863beb8f54d3947f98` |
+| `clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)` (§G) | `5f71dbc2fe984a06c9c60f62bbaaefc8d34e3f0db607bfdfdcb9d409a2152b6d` |
+| `clara.enrol_prepayment_account(uuid,text,text,text,text)` (§H) | `dc122ca3a216b7eae3d1d4678b2921911a1045f1ea761db5f3467685c8a1f554` |
 
 UNCONDITIONAL neighbours (must not have moved; the file relies on their live shape but never
 touches them):
@@ -5355,6 +5403,7 @@ touches them):
 | `clara._plan_overlap_warning(uuid,jsonb,uuid)` | `c2566349405844d14c94ba57836ee9256878001f744ad627b0337ae5b8caf7dc` |
 | `clara._plan_due_events(date,text,text,integer,boolean,date,date,integer)` | `66100718e518a0d587bab68dc63ffb5efb24f95b7d2b899cef3f55d3e3be3384` |
 | `clara._audit(uuid,uuid,uuid,text,text,uuid,jsonb)` | `000c730cd29d6544b014ecb0635fc30d9a238f23cdbd8d224ae8f4331086e2f1` |
+| `clara.retire_prepayment_account(uuid,text,text,text)` (§H's deliberate non-change) | `5a0fc662384760a5303c1cdffb02793967761013137d859dafe2239f118e8f63` |
 
 Note that `clara.create_accounting_plan`'s live sha had already moved since #915's own report (0308,
 #941, widened it to admit `revenue_recognition_schedule`) — pinned here at its value measured on
@@ -5389,8 +5438,15 @@ driven through all four reads beside a bookkeeper on the same schedule, with the
 measured alongside so the read and the table are asserted to agree; `tests/plan-overlap-template-arm-retired.test.mjs` (`p929.containment` replaced by
 `p1036.containment-closed` — the residual it pinned is closed, not merely held shut by a flag, and
 the three containment facts it named are re-measured as unchanged rather than as a tripwire);
-`tests/f-a4-pr2a-wrapper.test.mjs` and `tests/f-a4-pr2a-books.test.mjs` (the whole Tier-A/B/C
-agent-drafts/human-signs/belt-posts battery for this door — W13\*/W45\*/W14\*/W15/W16/W39/W40/W38\*/
-W5/W35\*/W34/W31 — retired with the pipeline it tested; W44 and W32, which never drove this wrapper,
-are untouched; `fa4p2a.W13-retired` proves the old `agent_act_receipts` discipline is genuinely gone
-rather than merely un-asserted).
+`tests/f-a4-pr2a-wrapper.test.mjs` (the Tier-A/B/C agent-drafts/human-signs/belt-posts battery for
+this door — W13\*/W45\*/W14\*/W15/W16/W39/W40/W38\*/W5 — retired with the pipeline it tested;
+`fa4p2a.W13-retired` proves the old `agent_act_receipts` discipline is genuinely gone rather than
+merely un-asserted); `tests/f-a4-pr2a-books.test.mjs` (W34 retired — its human half went at 0282 —
+but **W35 / W35-mutant / W31 RETARGETED rather than deleted**: their subjects are an accounting
+claim about the books and a lifecycle claim about the fiscal year, both still live rules, so they
+are re-driven through the LIVE human door, the plan lane, the catch-up window and the real posting
+belt — prepaid to exactly zero on a total that does not divide evenly, the stopping-one-short
+mutant, and `fiscal_years.successor` refused by name then cleared by opening the year; W44 and W32,
+which never drove this wrapper, are untouched);
+`tests/prepayment-account-roster.test.mjs` (`p940.enrol.race`, new: a real two-connection race on
+both roster doors).

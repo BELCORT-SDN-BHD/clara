@@ -44,7 +44,7 @@ import {
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 13;
+const EXPECTED_CELLS = 14;
 
 before(async () => {
   ready = await (async () => {
@@ -868,6 +868,53 @@ cell("p941.supersede.running — a corrected service period never moves a schedu
 // ===========================================================================================
 // AC "the web gains a Deferred revenue destination" — its READS, measured at the database seam.
 // ===========================================================================================
+
+cell("p941.create.reversed — an advance receipt that has been REVERSED is refused by name, with the axis and the reversal named, nothing is written, and the refusal matches the predicate clara.list_revenue_recognition_attention already filters on", async () => {
+  const scene = await deferredRevenueScene("reversedDR", { cents: 90000, termMonths: 3 });
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#941 battery: the membership runs three months from the payment" });
+
+  // THE BAND'S OWN PREDICATE FIRST, because it is the rule the door must match: the attention read
+  // filters `je.reversed_by is null` (0308), so before this arm the two halves of the lane
+  // disagreed -- the band would never offer a receipt the door was accepting.
+  const before = await listRecognitionAttention(scene.bob, scene.client);
+  assert.equal(before.unrecognised.some((r) => r.entry_id === scene.receipt), true,
+    "the scene's advance is not offered at all -- this cell cannot measure the change");
+
+  const { humanQuery } = await import("./rig-helpers.mjs");
+  await humanQuery(scene.alice, "select clara.reverse_entry($1,$2,$3) as r",
+    [scene.receipt, "#941 battery: the customer cancelled and was refunded", opk("p941-rev")]);
+  const after = await listRecognitionAttention(scene.bob, scene.client);
+  assert.equal(after.unrecognised.some((r) => r.entry_id === scene.receipt), false,
+    "the band still advertises a reversed advance");
+
+  // THE DOOR. A refunded advance on a recognition schedule would post Dr deferred revenue /
+  // Cr revenue every month against money the client got back -- revenue recognised on a cancelled
+  // performance obligation, and the liability driven into a debit balance.
+  const refused = await assertPair(CLR.badRequest, DR_REASON.sourceUnfit,
+    () => createRecognitionSchedule(scene.bob, {
+      client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+      authorityRef: scene.authorityRef }),
+    "recognising a reversed advance");
+  assert.equal(refused.detail.axis, "source_reversed", "the refusal does not name WHICH unfitness");
+  assert.ok(refused.detail.reversed_by, "…nor the reversal that made it unfit");
+  assert.equal(await recognitionScheduleCountFor(scene.receipt), 0, "a schedule was written anyway");
+
+  // THE OBO TWIN ANSWERS IDENTICALLY, because the rule lives in the shared core rather than in
+  // either entrance.
+  let oboErr = null;
+  try {
+    await createRecognitionScheduleFor({
+      client: scene.client, author: scene.bob, sourceEntry: scene.receipt,
+      revenueAccount: scene.revenue, authorityRef: scene.authorityRef, opKey: opk("p941-rev-obo") });
+  } catch (e) { oboErr = e; }
+  assert.ok(oboErr, "the OBO twin recognised a reversed advance");
+  assert.equal(JSON.parse(oboErr.detail).reason, DR_REASON.sourceUnfit);
+  assert.equal(JSON.parse(oboErr.detail).axis, "source_reversed");
+  assert.equal(await recognitionScheduleCountFor(scene.receipt), 0);
+});
 
 cell("p941.reads.reason_floor — a VIEWER of the owning firm reads both recognition reads and gets no stated reason, no stater and no stated-at, with term_reason_withheld:true; a bookkeeper on the same schedule gets all three; the wall matches clara.prepayment_stated_terms' own RLS policy, and the viewer keeps every other field", async () => {
   const scene = await deferredRevenueScene("reasonfloorDR", { cents: 90000, termMonths: 3 });
