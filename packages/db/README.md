@@ -5264,3 +5264,176 @@ neighbours. Its first substitution now reads `v_def` directly, like the other fo
 file, and the corrected FIRST-APPLY branch was exercised for real: in one rolled-back transaction
 the live router body was reversed through the block's own five (anchor, replacement) pairs, the
 pre-image installed, the block run, and all four arms re-read out of the catalog.
+
+
+## #949 — a tenancy's contract-terms record, and the recurring rent plan a person confirms (0300)
+
+`0300_tenancy_terms_rent_plan.sql` closes the tenancy half of #926's question 7. It builds on
+#948's landed contract lane (0299): a tenancy is already READ — the evaluator classifies it, the
+persist door banks eleven typed facts as `clara.document_regions` rows, and the fixed-asset lane
+drafts nothing for it, by name. What was missing is somewhere to put what the page states, a
+decision about whether Clara may draft a monthly rent expense at all, and the plan a person
+confirms.
+
+**The owner's ruling of 2026-09-20 is the spine of the file, and both halves of it land.** The
+credit account is `2050 Rent Payable`, a dedicated standard-chart liability minted by the shared
+chart migration 0295 and CONSUMED here by code and name — this file appends no chart row, and its
+own tail re-derives that structurally (no body of the lane names `clara.coa_template_accounts` at
+all). And when the simple monthly-rent treatment may not comply with the standard, Clara stops and
+asks: `clara._tenancy_lease_treatment` walks the ruling's own branch —
+
+| case | verdict | standard |
+|---|---|---|
+| a stated escalation, under EITHER framework | asks | the one in force |
+| the framework is not recorded | asks | — |
+| the framework is neither MPERS nor MFRS | asks | — |
+| MPERS, level rent | **drafts** | MPERS Section 20 (straight-line over the term) |
+| MFRS, term of 12 months or less | **drafts** | MFRS 16 (the short-term lease exemption) |
+| MFRS, term over 12 months | asks | MFRS 16 (right-of-use asset + lease liability) |
+
+Every answer carries the WRITTEN accounting basis naming both standards, the term and the rent it
+read, and — where it asks — the question the accountant answers. It measures nothing: no discount
+rate, no present value, no lease-liability schedule; full MFRS 16 measurement is out of scope by
+the ruling's own last line. The MFRS 16 LOW-VALUE exemption is deliberately not a branch, and the
+basis says so: the asset a tenancy of premises conveys is never low value, and this lane only ever
+sees a tenancy.
+
+**"Asks" is a prompt, never a wall** (the standing owner ruling "beta, nothing dark"). The confirm
+door still admits the plan when the branch asks — but only against a written PROFESSIONAL
+JUDGEMENT the accountant types, which is recorded on the confirmation row, printed into the plan's
+own purpose, and enforced by a CHECK on the table so no code path can drop it.
+
+**The triage question the owner left to the implementer, measured rather than assumed:** whether
+the contract-terms record is redundant with `clara.client_facts`. It is not, for three reasons all
+read off the live database — `uq_client_fact_live` is unique on (client_id, fact_key) where live,
+so a client with two shoplots could not hold two rents; `clara.client_fact_keys` is a closed
+five-member registry behind a foreign key whose successor role 0192 carried to
+`clara.knowledge_records`; and it carries a `source_document_id` but no region pointer, while AC1
+asks for each term to carry the region it was read from. The knowledge lane was checked too and is
+the same shape problem: its subject is the client or the firm, never one agreement.
+
+**`clara.contract_terms`** is therefore its own relation: one live row per (agreement document,
+term key) over a closed five-member vocabulary (`monthly_rent`, `deposit`, `term_start`,
+`term_end`, `escalation`), append-only and supersede-only at the TABLE (a correction opens a
+successor; the predecessor is never edited), with `clara.document_regions`' own RLS shape — forced
+RLS, the owner's ALL policy, a firm-scoped SELECT for `clara_authenticated` and one for
+`clara_agent_ro`, and nothing at all for the runtime. `basis_kind` is the honesty column:
+`document_region` (a region of this agreement printed this), `derived_from_regions` (computed from
+regions by the rule the basis sentence states) or `person_stated` (a named human typed it, no
+region claimed), tied to `source_region_ids` by a CHECK in both directions.
+
+**Why the terms are not simply more questions on #948's questionnaire.** `agreementFacts_v1` is a
+FROZEN closure, so an ESCALATION — which its eleven-question roster has no question for — cannot be
+read by that family at all. `clara.propose_contract_terms` is honest about which term comes from
+where: the rent and the deposit ARE readings of their own regions, the term's first and last day
+are DERIVATIONS from two of the same regions (the first day is the signing date, corrected by a
+person where the tenancy commences later; the last day is inclusive, so 24 months from 5 January
+2026 ends on 4 January 2028), and the escalation is reported as `no_question_in_the_questionnaire`
+— never silence, and never a zero.
+
+**The person's confirmation is the plan's own instruction, and that needed a third
+`authority_ref` kind.** The plan lane admits an `accounting_work` (accepted because
+`accounting_work.initiator` is NOT NULL — the owner's #977 ruling says exactly that) and a
+`chat_task` narrowed to a human-authored `chat_turn`. A person clicking Confirm on a contract page
+is neither. Three routes were considered and rejected: admitting a Work would start a run nobody
+asked for; minting a `chat_turn` would fabricate the very thing #977 exists to stop; and naming
+the DOCUMENT would make a thing a model read into a thing a person said, which REGRESSES #977
+rather than extending it. So the confirmation itself is the row —
+`clara.contract_plan_confirmations`, INSERT-only, whose `confirmed_by` is NOT NULL, which is the
+SAME property that makes an `accounting_work` acceptable — and the agreement rides on that row
+(`document_id`), which is how "the agreement is recorded as the source document" is satisfied
+without weakening what an instruction is. 0250's own closing line invited this ("a raise rather
+than a quiet refusal, so a future lane that widens the admitted kinds finds this line"); §G.1
+splices the arm in immediately above that raise, and §G.2 widens
+`clara.create_accounting_plan`'s shape wall by name. `clara.sign_depreciation_authority` carries
+the same wall and is deliberately untouched: a depreciation authority is not a tenancy.
+
+**The settlement is the Settlement candidate row, third instance** (CONTEXT.md; #657's pending
+bank line first, #947's unsettled payroll net pay second). 0298's four bodies are the template,
+line for line: `clara._rent_payable_unsettled` is a per-client FIFO ledger read over the confirmed
+plan's OWN payable account (which account is read off the CONFIRMATION, because the ruling lets
+the accountant choose another liability account), `clara._rent_settlement_bank_candidates` is the
+deterministic match basis (exact amount, ten-day window, live/unspent/unexcepted lines only, never
+a score), and `clara.settle_rent_payable` books Dr payable / Cr bank and then calls
+`clara._match_bank_line_core` DIRECTLY — no `bank_matches`, `bank_match_line_members` or
+`bank_match_entry_members` row is written anywhere in this file's own code. Because "unsettled" is
+a LEDGER fact and not a marker, the row clears itself by any route: a cell books a cheque by hand
+with no door of this lane involved and the row is already gone, with one new entry and no match,
+marker or dismissal row anywhere. A cheque is the same case by construction — the payable stays
+open until the cheque appears on the statement, which is the only moment Clara can see.
+
+**The deposit is a term and an offer, never a draft.** Signing does not say the money moved, so
+`clara.get_tenancy_deposit_coding` records nothing and posts nothing: it offers `1120 Deposits
+Paid` (consumed by code and name; a client who does not hold it is TOLD so) against bank lines of
+exactly the recorded deposit, inside a SIXTY-day window around the term's first day rather than
+the rent settlement's ten, because a deposit is paid once around commencement while a month's rent
+is paid within days of its month. `already_coded` is a ledger read, so the offer clears itself.
+There is deliberately NO write door for a deposit at all — coding a bank line is the coding lane's
+own act.
+
+**The escalation surfaces before its date and moves nothing by itself.**
+`clara._tenancy_escalation_state` is derived from the live plan revision and the live escalation
+term, so it clears the moment the plan carries the escalated amount. Sixty days' notice, stated
+out loud rather than hidden in a body, and the row does NOT disappear once the date passes — an
+escalation that took effect and was never confirmed is exactly the case a person most needs to
+see. `clara.confirm_tenancy_rent_plan_revision` records a SECOND confirmation row
+(`kind='rent_plan_revision'`) and moves the schedule through `clara.revise_accounting_plan`, so
+"no amount changes without that confirmation" is a record rather than a promise. A stepped rent
+always makes the branch ask, so that door carries the same written-judgement wall and quotes the
+same body's own question.
+
+**Needs you gains TWO kinds, not one** — `rent_payable_unsettled` and `rent_escalation_pending` —
+spliced additively in the 0146/0168/0180/0260/0288/0297/0298/0299 family. Two, because accepting a
+settlement candidate on the bank surface and confirming a plan revision on the contract page are
+different decisions in different places, and folding them would leave the label, the link and the
+affordance all guessing which. Both are DERIVED, neither mints a dismissal act, a `counts.*` key
+or a json key, and both are appended contiguously in one hunk at the end of every roster.
+
+**The prepayment lane is untouched, and AC7 is proven by driving it.** A tenancy whose 24-month
+term is recorded in `clara.contract_terms` is prepaid a year up front, and
+`clara.prepayment_schedule_v1` still refuses `prepayment_term_underivable`, naming
+`document_service_periods` — not the contract term this lane holds. Once a person states twelve
+months through the estate's own door the schedule derives, twelve lines, never twenty-four. The
+tail's own T.6 reads the catalog: no body of this lane names that table at all.
+
+**The migration's shape.** §A prestate · §B the record · §C its two doors · §D the proposal ·
+§E the framework read and the lessee branch · §F the draft and the confirmation relation ·
+§G the two authority splices and the confirm door · §H the settlement · §I the deposit ·
+§J the escalation · §K the queue splice · §Z the tail.
+
+**Prestate pins, MEASURED on the lane database after #948.** Three `sha256(prosrc)` pins in §A —
+`clara.persist_agreement_facts(uuid,jsonb,jsonb,integer)`
+(`d3b22a8ae6cd6ef47e3e1765fd52b95f3b0f8a27cc0d2a255dcdd1c0be47d1de`, the writer of the regions
+this file cites), `clara._agreement_entry_plan(uuid,jsonb)`
+(`1db0f2be1a1e9ce75e407f867da9498d593dfb92d76d68f2960fa6cb6680b9ca`, whose early return is why a
+tenancy never reaches the fixed-asset lane) and the REGISTERED frozen
+`clara.evaluate_agreement_contract_state_v1(jsonb,jsonb)`
+(`0c99e23bfd5d69aa733f0c180a42e4eb4b9bd3b7f856a0332dbbb8bfe5057c1c`) — plus three non-sha claims
+(the three chart rows on the current published platform template, `clara._tf_no_truncate()`, and
+the `reporting_framework` knowledge key). THREE MORE pins live inside the splice blocks that recut
+their targets, in 0298 §E's own idiom, each keyed on `sha256(pg_get_functiondef(...))`:
+`clara._authority_ref_refusal(text,uuid,uuid,uuid)`
+(`d70256f4208f6caf20e30259958f66d08ff1b445522399fc0c7f844f2cdea435`),
+`clara.create_accounting_plan(...)`
+(`13f0d80556e60828875203bc9a290f7d325d4d067c4079e5ef6d25632a25a055`) and
+`clara.list_review_queue(jsonb,jsonb,integer)`
+(`bc7f9250bf58562e893dee83623d4e2abc6bc42480bfd69f65944a76f893ed6e`). All three splices detect
+their own marker and no-op on a redo.
+
+**Redo posture.** Every body is `create or replace`, both relations are `create table if not
+exists` with `if not exists` indexes and `drop policy if exists` before each policy, every trigger
+is dropped-if-exists before it is created, and all three splices are marker-detecting.
+`CLARA_MIGRATION_REDO=0300_tenancy_terms_rent_plan` was used for every build round of this file
+and is recorded here as the work order asks.
+
+**The lint contract this file was written against.** #948 measured that
+`scripts/wiki-lint-checks.mjs` classifies any `do` block that so much as NAMES the
+definition-rendering catalog function as a change-of-record patch site. §Z therefore reads
+`p.prosrc` everywhere, and its own explanatory comment does not spell that function's name.
+
+**The reporting-framework key gets its first reader.** `clara.knowledge_keys` has carried
+`reporting_framework` since 0192/#644 with a label saying it is "DESCRIPTIVE in this slice — no
+posting or presentation code reads this row". `clara._client_reporting_framework` is that first
+reader, and it reads the key only to decide whether Clara may DRAFT, never to post: a live CLIENT
+record shadows a live FIRM record inside its effective window, and two live records of one scope
+carrying different codes answer `ambiguous` rather than picking.

@@ -341,4 +341,16 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "c8caeb96849ef4d6ce56fb47d7f856e1fbf3eb9031f3846eb2834c72c8d3b43b",
     },
   ],
+  // #949 [0300] (riders wave 4, lane 01) — the tenancy contract-terms and recurring rent-plan
+  // lane: the SAME 0146/0168/0180/0260/0288/0297/0298/0299 splice family for the review queue,
+  // plus the two authority-lane recuts a third `authority_ref` kind needs. Appended at the sorted
+  // position.
+  [
+    "0300_tenancy_terms_rent_plan.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut a CLOSED literal roster of exactly THREE named FUNCTIONS, each read at its own literal regprocedure spelled in this file — clara._authority_ref_refusal(text,uuid,uuid,uuid) (one new arm, inserted immediately above the unknown-kind raise 0250 itself left as the landing point for a lane that widens the admitted kinds), clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text) (one authority-kind wall, widened by name from two admitted kinds to three) and clara.list_review_queue(jsonb,jsonb,integer) (two rent CTEs and two union arms, in the 0146/0260/0297/0298/0299 idiom). Every anchor is asserted to occur EXACTLY once before replacing, and every anchor and replacement is a single dollar-quoted literal so each statement is reconstructible — no concatenation chain, and the one chr(10) is inside an ANCHOR the block only searches for, never inside a replacement it installs. All three return text or jsonb, so none can emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) is reachable, by construction rather than by inspection of a rendered string. Each splice detects its own marker in the INSTALLED body and no-ops on a redo, and every postcheck re-reads the COMMITTED catalog in either branch: the refusal recut for both arms #977 shipped, the plan-door recut for every wall #640 and #977 put there, and the queue recut for the shared column vector at exactly two more occurrences than before plus all thirteen pre-existing row-kind markers. Every other object this migration creates is static DDL the lexer inspects directly — two `create table if not exists` statements with their indexes, policies and append-only triggers, and twenty-two `create or replace function` statements at literal signatures (the record's two doors and its two projections, the proposal and its region read, the framework read and the lessee branch, the bank test, the draft and its granted read, the plan resolver, the confirm door, the four settlement bodies, the deposit offer, the escalation state and its two doors, and the two trigger functions) — and the file appends NO chart row at all and names clara.coa_template_accounts nowhere, which its own tail re-derives structurally.",
+      sha256: "97bcaa098261fd734f83f0a54d4e67e821ea08bb3ea933873526fc4546530c89",
+    },
+  ],
 ]);

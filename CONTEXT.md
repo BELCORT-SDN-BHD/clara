@@ -1001,10 +1001,45 @@ moment the underlying facts stop producing it — nobody dismisses it, nobody cl
 nothing has to be cleaned up when the decision is made elsewhere. It offers candidates and never
 chooses: an ambiguous case stays pending with the same one question, and choosing is the human's
 act. #657's pending bank line is its first instance; #947 (a posted payroll run's unsettled net
-pay, offered against candidate bank lines) is the second, reusing the same shape rather than
+pay, offered against candidate bank lines) is the second and #949 (a month of rent whose payable
+is still open on a confirmed tenancy plan) the third, each reusing the same shape rather than
 minting a sibling concept.
 _Avoid_: A stored Work, question or task; a new `accounting_work.purpose`; a notification; a row
 that survives the fact that produced it; a suggestion the product acts on by itself.
+
+**Contract terms record**:
+What one agreement STATES, recorded per client and per agreement, one live row per term, with the
+region of the page each figure was read from. It is append-only and supersede-only: a correction
+opens a successor and the superseded reading stays readable beside it. Every row says how it came
+to be what it is — READ from a region, DERIVED from regions by a stated rule, or STATED by a named
+person — so nothing on a screen can pass a derivation off as a reading. #949's tenancy terms (the
+monthly rent, the deposit, the term's first and last day, any escalation) are its first instance.
+_Avoid_: A client fact (one live row per client and key, so two tenancies would collide, and it
+carries no region); a knowledge record (its subject is the client or the firm, never one
+agreement); an editable row; a figure with no stated provenance.
+
+**Lessee treatment branch**:
+The decision about whether Clara may draft a monthly rent expense for a lease at all, taken from
+the client's own reporting framework and the term the agreement states, and never from a default.
+MPERS Section 20 expenses an operating lease straight-line over the term, so level rent under
+MPERS is the ordinary case; MFRS 16 recognises a right-of-use asset and a lease liability for a
+lease over twelve months, so only a short-term lease may be expensed straight-line; and a stated
+escalation makes the straight-line expense differ from the month's cash rent under either. Where
+the branch ASKS, Clara states the term, the rent and the escalation she read, names what the
+standard asks, and drafts nothing — a person may still confirm, against a written professional
+judgement that is recorded with the act.
+_Avoid_: A default framework; auto-posting a treatment that may not comply; averaging a stepped
+rent without a person's decision; a measurement (a discount rate, a right-of-use asset, a lease
+liability schedule) this lane cannot read.
+
+**Plan confirmation**:
+The recorded act of a named person starting or revising a recurring plan, carrying the document
+they were looking at, the figures and accounts they confirmed, and the treatment branch as it
+stood at that moment. It is what the plan lane's explicit instruction names, and it is admitted
+for the same reason a Work row is: it cannot exist without naming who asked. It is never amended
+— a changed mind is a revision, with its own confirmation.
+_Avoid_: A document standing in for an instruction; a Work minted to serve as a receipt; a chat
+turn nobody typed; an editable confirmation.
 
 **Match basis**:
 The DETERMINISTIC evidence for pairing one bank statement line with one already-approved
