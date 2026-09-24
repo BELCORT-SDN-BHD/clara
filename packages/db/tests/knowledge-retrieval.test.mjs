@@ -947,12 +947,30 @@ cell("p658.census.no_recut — the eight pinned bodies are byte-identical and ge
   const sourceCorrectionLive = (await rootQuery(
     "select count(*)::int as n from clara.schema_migrations where version ~ $1",
     ["work_source_correction_supersede$"])).rows[0].n > 0;
+  // A SECOND OF THE EIGHT IS NOW PINNED IN BOTH GENERATIONS (riders wave 4, 2026-09-24), by the
+  // same convention and for the same reason. #1031 recuts clara._knowledge_capture_core in scope:
+  // it gains ONE call to the financial-year-end pair rule
+  // (clara._knowledge_assert_fye_pair) immediately after its existing
+  // clara._knowledge_assert_value call, so a day that cannot exist in the recorded month is
+  // refused before it can become a second, disagreeing statement of the same fact. Nothing else
+  // in the body moves: 0317's tail proves that by REVERSE SUBSTITUTION against 0310's own pinned
+  // pre-image, and knowledge-fye-day.test.mjs carries the behavioural proof. This cell only has
+  // to stop calling that verified recut a drift of 0230's.
+  // THE BRANCH KEYS ON 0317, the LAST of #1031's two files to touch this body. The two ship as
+  // ONE cohort (the rule and its applicability fix), so a database carrying 0310 alone is a
+  // HALF-APPLIED cohort, and this cell failing on it is the right answer, not a false alarm --
+  // knowledge-fixtures.mjs's fyePairWallCohortApplied says the same thing in its own voice.
+  const fyePairWallLive = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["knowledge_fye_pair_applicability$"])).rows[0].n > 0;
   const pins = [
     ["clara.get_knowledge_pack(uuid,text,uuid)", "2deb725f00229f60a2fbbcc158fe656c5635cd220ec11727c182c39dc6c693fb"],
     ["clara.list_client_knowledge(uuid)", "32999fef181b09989994d40a9c12956f6107798b55eae0b45fce2806d2e7b691"],
     ["clara._knowledge_legacy_rows(uuid,uuid)", "65f4f0f3db1ab64cfa2e4ef55cc850fa9f2176009ac5271c57030e18706ff35a"],
     ["clara._knowledge_capture_core(uuid,text,uuid,text,jsonb,jsonb,date,date,text,text,jsonb,uuid,text,text,text,text)",
-      "2c8526b82d54ac0aa49c77c3be277be5ecd9cad73df0fec63908d67a0681b01b"],
+      fyePairWallLive
+        ? "e54104fc7dc48056eb6a8dfe8067360c67121d02656aae2b6ced1c01f6c91171"
+        : "2c8526b82d54ac0aa49c77c3be277be5ecd9cad73df0fec63908d67a0681b01b"],
     ["clara._knowledge_floor(text,text)", "5e4d80691226a6b0bc80dc45c50a6089db5f3a3f7e905f782a0c99c6db8820ca"],
     ["clara.capture_knowledge(text,jsonb,text,text,text,uuid,text,jsonb,date,date,jsonb)",
       "b9f1cf6b4aa54c9b26dfad6d8a256d5812f3660bf5b65a39e399bbca9be1009e"],
@@ -966,7 +984,7 @@ cell("p658.census.no_recut — the eight pinned bodies are byte-identical and ge
     const r = await rootQuery(
       "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha from pg_proc p where p.oid = $1::regprocedure",
       [sig]);
-    assert.equal(r.rows[0].sha, want, `${sig} is NOT at its measured pre-0230 body -- 0230 recuts nothing, and only #885's own named recut (0268) is tolerated`);
+    assert.equal(r.rows[0].sha, want, `${sig} is NOT at its measured pre-0230 body -- 0230 recuts nothing, and only #885's own named recut (0268) and #1031's own named recut (0310 + 0317) are tolerated`);
   }
   const overloads = await rootQuery(
     `select count(*)::int as n from pg_proc p join pg_namespace n on n.oid=p.pronamespace

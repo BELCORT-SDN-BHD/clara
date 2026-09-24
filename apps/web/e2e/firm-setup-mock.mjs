@@ -104,9 +104,14 @@ const CATALOGUE = [
     sort_order: 40, knowledge_key: null,
   },
   {
+    // #1032 (owner's ruling 2026-09-23) — tin is always offered; whether it reads `required` here
+    // is decided live off the turnover answer (packages/db/tests/firm-setup-applicability.test.mjs
+    // owns that against a real Postgres). This fixture models the OPTIONAL branch alone (`required:
+    // false`, static): its own subject is browser mechanics (CAS, drafts, a11y, the skip Dialog),
+    // never the applicability derivation.
     item_key: "tin", kind: "capture", group_key: "tax",
     question: "What is the firm's MyInvois TIN?",
-    note: "The firm's MyInvois TIN. Required when annual turnover is RM1 million or more; otherwise skip with a reason.",
+    note: "The firm's MyInvois TIN. Required once the firm's turnover makes MyInvois mandatory (RM1 million or more); optional below that, and you may still record it if the firm has registered for MyInvois voluntarily.",
     required: false, min_role: "admin", answer_shape: "text", answer_options: [], answer_field: null,
     sort_order: 45, knowledge_key: null,
   },

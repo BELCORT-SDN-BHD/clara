@@ -773,35 +773,27 @@ Two granted doors share this one core:
   party under one firm through this door, so the arity-≥-2 wall costs them nothing while the
   arity-1 boundary stays exactly where the owner's 2026-09-15 ruling put it.
 
-**`clara.create_client(text,text)` keeps its body and its grant, and is the one place 0287
-departs from the brief's literal "no granted role reaches an unwalled client-minting verb". It is
-an OPEN residual, not a closed question.** 0287 §C2 does give the brief's third per-verb answer —
-SUPERSEDED — where a reader of the catalogue can see it: a `comment on function` naming
-`open_client_onboarding` as the successor and saying in the same sentence that the gap is still
-open. The comment is the only thing about this verb 0287 changes; the prestate and the tail pin its
-body and its grant byte-for-byte. `rig-fixtures.mjs`'s shared `buildWorld()` (read by dozens of battery
-files) and `wave-b/wb-fixtures.mjs`'s `buildWaveBWorld()` both construct a THIRD same-leading-token
-client in one firm through `create_client`, and `name-only-guard.test.mjs` constructs six more
-through the same shared JS fixture helper; re-pointing `create_client`'s body would turn all of
-those red for a fixture-naming coincidence unrelated to what any of them test, and withdrawing its
-grant would meet the forty-eight-plus test files that call it through `rig-fixtures.mjs`'s
-`createClient()` helper with a bare 42501 on their very first fixture client. `create_client` has
-no product caller — this ticket's own triage measured that with a repo-wide grep. Closing this
-residual for real needs a dedicated migration of those call sites onto `open_client_onboarding` (or
-a rewrite of the fixture naming convention so it stops manufacturing same-family collisions by
-construction) first.
+**`clara.create_client(text,text)` kept its body and its grant, and was the one place 0287
+departed from the brief's literal "no granted role reaches an unwalled client-minting verb".** It
+was an OPEN residual, not a closed question, when this section was written. 0287 §C2 gave the
+brief's third per-verb answer — SUPERSEDED — where a reader of the catalogue can see it: a
+`comment on function` naming `open_client_onboarding` as the successor and saying in the same
+sentence that the gap was still open. The comment was the only thing about this verb 0287 changed;
+the prestate and the tail pinned its body and its grant byte-for-byte. `rig-fixtures.mjs`'s shared
+`buildWorld()` (read by dozens of battery files) and `wave-b/wb-fixtures.mjs`'s `buildWaveBWorld()`
+both construct a THIRD same-leading-token client in one firm through `create_client`, and
+`name-only-guard.test.mjs` constructs six more through the same shared JS fixture helper —
+re-pointing `create_client`'s body would have turned all of those red for a fixture-naming
+coincidence unrelated to what any of them test. **This residual is CLOSED by #1038 (migration
+0316) — see "`clara.create_client`'s human grant withdrawn (0316, #1038)" below**; the reasoning
+above is left in place because it explains WHY the closing migration only revokes a grant and
+never re-points the body.
 
-Three cells bound the gap rather than claiming it away.
-`p899.census.granted_client_minters_and_the_one_residual` sweeps the live catalogue and fails
-loudly the day a SECOND granted minter loses the wall — or the day the array empties, which would
-mean this section and the ticket's criterion both need rewriting.
-`p899.census.create_client_documented_exception` drives the residual so it is evidenced, not
-asserted. `p899.census.create_client_residual_is_bounded` proves the reach: the catalogue comment
-is live, **no product tree calls the verb at all** (`apps/web/app|components|lib` and every
-`packages/runtime` tree the operation census counts as production are swept and empty), and the one
-non-test caller anywhere — `scripts/onboard-rpr.mjs`, the beta onboarding operator — runs as the
-postgres superuser with a jwt GUC and never `SET ROLE`s to `clara_authenticated`, so it does not
-ride the grant this residual is about.
+Three cells bounded the gap rather than claiming it away, when this section was written; #1038
+rewrote all three onto the closed shape (see below), moving them onto their OWN stem separate
+from 0287's, so a database carrying 0287 without 0316 skips them loudly (an explicit
+pre-integration run) or fails loudly (a focused one) instead of asserting either the old,
+now-impossible OPEN shape or the new, not-yet-true CLOSED one.
 
 **Two guarantees the core carries that the doors above do not state.** (1) The wall is
 SERIALISED: `_client_birth_core` takes `pg_advisory_xact_lock(203005008, hashtext(firm || ':' ||
@@ -814,6 +806,59 @@ family), not the whole firm, so unrelated births never wait on each other. (2) `
 RECORDED, not only consulted: the core writes it into `clara.client_identifiers` under
 `clara.add_client_identifier`'s own normalisation, so a wall a caller cleared with an identifier
 also holds for the next caller. Both are re-asserted structurally by 0287's own tail (T.5b).
+
+## `clara.create_client`'s human grant withdrawn (0316, #1038)
+
+[0316_create_client_human_grant_withdrawn.sql](migrations/0316_create_client_human_grant_withdrawn.sql)
+closes the residual the section above bounded: `clara.create_client`'s `clara_authenticated`
+EXECUTE grant is **revoked**. Its body — unwalled, no identity check — is untouched (prestate and
+tail both pin it byte-for-byte), because the reasoning above still holds: `buildWorld()`,
+`buildWaveBWorld()` and `name-only-guard.test.mjs` still need to mint same-family clients by
+fixture convention, and re-pointing the body would break them for a naming coincidence unrelated
+to what any of them test. Only WHO can call it moved, never WHAT it does when called.
+
+**How the rig's own callers keep working with no grant at all.** Every caller that used to reach
+`create_client` through the `clara_authenticated` grant now reaches it the same way
+[`packages/db/scripts/onboard-rpr.mjs`](scripts/onboard-rpr.mjs) always has, for its own one
+non-test call site — the "HUMAN-CONTEXT IDIOM" that script's own header names, itself
+[`seeds/0002_core_seed.sql`](seeds/0002_core_seed.sql)'s house pattern: stay at the base
+connection identity (the postgres superuser, which bypasses EXECUTE-grant checks entirely — a
+plain PostgreSQL property, not something this ticket invented) and hand-set
+`request.jwt.claims` so `clara._human_ctx` resolves the same actor/firm/floor a granted
+`clara_authenticated` caller would have gotten. `packages/db/tests/rig-fixtures.mjs`'s
+`createClientRaw(sub, {name, opKey})` is the ONE place this idiom lives for the test rig
+(`withActor({ jwtSub: sub }, …)`, `rig-helpers.mjs`'s own `role: null` branch); `createClient()`
+wraps it and then drives the legacy activation bridge exactly as before. A dozen direct callers
+that used to inline `humanQuery(sub, "select clara.create_client(…)")` across
+`packages/db/tests` were moved onto `createClientRaw` in the same ticket, and a NEW census cell
+(`p899.census.no_test_file_calls_create_client_directly`, AC1) sweeps the whole `tests/` tree and
+fails loudly if a new direct caller ever reappears outside that one fixture.
+
+**The grant-matrix census.** `packages/db/tests/rig-meta.mjs`'s `WRITERS` array no longer lists
+`create_client` — the exact-match sweep `rig-isolation.test.mjs`'s T17 runs now expects
+`clara_authenticated` (and every other application-facing role) to hold **zero** EXECUTE on it,
+and fails loudly if the grant ever returns. `clara.open_client_onboarding` (already in
+`CLIENT_BIRTH_WALL_0287_COHORT`) is the granted human door in its place.
+
+**Two RBAC cells that used `create_client` as their example human writer were repointed to
+`open_client_onboarding`** — not a behavioural change to what either cell proves, since both
+subjects (a human writer ignoring a foreign wake credential; a non-authenticated role never
+reaching a real writer) are equally true of either door:
+`rig-isolation.test.mjs`'s "T16 CRITICAL-1" and `rig-runtime-catalog.test.mjs`'s agent-read-login
+writer-denial cell.
+
+**The three #899 census cells, rewritten and moved onto their own stem
+(`create_client_human_grant_withdrawn$`)**, separate from 0287's own gate — the
+`firm-setup-applicability.test.mjs` / `TIN_REQUIRED_STEM` idiom (see "The firm-setup TIN item"
+section elsewhere in this file):
+`p899.census.no_unwalled_granted_client_minters` now asserts the granted-minter sweep's unwalled
+set is EMPTY (the ticket's own criterion — "no granted human role can reach a client-minting verb
+that lacks the wall" — is MET, not merely bounded); `p899.census.create_client_residual_closed`
+asserts the catalogue comment names `#1038`/"withdrawn" and directly re-measures
+`has_function_privilege('clara_authenticated', …) = false`;
+`p899.census.create_client_refuses_the_human_grant` is the vacuity control — the EXACT call shape
+an earlier cell in this file's history once proved SUCCEEDING now REFUSES `42501`
+`insufficient_privilege`.
 
 ## Storage grant/policy battery
 
@@ -882,8 +927,8 @@ to `clara_authenticated` alone.
 |---|---|---|
 | `clara.seed_firm_setup_plan(p_op_key)` | admin | RECONCILES the firm plan against `clara.firm_setup_keys`: inserts only the catalogue rows the plan is missing and never touches an existing item, so an answer `firmInterview_v3` already wrote is neither rewritten nor re-asked. Rotates the CAS token and appends a revision snapshot. |
 | `clara.answer_firm_setup_item(p_plan, p_expected_revision, p_item_key, p_answer, p_op_key)` | admin, then the catalogue row's `min_role` | Validates the answer against the catalogue's declared shape, records it with its author, and — for the three firm-defaultable keys only — captures a firm-scope `clara.knowledge_records` row through the live `clara.capture_knowledge`. CAS mismatch is `CLR06` + `detail.reason='stale_plan'`. It is also the journey's CORRECTION PATH: it sets `state='answered'` from any non-committed state and replaces `answer` wholesale, so a recorded fact is corrected and a deferral is un-skipped by the same act (no deferral reason survives beside the new value). The one exception is a key that already carries a LIVE firm-scope knowledge record — the second capture is refused `knowledge_already_live`, and correction belongs to `clara.correct_knowledge`. |
-| `clara.defer_firm_setup_item(p_plan, p_expected_revision, p_item_key, p_reason, p_op_key)` | admin, then `min_role` | Skips an item that is NOT `required_for_commit`, parking the stated reason in the item's `answer` as `{"deferred_reason": …}` (`clara.onboarding_plan_items` has no `reason` column and its deferred CHECK arm constrains none). Refuses a required item and an already-answered one. |
-| `clara.commit_firm_setup(p_plan, p_expected_revision, p_op_key)` | admin | Commits the plan once every **catalogue** row that is `required_for_commit` is answered, resolved or deferred; otherwise `CLR10 required_items_outstanding`, naming them. It reads the catalogue, not the plan row's own flag, so a foreign plan item (`bookkeeper_email` → #625, `first_client_onboarding` → #649) cannot block this journey. |
+| `clara.defer_firm_setup_item(p_plan, p_expected_revision, p_item_key, p_reason, p_op_key)` | admin, then `min_role` | Skips an item that is not required — the catalogue's own `required_for_commit`, OR (#1032, 0311) a LIVE `'required'` verdict off `clara._firm_setup_applicability` — parking the stated reason in the item's `answer` as `{"deferred_reason": …}` (`clara.onboarding_plan_items` has no `reason` column and its deferred CHECK arm constrains none). Refuses a required item (static or dynamic) and an already-answered one. |
+| `clara.commit_firm_setup(p_plan, p_expected_revision, p_op_key)` | admin | Commits the plan once every row that is required — the catalogue's own `required_for_commit`, OR (#1032, 0311) a live `'required'` verdict — is answered, resolved or deferred; otherwise `CLR10 required_items_outstanding`, naming them. It reads the catalogue plus the applicability door, not the plan row's own flag, so a foreign plan item (`bookkeeper_email` → #625, `first_client_onboarding` → #649) cannot block this journey. |
 | `clara.get_firm_setup()` | admin | The journey's ONE production-facing read: plan identity and CAS token, every catalogue row with its plan state, the required-answered/required-total counter, the outstanding required keys, and the confirmed firm-scope facts with scope, source, actor and an authority verdict taken from the author's CURRENT membership rank. |
 | `clara.dismiss_firm_setup_tip(p_plan, p_item_key, p_action)` | admin, then `min_role` | #935 — the ONLY door that may settle an `item_kind='education'` row (`p_action` is `'acknowledged'` or `'deferred'`). No `p_op_key`, no `p_expected_revision`: it writes no audit row, emits no domain event, never rotates the plan's CAS token, and is idempotent by construction (a repeat call on an already-settled tip echoes its actual state rather than re-writing or erroring). Refuses a non-education item by name (`CLR10 firm_setup_item_not_a_tip`). |
 
@@ -991,6 +1036,54 @@ because until this file no `education` row existed to expose it: without the gua
 door would happily record an AUDITED "accounting item" against a tip, which is exactly the
 invariant the ticket's two hard properties forbid. The new door itself,
 `clara.dismiss_firm_setup_tip`, is the table above's own row.
+
+**#1032 (0311, riders wave 4: TIN becomes required-or-optional, not seeded-or-not)** takes the
+follow-up 0257's own header proposed and #891's paragraph above restates ("deciding that a seeded,
+applicable TIN should block a commit") and settles it the owner's way (ruling 2026-09-23, Option
+A): the TIN item is now asked of EVERY firm, whatever the turnover answer. Only `tin`'s own branch
+of `clara._firm_setup_applicability` changes — `mpers_eligibility`'s branch and the unconditional
+`else` for the other ten rows are byte-identical to 0257 — and it now returns `'required'` or
+`'optional'`, never `'inapplicable'`/`'undetermined'`: required once turnover makes MyInvois
+mandatory, optional otherwise, including while turnover is itself still unanswered (the ruling's
+own "otherwise ... optional", not a third undetermined state — unreachable in practice regardless,
+since `turnover` and `tin` are always seeded together in the same reconciliation).
+`seed_firm_setup_plan`'s guard widens from `= 'applicable'` to `not in ('inapplicable',
+'undetermined')`, so `tin` is now always seed-eligible while `mpers_eligibility`'s own
+seeded-or-not behaviour is unchanged. Required-ness becomes ONE PREDICATE —
+`k.required_for_commit or clara._firm_setup_applicability(p.id, k.item_key) = 'required'` — used
+at every site that ever asked "is this required": `get_firm_setup`'s `items[].required`,
+`required_outstanding` and both `counter` sides (four sites, one recut), `commit_firm_setup`'s
+outstanding-items gate (its FIRST recut ever — 0257 and 0259 both left it a measured, untouched
+baseline), and `defer_firm_setup_item`'s required-refusal guard (not named in the ticket's own Key
+Interfaces, recut anyway: without it the database would admit a skip the web surface's Required
+badge already hides the control for, the same "two notions disagreeing" defect class 0259's fix
+round exists because of, closed here before it could recur). `mpers_eligibility` is a no-op under
+this predicate everywhere it appears, because its branch never returns the literal `'required'` —
+so `#891`'s own "eligibility item keeps its present behaviour" holds by construction, re-verified
+byte-for-byte rather than merely claimed. One data cell moves: `tin`'s `user_note`
+(0258/0259_firm_setup_user_notes.sql's own accountant sentence), backfilled through the SAME
+disable/enable-append-only-trigger shape 0258 established, since "otherwise skip with a reason" is
+no longer true once tin is answerable rather than inapplicable. No new function is minted and no
+grant changes, so — like 0257 itself, and like `rig-meta.mjs`'s own `#979` precedent ("NO COHORT,
+NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed") — this file adds no
+`rig-meta.mjs` cohort.
+
+**The population 0311 does NOT reach, stated rather than left silent** (#1032's own fix round,
+review finding L06-SPEC-06). 0311 recuts `clara.seed_firm_setup_plan` but backfills no existing
+plan, and that door refuses outright when the plan is not open (`CLR10 firm_setup_not_open`). A
+firm that COMMITTED its firm-setup plan before 0311 therefore has no `tin` row and no path to one:
+the catalogue carries no reopen door (measured on the live catalog — `_assert_firm_setup_answer`,
+`_firm_setup_applicability`, `_firm_setup_bump`, `_firm_setup_plan`, `answer_firm_setup_item`,
+`commit_firm_setup`, `defer_firm_setup_item`, `dismiss_firm_setup_tip`, `get_firm_setup`,
+`seed_firm_setup_plan`, and nothing else), and the web checklist guards every write control behind
+`!committed`. This is NOT specific to `tin`: a committed firm-setup plan has always been closed to
+every later catalogue row, including #935's three education tips, so backfilling `tin` alone would
+reach only the one item and would have to invent either a reopen door or a write into a committed
+plan — both of them product decisions well outside #1032's brief, which is why neither is taken
+here. Against the standing beta ruling ("nothing is dark") this is a REAL, disclosed gap for
+firms that committed below the RM1M threshold before 0311; it wants its own ticket — reopening, or
+amending, a committed firm-setup plan — and it is named here and in the lane's fix report so the
+owner can rule on it rather than discover it.
 
 At frontier 0222 the accrual lane adds four public names to that boundary:
 `create_accrual_adjustment`, `list_accrual_adjustments` and `get_accrual_adjustment` on
@@ -6164,3 +6257,144 @@ reachability):
 * `p871.derivation` — the shared status expression AND the shared masking block are present in both
   live bodies, each with a mutated-string vacuity control, and the migration's tail carries both
   pins.
+
+## 0310 — Knowledge refuses a financial-year-end pair that cannot be a real calendar day (#1031, riders wave 4, lane 06)
+
+`0310_knowledge_fye_pair_wall.sql` closes the gap #898's own fix round pinned rather than closed
+(`wave2-lane02-fix.md`, cell `fd.06`): Knowledge's `financial_year_end_day` (0240) is typed against
+`range:day_1_31` alone — a whole number 1-31, with no awareness of the sibling
+`financial_year_end_month` row, because `clara._knowledge_assert_value(p_knowledge_key, p_value)`
+sees one key and one value and has no client to read a sibling answer from. `clara.clients`' own
+year-end door (`clara.set_client_fy_end`, 0041) DOES refuse the impossible pair (CLR37,
+`fa_particulars_invalid`/`fy_end`), so a firm could state day 31 for February into Knowledge while
+the client row it is meant to agree with refuses the identical pair outright.
+
+**The one new rule, and both write doors consult it.** `clara._knowledge_assert_fye_pair(p_client,
+p_knowledge_key, p_value)` is a no-op for every key but the two year-end keys and a no-op at firm
+scope (D8's own wall, `clara._tf_knowledge_firm_eligibility`, already refuses a firm-scope capture
+of either key before a live client-scoped sibling could exist to compare against). Given a client
+scope, it reads the OTHER key's live value for that client — absent means nothing to compare,
+0240's original posture for a lone month or day, unchanged — and judges the pair with
+`clara.set_client_fy_end`'s own calendar rule (0041:3255-3258), copied verbatim rather than
+re-derived, so the two doors can never disagree about what a real financial year end is. A refused
+pair carries the SAME typed reason the client-row door already uses ("reuse its reason, mint
+nothing new"), with the month and the day it judged named on the detail — the client-row door's own
+generic message does not carry either value, and the ticket's own "Desired behavior" asked for both.
+
+Grep-measured on the lane-06 rig (`select … from pg_proc where prosrc ilike
+'%_knowledge_assert_value(%'`): exactly two clara bodies can ever write either year-end key,
+`clara._knowledge_capture_core` (which `capture_knowledge` / `capture_knowledge_for` /
+`promote_plan_answers_to_knowledge` all nest) and `clara.correct_knowledge` (which calls
+`clara._knowledge_assert_value` directly, bypassing the core). Both are recut, each gaining ONE
+line immediately after its existing `_knowledge_assert_value` call — "the pair rule lives once and
+both keys consult it" is satisfied by both WRITE DOORS consulting the one rule, not by the two keys
+each carrying a copy.
+
+**The choice this file makes, named.** The catalogue has no existing mechanism for one key's
+capture to reach in and clear or rewrite a sibling key's own live record — every capture door
+either writes the one record it was asked to write or refuses. "Clear the day with a disclosed
+reason" would be new machinery invented for this one pair; refusal, in both directions, needs none
+— it reuses the exact posture `_knowledge_assert_value` already keeps for a syntactically-valid-
+but-out-of-range value. So: capturing (or *correcting*) the day against an already-live,
+incompatible month is refused and the month is untouched; capturing (or correcting) the month
+against an already-live, incompatible day is refused the same way and the day is untouched. A
+client with no live sibling yet keeps 0240's original, unconstrained-alone posture for whichever
+half is stated first.
+
+**What this file deliberately does not do.** It does not touch `clara.set_client_fy_end` or
+`clara.clients`' own `ck_clients_fy_end` CHECK (0041) — the ticket's own out-of-scope, and the
+prestate pins that body UNMOVED. It does not read `financial_year_end_day` out of Knowledge
+anywhere new — the rule reads the sibling row directly, inside the SECURITY DEFINER write path,
+never through a new read surface. It does not change `clara._knowledge_assert_value` itself —
+0240's "one key, one value" segregation stays exactly as it was; the pair rule is a second, later
+call in each caller, never a widened first one.
+
+**The negative census.** `clara._knowledge_assert_fye_pair` is a genuine (STABLE, ungranted) reader
+of `clara.knowledge_records`, so `knowledge-firm-defaults.test.mjs`'s closed-cohort census
+(`p654.census.not_a_posting_grant`) needed a new, bimodal, positively-verified exception —
+declared and measured the same way #658's five 0230 reads already are, present only once this
+battery's own frontier carries 0310.
+
+**Migration triad.** `tests/fye-pair-wall-preintegration-gate.mjs` (marker-probed, not
+existence-probed — both `_knowledge_capture_core` and `correct_knowledge` have existed since 0192,
+so a bare `to_regprocedure` would report this cohort applied estate-wide),
+`FYE_PAIR_WALL_0310_COHORT` in `tests/rig-meta.mjs` (its own bimodal `cohortFailures()` call, the
+0248/0249/0250 fold pattern) and `knowledgeFixtures.mjs`'s `fyePairWallCohortApplied` (the same
+three-flag marker probe), and the gate's `--import` token in `package.json`'s test script, last in
+migration order. Battery: cells `fd.06` (rewritten from #898's own pinned-gap cell to assert the
+closed outcome) through `fd.10`, inside `tests/knowledge-fye-day.test.mjs`, gated on 0310 ON TOP OF
+0240's own gate (`pairCell`/`pairGate`, layered beside the file's original `cell`/`gate`) — fd.01
+through fd.05 are unmoved and stay 0240-only.
+
+**Redo-safe by construction**: the one statement that changes the catalog is
+`create or replace function`; the grant/revoke pairs are idempotent. The prestate detects its own
+redo by the same signal 0248 uses — both recut bodies already calling the new rule — and refuses a
+PARTIAL signal (one caller updated, the other not) rather than guessing.
+## 0317 — the year-end pair rule reads its sibling at the incoming applicability, and an impossible pair no longer aborts a promotion (#1031 fix round, riders wave 4, lane 06)
+
+`0317_knowledge_fye_pair_applicability.sql` fixes 0310, which is applied and therefore immutable.
+It takes a number from wave 4's OVERFLOW block (`0315` and up — `riders-2026-09-20/README.md`'s
+own rule for a fix round that needs another migration), never the next free number, and 0310 and
+0317 ship together as ONE cohort: `knowledge-fixtures.mjs`'s `fyePairWallCohortApplied` probes the
+shape the pair wall finally takes, `tests/fye-pair-wall-preintegration-gate.mjs` gates both, and a
+database carrying 0310 alone is reported PARTIAL rather than skipped, which is what it is.
+
+**Defect 1 — the sibling was read without its applicability.** 0310's rule selected the sibling
+year-end row on `state = 'live' and scope_kind = 'client' and client_id = $1 and knowledge_key =
+<sibling>`, with no `applies_when` predicate and no `ORDER BY`. But `uq_knowledge_live` (0192) is
+PARTIAL over (scope, subject, key, APPLICABILITY): one client may legitimately hold several live
+rows of one key, one per `applies_when` — the state
+`apps/web/components/registers/knowledge-panel.tsx` names out loud. "The sibling row" was therefore
+not one row, and the read took an arbitrary one. DRIVEN through `clara.capture_knowledge` as a
+bookkeeper, both directions: month 1 at `{}` plus month 2 at `{"from_fy":2025}` let day 31 at
+`{"from_fy":2025}` be ACCEPTED — leaving month 2 and day 31 live at the SAME applicability, the
+exact pair `clara.set_client_fy_end` refuses on the client row; and month 2 at `{}` plus month 1 at
+`{"from_fy":2025}` made day 31 at `{"from_fy":2025}` — 31 January, a real date — be REFUSED,
+naming a month belonging to a different applicability. The rule now takes the applicability it is
+judging and reads the sibling through `clara._knowledge_applies_when_digest`, the SAME digest the
+capture core computes for its own supersession lookup and the same one that partial index is over,
+so at most one row can match and `select … into` cannot be ambiguous. That needs a fourth
+argument, so the rule is re-cut at `(uuid, text, jsonb, jsonb)` and 0310's three-argument form is
+DROPPED after both callers move — the catalogue never carries two overloads, and `rig-meta.mjs`'s
+cohort is by NAME, so it is unmoved. `clara._knowledge_capture_core` passes its own
+`p_applies_when`; `clara.correct_knowledge` passes `r.applies_when`, the live record's own
+applicability, which a correction reuses verbatim and never moves.
+
+**Defect 2 — an impossible pair aborted a whole promotion.** #1031's brief asked for the
+onboarding promotion path to be unchanged. `clara.promote_plan_answers_to_knowledge` withholds a
+per-item refusal and carries on: its loop catches CLR10 and CLR11 around the nested
+`clara._knowledge_capture_core` and appends the item to `withheld`. The pair rule raises CLR37 —
+the client-row door's own typed reason, which is right — and CLR37 was not in that catch, so a
+committed plan holding an impossible pair raised straight out of the loop and NOTHING was
+promoted, `entity_type` included. DRIVEN on the rig before the fix. The arm now catches CLR37 too,
+so the offending key alone is withheld with its own sqlstate and detail, which IS this door's
+documented behaviour. Cell: `knowledge-onboarding-promotion.test.mjs` `kp.14`, with a vacuity
+control (the pre-image body put back on the rig, the cell seen failing with the raised CLR37, then
+restored through `CLARA_MIGRATION_REDO`).
+
+**Disclosed residual — 29 February outside a leap year is still accepted.** #1031's "current
+behavior" enumerated three impossible cases: 31 for a 30-day month, 30 or 31 for February, and 29
+for February when the pair is not tied to a leap year. The first two are closed; the third is NOT,
+deliberately. The rule is `clara.set_client_fy_end`'s own calendar rule copied verbatim (0041),
+that rule admits `month = 2 and day = 29`, the year-end pair carries no year to judge a leap year
+against, and the client-row door is explicitly out of #1031's scope — so refusing 29 February in
+Knowledge ALONE would re-create the very disagreement between two records of one fact that #1031
+exists to remove. Named in `clara._knowledge_assert_fye_pair`'s own body, in 0317's header and in
+the lane's fix report; a follow-up belongs on the CLIENT-ROW door, where both records can move
+together.
+
+**How the three pasted bodies are proved.** 0317 re-cuts three whole bodies statically (no
+`pg_get_functiondef` splice, so no new entry in `apps/web/tests/firm-scope-db-pins.corpus.ts` is
+owed — the file contains no dynamic SQL at all). Each pasted body is the LIVE pre-image plus
+exactly one named chunk, and the tail proves it by REVERSE SUBSTITUTION: it reads the installed
+body, puts the pre-0317 chunk back, and requires the result to hash to the `sha256(prosrc)` the
+prestate pinned. A change smuggled anywhere else in a pasted body reds the migration instead of
+shipping.
+
+**Redo-safe by construction (#957).** Every statement is `create or replace function` or
+`drop function if exists`. The prestate detects its own redo by ONE signal — the four-argument
+rule live, the three-argument one gone, and BOTH write doors already calling it — and refuses a
+PARTIAL signal rather than guessing. Both branches were exercised on the lane database: the FIRST
+APPLY through `pnpm db:migrate` (with all four recut pins checked), and the REDO branch through
+`CLARA_MIGRATION_REDO=0317_knowledge_fye_pair_applicability` after the promotion door was put back
+at its pre-image for `kp.14`'s vacuity control.

@@ -209,8 +209,9 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
       expectedPlanRevision: (v === "a" ? cm1 : cm2).rev, opKey: k }),
     cancel_client_onboarding: (k, v) => cancelOnboarding(w.users.hana, {
       client: (v === "a" ? cx1 : cx2).client, plan: (v === "a" ? cx1 : cx2).plan, reason: "g4", opKey: k }),
-    create_client: (k, v) => humanQuery(w.users.alice,
-      "select clara.create_client(p_name => $1, p_op_key => $2) as r", [`g4cc_${v}_${k.slice(-6)}`, k]),
+    // [#1038] create_client dropped out of `table` on purpose: its clara_authenticated grant is
+    // withdrawn (0316), so it also drops out of `derived` (the GRANT-DERIVED inventory above) --
+    // an entry here for it would fail the `stale` assertion below, not merely go unused.
     bootstrap_client_plan: (k, v) => humanQuery(w.users.hana,
       "select clara.bootstrap_client_plan(p_client => $1, p_op_key => $2) as r", [v === "a" ? preA : preB, k]),
   };

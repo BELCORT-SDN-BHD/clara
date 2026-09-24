@@ -400,26 +400,57 @@ no new relation or grant to independently anchor a cell to.
 
 `firm-setup-applicability.test.mjs` is frontier-gated on its own stable stem
 (`firm_setup_applicability$`), the `firm_setup_polish$` idiom, and preloads
-`firm-setup-applicability-preintegration-gate.mjs` in the package run. Four cells, one per
-acceptance criterion, all through `humanQuery`: `p891.mpers.entity_type` seeds a Sdn Bhd and a
-sole proprietorship through the doors and shows the eligibility item seeded (`pending`) for the
-first and permanently unseeded for the second, even after a later reconciliation; `p891.tin.
-turnover` does the same for the TIN item against the turnover answer, including the unanswered
-(`'undetermined'`) case before either firm states a turnover band; `p891.counter.excludes` answers
-turnover above the exemption threshold, reconciles (TIN joins `counter.required_total` at 9,
-unanswered), answers TIN (joins `required_answered` too), then RE-answers turnover back under the
-threshold and shows TIN drop out of BOTH sides of the counter on the very next read while its own
-recorded answer is untouched — the regression this file's own migration header measured and
-guarded against (`p648.commit.outstanding`'s `required_total=8` invariant, which answers
-`entity_type` as `'sdn_bhd'` without ever re-seeding, stays true only because a conditional item's
-counter contribution requires it to be ACTUALLY SEEDED, not merely live-applicable); `p891.answer.
-survives` answers `mpers_eligibility` while `entity_type='sdn_bhd'`, then corrects `entity_type`
-away and shows the item's own `state`/`answer` untouched while its reported `applicability` and
-`required` flip live. All four cells were run against a deliberately broken variant of the
-migration (seed's applicability filter removed, `get_firm_setup`'s applicability/counter/`v_unseeded`
+`firm-setup-applicability-preintegration-gate.mjs` in the package run. Two cells still describe
+#891's own subject, untouched: `p891.mpers.entity_type` seeds a Sdn Bhd and a sole proprietorship
+through the doors and shows the eligibility item seeded (`pending`) for the first and permanently
+unseeded for the second, even after a later reconciliation; `p891.answer.survives` answers
+`mpers_eligibility` while `entity_type='sdn_bhd'`, then corrects `entity_type` away and shows the
+item's own `state`/`answer` untouched while its reported `applicability` and `required` flip live.
+The other two of #891's original four cells — `p891.tin.turnover` and `p891.counter.excludes` —
+pinned TIN's old seeded-or-not shape and were REWRITTEN by **#1032** (below) to the new
+required-or-optional one; the "Firm setup TIN required-or-optional" section that follows owns their
+replacements. All four ORIGINAL cells were run, at the time, against a deliberately broken variant
+of 0257 (seed's applicability filter removed, `get_firm_setup`'s applicability/counter/`v_unseeded`
 guards reverted, applied via the `CLARA_MIGRATION_REDO` mechanism on this lane's own rig) and failed
 for the reasons this file's own assertions name, then re-run green after restoring the migration
 byte-for-byte — the vacuity control.
+
+## Firm setup TIN required-or-optional (#1032, `0311_firm_setup_tin_required.sql`)
+
+Owner's ruling 2026-09-23 (Option A, #1032, citing #891's own remainder): the TIN item is seeded
+for every firm now, required once the turnover answer makes MyInvois mandatory and optional
+otherwise, never seeded-or-not. Its cells live INSIDE `firm-setup-applicability.test.mjs` (the
+door under test, `clara._firm_setup_applicability`, is the same one), gated on their OWN stable
+stem (`firm_setup_tin_required$`, never 0257's — the `activity-feed.test.mjs` multi-stem-in-one-
+file idiom, "0183, gated on its OWN stem rather than 0181's": a database carrying 0257 but not yet
+0311 must skip these cells loudly rather than assert a shape `tin` can no longer take) and preload
+`firm-setup-tin-required-preintegration-gate.mjs` in the package run. Three cells:
+`p1032.tin.always_seeded_required_or_optional` seeds three firms (turnover unanswered, answered
+`'<RM1M'`, answered `'RM1M-5M'`) and shows TIN seeded (`pending`, never `unseeded`) in all three,
+reading `optional`/`false` in the first two and `required`/`true` in the third, with
+`counter.required_total` moving from 8 to 9 only in the third and the counter/`required_outstanding`
+arithmetic invariant holding throughout; a sub-threshold firm is also shown ABLE to volunteer an
+answer anyway. `p1032.tin.flip_keeps_answer_both_ways` answers TIN while optional, then answers
+turnover mandatory (TIN flips to required, answer untouched) then answers turnover back exempt
+(TIN flips back to optional, answer STILL untouched) — AC3's "both ways". `p1032.commit.
+refuses_until_tin_answered_when_required` answers every statically-required item plus a mandatory
+turnover, leaves TIN pending, and shows BOTH `defer_firm_setup_item` (`CLR10
+firm_setup_item_required`) and `commit_firm_setup` (`CLR10 required_items_outstanding` naming
+`tin`) refuse it — then answers TIN and commits; a second, separate firm with turnover below the
+threshold commits with TIN left pending and unanswered, on purpose, proving the ticket's own "the
+commit door ignores it" for the optional branch. `mpers_eligibility`'s own branch of
+`_firm_setup_applicability` and the unconditional `else` for the other ten rows are asserted
+byte-identical to 0257 in the migration's own tail, which is why its two cells above needed no
+change at all.
+
+`firm-setup-user-notes.test.mjs`'s `p934.notes.accountant_text` pins `tin`'s `user_note` literally
+(an INDEPENDENT source of truth transcribed from its own owner ruling, never re-derived from the
+migration) and was updated to 0311's new sentence — "otherwise skip with a reason" stopped being
+true the moment TIN became answerable rather than inapplicable. `firm-setup.test.mjs`'s
+`p648.seed.reconcile` / `p648.seed.empty` needed their literal seeded-row counts moved too (10→11,
+13→14 respectively): TIN is now among the rows a first reconciliation inserts even when its
+dependency (`turnover`) is unanswered, where before #1032 it was held back the same way
+`mpers_eligibility` still is.
 
 `firm-setup.test.mjs` (#648) and `firm-setup-polish.test.mjs` (#895) both needed narrow, direct
 consequences of #891's seed-time change fixed alongside it: `p648.seed.reconcile` /
@@ -562,14 +593,16 @@ Counterparty fixtures are planted as post-images: `clara.counterparties` carries
 trigger (CLR08) and `ck_counterparties_merge_retirement` admits retirement only as a merge, so a
 retired counterparty is inserted with both `merged_into` and `retired_at` set.
 
-## `client-birth-wall.test.mjs` (0287, #899)
+## `client-birth-wall.test.mjs` (0287/#899, 0316/#1038)
 
-Fourteen cells over the two granted doors `0287_client_birth_wall.sql` wires to the shared, ungranted
-`clara._client_birth_core`, plus a live catalogue census. Frontier-gated on the live catalog through
+Eleven cells over the two granted doors `0287_client_birth_wall.sql` wires to the shared, ungranted
+`clara._client_birth_core`. Frontier-gated on the live catalog through
 `client-birth-wall-preintegration-gate.mjs`: a package-wide run against a chain below 0287 SKIPS
 loudly, a focused run FAILS, and a PARTIAL cohort (some but not all of `_client_birth_core`,
 `open_client_onboarding` and the re-pointed `begin_client_onboarding` present) throws rather than
-skipping — the estate's "wholly present or wholly absent" rule.
+skipping — the estate's "wholly present or wholly absent" rule. A SEPARATE, SECOND group of four
+cells (the live catalogue census) lives in the same file, gated on ITS OWN stem — see "#1038 (0316)
+cells" below.
 
 - `p899.new_verb.*` — `clara.open_client_onboarding`, called with **no prior read**: arity 0
   creates; arity ≥ 2 refuses with the same CLR10 `name_family_collision` token and candidate rows
@@ -587,16 +620,41 @@ skipping — the estate's "wholly present or wholly absent" rule.
   `client-onboarding-identity.test.mjs`'s own `p649.identity.direct_birth_residual`); arity 0 and
   arity 1 are unchanged from before 0287 — the deliberate scope boundary the migration's own header
   argues for, proved here rather than left assumed.
-- `p899.census.*` — a live, catalogue-derived sweep of every granted human/agent/wake-reachable
-  body that mints a `clara.clients` row (directly, or by delegating to `_client_birth_core`), plus a
-  belt asserting `_client_birth_core` itself holds no application-role grant. **These cells BOUND
-  the one residual; they do not claim the ticket's census criterion is met, because it is not.**
-  `clara.create_client` is still granted and still unwalled, so the roster of unwalled granted
-  minters is asserted to be exactly `["create_client"]` — a new member is a regression and an empty
-  array means the residual was closed and both this census and the criterion should be rewritten.
-  `create_client_residual_is_bounded` then measures the reach: the catalogue comment marking the
-  verb superseded is live, no product tree calls it, and the single operator script that does runs
-  as the superuser rather than on the grant. See `packages/db/README.md`, "The client birth wall".
+### #1038 (0316) cells
+
+Four cells, gated on their own stem (`create_client_human_grant_withdrawn$`) rather than 0287's —
+the `firm-setup-applicability.test.mjs` / `TIN_REQUIRED_STEM` idiom (a database carrying 0287
+without 0316 skips these loudly instead of asserting a shape the catalogue can no longer
+produce), preloaded via `create-client-grant-withdrawn-preintegration-gate.mjs`:
+
+- `p899.census.no_unwalled_granted_client_minters` — the SAME live, catalogue-derived sweep of
+  every granted human/agent/wake-reachable body that mints a `clara.clients` row (directly, or by
+  delegating to `_client_birth_core`), plus the belt asserting `_client_birth_core` itself holds no
+  application-role grant, that the 0287-era `granted_client_minters_and_the_one_residual` cell
+  used to run. **The criterion is now MET, not merely bounded**: `clara.create_client` no longer
+  appears in the granted-minter sweep at all (0316 withdrew its only grant among the five roles
+  checked), so the unwalled-minter set is asserted EMPTY — a non-empty result is a regression.
+- `p899.census.create_client_residual_closed` — the catalogue comment names `#1038`/"withdrawn";
+  no product tree calls the verb (unchanged from 0287); the one non-test caller anywhere
+  (`scripts/onboard-rpr.mjs`) runs as the postgres superuser with a jwt GUC, unaffected by the
+  revoke; and a DIRECT `has_function_privilege('clara_authenticated', …) = false` re-measurement.
+- `p899.census.create_client_refuses_the_human_grant` — the vacuity control: the EXACT call shape
+  the 0287-era `create_client_documented_exception` cell once proved SUCCEEDING (two same-family
+  clients, no wall) now REFUSES `42501 insufficient_privilege`.
+- `p899.census.no_test_file_calls_create_client_directly` — AC1: sweeps every `.mjs` file under
+  `packages/db/tests` (test files included, unlike `sweepFor`'s PRODUCT_TREES sweep above) for the
+  literal `clara.create_client(`, exempting only `rig-fixtures.mjs` (the one fixture helper,
+  `createClientRaw`/`createClient`) and this file itself (whose own refusal cell above calls the
+  literal SQL on purpose). See `packages/db/README.md`, "`clara.create_client`'s human grant
+  withdrawn (0316, #1038)".
+
+Every OTHER `packages/db/tests` file that used to call `clara.create_client` directly (not through
+`rig-fixtures.mjs`'s shared helper) now calls `createClientRaw(sub, {name, opKey})` instead —
+`audit-actor-role.test.mjs`, `coa-template-pr-b-helpers.mjs`, `f-a7-pi.test.mjs`,
+`firm-commercial-settings.test.mjs`, `firm-portfolio-pack.test.mjs`, `rig-events.test.mjs` and
+`wave-b/wb-r3.test.mjs`. `wave-b/wb-g-opkeys.test.mjs`'s own `create_client` fixture entry was
+REMOVED (not repointed): the writer it tests drops out of that file's grant-derived inventory the
+moment the grant is gone, so a table entry for it would fail that file's own "stale" assertion.
 
 ## Batteries with their own frontier gate
 
@@ -931,6 +989,13 @@ to mint a world or to read a catalog back for a census.
   cannot over-correct into silencing a client that really was reading the firm default.
 - `p658.census.no_recut` — the eight pinned bodies byte-identical, `get_context_pack` at exactly
   one overload, one `pg_proc` row per installed name, and the CORE tier small and enumerable.
+  TWO of the eight are pinned in BOTH generations, each branching on the ledger row of the
+  migration that recut it: `clara.answer_work_question` on #885's `0268`, and
+  `clara._knowledge_capture_core` on #1031's `0317` (the second of that ticket's two files to
+  touch the body — `0310` mints the year-end pair rule and splices the call, `0317` re-cuts the
+  rule at four arguments so the sibling is read at the incoming applicability). A recutting
+  ticket comes back into THIS file and re-measures the pin against the new body, in its own
+  commit: the pin never updates itself.
 
 Fixtures: `knowledge-retrieval-fixtures.mjs`. Gate: `knowledge-retrieval-preintegration-gate.mjs`
 (preloaded, the battery SKIPS loudly below 0230; a FOCUSED run without it FAILS loudly — both

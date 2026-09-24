@@ -36,7 +36,7 @@ import {
   acceptPublishedLegal, printSkipCount, WCHART,
 } from "./work-journal-fixtures.mjs";
 import {
-  createClient, createFirm, addMember, insertUser, seedAdmission, sandboxName,
+  createClient, createClientRaw, createFirm, addMember, insertUser, seedAdmission, sandboxName,
 } from "./rig-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 import { upsertAccountClassed } from "./s6-helpers.mjs";
@@ -136,9 +136,10 @@ async function namedClient(sub, name) {
  *  not, because "a client the review queue's active-client join structurally excludes" is the
  *  subject of `p659.portfolio.onboarding_disclosed`. */
 async function onboardingClient(sub, name) {
-  const r = await humanQuery(sub,
-    "select clara.create_client(p_name => $1, p_op_key => $2) as receipt", [name, opk("p659-cli")]);
-  const client = r.rows[0].receipt.client_id;
+  // [#1038] clara.create_client's clara_authenticated grant is withdrawn; createClientRaw
+  // reaches the same unwalled, unactivated verb through the rig's own root+jwt idiom.
+  const r = await createClientRaw(sub, { name, opKey: opk("p659-cli") });
+  const client = r.client_id;
   const st = await rootQuery("select status from clara.clients where id = $1", [client]);
   assert.equal(st.rows[0].status, "onboarding", "the birth door still births an onboarding client");
   await mkChart(sub, client);

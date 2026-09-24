@@ -11,27 +11,47 @@
 //   AC3 — a firm-scope capture of the key is refused with the month key's typed reason (fd.04).
 //   AC4 — a committed onboarding plan with a day answer promotes to a knowledge value equal to
 //         the client row's day (fd.05).
-//   The ticket's "Desired behavior" also asks that a client's day on the client row and in
-//   Knowledge never disagree silently. That is NOT delivered (the setter and the client row's own
-//   check are the ticket's own out-of-scope); fd.06 measures exactly where the wall is -- the
-//   client row's door refuses an impossible pair -- and pins the disagreement that is left, so
-//   the owed follow-up has a cell to come back to.
+//   The ticket's "Desired behavior" also asked that a client's day on the client row and in
+//   Knowledge never disagree silently. #898 itself did NOT deliver that (the setter and the
+//   client row's own check were #898's own out-of-scope); fd.06 originally measured exactly where
+//   the wall was -- the client row's door refuses an impossible pair, Knowledge did not -- and
+//   pinned the disagreement that was left as an owed follow-up.
 // AC5 (from-scratch apply with prestate and tail proof) is the migration's own prestate/tail
 // blocks, exercised by the single `pnpm db:migrate` apply this battery is gated on — RIG.md is
 // explicit that a lane never re-runs a second from-scratch chain on its own cluster.
+//
+// #1031 (migration 0310_knowledge_fye_pair_wall.sql) closes exactly the gap fd.06 pinned: fd.06
+// is REWRITTEN below to assert the closed outcome (it failed, for the right reason, against the
+// pre-0310 subject -- restored byte for byte and re-measured as part of this ticket's own vacuity
+// control, recorded in the ticket report rather than left in this file), and fd.07-fd.10 cover
+// #1031's own remaining acceptance criteria: the 30-day-month case, the REVERSE capture order (day
+// before month), a possible pair in EITHER order, and the second write path (clara.correct_knowledge)
+// this ticket also had to close. Every pair-wall cell runs through `pairCell`, gated on 0310 ON TOP
+// OF 0240 (see `pairGate` below) -- fd.01-fd.05 above are unaffected and stay on the 0240-only gate.
 
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { assertRaises, endPool, humanQuery, opk, rootQuery } from "./rig-fixtures.mjs";
-import { committedPlan, fyeDayCohortApplied, knowledgeWorld } from "./knowledge-fixtures.mjs";
+import {
+  committedPlan, fyeDayCohortApplied, fyePairWallCohortApplied, knowledgeWorld,
+} from "./knowledge-fixtures.mjs";
 
-const EXPECTED_CELLS = 6;
+const EXPECTED_CELLS = 5; // fd.01 .. fd.05 -- the 0240 cohort alone
+const PAIR_EXPECTED_CELLS = 7; // fd.06 (rewritten) .. fd.12 -- #1031's pair-wall cohort on top of 0240
 let live = false;
+let pairWallLive = false;
 let executed = 0;
+let pairExecuted = 0;
 
-before(async () => { live = await fyeDayCohortApplied(); });
+before(async () => {
+  live = await fyeDayCohortApplied();
+  pairWallLive = live && await fyePairWallCohortApplied();
+});
 after(async () => {
   if (live) assert.equal(executed, EXPECTED_CELLS, `expected ${EXPECTED_CELLS} cells to run, ${executed} did`);
+  if (pairWallLive) {
+    assert.equal(pairExecuted, PAIR_EXPECTED_CELLS, `expected ${PAIR_EXPECTED_CELLS} pair-wall cells to run, ${pairExecuted} did`);
+  }
   await endPool();
 });
 
@@ -49,6 +69,30 @@ function cell(name, fn) {
   test(name, async (t) => {
     if (gate(t)) return;
     executed += 1;
+    await fn(t);
+  });
+}
+
+/** #1031's own gate, layered on top of `gate()`: a database missing 0240 entirely reports THAT
+ *  (deferring to `gate()`'s own message, never a second reason); a database carrying 0240 but not
+ *  yet 0310 reports the 0310-specific reason. */
+function pairGate(t) {
+  if (live) {
+    if (pairWallLive) return false;
+    if (process.env.CLARA_ALLOW_MISSING_FYE_PAIR_WALL_0310 === "1") {
+      console.warn("SKIP knowledge-fye-day (pair-wall cells): the 0310 cohort is not applied (explicit pre-integration run).");
+      t.skip("fye pair-wall cohort absent -- explicit pre-integration run");
+      return true;
+    }
+    assert.fail("the 0310 fye pair-wall cohort is required for a focused run: apply 0310_knowledge_fye_pair_wall.sql");
+  }
+  return gate(t);
+}
+
+function pairCell(name, fn) {
+  test(name, async (t) => {
+    if (pairGate(t)) return;
+    pairExecuted += 1;
     await fn(t);
   });
 }
@@ -189,54 +233,231 @@ cell("fd.05 a committed onboarding plan's day answer promotes to a knowledge val
     "the promoted day must equal the client row's own day (AC4)");
 });
 
-cell("fd.06 an impossible month/day pair is a STATED fact in Knowledge, and is refused where the fact is AUTHORITATIVE -- so nothing in the estate can derive 31 February", async () => {
-  // WHY THIS CELL EXISTS. Review (ADV-03) drove the pair through the governed door and called it
-  // an accounting-correctness defect: clara.capture_knowledge accepts financial_year_end_day = 31
-  // for a client whose financial_year_end_month is 2, which clara.clients' own ck_clients_fy_end
-  // would refuse. 0240's header already says the catalog's bound is the coarse 1..31 on purpose
-  // (clara._knowledge_assert_value sees one key and one value; it has no sibling answer to read a
-  // month from) and delegates the calendar bound to the client row. Prose is not a wall, so this
-  // cell measures where the wall actually is -- and, at the end, measures the hole that is left,
-  // so that nobody reads the wall as closing it.
+const reasonAndAxis = (err) => {
+  try { const d = JSON.parse(err.detail ?? "{}"); return { reason: d.reason ?? null, axis: d.axis ?? null, month: d.month, day: d.day }; }
+  catch { return { reason: null, axis: null }; }
+};
+
+pairCell("fd.06 an impossible month/day pair is REFUSED AT CAPTURE TIME -- the #898 gap this cell used to pin is closed by #1031 (0310): Knowledge and the client row can no longer disagree", async () => {
+  // WHY THIS CELL WAS REWRITTEN (not just extended). Review (ADV-03) drove the pair through the
+  // governed door and called it an accounting-correctness defect: clara.capture_knowledge
+  // accepted financial_year_end_day = 31 for a client whose financial_year_end_month was 2, which
+  // clara.clients' own ck_clients_fy_end would refuse. #898's own fix round (wave2-lane02-fix.md,
+  // cell fd.06) established the client row could not be corrupted and PINNED the Knowledge-side
+  // gap with a cell asserting the disagreement, rather than closing it. #1031 (0310) closes it:
+  // clara._knowledge_assert_fye_pair now judges the pair the same way clara.set_client_fy_end
+  // already does, consulted by BOTH write doors that can touch either key. This cell now asserts
+  // the CLOSED outcome -- the refused capture, its typed reason, and that nothing landed -- in
+  // place of the disagreement the old assertions measured.
   const w = await knowledgeWorld("fd6");
 
-  // (a) THE FINDING, REPRODUCED. Knowledge records what the firm SAID, and says it twice.
+  // (a) THE FINDING #898's REVIEW MEASURED, NOW REFUSED AT THE SAME DOOR THE FINDING NAMED.
+  // Knowledge captures the month, then refuses the impossible day for it -- BEFORE it can ever
+  // become a second, disagreeing statement of the same fact.
   assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_month", client: w.clientA,
     value: 2, basis: "the client says their year ends in February" })).status, "captured");
-  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_day", client: w.clientA,
-    value: 31, basis: "the client says the 31st" })).status, "captured");
+  const refusal = await assertRaises("CLR37", () => capture(w.bookkeeper, {
+    key: "financial_year_end_day", client: w.clientA, value: 31, basis: "the client says the 31st" }),
+    "capturing financial_year_end_day=31 for a client whose financial_year_end_month is live at 2");
 
-  // (b) THE WALL, WHERE THE FACT BECOMES AUTHORITATIVE. clara.clients.fy_end_month/fy_end_day is
-  // what every fiscal-year read in this estate derives a date from, and its own door refuses the
-  // impossible pair with a typed refusal a person can act on -- not a raw constraint violation.
-  const refusal = await assertRaises("CLR37", () => setFyEnd(w.bookkeeper, w.clientA, 2, 31),
-    "setting the client row's financial year end to 31 February");
-  assert.equal(refusal.message,
-    "a financial-year end must be a real calendar day (month 1..12, day valid for that month)");
+  // (b) THE SAME TYPED REASON clara.set_client_fy_end (the client-row door) ALREADY USES --
+  // "mint nothing new" (#1031's own key interface) -- with BOTH values named, which the client-row
+  // door's own generic message does not carry (the ticket's "Desired behavior" line, verbatim).
+  const detail = reasonAndAxis(refusal);
+  assert.equal(detail.reason, "fa_particulars_invalid", "the SAME typed reason clara.set_client_fy_end uses (0041:3262)");
+  assert.equal(detail.axis, "fy_end");
+  assert.equal(detail.month, 2, "the refusal names the month it judged the day against");
+  assert.equal(detail.day, 31, "the refusal names the day that cannot exist in that month");
 
-  // (c) THE CONTROL, so (b) is about the PAIR and not about the door: the same caller, the same
-  // client, February's real last day, accepted.
+  // (c) NOTHING LANDED: the refused day never became a live Knowledge record -- no silent pair,
+  // and no partial write to clean up.
+  assert.equal(
+    await rootQuery(
+      "select count(*)::int as n from clara.knowledge_records where client_id = $1 and knowledge_key = 'financial_year_end_day' and state = 'live'",
+      [w.clientA]).then((r) => r.rows[0].n),
+    0, "the refused day must not have landed in Knowledge");
+
+  // (d) THE CONTROL, so (a)-(c) are about the PAIR and not about the door: the SAME caller, the
+  // SAME client, February's real last day -- accepted, and Knowledge and the client row NOW AGREE
+  // once the client row is set to the identical possible pair. #898's own "Desired behavior"
+  // clause ("a client's day on the client row and in Knowledge never disagree silently") is what
+  // this closes: there is no route left, through either write door, to a live Knowledge pair the
+  // client row's own check would refuse.
+  const ok = await capture(w.bookkeeper, { key: "financial_year_end_day", client: w.clientA,
+    value: 28, basis: "the client says the 28th" });
+  assert.equal(ok.status, "captured");
   const set = await setFyEnd(w.bookkeeper, w.clientA, 2, 28);
   assert.equal(set.fy_end_month, 2);
   assert.equal(set.fy_end_day, 28);
-
-  // (d) WHAT IS LEFT, MEASURED RATHER THAN ASSUMED, AND OWED. The two rows now disagree and
-  // nothing reconciles them: #898's own "Desired behavior" line ("a client's day on the client
-  // row and in Knowledge never disagree silently") is NOT delivered by this ticket, whose
-  // out-of-scope list holds the setter and the client row's check. The harm the review named --
-  // a read deriving an impossible date -- is not reachable today: nothing outside these
-  // migrations and their tests reads financial_year_end_day at all, and the interview refuses the
-  // pair at answer time (packages/runtime/workflows/interview.v4.questions.ts validateFyeDay is
-  // month-aware). When the follow-up lands -- a reconciliation across BOTH keys, or a read that
-  // shows the disagreement -- this assertion is what it has to come back and change.
   const stated = (await rootQuery(
     `select value from clara.knowledge_records
       where client_id = $1 and knowledge_key = 'financial_year_end_day' and state = 'live'`,
     [w.clientA])).rows[0].value;
   const authoritative = (await rootQuery(
     "select fy_end_day from clara.clients where id = $1", [w.clientA])).rows[0].fy_end_day;
-  assert.equal(stated, 31);
+  assert.equal(stated, 28);
   assert.equal(authoritative, 28);
-  assert.notEqual(stated, authoritative,
-    "#898's 'never disagree silently' clause is owed: Knowledge keeps the stated day and the client row keeps the lawful one, with nothing between them");
+  assert.equal(stated, authoritative, "Knowledge and the client row agree on the possible pair -- the gap #898 pinned is closed");
+});
+
+pairCell("fd.07 the same refusal for a 30-day month: April 31 is refused the same way, same typed reason, both values named", async () => {
+  const w = await knowledgeWorld("fd7");
+  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_month", client: w.clientA,
+    value: 4, basis: "the client says their year ends in April" })).status, "captured");
+  const refusal = await assertRaises("CLR37", () => capture(w.bookkeeper, {
+    key: "financial_year_end_day", client: w.clientA, value: 31, basis: "the client says the 31st" }),
+    "capturing financial_year_end_day=31 for a client whose financial_year_end_month is live at 4 (April, 30 days)");
+  const detail = reasonAndAxis(refusal);
+  assert.equal(detail.reason, "fa_particulars_invalid");
+  assert.equal(detail.axis, "fy_end");
+  assert.equal(detail.month, 4);
+  assert.equal(detail.day, 31);
+});
+
+pairCell("fd.08 the REVERSE order: day 31 captured alone still succeeds (0240's own unconstrained-alone posture, unchanged), then month 2 is refused rather than the pair disagreeing silently", async () => {
+  const w = await knowledgeWorld("fd8");
+  const dayFirst = await capture(w.bookkeeper, { key: "financial_year_end_day", client: w.clientA,
+    value: 31, basis: "the client says the 31st; the month is not yet known" });
+  assert.equal(dayFirst.status, "captured",
+    "a lone day, with no sibling month yet live, keeps 0240's original unconstrained-alone posture -- nothing to compare the pair against");
+  const refusal = await assertRaises("CLR37", () => capture(w.bookkeeper, {
+    key: "financial_year_end_month", client: w.clientA, value: 2, basis: "the client now says February" }),
+    "capturing financial_year_end_month=2 for a client whose financial_year_end_day is live at 31");
+  const detail = reasonAndAxis(refusal);
+  assert.equal(detail.reason, "fa_particulars_invalid");
+  assert.equal(detail.month, 2);
+  assert.equal(detail.day, 31);
+
+  // THE CHOICE 0310's OWN HEADER NAMES ("say which"): refusal, in BOTH directions, never a silent
+  // clear of the sibling. The day stays exactly as stated; the impossible month never lands.
+  const stillDay31 = (await rootQuery(
+    `select value from clara.knowledge_records
+      where client_id = $1 and knowledge_key = 'financial_year_end_day' and state = 'live'`,
+    [w.clientA])).rows[0].value;
+  assert.equal(stillDay31, 31, "the day is untouched by the refused month capture -- no silent clear of a sibling record");
+  assert.equal(
+    await rootQuery(
+      "select count(*)::int as n from clara.knowledge_records where client_id = $1 and knowledge_key = 'financial_year_end_month' and state = 'live'",
+      [w.clientA]).then((r) => r.rows[0].n),
+    0, "the refused month never landed");
+});
+
+pairCell("fd.09 a possible pair is accepted in EITHER capture order: month then day, and day then month", async () => {
+  const w = await knowledgeWorld("fd9a");
+  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_month", client: w.clientA,
+    value: 6, basis: "the client's year ends in June" })).status, "captured");
+  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_day", client: w.clientA,
+    value: 30, basis: "the client says the 30th" })).status, "captured");
+
+  const w2 = await knowledgeWorld("fd9b");
+  assert.equal((await capture(w2.bookkeeper, { key: "financial_year_end_day", client: w2.clientA,
+    value: 30, basis: "the client says the 30th; the month is not yet known" })).status, "captured");
+  assert.equal((await capture(w2.bookkeeper, { key: "financial_year_end_month", client: w2.clientA,
+    value: 6, basis: "the client's year ends in June" })).status, "captured");
+});
+
+pairCell("fd.10 clara.correct_knowledge ALSO consults the pair rule -- the second write path #1031 closes", async () => {
+  const w = await knowledgeWorld("fd10");
+  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_month", client: w.clientA,
+    value: 6, basis: "the client's year ends in June" })).status, "captured");
+  const dayCapture = await capture(w.bookkeeper, { key: "financial_year_end_day", client: w.clientA,
+    value: 30, basis: "the client says the 30th" });
+  assert.equal(dayCapture.status, "captured");
+
+  // Correcting the LIVE day to 31 must be refused -- June has 30 days -- the SAME wall a fresh
+  // capture hits (fd.07), now reached through clara.correct_knowledge instead of capture_knowledge.
+  const refusal = await assertRaises("CLR37", () => humanQuery(w.bookkeeper,
+    `select clara.correct_knowledge(p_record => $1, p_value => $2::jsonb, p_reason => $3, p_op_key => $4) as r`,
+    [dayCapture.record_id, JSON.stringify(31), "typo -- the client meant the 30th, not the 31st", opk("p1031corr")])
+    .then((r) => r.rows[0].r),
+    "correcting financial_year_end_day to 31 for a client whose financial_year_end_month is live at 6 (June, 30 days)");
+  const detail = reasonAndAxis(refusal);
+  assert.equal(detail.reason, "fa_particulars_invalid");
+  assert.equal(detail.axis, "fy_end");
+  assert.equal(detail.month, 6);
+  assert.equal(detail.day, 31);
+
+  // NOTHING LANDED: the live day is still 30, and its revision count is still 1 (the refused
+  // correction never inserted a second revision).
+  const live = await rootQuery(
+    `select value, revision_n from clara.knowledge_records
+      where client_id = $1 and knowledge_key = 'financial_year_end_day' and state = 'live'`,
+    [w.clientA]);
+  assert.equal(live.rows.length, 1);
+  assert.equal(live.rows[0].value, 30);
+  assert.equal(live.rows[0].revision_n, 1);
+});
+// =============================================================================================
+// #1031's OWN FIX ROUND (0317_knowledge_fye_pair_applicability.sql, review finding L06-SPEC-02).
+// 0310's rule read "the sibling year-end row for this client" with NO applicability predicate,
+// although `uq_knowledge_live` (0192) is partial over (scope, subject, key, APPLICABILITY): one
+// client may hold SEVERAL live rows of one key, one per applies_when. An unscoped, unordered read
+// therefore judged the incoming value against an ARBITRARY sibling -- which both accepted a pair
+// that cannot exist and refused one that can. Both directions are driven below, through the
+// public capture door, at TWO applicabilities.
+// =============================================================================================
+
+pairCell("fd.11 the sibling is read AT THE INCOMING APPLICABILITY: an impossible pair cannot hide behind a possible sibling at a DIFFERENT applies_when", async () => {
+  const w = await knowledgeWorld("fd11");
+  const FY25 = { from_fy: 2025 };
+
+  // A possible month at the DEFAULT applicability, and an incompatible one at from_fy 2025. Both
+  // are live at once -- that is what a partial unique index over the applicability permits.
+  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_month", client: w.clientA,
+    value: 1, basis: "the client's year ended in January until 2025" })).status, "captured");
+  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_month", client: w.clientA,
+    value: 2, appliesWhen: FY25, basis: "from FY2025 the client's year ends in February" })).status,
+    "captured");
+
+  // Day 31 AT from_fy 2025 must be judged against FEBRUARY (that applicability's own month), not
+  // against January. Before the fix the unscoped read took the other row and ACCEPTED this,
+  // leaving month=2 and day=31 live at the SAME applicability -- the exact pair
+  // clara.set_client_fy_end refuses on the client row.
+  const refusal = await assertRaises("CLR37", () => capture(w.bookkeeper, {
+    key: "financial_year_end_day", client: w.clientA, value: 31, appliesWhen: FY25,
+    basis: "the client says the 31st" }),
+    "capturing financial_year_end_day=31 at from_fy 2025, where that applicability's own month is 2");
+  const detail = reasonAndAxis(refusal);
+  assert.equal(detail.reason, "fa_particulars_invalid");
+  assert.equal(detail.axis, "fy_end");
+  assert.equal(detail.month, 2, "the refusal must name the month live AT THE INCOMING APPLICABILITY");
+  assert.equal(detail.day, 31);
+
+  // NOTHING LANDED at either applicability: no live day row for this client at all.
+  assert.equal(
+    await rootQuery(
+      "select count(*)::int as n from clara.knowledge_records where client_id = $1 and knowledge_key = 'financial_year_end_day' and state = 'live'",
+      [w.clientA]).then((r) => r.rows[0].n),
+    0, "the refused day must not have landed at any applicability");
+});
+
+pairCell("fd.12 ...and the mirror image: a POSSIBLE pair is not refused because some OTHER applicability holds an incompatible month", async () => {
+  const w = await knowledgeWorld("fd12");
+  const FY25 = { from_fy: 2025 };
+
+  // February at the DEFAULT applicability, January from FY2025.
+  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_month", client: w.clientA,
+    value: 2, basis: "the client's year ended in February until 2025" })).status, "captured");
+  assert.equal((await capture(w.bookkeeper, { key: "financial_year_end_month", client: w.clientA,
+    value: 1, appliesWhen: FY25, basis: "from FY2025 the client's year ends in January" })).status,
+    "captured");
+
+  // 31 January is a real date. Before the fix this was REFUSED CLR37 with detail
+  // {"month":2,"day":31} -- naming a month that belongs to a DIFFERENT applicability.
+  const ok = await capture(w.bookkeeper, { key: "financial_year_end_day", client: w.clientA,
+    value: 31, appliesWhen: FY25, basis: "the client says the 31st" });
+  assert.equal(ok.status, "captured",
+    "31 January is a real calendar day; a sibling month at another applicability must not refuse it");
+
+  // The default applicability is untouched -- it still holds February alone, with no day beside it.
+  const rows = await rootQuery(
+    `select r.knowledge_key, r.value, r.applies_when from clara.knowledge_records r
+      where r.client_id = $1 and r.state = 'live' order by r.knowledge_key, r.applies_when::text`,
+    [w.clientA]);
+  assert.deepEqual(
+    rows.rows.map((r) => [r.knowledge_key, r.value, r.applies_when]),
+    [["financial_year_end_day", 31, FY25],
+     ["financial_year_end_month", 1, FY25],
+     ["financial_year_end_month", 2, {}]],
+    "the live rows per applicability are not what the two captures and the default month left");
 });

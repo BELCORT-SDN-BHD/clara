@@ -6,8 +6,14 @@
 import { ROLES, rootQuery } from "./rig-helpers.mjs";
 
 // The exact §5 EXECUTE matrix (v1 §5 as amended by v2 §A/§B/§F).
+// #1038 [0316]: create_client REMOVED from this list -- its clara_authenticated grant is
+// withdrawn (closing #899's own named residual; see 0316_create_client_human_grant_withdrawn.sql
+// and client-birth-wall.test.mjs's rewritten p899.census cells). The exact-match sweep below now
+// expects clara_authenticated to hold ZERO EXECUTE on it and fails loudly if the grant returns.
+// open_client_onboarding (CLIENT_BIRTH_WALL_0287_COHORT below) is the granted human door in its
+// place; the body and every OTHER role's posture (all zero, unmoved) are untouched.
 export const WRITERS = [
-  "create_firm", "add_member", "set_member_role", "remove_member", "create_client", "upsert_account",
+  "create_firm", "add_member", "set_member_role", "remove_member", "upsert_account",
   // Slice-5 retires ingest_document; verified documents now enter through the
   // runtime intake finalizer and the legacy name retains no application grant.
   "record_client_resolution", "draft_entry", "approve_entry", "reverse_entry", "record_notification",
@@ -2311,6 +2317,19 @@ export const AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT = [
   ...AUTHORITY_REF_HUMAN_INSTRUCTION_0250_UNGRANTED_FNS,
 ];
 
+// #1031 [0310 + its fix round 0317, the financial-year-end pair wall in Knowledge] — its own
+// cohort, the same "wholly present or wholly absent" reason the two above carry: the
+// `db-slice-frontiers` matrix runs this package against databases pinned at earlier frontiers
+// where 0240 has applied and 0310 has not. The cohort is BY NAME, so 0317 re-cutting the rule
+// from three arguments to four (the sibling is read at the incoming applicability) moves nothing
+// here and 0317 adds NO new name of its own — the one name below is the whole of it.
+// `_knowledge_assert_fye_pair` is UNGRANTED like `_authority_ref_refusal` above: the main sweep
+// fails the moment a grant appears on it, this cohort fails if it ever DISAPPEARS from either of
+// the two write doors (`_knowledge_capture_core`, `correct_knowledge`) that must both call it —
+// see knowledgeFixtures.mjs's `fyePairWallCohortApplied`, the same three-flag marker probe.
+const FYE_PAIR_WALL_0310_UNGRANTED_FNS = ["_knowledge_assert_fye_pair"];
+export const FYE_PAIR_WALL_0310_COHORT = [...FYE_PAIR_WALL_0310_UNGRANTED_FNS];
+
 // #979 [0251, the depreciation authority read tells "never had one" apart from "had one, and it
 // was retired"] — NO COHORT, NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed, for
 // the same reason #797's (0212) and #720's (0198) blocks state theirs. 0251 creates no function:
@@ -4043,6 +4062,11 @@ export async function grantMatrixFailures() {
   const authorityRefRuleLive = AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT.filter((n) => liveNames.has(n));
   if (authorityRefRuleLive.length !== 0) {
     failures.push(...cohortFailures("#977 0250 authority-ref human-instruction rule", AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT, liveNames));
+  }
+  // #1031 [0310] — bimodal like 0250's: wholly present once 0310 applies, wholly absent before it.
+  const fyePairWallLive = FYE_PAIR_WALL_0310_COHORT.filter((n) => liveNames.has(n));
+  if (fyePairWallLive.length !== 0) {
+    failures.push(...cohortFailures("#1031 0310 knowledge fye pair wall", FYE_PAIR_WALL_0310_COHORT, liveNames));
   }
   // #652 [0222] — bimodal like F-A6's: wholly present once 0222 applies, wholly absent before it,
   // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.

@@ -245,11 +245,14 @@ cell("p648.seed.reconcile a plan already carrying firmInterview_v3 items is reco
   // RED BEFORE THE DOOR EXISTED: a blind insert raises 23505 on uq_onboarding_plan_items_key.
   // #935: fifteen now -- the original twelve plus the three education tips.
   assert.equal(receipt.catalogue_total, 15);
-  // #891: of the nine catalogue rows still missing (legal_name/ssm/mia are already planted),
-  // mpers_eligibility and tin are UNDETERMINED here -- entity_type and turnover are neither of
-  // them among the planted v3 items -- so neither is seeded yet; seven are, plus #935's three
-  // tips, which carry no predicate at all and always seed: ten.
-  assert.equal(receipt.seeded, 10, "the seed inserted something other than the seven MISSING, determinable catalogue rows plus the three tips");
+  // #891/#1032: of the twelve catalogue rows still missing (legal_name/ssm/mia are already
+  // planted), mpers_eligibility alone stays UNDETERMINED here -- entity_type is not among the
+  // planted v3 items -- so it is not seeded yet. tin is DIFFERENT since #1032: it is seeded for
+  // EVERY firm now (optional, since turnover is not among the planted items either), never held
+  // back the way mpers_eligibility still is. So eight determinable/unconditional rows (entity_type,
+  // address, turnover, tin, fye, framework, accounting_basis, currency) seed, plus #935's three
+  // tips, which carry no predicate at all and always seed: eleven.
+  assert.equal(receipt.seeded, 11, "the seed inserted something other than the eight determinable/unconditional catalogue rows plus the three tips");
 
   for (const key of ["legal_name", "ssm", "mia"]) {
     const after = await itemRow(w.plan, key);
@@ -292,10 +295,13 @@ cell("p648.seed.empty a claimed firm's empty plan gains exactly the catalogue, a
 
   const key = opk("fsseed");
   const first = await seed(w.admin, { opKey: key });
-  // #891: entity_type and turnover are both unanswered on this brand-new plan, so
-  // mpers_eligibility and tin are both UNDETERMINED and stay unseeded; the other ten rows seed.
-  // #935: plus the three education tips, which carry no predicate at all: thirteen.
-  assert.equal(first.seeded, 13);
+  // #891/#1032: entity_type and turnover are both unanswered on this brand-new plan, so
+  // mpers_eligibility (entity_type-gated) stays UNDETERMINED and unseeded -- unchanged by #1032.
+  // tin (turnover-gated) is DIFFERENT since #1032: seeded for EVERY firm, optional while turnover
+  // is unanswered, so it is one of the eleven rows that seed here, not held back the way
+  // mpers_eligibility still is. #935: plus the three education tips, which carry no predicate at
+  // all: fourteen.
+  assert.equal(first.seeded, 14);
   assert.equal(first.catalogue_total, 15);
 
   const rows = await rootQuery(
@@ -303,7 +309,7 @@ cell("p648.seed.empty a claimed firm's empty plan gains exactly the catalogue, a
        from clara.onboarding_plan_items i
        join clara.firm_setup_keys k on k.item_key = i.item_key
       where i.plan_id = $1 order by k.sort_order`, [w.plan]);
-  assert.equal(rows.rows.length, 13);
+  assert.equal(rows.rows.length, 14);
   for (const r of rows.rows) {
     assert.equal(r.state, "pending", `${r.item_key} was seeded in state ${r.state}`);
     assert.equal(r.required_for_commit, r.cat_required, `${r.item_key} lost its catalogue required flag`);

@@ -31,7 +31,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { AGENT_USER_ID, ROLES, assertRaises, endPool, getPool, humanQuery, opk, roleQuery, rootQuery } from "./rig-fixtures.mjs";
+import { AGENT_USER_ID, ROLES, assertRaises, createClientRaw, endPool, getPool, humanQuery, opk, roleQuery, rootQuery } from "./rig-fixtures.mjs";
 import { auditActorRoleCohortApplied, knowledgeWorld } from "./knowledge-fixtures.mjs";
 
 const EXPECTED_CELLS = 7;
@@ -330,11 +330,10 @@ cell("ar.05 every governed door inherits the column with no per-door change -- o
   assert.ok(callers >= 300, `only ${callers} function(s) call clara._audit -- the census that makes "every door" mean something`);
 
   // (c) A DOOR FROM A LANE THIS TICKET NEVER TOUCHED. clara.create_client (0004) has nothing to do
-  // with knowledge, and inherits the column anyway.
+  // with knowledge, and inherits the column anyway. [#1038] no human role can EXECUTE it any
+  // more, so this cell reaches it the rig's own root+jwt idiom rather than humanQuery.
   const w = await knowledgeWorld("p912a5");
-  await humanQuery(w.admin,
-    "select clara.create_client(p_name => $1, p_op_key => $2) as r",
-    [`p912 inherit ${randomUUID().slice(0, 8)}`, opk("p912cc")]);
+  await createClientRaw(w.admin, { name: `p912 inherit ${randomUUID().slice(0, 8)}`, opKey: opk("p912cc") });
   const created = await auditRowOf(w.firm, "create_client", w.admin);
   assert.equal(created.actor_role, "admin",
     "a door in another lane entirely records the role, with no edit of its own");

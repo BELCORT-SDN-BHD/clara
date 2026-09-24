@@ -18,11 +18,18 @@ export type FirmSetupAnswerShape = "text" | "long_text" | "choice" | "month" | "
  *  exactly what the reconciling seed fixes. It is a real state of this surface, never a null. */
 export type FirmSetupItemState = "unseeded" | "pending" | "answered" | "resolved" | "deferred";
 
-/** #891 — whether this item is asked of THIS firm at all, derived live from an earlier answer on
- *  the same plan (never stored): `applicable`, `inapplicable`, or `undetermined` while the item it
- *  depends on is itself unanswered. Ten of the twelve catalogue rows read `applicable` always;
- *  `mpers_eligibility` (entity_type) and `tin` (turnover) are the only two with a real predicate. */
-export type FirmSetupApplicability = "applicable" | "inapplicable" | "undetermined";
+/** #891/#1032 — this item's live verdict off `clara._firm_setup_applicability`, derived from an
+ *  earlier answer on the same plan (never stored). Ten of the fifteen catalogue rows read
+ *  `applicable` always. `mpers_eligibility` (entity_type) is the one row that can still be
+ *  `inapplicable` (never asked; entity_type says no) or `undetermined` (entity_type unanswered
+ *  yet) — unchanged by #1032. `tin` (turnover) is DIFFERENT since #1032 (owner's ruling
+ *  2026-09-23): it is seeded for every firm and never reads `inapplicable` or `undetermined` any
+ *  more — only `required` (turnover makes MyInvois mandatory) or `optional` (turnover is
+ *  unanswered or below the RM1M threshold). `isHiddenByApplicability`/`isNowInapplicable` below
+ *  both only ever match `undetermined`/`inapplicable`, so they are unreachable for `tin` now; the
+ *  `required`/`optional` verdicts drive `FirmSetupItem.required` instead (the Required/Optional
+ *  badge and the skip control, both already generic over any item). */
+export type FirmSetupApplicability = "applicable" | "inapplicable" | "undetermined" | "required" | "optional";
 
 export type FirmSetupPlanState = "open" | "committed" | "cancelled";
 
@@ -39,11 +46,15 @@ export type FirmSetupItem = {
    *  `user_note` here (0258_firm_setup_user_notes.sql); the engineer's own provenance note (file
    *  names, line numbers) that rendered here before #934 is no longer what this surface shows. */
   note: string;
-  /** The catalogue's own `required_for_commit` flag, and nothing else: what the Finish gate
-   *  honours, so the Required/Optional badge and the skip control can be driven by it directly.
-   *  #891's conditional rows (`mpers_eligibility`, `tin`) are `false` here however applicable
-   *  they are to this firm — whether that SHOULD gate a commit is an open product question, not
-   *  something this flag may answer on its own (0259 SS G, "ONE NOTION OF REQUIRED"). */
+  /** The catalogue's own `required_for_commit` flag, OR (#1032) a live `'required'` verdict off
+   *  the applicability door — exactly what the Finish gate (`commit_firm_setup`) and
+   *  `required_outstanding` now honour too, so the Required/Optional badge and the skip control
+   *  can be driven by it directly and can never disagree with what the commit door actually gates
+   *  on (0311's own "ONE PREDICATE FOR REQUIRED-NESS, USED EVERYWHERE"). `mpers_eligibility` is
+   *  `false` here always — its own applicability verdict never reads `'required'` (0259 SS G, "ONE
+   *  NOTION OF REQUIRED", left untouched by #1032). `tin` is `true` exactly while turnover makes
+   *  MyInvois mandatory, `false` otherwise — including a voluntary answer from a firm below the
+   *  threshold, which this surface still offers a form for and never counts as required. */
   required: boolean;
   min_role: string;
   answer_shape: FirmSetupAnswerShape;
@@ -175,7 +186,10 @@ export function firmSetupGroups(env: FirmSetupEnvelope): { key: string; items: F
  * #891 — an item this surface must never render a question or an answer form for, because nothing
  * has ever been recorded against it and its predicate says it either cannot yet be determined or
  * already reads NO. An item that WAS answered before it became inapplicable is never hidden — its
- * answer survives, and it renders through `isNowInapplicable` below instead (AC4).
+ * answer survives, and it renders through `isNowInapplicable` below instead (AC4). #1032: `tin`'s
+ * applicability never reads `undetermined`/`inapplicable` any more (only `required`/`optional`),
+ * so this predicate is now unreachable for it — `tin` is always rendered, with a form, whatever
+ * its state. `mpers_eligibility` is unaffected.
  */
 export function isHiddenByApplicability(item: FirmSetupItem): boolean {
   if (item.state !== "unseeded") return false;

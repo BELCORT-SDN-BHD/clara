@@ -946,10 +946,27 @@ cell("p654.census.not_a_posting_grant — no function outside the knowledge coho
       + "application role."],
   ]);
   const tenancyLive = readers.some((r) => r.proname === "_client_reporting_framework");
+  // #1031 (0310 + its fix round 0317) ADDS ONE MORE READ, bimodal like 0230's five above and for
+  // the same reason: the loop underneath MEASURES the claim on the live body, and presence is
+  // asserted only once this battery's own frontier carries the pair-wall cohort.
+  const FYE_PAIR_WALL_0310_CONSUMERS = new Map([
+    ["_knowledge_assert_fye_pair",
+      "#1031 (0310, re-cut at four arguments by 0317) — judges the financial-year-end PAIR "
+      + "(financial_year_end_month, financial_year_end_day) against the sibling key's own LIVE "
+      + "value for the same client AT THE SAME APPLICABILITY. A STABLE SELECT of at most one "
+      + "sibling row (state='live', scope_kind='client', client_id=$1, knowledge_key=<sibling>, "
+      + "applies_when_digest=<the incoming applicability's digest> — the same digest "
+      + "uq_knowledge_live is partial over, which is why at most one row can match); it writes "
+      + "nothing anywhere and is UNGRANTED, so it authorises no application role anything either "
+      + "— see clara._knowledge_capture_core and clara.correct_knowledge, the two callers that "
+      + "consult it."],
+  ]);
   const retrievalLive = readers.some((r) => r.proname === "retrieve_knowledge");
+  const pairWallLive = readers.some((r) => r.proname === "_knowledge_assert_fye_pair");
   const strays = readers
     .filter((r) => !COHORT.has(r.proname) && !READ_ONLY_CONSUMERS.has(r.proname)
-      && !RETRIEVAL_0230_CONSUMERS.has(r.proname) && !TENANCY_0300_CONSUMERS.has(r.proname))
+      && !RETRIEVAL_0230_CONSUMERS.has(r.proname) && !TENANCY_0300_CONSUMERS.has(r.proname)
+      && !FYE_PAIR_WALL_0310_CONSUMERS.has(r.proname))
     .map((r) => r.sig);
   assert.deepEqual(strays, [],
     "a function outside the knowledge cohort reads clara.knowledge_records -- a firm preference is becoming an authority somewhere");
@@ -974,6 +991,7 @@ cell("p654.census.not_a_posting_grant — no function outside the knowledge coho
     ...READ_ONLY_CONSUMERS,
     ...(retrievalLive ? RETRIEVAL_0230_CONSUMERS : []),
     ...(tenancyLive ? TENANCY_0300_CONSUMERS : []),
+    ...(pairWallLive ? FYE_PAIR_WALL_0310_CONSUMERS : []),
   ];
   for (const [name, reason] of declaredConsumers) {
     const rows = readers.filter((r) => r.proname === name);
