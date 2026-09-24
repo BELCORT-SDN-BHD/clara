@@ -406,12 +406,17 @@ test("prepayments.detail — the derived facts, the judged account WITH its stat
       assert.equal(byTestId(h.container, "prepayment-period-refused").length, 1);
       // #919 — a LIVE term renders no superseded-term banner.
       assert.equal(byTestId(h.container, "prepayment-term-superseded").length, 0);
-      assert.doesNotMatch(text, /a corrected term needs a new schedule/);
+      assert.doesNotMatch(text, /cannot be corrected/);
     });
   });
 });
 
-test("prepayments.detail — ticket 919: a schedule whose term row has since been superseded renders the corrected-term banner, naming that a new schedule (not a revision) is what a corrected term needs", async () => {
+test("prepayments.detail — ticket 919: a schedule whose term row has since been superseded renders the corrected-term banner, saying plainly that THIS schedule's term cannot be corrected", async () => {
+  // [#1036 fix round / L04-SPEC-04] The banner used to say "a corrected term needs a new schedule
+  // from the next period". Measured: `uq_prepayment_schedules_source` admits ONE schedule per
+  // recognition entry and `clara.create_prepayment_schedule` answers CLR13
+  // `prepayment_schedule_exists` for a second one, so that replacement exists in NO door. The
+  // banner now states the fact instead of advice nobody can act on.
   const SUPERSEDED = {
     ...DETAIL, term_live: false, term_superseded_by: "sp-2", term_moved: true,
     term_current_start: "2026-01-01", term_current_end: "2027-01-31",
@@ -419,7 +424,9 @@ test("prepayments.detail — ticket 919: a schedule whose term row has since bee
   await withMockedEnv(rpcRouter({ get_prepayment_schedule: SUPERSEDED }), async () => {
     await drive(createElement(PrepaymentDetail, { clientId: CLIENT, scheduleId: SCHEDULE }), (h) => {
       assert.equal(byTestId(h.container, "prepayment-term-superseded").length, 1);
-      assert.match(h.text(), /a corrected term needs a new schedule/);
+      assert.match(h.text(), /cannot be corrected/);
+      assert.doesNotMatch(h.text(), /needs a new schedule/,
+        "the banner still promises a replacement schedule the estate has no door for");
     });
   });
 });
@@ -438,7 +445,7 @@ test("prepayments.detail — ticket 919 / ADV-02: a term row SUPERSEDED BY A RE-
     await drive(createElement(PrepaymentDetail, { clientId: CLIENT, scheduleId: SCHEDULE }), (h) => {
       assert.equal(byTestId(h.container, "prepayment-term-superseded").length, 0,
         "the term row moved, the TERM did not — there is nothing for this firm to act on");
-      assert.doesNotMatch(h.text(), /a corrected term needs a new schedule/);
+      assert.doesNotMatch(h.text(), /cannot be corrected/);
     });
   });
 

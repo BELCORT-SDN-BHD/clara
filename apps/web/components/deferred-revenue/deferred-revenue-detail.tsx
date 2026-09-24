@@ -196,13 +196,30 @@ export function DeferredRevenueDetail({
             data-testid="deferred-revenue-term-stated"
           >
             <p className="max-w-prose text-sm">{t("termStatedNote")}</p>
-            <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <Fact label={t("factTermStatedBy")}>{row.term_stated_by ?? "—"}</Fact>
-              <Fact label={t("factTermStatedAt")}>
-                {row.term_stated_at === null ? "—" : row.term_stated_at.slice(0, 10)}
-              </Fact>
-              <Fact label={t("factTermReason")} wide>{row.term_reason ?? "—"}</Fact>
-            </dl>
+            {/* #1036 fix round / ADV-02 — THE STATEMENT IS THERE AND IT IS NOT YOURS TO READ.
+                Below `clara.role_rank('bookkeeper')` the read returns the trio null and this flag
+                true (migration 0315 §E). Painting three em-dashes would read as "nobody said why",
+                which is a false statement of fact about a schedule someone DID justify -- so the
+                block says what is true and who may see it, which is the standing ruling that a
+                wall prompts rather than going dark. `=== true`, never a truthiness test: the field
+                arrives as unvalidated jsonb and an ABSENT one (a web build ahead of its database)
+                is falsy. */}
+            {row.term_reason_withheld === true ? (
+              <p
+                className="max-w-prose text-sm text-muted-foreground"
+                data-testid="deferred-revenue-term-reason-withheld"
+              >
+                {t("termReasonWithheld")}
+              </p>
+            ) : (
+              <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Fact label={t("factTermStatedBy")}>{row.term_stated_by ?? "—"}</Fact>
+                <Fact label={t("factTermStatedAt")}>
+                  {row.term_stated_at === null ? "—" : row.term_stated_at.slice(0, 10)}
+                </Fact>
+                <Fact label={t("factTermReason")} wide>{row.term_reason ?? "—"}</Fact>
+              </dl>
+            )}
           </div>
         ) : null}
 

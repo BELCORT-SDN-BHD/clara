@@ -303,6 +303,71 @@ test("prepayments.detail.term_source — a document-backed schedule is unchanged
 });
 
 // ===========================================================================================
+// 2b · The fix round: a reason the reader may not see, and a correction path that does not exist.
+// ===========================================================================================
+
+test("prepayments.detail.reason_withheld — below the bookkeeper floor the read returns term_reason_withheld with the trio null, and the block says the statement EXISTS and who may read it rather than painting an em-dash that reads as 'nobody said why'", async () => {
+  await withMockedEnv(rpcRouter({
+    get_prepayment_schedule: {
+      ...STATED_DETAIL,
+      term_stated_by: null, term_stated_at: null, term_reason: null,
+      term_reason_withheld: true,
+    },
+  }), async () => {
+    await drive(
+      createElement(PrepaymentDetail, { clientId: CLIENT, scheduleId: STATED_SCHEDULE }),
+      (h) => {
+        assert.equal(byTestId(h.container, "prepayment-term-stated").length, 1,
+          "the provenance block still renders -- the wall is on three FIELDS, not on the schedule");
+        assert.equal(byTestId(h.container, "prepayment-term-reason-withheld").length, 1,
+          "nothing tells the reader the statement exists and is withheld");
+        const text = h.text();
+        assert.match(text, /visible to bookkeepers/i,
+          "the reader is not told who may see the statement");
+        assert.doesNotMatch(text, /the client confirmed twelve months/,
+          "the withheld reason leaked into the rendered text");
+      },
+    );
+  });
+});
+
+test("prepayments.detail.reason_withheld — above the floor nothing is withheld: the trio renders and the withheld note is absent", async () => {
+  await withMockedEnv(rpcRouter({
+    get_prepayment_schedule: { ...STATED_DETAIL, term_reason_withheld: false },
+  }), async () => {
+    await drive(
+      createElement(PrepaymentDetail, { clientId: CLIENT, scheduleId: STATED_SCHEDULE }),
+      (h) => {
+        assert.equal(byTestId(h.container, "prepayment-term-reason-withheld").length, 0,
+          "a reader who CAN see the reason is told it is withheld");
+        assert.match(h.text(), /the client confirmed twelve months of cover on the telephone/);
+      },
+    );
+  });
+});
+
+test("prepayments.detail.correction_path — the superseded-term banner no longer promises a replacement schedule no door offers: it says plainly that a running schedule's term cannot be corrected", async () => {
+  await withMockedEnv(rpcRouter({
+    get_prepayment_schedule: { ...STATED_DETAIL, term_moved: true, term_live: false },
+  }), async () => {
+    await drive(
+      createElement(PrepaymentDetail, { clientId: CLIENT, scheduleId: STATED_SCHEDULE }),
+      (h) => {
+        assert.equal(byTestId(h.container, "prepayment-term-superseded").length, 1);
+        const text = h.text();
+        // `uq_prepayment_schedules_source` admits ONE schedule per recognition entry, and
+        // `clara.create_prepayment_schedule` answers CLR13 prepayment_schedule_exists for a second
+        // one -- so "a new schedule from the next period" is advice no door can carry out.
+        assert.doesNotMatch(text, /needs a new schedule/i,
+          "the banner still promises a replacement schedule the estate has no door for");
+        assert.match(text, /cannot be corrected/i,
+          "the banner must say plainly that this schedule's term is fixed once it is running");
+      },
+    );
+  });
+});
+
+// ===========================================================================================
 // 3 · Arm B: the right next act, from the read's own token.
 // ===========================================================================================
 

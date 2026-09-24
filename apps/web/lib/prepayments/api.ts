@@ -48,6 +48,13 @@ export type StatedTermFacts = {
   term_stated_by: string | null;
   term_stated_at: string | null;
   term_reason: string | null;
+  /** #1036 fix round / ADV-02 — TRUE when a statement EXISTS and this reader is below the
+   *  bookkeeper floor the three fields above are walled at (`clara.prepayment_stated_terms`'
+   *  `p_pst_human` policy, which the SECURITY DEFINER reads previously bypassed). Never true when
+   *  there is simply no statement, so a surface can tell "not yours to see" from "nobody said
+   *  why". Optional on the wire: a web build ahead of its database sees it absent, which is why
+   *  every read of it is `=== true`. */
+  term_reason_withheld?: boolean;
 };
 
 export type PrepaymentListRow = StatedTermFacts & {
