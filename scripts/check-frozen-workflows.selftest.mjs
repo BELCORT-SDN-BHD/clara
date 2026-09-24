@@ -430,7 +430,7 @@ const ATTRIBUTION = [
   // wave 2026-09-15 cut, chatTurn_v20's four, claraWork_v4's two (its knowledge-context step) and
   // clientOnboarding_v5's two (interview.v4.known.ts's pre-read of the same pack). Since the wave
   // 2026-09-18 cut, chatTurn_v21's four and claraWork_v5's two as well. Since the 2026-09-25 CUT
-  // PHASE (#985), chatTurn_v22's four. 22.
+  // PHASE (#985), chatTurn_v22's four, and (#1030) claraWork_v6's two. 24.
   //
   // NEITHER NEW PAIR REACHES IT DIRECTLY, AND THAT IS WORTH SAYING BECAUSE IT LOOKS LIKE A
   // CONTRADICTION. chatTurn_v21 and claraWork_v5 both REPOINTED their knowledge read away from
@@ -447,6 +447,7 @@ const ATTRIBUTION = [
     `${W}chatTurn.v22.impl.ts`, `${W}chatTurn.v22.prompt.ts`, `${W}chatTurn.v22.tools.ts`, `${W}chatTurn.v22.ts`,
     `${W}claraWork.v4.impl.ts`, `${W}claraWork.v4.ts`,
     `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
+    `${W}claraWork.v6.impl.ts`, `${W}claraWork.v6.ts`,
     `${W}clientOnboarding.v5.ts`, `${W}interview.v4.known.ts`,
   ]],
   // ... periodic-adjustment-basis.ts under the 5 reaching chatTurn_v19 entry files plus
@@ -476,19 +477,29 @@ const ATTRIBUTION = [
     `${W}claraWork.v3.impl.ts`, `${W}claraWork.v3.ts`,
     `${W}claraWork.v4.impl.ts`, `${W}claraWork.v4.ts`,
     `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
+    `${W}claraWork.v6.impl.ts`, `${W}claraWork.v6.ts`,
   ]],
   ["packages/runtime/lib/work-trace.mjs", [
     `${W}claraWork.v3.impl.ts`, `${W}claraWork.v3.ts`,
     `${W}claraWork.v4.impl.ts`, `${W}claraWork.v4.ts`,
     `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
+    `${W}claraWork.v6.impl.ts`, `${W}claraWork.v6.ts`,
   ]],
-  // ... and the three modules this cut introduced, recorded here at their birth so the NEXT
+  // ... and the three modules the wave 2026-09-18 cut introduced, recorded at their birth so the NEXT
   // successor's roster growth is measured against a written baseline rather than against nothing.
   // `work-trace-bounds.mjs` is #847's writer-side mirror, `capability-registry-v2.mjs` is #658's
   // registry sibling, and `knowledge-retrieval.mjs` is the bounded read both lanes now use — which
-  // is why it alone is reached by BOTH classes.
-  ["packages/runtime/lib/work-trace-bounds.mjs", [`${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`]],
-  ["packages/runtime/lib/capability-registry-v2.mjs", [`${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`]],
+  // is why it alone is reached by BOTH classes. Each gains claraWork_v6's two at the 2026-09-25
+  // cut phase (#1030): v6 is v5's step bodies with its own identity, so it reaches every module v5
+  // reaches, and the rosters growing by exactly two is the measurement that says so.
+  ["packages/runtime/lib/work-trace-bounds.mjs", [
+    `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
+    `${W}claraWork.v6.impl.ts`, `${W}claraWork.v6.ts`,
+  ]],
+  ["packages/runtime/lib/capability-registry-v2.mjs", [
+    `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
+    `${W}claraWork.v6.impl.ts`, `${W}claraWork.v6.ts`,
+  ]],
   // ... and the module the 2026-09-25 CUT PHASE (#985) locked, recorded here at its birth for the
   // same reason the three above were: `lib/opening-parse.mjs` is the opening lane's route core,
   // and `chatTurn_v22`'s `read_opening_source` calls it rather than re-deriving a client's
@@ -502,6 +513,7 @@ const ATTRIBUTION = [
     `${W}chatTurn.v21.impl.ts`, `${W}chatTurn.v21.ts`,
     `${W}chatTurn.v22.impl.ts`, `${W}chatTurn.v22.ts`,
     `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
+    `${W}claraWork.v6.impl.ts`, `${W}claraWork.v6.ts`,
   ]],
 ];
 

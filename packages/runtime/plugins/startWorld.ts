@@ -45,6 +45,7 @@ import { CLARA_WORK_BUNDLE_V2_BANNER } from "../workflows/claraWork.v2.bundle.js
 import { CLARA_WORK_BUNDLE_V3_BANNER } from "../workflows/claraWork.v3.bundle.js";
 import { CLARA_WORK_BUNDLE_V4_BANNER } from "../workflows/claraWork.v4.bundle.js";
 import { CLARA_WORK_BUNDLE_V5_BANNER } from "../workflows/claraWork.v5.bundle.js";
+import { CLARA_WORK_BUNDLE_V6_BANNER } from "../workflows/claraWork.v6.bundle.js";
 import { makeDocumentServices, recoverPendingDocumentIntakes } from "../lib/intake.mjs";
 import { makeInvoiceFactsServices } from "../workflows/invoiceFacts.v1.services.mjs";
 import { makeStatementFactsServices } from "../workflows/statementFacts.v1.services.mjs";
@@ -317,6 +318,14 @@ export default definePlugin(() => {
       // banner is therefore a silent, misattributed failure of the whole work-lane battery: add the
       // line in the SAME commit as the pin.
       console.log(CLARA_WORK_BUNDLE_V5_BANNER);
+      // CUT PHASE 2026-09-25 (#1030) — THE SIXTH LINE, ADDED IN THE SAME COMMIT AS THE REGISTRY
+      // REPOINT, because the comment above this one is the record of what happens when it is not.
+      // v6 is what `workflows.claraWork` now dispatches; v1..v5 are still carried for runs parked
+      // on their hooks. `tests/pinned-work-bundle.mjs`'s `waitBooted` blocks on exactly this line
+      // for the PINNED version, and its throw is swallowed by the caller's retry loop — so a
+      // missing banner is a silent, misattributed failure of the whole work-lane battery, not a
+      // missing log line.
+      console.log(CLARA_WORK_BUNDLE_V6_BANNER);
       // #637 (C88.8 / C-70) — the ONE MORE LINE this comment used to promise here (which commit
       // built this image, which schema it is talking to, which body each class dispatches to, and
       // how many bodies it carries for parked runs) is `emitProvenanceLine()`, ABOVE, at the top of

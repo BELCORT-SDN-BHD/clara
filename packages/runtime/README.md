@@ -21,12 +21,41 @@ and retained exports; repository state alone is not evidence of a deployed image
 
 ### The pin the 2026-09-25 cut phase moved (so far)
 
-`chatTurn → chatTurn_v22`. The cut phase carries every successor contract the riders waves wrote
-into ONE new body per class; `#985` is its first ticket, and this section grows as the tickets
-behind it land. `claraWork` is still pinned to `claraWork_v5` and `statementFacts` to
+`chatTurn → chatTurn_v22` and `claraWork → claraWork_v6`. The cut phase carries every successor
+contract the riders waves wrote into ONE new body per class; `#985` is its first ticket and this
+section grows as the tickets behind it land. `statementFacts` is still pinned to
 `statementFacts_v3` at this commit. Every superseded body stays exported and in `workflowBodies` —
 the boot census refuses to start the world database-wide if a body a parked run needs is missing,
 and that is policy (c) enforced rather than promised.
+
+**What `claraWork_v6` carries** (#1030): ONE new behaviour and no new capability. Before a v6 run
+reads knowledge, spends a token or reaches a model it asks
+`clara.source_correction_successor_brief` whether this Work is the successor a document correction
+owed; if it is, the run PARKS on a confirmation question naming BOTH figures — what the retired
+Work was admitted on, and what the document says now — and nothing may post until a person answers
+it. The tool roster does not move (same seven names, same schemas, same declared doors) and the
+budgets do not move (the park happens before the loop and spends no segment, model call or tool
+call). What moves in the hashed bundle is the instructions text — one stanza,
+`SOURCE_CORRECTION_SUCCESSOR_STANZA` — and this closure's four ids, so the digest moves and
+`tests/pinned-work-bundle.mjs` can tell a v6 run from a v5 one on the record. **No wire kind is
+added**, so `claraWork.v3.parts.ts` stays the declarer and `apps/web` is untouched.
+
+**Deploy order, in one direction: migration 0321 must be LIVE BEFORE this image runs any Work**, on
+top of v5's 0230, v4's 0192/0216 and v3's 0195. Against a database without 0321 the successor probe
+cannot answer and EVERY Work settles `failed`/`internal` with nothing posted — contained, loud, and
+the correct failure for a deploy-order mistake, exactly as v5's 0230 stanza reasons. On the chat
+lane a missing function is a typed refusal and the turn survives; **on the Work lane it is
+terminal**. The REVERSE order is free: 0321 against a v5 image adds doors that nothing calls.
+
+**Rollback to v5** stops asking the confirmation and changes no database state, but it is NOT free
+while the re-derivation belt is live: a successor the belt admits would run under a v5 image
+WITHOUT the confirmation — v5 has no arm for it — and could post a re-derived basis nobody was
+shown. The belt ships in the same image, so rolling the image back removes both halves together;
+a rollback should still drain parked confirmations rather than assume they resume identically.
+
+**Refinements the digest cannot see** (CUT-PLAN §5, R5): `z.toJSONSchema` erases `.refine` /
+`.superRefine`, so `ask_question`'s `fields[]` superRefine contributes nothing to the hashed text.
+**v6 changes no refinement.** Stated here by hand because no gate will state it.
 
 * **`chatTurn_v22`** — v21's thirty-nine tools by import plus exactly ONE: `read_opening_source`
   (#985, the contract #656 wrote and v21 deliberately left out). It takes `{client_id, seed_id}`

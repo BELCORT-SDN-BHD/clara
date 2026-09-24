@@ -110,7 +110,10 @@ export function rederivedBasis(b) {
   const lines = basis.lines.map((l) => {
     const debit = lineCents(l, "debit_cents");
     const credit = lineCents(l, "credit_cents");
-    const out = { ...l };
+    // Object.assign rather than an object spread: the parts-parity census REFUSES a spread it
+    // cannot classify, because a spread is exactly how an unreviewed type discriminant reaches a
+    // transcript part without anyone seeing it. Same reason claraWork.v5.impl.ts gives for its own.
+    const out = Object.assign({}, l);
     if (debit === priorCents && priorCents !== 0) { out.debit_cents = liveCents; moved += 1; }
     if (credit === priorCents && priorCents !== 0) { out.credit_cents = liveCents; moved += 1; }
     return out;
@@ -138,7 +141,7 @@ export function rederivedBasis(b) {
 
   return {
     ok: true,
-    basis: { ...basis, lines },
+    basis: Object.assign({}, basis, { lines }),
     from: { field_path: fieldPath, cents: liveCents, source: "live_facts" },
   };
 }

@@ -36,6 +36,7 @@ import { claraWork_v2 } from "./claraWork.v2.js";
 import { claraWork_v3 } from "./claraWork.v3.js";
 import { claraWork_v4 } from "./claraWork.v4.js";
 import { claraWork_v5 } from "./claraWork.v5.js";
+import { claraWork_v6 } from "./claraWork.v6.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -359,7 +360,7 @@ export const workflows = {
   // read-set rows already written stay readable. A Work parked on a v5 question stays ANSWERABLE
   // under a v4 image, but the resumed v4 run will not be told about drift — so a rollback should
   // drain parked questions first rather than assume they resume identically.
-  claraWork: claraWork_v5,
+  claraWork: claraWork_v6,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -991,6 +992,7 @@ export { claraWork_v4 };
 // cutover — and the pinned v5 body is exported too so the rollback preflight can use the same
 // uniform census for every version.
 export { claraWork_v5 };
+export { claraWork_v6 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
@@ -1081,6 +1083,7 @@ export const workflowBodies: readonly string[] = Object.freeze([
   "claraWork_v3",
   "claraWork_v4",
   "claraWork_v5",
+  "claraWork_v6",
   "documentIngest_v1",
   "documentIngest_v2",
   "invoiceFacts_v1",
@@ -1121,7 +1124,7 @@ export const workflowBodies: readonly string[] = Object.freeze([
 export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
   closeExample: "closeExampleV1",
   chatTurn: "chatTurn_v22",
-  claraWork: "claraWork_v5",
+  claraWork: "claraWork_v6",
   documentIngest: "documentIngest_v2",
   invoiceFacts: "invoiceFacts_v1",
   statementFacts: "statementFacts_v3",
