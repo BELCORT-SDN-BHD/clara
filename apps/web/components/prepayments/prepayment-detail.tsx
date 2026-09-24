@@ -156,8 +156,10 @@ export function PrepaymentDetail({ clientId, scheduleId }: { clientId: string; s
             KEYED ON `term_moved`, NEVER ON `term_live` (ADV-02). `clara._record_document_service_period_core`
             supersedes the live row unconditionally — it compares no dates — so `term_live` goes
             false on a re-record that restates the term byte for byte. This banner says the term
-            "has since been corrected" and that the schedule needs rebuilding; on an unchanged term
-            that is a false statement of fact and wrong advice about a running amortisation.
+            "has since been corrected"; on an unchanged term that is a false statement of fact and
+            wrong advice about a running amortisation. It no longer says the schedule can be
+            rebuilt either (L04-SPEC-04): `uq_prepayment_schedules_source` admits ONE schedule per
+            recognition entry whatever the first one's status, so there is no door for that.
 
             `=== true`, NEVER a truthiness test. The field arrives as unvalidated jsonb from
             `clara.get_prepayment_schedule`, and an ABSENT one — a web build ahead of its database,

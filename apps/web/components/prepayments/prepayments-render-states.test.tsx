@@ -184,6 +184,13 @@ const refusedOcc = (due: string) => ({
   receipt_id: null, entry_id: null,
 });
 
+/** A refused occurrence carrying a NAMED typed reason — the explain surface keys on it, and the
+ *  four reasons this build can say something specific about are not interchangeable. */
+const refusedOcc2 = (due: string, reason: string, message: string) => ({
+  ...refusedOcc(due),
+  outcome: { state: "refused", code: "CLR10", reason, message },
+});
+
 const DETAIL = {
   schedule_id: SCHEDULE,
   client_id: CLIENT,
@@ -509,6 +516,64 @@ test("prepayments.detail — a REFUSED period reaches the explain-and-choose sur
       // probe names the shapes an override would actually take.
       assert.doesNotMatch(text, /post it anyway|override|force the posting|ignore the refusal/i,
         "there is NO third choice: a control that walked around a wall would be a lie");
+    });
+  });
+});
+
+test("prepayments.detail — L04-SPEC-04: not one sentence on this register offers a REPLACEMENT schedule, because the estate has no door that opens one", async () => {
+  // MEASURED, not reasoned about (`p939.supersede.running`, on the lane database):
+  // `uq_prepayment_schedules_source` carries no status predicate at all, so
+  // `clara.create_prepayment_schedule` answers CLR13 `prepayment_schedule_exists` for a second
+  // schedule over the same recognition BOTH while the first is running AND after it has ended.
+  // Three sentences on this register used to send a person to do exactly that — the ended-schedule
+  // note, the lapsed-authority explanation and the period-line explanation — and the third is the
+  // corrected-term advice #939 AC4 names. A surface may state the limitation; it may not offer an
+  // act the database refuses.
+  const ENDED = { ...DETAIL, status: "ended", ended_at: "2026-03-31T00:00:00Z", ended_by: "u1",
+    ended_reason: "the client cancelled the cover" };
+  await withMockedEnv(rpcRouter({ get_prepayment_schedule: ENDED }), async () => {
+    await drive(createElement(PrepaymentDetail, { clientId: CLIENT, scheduleId: SCHEDULE }), (h) => {
+      const text = h.text();
+      assert.match(text, /This schedule has ended/, "the state itself is still said plainly");
+      assert.doesNotMatch(text, /Configure a new one/,
+        "an ended schedule's recognition still carries a schedule, so a new one is refused");
+      assert.match(text, /one recognition carries one schedule/,
+        "…and the reason a person cannot simply reconfigure is said instead of left to be discovered");
+    });
+  });
+
+  // THE LAPSED-AUTHORITY EXPLANATION. `clara.revise_accounting_plan` moves the SCHEDULE and never
+  // `authorised_by` (0193), and there is no other door, so "end this schedule and configure a new
+  // one under someone who is" was two impossible acts in one sentence.
+  const LAPSED = { ...DETAIL,
+    periods: [period("2026-03-31", 100000, refusedOcc("2026-03-31"))],
+    occurrences: [refusedOcc("2026-03-31")] };
+  await withMockedEnv(rpcRouter({ get_prepayment_schedule: LAPSED }), async () => {
+    await drive(createElement(PrepaymentDetail, { clientId: CLIENT, scheduleId: SCHEDULE }), (h) => {
+      const text = h.text();
+      assert.match(text, /no longer an active member with a bookkeeper role/,
+        "what the typed reason MEANS is still explained");
+      assert.doesNotMatch(text, /configure a new one/i,
+        "…without offering a replacement schedule the door refuses");
+      assert.match(text, /Restoring their membership/,
+        "the ONE remedy that exists is named");
+    });
+  });
+
+  // THE PERIOD-LINE EXPLANATION — the corrected-term case itself (#939 AC4 / #941 AC3).
+  const OUT_OF_TERM = { ...DETAIL,
+    periods: [period("2026-03-31", 100000, refusedOcc2("2026-03-31", "amortisation_period_line_missing",
+      "this schedule has no period ending on that due date"))],
+    occurrences: [refusedOcc2("2026-03-31", "amortisation_period_line_missing",
+      "this schedule has no period ending on that due date")] };
+  await withMockedEnv(rpcRouter({ get_prepayment_schedule: OUT_OF_TERM }), async () => {
+    await drive(createElement(PrepaymentDetail, { clientId: CLIENT, scheduleId: SCHEDULE }), (h) => {
+      const text = h.text();
+      assert.match(text, /falls outside the allocation this schedule was derived from/);
+      assert.doesNotMatch(text, /needs a new schedule/,
+        "the corrected-term remedy this sentence offered exists in no door");
+      assert.match(text, /raise the difference with the reviewer/i,
+        "…and the honest next act is named in its place");
     });
   });
 });

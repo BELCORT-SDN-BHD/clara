@@ -437,6 +437,35 @@ test("941.detail: a schedule renders its facts, its stated-term evidence and eac
   });
 });
 
+test("941.detail: L04-SPEC-04 — an ENDED schedule offers no replacement, because one receipt carries one schedule and the door refuses a second", async () => {
+  // MEASURED on the lane database (`p941.supersede.running`): the plan is ended through
+  // `clara.end_accounting_plan` and `clara.create_revenue_recognition_schedule` STILL answers
+  // CLR13 `revenue_recognition_schedule_exists` for the same receipt —
+  // `uq_revenue_recognition_schedules_source` carries no status predicate. The ended note used to
+  // say "Configure a new one if the remaining periods are still to be recognised", which is an act
+  // nobody can perform.
+  await withMockedEnv(rpcRouter({
+    get_revenue_recognition_schedule: {
+      ...DETAIL, status: "ended", ended_at: "2026-06-30T00:00:00Z", ended_by: "u1",
+      ended_reason: "the member cancelled the agreement",
+    },
+  }), async () => {
+    const h = await renderComponent(
+      app(createElement(DeferredRevenueDetail, { clientId: CLIENT, scheduleId: SCHEDULE })));
+    try {
+      await h.settle();
+      const text = h.text();
+      assert.ok(text.includes("This schedule has ended"), "the state itself is still said plainly");
+      assert.ok(!/Configure a new one/.test(text),
+        "the receipt still carries this schedule, so a new one is refused");
+      assert.ok(text.includes("one recognition carries one schedule"),
+        "…and the reason is said, in the same words the corrected-term banner uses");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
 test("941.detail: a read that fails renders the not-found state rather than an empty schedule, and a schedule whose term MOVED carries the banner", async () => {
   await withMockedEnv(rpcRouter({ get_revenue_recognition_schedule: null }), async () => {
     const h = await renderComponent(
