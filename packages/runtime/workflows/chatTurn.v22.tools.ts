@@ -279,8 +279,9 @@ export function openingSourceOutcome(
 // reads. It is RESTATED here rather than imported, for the reason `workRoutes.ts:135-141` writes
 // out: a frozen file hash-locks its whole transitive relative-import closure, and importing
 // `lib/authz.mjs` into this closure would freeze the runtime's auth boundary for every route that
-// uses it. One query and one comparison is the smaller cost, and the census below is what keeps
-// the two readings honest.
+// uses it. One query and one comparison is the smaller cost, and what keeps the restatement
+// honest is a cell that DRIVES it: `tests/chat-turn-v22-opening-db.test.mjs` refuses a real
+// viewer of a real firm this read and then lets the firm's owner take it, on the same basis.
 
 /** Firm role ranks, mirroring `clara.role_rank` — `src/openingRoutes.ts:30`'s own table. */
 const ROLE_RANK: Readonly<Record<string, number>> = Object.freeze({ viewer: 0, bookkeeper: 1, admin: 2, owner: 3 });

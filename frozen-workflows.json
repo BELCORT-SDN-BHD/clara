@@ -884,7 +884,7 @@
       "note": "#985 - chatTurn_v22's prompt: v21's text plus ONE stanza, READING AN OPENING SOURCE. No new wire kind (ClaraPartV22 IS ClaraPartV21 by reference) and no new C-19 coding-intent arm - the tool mints no terminal card, so a successful read must not collect the coding-incomplete refusal. NOT deploy-locked yet."
     },
     "packages/runtime/workflows/chatTurn.v22.tools.ts": {
-      "sha256": "6d9ebff13f54adc6698c4cf06a5c67a788012bf32d6729f46b5d3706896179b1",
+      "sha256": "aed155328cbc4c5e6b663b0765c791444c15299561d95ec43b290af6e115c000",
       "note": "#985 - chatTurn_v22's tool map: buildToolsV21's thirty-nine by import plus read_opening_source. The tool calls the route core parseOpeningTargets(client, {seedId, firmId, reassert}) on a clara_runtime connection and never clara.record_opening_targets_parsed itself, and it restates the browser route's bookkeeper+ floor through clara.resolve_chat_principal rather than importing lib/authz.mjs (which would freeze the runtime's auth boundary for every route). NOT deploy-locked yet."
     },
     "packages/runtime/workflows/chatTurn.v22.ts": {
