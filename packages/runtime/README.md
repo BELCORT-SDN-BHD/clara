@@ -462,7 +462,9 @@ the running process actually booted with, by variable name; `measured:false` mea
 assert has not run there and is not evidence of a clean posture. Read `checks.tls.pinned` on the
 deployed host rather than the image: on 2026-09-09 all seven lane DSNs of `clara-runtime` were
 switched to verify-full through this ceremony and `/ready` reported them pinned with the shipped
-CA validated (#617).
+CA validated (#617). #871's signed-out invite-preview lane is the EIGHTH and joined
+`TLS_CHECKED_DSN_VARS` with the lane roster, so it carries the same pin obligation from the day
+its credential ceremony runs; until then the variable is unset and the assert simply skips it.
 [node-postgres SSL configuration](https://node-postgres.com/features/ssl)
 
 ### Recovery checklist
