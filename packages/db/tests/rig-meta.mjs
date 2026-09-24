@@ -368,6 +368,26 @@ const PAYROLL_SETTLEMENT_0298_COHORT = [...PAYROLL_SETTLEMENT_0298_HUMAN_FNS];
 // PAYROLL_0296's two internals above.
 const AGREEMENT_0299_RUNTIME_FNS = ["persist_agreement_facts", "fail_agreement_facts"];
 const AGREEMENT_0299_COHORT = [...AGREEMENT_0299_RUNTIME_FNS];
+// #949 [0300] the tenancy contract-terms + recurring rent-plan lane, riders wave 4 lane 01. TEN
+// clara_authenticated doors and NOT ONE machine-lane grant: this lane is a person's lane end to
+// end — a person records the terms Clara read, a person confirms the plan, a person accepts the
+// settlement, a person confirms the revision. Three READS at the viewer floor
+// (get_contract_terms, propose_contract_terms, get_tenancy_rent_plan_draft,
+// get_tenancy_escalation_revision) and the rest at bookkeeper+, each floor enforced in the body.
+// The twelve internals this file mints (_contract_terms_row_json, _contract_term_rank,
+// _tenancy_term_regions, _client_reporting_framework, _tenancy_lease_treatment,
+// _tenancy_account_is_bank, _tenancy_rent_plan_draft, _tenancy_rent_plan,
+// _rent_payable_unsettled, _rent_settlement_bank_candidates, _settle_rent_payable_core,
+// _tenancy_escalation_state) stay ungranted to every application role — the sweep's
+// expected=false IS that assertion, the same posture PAYROLL_SETTLEMENT_0298 takes above.
+const TENANCY_RENT_0300_HUMAN_FNS = [
+  "record_contract_terms", "get_contract_terms", "propose_contract_terms",
+  "get_tenancy_rent_plan_draft", "confirm_tenancy_rent_plan",
+  "get_rent_settlement_candidates", "settle_rent_payable",
+  "get_tenancy_deposit_coding", "get_tenancy_escalation_revision",
+  "confirm_tenancy_rent_plan_revision",
+];
+const TENANCY_RENT_0300_COHORT = [...TENANCY_RENT_0300_HUMAN_FNS];
 // F-A1 PR-4 — the bank-statement witness cutover. Its OWN cohort rather than an addition to
 // BANK_0038_*, and that is not cosmetic: `cohortFailures` tolerates a WHOLLY absent cohort (a
 // chain that stops short of this wave) but fails a PARTIAL one, so folding these two names
@@ -3450,6 +3470,11 @@ export const ALLOWED = {
     // ONLY, bookkeeper floor body-enforced; clara_runtime, both agent read roles and all four
     // wake lanes gain ZERO, and the three internals it reaches through hold no role at all.
     ...PAYROLL_SETTLEMENT_0298_HUMAN_FNS,
+    // #949 [0300] the tenancy contract-terms + rent-plan lane — see the block above.
+    // clara_authenticated ONLY, floors body-enforced (viewer for the four reads, bookkeeper for
+    // the six acts); clara_runtime, both agent read roles and all four wake lanes gain ZERO, and
+    // the twelve internals these doors reach through hold no role at all.
+    ...TENANCY_RENT_0300_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3925,6 +3950,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#945 0296 payroll-summary reading lane", PAYROLL_0296_COHORT, liveNames));
   failures.push(...cohortFailures("#947 0298 payroll net-pay settlement", PAYROLL_SETTLEMENT_0298_COHORT, liveNames));
   failures.push(...cohortFailures("#948 0299 agreement-contract reading + acquisition lane", AGREEMENT_0299_COHORT, liveNames));
+  failures.push(...cohortFailures("#949 0300 tenancy contract terms + recurring rent plan", TENANCY_RENT_0300_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3 PR-1a bank/COA core extractions", EXTRACTION_F_A3_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("#623 0178 accounting-work lane", WORK_JOURNAL_0178_COHORT, liveNames));
   failures.push(...cohortFailures("#629 0180 shared work-question lane", WORK_QUESTIONS_0180_COHORT, liveNames));

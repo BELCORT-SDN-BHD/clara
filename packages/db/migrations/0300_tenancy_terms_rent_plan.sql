@@ -315,6 +315,8 @@ begin
   return new;
 end $tfctao$;
 
+revoke all on function clara._tf_contract_terms_append_only() from public;
+
 comment on function clara._tf_contract_terms_append_only() is
   '#949: clara.contract_terms is append-only. DELETE is refused outright; the ONE admitted UPDATE stamps superseded_by/superseded_at/supersede_reason exactly once, and every other column is compared column by column so a widened SET collides here.';
 
@@ -1108,6 +1110,8 @@ begin
   raise exception 'a plan confirmation is a record of one moment: it is never % (revise the plan instead, which is its own confirmation)', lower(tg_op)
     using errcode='CLR08', detail='{"reason":"contract_plan_confirmation_immutable"}';
 end $tfcpci$;
+
+revoke all on function clara._tf_contract_plan_confirmation_immutable() from public;
 
 comment on function clara._tf_contract_plan_confirmation_immutable() is
   '#949: clara.contract_plan_confirmations admits INSERT alone. UPDATE and DELETE are both refused outright -- a confirmation is what a named person did at a moment, and a changed mind is a revision with its own row.';
@@ -2484,3 +2488,227 @@ end
 $p949_lrq$;
 
 reset role;
+
+-- =====================================================================================
+-- No rig-meta cohort would be a wrong claim here: this file adds TEN newly-GRANTED, CALLABLE
+-- names, every one of them clara_authenticated and none of them reachable by any machine lane.
+-- All ten are added to packages/db/tests/rig-meta.mjs's ALLOWED roster and to their own
+-- operation-census cohort in the SAME commit, so operation-census.test.mjs is the actual
+-- grant-correctness proof and is run as one of this ticket's gates. The twelve internals this
+-- file mints are reached only from definer bodies already accounted for above and are covered by
+-- that same sweep's default "no role may execute anything unlisted" posture, with no cohort entry
+-- of their own needed (the #946/#947 posture, restated).
+-- =====================================================================================
+
+-- =====================================================================================
+-- SecZ  TAIL. Everything this file claims to have done, re-derived from the live catalog.
+--
+--       IT READS `p.prosrc`, NEVER A RENDERED DEFINITION, and that is a lint contract rather
+--       than a style choice: scripts/wiki-lint-checks.mjs classifies any `do` block that so much
+--       as NAMES the definition-rendering catalog function as a change-of-record PATCH site and
+--       then requires every attributable target to sit in the wiki whitelist. #948 measured that
+--       in both directions; this tail therefore names it nowhere at all, comments included.
+-- =====================================================================================
+do $p949_tail$
+declare
+  v_owner text; v_vol text; v_secdef boolean; v_n int; v_sig text; v_src text;
+  v_proacl aclitem[]; v_proowner oid; v_rls boolean; v_force boolean; v_j jsonb;
+begin
+  -- T.1 THE TWO NEW RELATIONS: forced RLS, owned by clara_fn_owner, their three policies each,
+  --     their append-only belts and the live-uniqueness index the supersede chain rests on.
+  for v_sig in select unnest(array['contract_terms','contract_plan_confirmations']) loop
+    select c.relrowsecurity, c.relforcerowsecurity, c.relowner::regrole::text
+      into v_rls, v_force, v_owner
+      from pg_class c where c.oid = ('clara.' || v_sig)::regclass;
+    if not v_rls or not v_force or v_owner <> 'clara_fn_owner' then
+      raise exception '#949 tail T.1: clara.% is rls=% force=% owner=% -- expected true/true/clara_fn_owner', v_sig, v_rls, v_force, v_owner
+        using errcode='CLR10';
+    end if;
+    select count(*)::int into v_n from pg_policies p
+     where p.schemaname = 'clara' and p.tablename = v_sig;
+    if v_n <> 3 then
+      raise exception '#949 tail T.1: clara.% carries % policy(ies), expected 3 (owner, human, agent)', v_sig, v_n
+        using errcode='CLR10';
+    end if;
+    select count(*)::int into v_n from pg_trigger t
+     where t.tgrelid = ('clara.' || v_sig)::regclass and not t.tgisinternal;
+    if v_n <> 2 then
+      raise exception '#949 tail T.1: clara.% carries % non-internal trigger(s), expected 2 (the append-only belt and the truncate belt)', v_sig, v_n
+        using errcode='CLR10';
+    end if;
+  end loop;
+  if not exists (select 1 from pg_indexes i
+                  where i.schemaname='clara' and i.tablename='contract_terms'
+                    and i.indexname='uq_contract_terms_live') then
+    raise exception '#949 tail T.1: uq_contract_terms_live is absent -- two live readings of one term could coexist'
+      using errcode='CLR10';
+  end if;
+
+  -- T.2 THE TEN GRANTED DOORS carry EXACTLY clara_authenticated: not PUBLIC (grantee 0), and no
+  --     machine lane. Read off pg_proc.proacl directly, never a privilege predicate.
+  for v_sig in select unnest(array[
+      'clara.record_contract_terms(uuid,uuid,jsonb,text)',
+      'clara.get_contract_terms(uuid)',
+      'clara.propose_contract_terms(uuid)',
+      'clara.get_tenancy_rent_plan_draft(uuid)',
+      'clara.confirm_tenancy_rent_plan(uuid,uuid,text,text,text,text)',
+      'clara.get_rent_settlement_candidates(uuid)',
+      'clara.settle_rent_payable(uuid,uuid,uuid,text)',
+      'clara.get_tenancy_deposit_coding(uuid)',
+      'clara.get_tenancy_escalation_revision(uuid)',
+      'clara.confirm_tenancy_rent_plan_revision(uuid,uuid,text,text)'])
+  loop
+    select p.proacl, p.proowner, p.proowner::regrole::text, p.prosecdef
+      into v_proacl, v_proowner, v_owner, v_secdef
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_owner <> 'clara_fn_owner' or not v_secdef then
+      raise exception '#949 tail T.2: % is owner=% secdef=% -- expected clara_fn_owner / true', v_sig, v_owner, v_secdef
+        using errcode='CLR10';
+    end if;
+    if exists (select 1 from aclexplode(coalesce(v_proacl, acldefault('f', v_proowner))) a
+                where a.grantee = 0) then
+      raise exception '#949 tail T.2: PUBLIC holds a grant on %', v_sig using errcode='CLR10';
+    end if;
+    if not exists (select 1 from aclexplode(coalesce(v_proacl, acldefault('f', v_proowner))) a
+                    where a.grantee = 'clara_authenticated'::regrole) then
+      raise exception '#949 tail T.2: clara_authenticated lacks a grant on %', v_sig using errcode='CLR10';
+    end if;
+    if exists (select 1 from aclexplode(coalesce(v_proacl, acldefault('f', v_proowner))) a
+                where a.grantee in ('clara_runtime'::regrole, 'clara_agent_ro'::regrole)) then
+      raise exception '#949 tail T.2: a machine-lane role holds a grant on %, expected clara_authenticated only', v_sig
+        using errcode='CLR10';
+    end if;
+  end loop;
+
+  -- T.3 THE TWELVE INTERNALS hold NO application role's grant at all -- only the owner.
+  for v_sig in select unnest(array[
+      'clara._contract_terms_row_json(clara.contract_terms)',
+      'clara._contract_term_rank(text)',
+      'clara._tenancy_term_regions(uuid)',
+      'clara._client_reporting_framework(uuid)',
+      'clara._tenancy_lease_treatment(uuid,uuid)',
+      'clara._tenancy_account_is_bank(uuid,text)',
+      'clara._tenancy_rent_plan_draft(uuid,uuid,text,text)',
+      'clara._tenancy_rent_plan(uuid)',
+      'clara._rent_payable_unsettled(uuid)',
+      'clara._rent_settlement_bank_candidates(uuid,bigint,date,int)',
+      'clara._settle_rent_payable_core(jsonb,uuid,uuid,uuid,text)',
+      'clara._tenancy_escalation_state(uuid)'])
+  loop
+    select p.proacl, p.proowner into v_proacl, v_proowner from pg_proc p where p.oid = v_sig::regprocedure;
+    if exists (select 1 from aclexplode(coalesce(v_proacl, acldefault('f', v_proowner))) a
+                where a.grantee <> v_proowner) then
+      raise exception '#949 tail T.3: % is reachable by an application role -- expected wholly ungranted', v_sig
+        using errcode='CLR10';
+    end if;
+  end loop;
+
+  -- T.4 THE QUEUE SPLICE: both new kinds projected exactly once, and every kind that was there
+  --     before this file survives at its own marker.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure;
+  for v_sig in select unnest(array['rent_payable_unsettled','rent_escalation_pending']) loop
+    v_n := (length(v_src) - length(replace(v_src, '''' || v_sig || '''::text row_kind', '')))
+           / length('''' || v_sig || '''::text row_kind');
+    if v_n <> 1 then
+      raise exception '#949 tail T.4: the queue projects % % time(s), expected 1', v_sig, v_n
+        using errcode='CLR10';
+    end if;
+  end loop;
+  for v_sig in select unnest(array['draft','uncoded_filing','open_question','coding_task',
+      'compliance_watch','lint_finding','fixed_asset_incomplete','staff_advance_incomplete',
+      'work_question','depreciation_authority_pending','payroll_posting_blocked',
+      'payroll_net_pay_unsettled','agreement_posting_blocked'])
+  loop
+    if position('''' || v_sig || '''::text row_kind' in v_src) = 0 then
+      raise exception '#949 tail T.4: the queue no longer projects % -- an earlier lane''s arm was disturbed', v_sig
+        using errcode='CLR10';
+    end if;
+  end loop;
+  if position('union all select * from rent_settlement_rows' in v_src) = 0
+     or position('union all select * from rent_escalation_rows' in v_src) = 0 then
+    raise exception '#949 tail T.4: the all_rows union no longer includes both new arms' using errcode='CLR10';
+  end if;
+
+  -- T.5 THE TWO AUTHORITY SPLICES: the third kind is admitted in both bodies, and both arms #977
+  --     shipped survive verbatim.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara._authority_ref_refusal(text,uuid,uuid,uuid)'::regprocedure;
+  if position('contract_confirmation' in v_src) = 0
+     or position('if p_ref_kind = ''accounting_work'' then' in v_src) = 0
+     or position('if p_ref_kind = ''chat_task'' then' in v_src) = 0
+     or position('authority_ref_not_human_instruction' in v_src) = 0 then
+    raise exception '#949 tail T.5: clara._authority_ref_refusal is missing the new arm or one of #977''s own'
+      using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)'::regprocedure;
+  if position('''contract_confirmation'')' in v_src) = 0
+     or position('authority_rule_unsupported' in v_src) = 0
+     or position('plan_kind_unsupported' in v_src) = 0
+     or position('clara._authority_ref_refusal(v_ref_kind, v_ref_id, v_firm, p_client)' in v_src) = 0 then
+    raise exception '#949 tail T.5: clara.create_accounting_plan lost a wall it carried before this file'
+      using errcode='CLR10';
+  end if;
+
+  -- T.6 THE CHART IS CONSUMED, NEVER APPENDED TO. The three codes are still the current published
+  --     platform template's, under the names this file spells; and STRUCTURALLY, no body this
+  --     file mints names the template table at all, so it could not append a row if it wanted to.
+  for v_sig, v_src in
+    select x.code, x.nm from (values ('2050','Rent Payable'),('6100','Rental of Premises'),
+                                     ('1120','Deposits Paid')) x(code, nm)
+  loop
+    if not exists (
+      select 1 from clara.coa_template_accounts a
+        join clara.coa_templates t on t.id = a.template_id
+       where t.template_key = 'my_sme_starter' and t.scope = 'platform' and t.state = 'published'
+         and t.version = (select max(t2.version) from clara.coa_templates t2
+                            where t2.template_key='my_sme_starter' and t2.scope='platform'
+                              and t2.state='published')
+         and a.account_code = v_sig and a.name = v_src) then
+      raise exception '#949 tail T.6: the current published platform template no longer carries % %', v_sig, v_src
+        using errcode='CLR10';
+    end if;
+  end loop;
+  select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara'
+     and (p.proname like 'contract@_%' escape '@' or p.proname like '%tenancy%'
+          or p.proname like '%rent_%' or p.proname like '%_contract_term%')
+     and (p.prosrc ilike '%coa_template_accounts%' or p.prosrc ilike '%document_service_periods%');
+  if v_n <> 0 then
+    raise exception '#949 tail T.6: % of this lane''s bodies name the chart template or the prepayment service period -- this file appends no chart row and weakens no person-stated term', v_n
+      using errcode='CLR10';
+  end if;
+
+  -- T.7 A FIXTURE-FREE PROBE over the bodies that can be driven without a client: the closed
+  --     term-key roster, the bank test over an account nobody holds, the framework read over a
+  --     client that does not exist, and the lessee branch over nothing at all -- which must say
+  --     `terms_incomplete` rather than assuming a framework or a rent.
+  if clara._contract_term_rank('monthly_rent') <> 1 or clara._contract_term_rank('deposit') <> 2
+     or clara._contract_term_rank('term_start') <> 3 or clara._contract_term_rank('term_end') <> 4
+     or clara._contract_term_rank('escalation') <> 5
+     or clara._contract_term_rank('service_charge') <> 9 then
+    raise exception '#949 tail T.7: the contract-term vocabulary is not the closed five-member roster this file ships'
+      using errcode='CLR10';
+  end if;
+  if clara._tenancy_account_is_bank('00000000-0000-0000-0000-000000000000'::uuid, '2050') then
+    raise exception '#949 tail T.7: the bank test says 2050 is a bank account for a client that does not exist'
+      using errcode='CLR10';
+  end if;
+  v_j := clara._client_reporting_framework('00000000-0000-0000-0000-000000000000'::uuid);
+  if (v_j->>'in_force') <> 'none' or (v_j->>'framework_code') is not null then
+    raise exception '#949 tail T.7: the framework read invented an answer for a client that does not exist (%)', v_j
+      using errcode='CLR10';
+  end if;
+  v_j := clara._tenancy_lease_treatment('00000000-0000-0000-0000-000000000000'::uuid,
+                                        '00000000-0000-0000-0000-000000000000'::uuid);
+  if (v_j->>'drafts')::boolean is not false or (v_j->>'reason') <> 'terms_incomplete'
+     or position('MPERS Section 20' in coalesce(v_j->>'basis','')) = 0
+     or position('MFRS 16' in coalesce(v_j->>'basis','')) = 0 then
+    raise exception '#949 tail T.7: the lessee branch does not refuse an unrecorded tenancy, or its written basis no longer names both standards (%)', v_j
+      using errcode='CLR10';
+  end if;
+
+  raise notice '#949 tail OK: clara.contract_terms and clara.contract_plan_confirmations are forced-RLS, clara_fn_owner-owned, three policies and two belts each, with the live-uniqueness index the supersede chain rests on; the ten granted doors are clara_authenticated-only with no PUBLIC and no machine lane, and the twelve internals are reachable by no application role; clara.list_review_queue projects rent_payable_unsettled and rent_escalation_pending exactly once each beside all thirteen kinds it already carried; clara._authority_ref_refusal and clara.create_accounting_plan admit contract_confirmation while keeping every wall #977 and #640 put there; the three chart rows this lane consumes are still the current published platform template''s under the names it spells, and no body of this lane names the template table or the prepayment service period at all; and a fixture-free probe drove the closed term vocabulary, the bank test, the framework read and the lessee branch -- which refuses an unrecorded tenancy by name and still states MPERS Section 20 and MFRS 16 in its written basis.';
+end
+$p949_tail$;
