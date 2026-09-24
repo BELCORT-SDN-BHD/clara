@@ -42,12 +42,25 @@ test("v6.bundle: the ids are this cut's own, and the digest is the hash of the c
     "a version whose digest equalled its predecessor's would be a cut nothing downstream could see");
 });
 
-test("v6.bundle: the ROSTER does not move, and saying so is the honest description of this cut", () => {
+test("v6.bundle: the ROSTER is v5's SEVEN plus this cut's three, and nothing else moved", () => {
+  // #1030 minted v6 with v5's roster unchanged and this cell said so. #1135 is the ticket that
+  // widens it: two READS and one QUESTION, every one of them declared in all three places the
+  // digest hashes. The claim the cell makes is therefore now "plus exactly three", and the SEVEN
+  // predecessors are still byte-identical, which is the part a reader actually needs.
   const v5 = v5Bundle.CLARA_WORK_BUNDLE_V5.tools;
   const v6 = v6Bundle.CLARA_WORK_BUNDLE_V6.tools;
-  assert.deepEqual([...v6.names], [...v5.names], "same seven tools");
-  assert.deepEqual(v6.schemas, v5.schemas, "…the same input schemas, to the byte of their JSON");
-  assert.deepEqual(v6.dependencies, v5.dependencies, "…and the same declared doors");
+  const added = ["read_prepayment_source", "read_revenue_recognition_source", "answer_prepayment_term"];
+  assert.deepEqual([...v6.names].filter((n) => ![...v5.names].includes(n)).sort(), added.slice().sort());
+  assert.deepEqual([...v5.names].filter((n) => ![...v6.names].includes(n)), [],
+    "nothing v5 could do stops being possible");
+  for (const name of v5.names) {
+    assert.deepEqual(v6.schemas[name], v5.schemas[name], `${name}: the same input schema, to the byte of its JSON`);
+    assert.deepEqual(v6.dependencies[name], v5.dependencies[name], `${name}: the same declared doors`);
+  }
+  for (const name of added) {
+    assert.ok(v6.schemas[name], `${name} has a schema`);
+    assert.ok(v6.dependencies[name], `${name} declares its doors`);
+  }
   assert.deepEqual(v6Bundle.CLARA_WORK_BUDGETS_V6, v5Bundle.CLARA_WORK_BUDGETS_V5,
     "and the budgets do not move: the confirmation parks BEFORE the loop and spends nothing");
   // WHAT DID MOVE. Exactly one thing, and it is the reason the digest is different.
@@ -61,7 +74,11 @@ test("v6.bundle: the ROSTER does not move, and saying so is the honest descripti
   );
   assert.ok(
     v6Bundle.CLARA_WORK_BUNDLE_V6.instructions.text.includes(v6Prompt.SOURCE_CORRECTION_SUCCESSOR_STANZA),
-    "…plus the one stanza this cut adds",
+    "…plus #1030's stanza",
+  );
+  assert.ok(
+    v6Bundle.CLARA_WORK_BUNDLE_V6.instructions.text.includes(v6Prompt.PREPAYMENT_SOURCE_STANZA),
+    "…and #915's, which replaces v1's 'there is no source document' clause",
   );
 });
 

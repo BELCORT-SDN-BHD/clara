@@ -164,6 +164,15 @@ test("p6-1.parts-parity: v16 plus the live reader admits the freeform_result emi
         "packages/runtime/workflows/chatTurn.v20.tools.ts",
         "packages/runtime/workflows/chatTurn.v20.tools.ts",
         "packages/runtime/workflows/chatTurn.v21.tools.ts",
+        // CUT PHASE 2026-09-25 - chatTurn_v22 adds THREE sites, and all three are REPLACEMENTS of
+        // v21's or v20's tools under the same name rather than new cards: #982/#1007's trade
+        // invoice, #931's staff expense claim and #937/#942's accrual. Every one of them still
+        // announces a `journal_entry` Work on the existing card, so `WORK_ACCEPTED_PURPOSES` stays
+        // at three for the fourth cut running, and the cut's six OTHER tools appear nowhere here:
+        // two opening acts, two reads and two CONFIGURATION receipts, none of which mints a card.
+        "packages/runtime/workflows/chatTurn.v22.tools.ts",
+        "packages/runtime/workflows/chatTurn.v22.tools.ts",
+        "packages/runtime/workflows/chatTurn.v22.tools.ts",
       ],
     },
     {

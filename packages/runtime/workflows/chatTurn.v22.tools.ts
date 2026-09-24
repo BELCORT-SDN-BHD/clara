@@ -27,8 +27,16 @@ import { authoringRefusal, stableOpKey } from "./chatTurn.v11.tools.js";
 import type { WorkAcceptedPartV19 } from "./chatTurn.v19.parts.js";
 import { pools, readScoped, type PgExec, type ToolCtx } from "./chatTurn.v15.infra.js";
 import { parseOpeningTargets, readOpeningSeed, refreshOpeningTargets } from "../lib/opening-parse.mjs";
+// EVERY TOOL NAME COMES FROM THE MODULE THAT DECLARES ITS STRING LITERAL, never through one that
+// merely re-exports it. `check-parts-parity.mjs` resolves a computed key by dereferencing the
+// identifier through its import chain and refuses a chain whose next hop is a RE-EXPORT rather
+// than a binding, so importing `START_TRADE_INVOICE_WORK_TOOL` from the v2 carrier — which
+// re-exports the frozen module's — would refuse this whole tool map. claraWork.v3's, v4's and v6's
+// headers state the same rule; it has been paid for three times and is not paid for a fourth here.
+import { START_TRADE_INVOICE_WORK_TOOL } from "../lib/trade-invoice-basis.js";
+import { START_STAFF_EXPENSE_CLAIM_WORK_TOOL } from "../lib/staff-expense-claim-basis.js";
+import { START_ACCRUAL_WORK_TOOL } from "../lib/accrual-basis.js";
 import {
-  START_TRADE_INVOICE_WORK_TOOL,
   TRADE_INVOICE_REFUSALS_V2,
   duplicateQuestion,
   isTradeInvoiceRefusalV2,
@@ -40,7 +48,6 @@ import {
   type StartTradeInvoiceWorkInputV2,
 } from "../lib/trade-invoice-basis.v2.js";
 import {
-  START_STAFF_EXPENSE_CLAIM_WORK_TOOL,
   claimFromInputV2,
   localClaimRefusalV2,
   startStaffExpenseClaimWorkInputSchemaV2,
@@ -48,7 +55,6 @@ import {
 } from "../lib/staff-expense-claim-basis.v2.js";
 import {
   ACCRUAL_TIMEZONE,
-  START_ACCRUAL_WORK_TOOL,
   accrualFromInputV2,
   accrualRefusalMessageV2,
   localAccrualRefusalV2,

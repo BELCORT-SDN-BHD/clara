@@ -78,6 +78,24 @@ import {
   type AskKnowledgeConflictInputV4,
 } from "./claraWork.v4.tools.js";
 import { CLARA_WORK_BUNDLE_V6_DIGEST } from "./claraWork.v6.bundle.js";
+// THE THREE NAMES #1135 ADDS come from the module that DECLARES their string literals, never
+// through one that merely re-exports them: the parts-parity census dereferences a computed key
+// through its import chain and refuses a chain whose next hop is a re-export. Same rule the seven
+// above follow, and it has been paid for twice already.
+import {
+  ANSWER_PREPAYMENT_TERM_TOOL,
+  PREPAYMENT_TERM_FIELDS,
+  PREPAYMENT_TERM_QUESTION,
+  READ_PREPAYMENT_SOURCE_DOOR,
+  READ_PREPAYMENT_SOURCE_TOOL,
+  READ_REVENUE_RECOGNITION_SOURCE_DOOR,
+  READ_REVENUE_RECOGNITION_SOURCE_TOOL,
+  answerPrepaymentTermInputSchemaV6,
+  readPrepaymentSourceInputSchema,
+  readRevenueRecognitionSourceInputSchema,
+  type ReadPrepaymentSourceInput,
+  type ReadRevenueRecognitionSourceInput,
+} from "./claraWork.v6.schemas.js";
 
 export {
   ANSWER_ACCRUAL_TERM_TOOL, ASK_KNOWLEDGE_CONFLICT_TOOL,
@@ -104,6 +122,15 @@ export type {
 export { READ_KNOWLEDGE_HISTORY_DOOR, READ_KNOWLEDGE_RECORD_DOOR, readKnowledgeInputSchemaV6 };
 export { CLARA_WORK_TOOL_DEPENDENCIES_V6, CLARA_WORK_TOOL_SCHEMAS_V6 };
 export type { ReadKnowledgeInputV6 };
+export {
+  ANSWER_PREPAYMENT_TERM_TOOL, PREPAYMENT_TERM_FIELDS, PREPAYMENT_TERM_QUESTION,
+  READ_PREPAYMENT_SOURCE_DOOR, READ_PREPAYMENT_SOURCE_TOOL,
+  READ_REVENUE_RECOGNITION_SOURCE_DOOR, READ_REVENUE_RECOGNITION_SOURCE_TOOL,
+  answerPrepaymentTermInputSchemaV6, readPrepaymentSourceInputSchema,
+  readRevenueRecognitionSourceInputSchema,
+};
+export type { AnswerPrepaymentTermInputV6, ReadPrepaymentSourceInput, ReadRevenueRecognitionSourceInput }
+  from "./claraWork.v6.schemas.js";
 
 /** What a read answers. `ok:true` carries the door's own envelope VERBATIM under `data` — the
  *  estate's law on this side of the wire is that a door's considered answer is never re-worded by
@@ -329,6 +356,114 @@ export async function runRecordJournalEntryV6(
 
 /** Build the closed tool set for ONE v5 segment. The names come from the hashed bundle's own
  *  roster, so a tool this file could build but the bundle does not name cannot exist. */
+
+// ---------------------------------------------------------------------------
+// #1135 / #915 item 2 and #941 item 2 - the two source reads.
+//
+// ONE BODY, TWO DOORS, for the reason `runKnowledgeRead` above gives for the inspection pair: the
+// only difference between them is which door they call and which sentence describes the failure,
+// and a second copy of a budget check, a credential path and a refusal router is how two reads of
+// one family come to disagree about what "not found" means.
+//
+// NEITHER READ IS A STOP CONDITION and neither is a required read. A run reads the recorded term
+// IN ORDER to keep going: it looks, then it records the entry or asks the two-date question. A
+// refusal here is a fact to reason about, not the end of the run.
+//
+// AND NEITHER RETURNS DOCUMENT BYTES. The byte door stays 0190's and is unreachable from this
+// credential; what comes back is what a PERSON recorded about the document.
+// ---------------------------------------------------------------------------
+
+export type SourceReadResultV6 =
+  | { ok: true; source_entry_id: string; data: Record<string, unknown> }
+  | { ok: false; code: string; reason: string | null; message: string };
+
+/** What the prepayment read says when it cannot answer. CLR11 is ALSO the answer for another
+ *  firm's entry: there is no existence oracle on this lane. CLR10 names the runtime's own wiring
+ *  mistake and is never something a person can act on. */
+export const PREPAYMENT_SOURCE_REFUSALS: Readonly<Record<string, string>> = Object.freeze({
+  prepayment_source_not_found: "I cannot see that recognition for this client.",
+  prepayment_read_scope_required:
+    "The prepayment read was not given a firm, a client and an entry. Nothing was read.",
+});
+
+export const REVENUE_RECOGNITION_SOURCE_REFUSALS: Readonly<Record<string, string>> = Object.freeze({
+  revenue_recognition_source_not_found: "I cannot see that advance for this client.",
+  revenue_recognition_read_scope_required:
+    "The recognition read was not given a firm, a client and an entry. Nothing was read.",
+});
+
+function sourceRefusal(
+  map: Readonly<Record<string, string>>,
+  code: string,
+  reason: string | null,
+  fallback: string,
+): SourceReadResultV6 {
+  const mapped = reason !== null && Object.prototype.hasOwnProperty.call(map, reason) ? map[reason] : null;
+  return { ok: false, code, reason, message: mapped ?? fallback };
+}
+
+/** EXPORTED BECAUSE IT IS THE CONTRACT, not because a test asked: the door call around it needs a
+ *  database, this decision does not. */
+export function prepaymentSourceRefusal(code: string, reason: string | null, fallback: string): SourceReadResultV6 {
+  return sourceRefusal(PREPAYMENT_SOURCE_REFUSALS, code, reason, fallback);
+}
+
+export function revenueRecognitionSourceRefusal(code: string, reason: string | null, fallback: string): SourceReadResultV6 {
+  return sourceRefusal(REVENUE_RECOGNITION_SOURCE_REFUSALS, code, reason, fallback);
+}
+
+async function runSourceRead(
+  ctx: WorkToolCtx,
+  ledger: WorkBudgetLedger,
+  budgets: ClaraWorkBudgets,
+  door: string,
+  map: Readonly<Record<string, string>>,
+  input: { source_entry_id: string },
+  fallback: string,
+): Promise<SourceReadResultV6> {
+  if (ledger.toolCalls >= budgets.toolCalls) {
+    ledger.exhausted = "toolCalls";
+    if (ledger.terminal === null) ledger.terminal = { kind: "budget_exhausted", detail: "toolCalls" };
+    return {
+      ok: false,
+      code: "budget_exhausted",
+      reason: "toolCalls",
+      message: "This Work reached its tool-call budget before that source could be read.",
+    };
+  }
+  ledger.toolCalls += 1;
+
+  if (!ctx.clientId) {
+    return {
+      ok: false,
+      code: "CLR03",
+      reason: "no_client_context",
+      message: "This Work is not bound to a client, so there is no source of theirs to read.",
+    };
+  }
+
+  try {
+    const answer = await withTransientRetry(ledger, budgets, () =>
+      pools().withRuntime((c: PgExec) =>
+        c
+          // THE ARGUMENT ORDER IS THE DOOR'S OWN - (p_firm, p_client, p_source_entry) - and the
+          // firm and the client are the RUN's, never the model's.
+          .query(`select ${door}($1::uuid, $2::uuid, $3::uuid) as answer`, [ctx.firmId, ctx.clientId, input.source_entry_id])
+          .then((r) => (r.rows[0]?.answer ?? null) as Record<string, unknown> | null),
+      ),
+    );
+    if (!answer || typeof answer !== "object") {
+      return { ok: false, code: "internal", reason: null, message: fallback };
+    }
+    // THE ENVELOPE RIDES THROUGH VERBATIM: a door's considered answer is never re-worded by a
+    // layer above it, and every figure in it is the database's own.
+    return { ok: true, source_entry_id: input.source_entry_id, data: answer };
+  } catch (error) {
+    const classification = classifyWorkError(error);
+    return sourceRefusal(map, classification.code, classification.reason, classification.message || fallback);
+  }
+}
+
 export function buildClaraWorkToolsV6(ctx: WorkToolCtx, ledger: WorkBudgetLedger, budgets: ClaraWorkBudgets) {
   return {
     [LIST_ACCOUNTS_TOOL]: tool({
@@ -384,6 +519,47 @@ export function buildClaraWorkToolsV6(ctx: WorkToolCtx, ledger: WorkBudgetLedger
         "person's judgement. The question always offers them the answer that neither applies and the record needs " +
         "correcting. Use it only for a conflict that actually blocks this Work, never to tidy the register.",
       inputSchema: askKnowledgeConflictInputSchemaV4,
+    }),
+    [READ_PREPAYMENT_SOURCE_TOOL]: tool({
+      description:
+        "Read what this estate RECORDS about the prepayment behind this Work's entry: the service "
+        + "period a person recorded and the grounds they wrote, the prepaid leg and its cents, and "
+        + "the schedule once one stands. Give the POSTED entry id. It returns NO document bytes - "
+        + "you never read the document itself - and if no service period is recorded, say so and "
+        + "ask the fixed two-date question rather than inferring one.",
+      inputSchema: readPrepaymentSourceInputSchema,
+      execute: (input: ReadPrepaymentSourceInput) =>
+        runSourceRead(
+          ctx, ledger, budgets, READ_PREPAYMENT_SOURCE_DOOR, PREPAYMENT_SOURCE_REFUSALS, input,
+          "That prepayment source could not be read.",
+        ),
+    }),
+    [READ_REVENUE_RECOGNITION_SOURCE_TOOL]: tool({
+      description:
+        "Read what this estate RECORDS about the customer advance behind this Work's entry: the "
+        + "recorded term and the grounds a person wrote for it, the candidate liability leg and "
+        + "its cents, and the schedule once one stands. Give the POSTED entry id. It returns NO "
+        + "document bytes, ever, and a term nobody recorded is a thing to ask about rather than a "
+        + "thing to derive.",
+      inputSchema: readRevenueRecognitionSourceInputSchema,
+      execute: (input: ReadRevenueRecognitionSourceInput) =>
+        runSourceRead(
+          ctx, ledger, budgets, READ_REVENUE_RECOGNITION_SOURCE_DOOR, REVENUE_RECOGNITION_SOURCE_REFUSALS,
+          input, "That advance could not be read.",
+        ),
+    }),
+    // NO `execute` - same act as the other three question tools, narrower question. The FIELDS are
+    // not yours: this question always asks a person for the two dates and the grounds, and nothing
+    // else. There is no date in this schema and there never will be.
+    [ANSWER_PREPAYMENT_TERM_TOOL]: tool({
+      description:
+        "Ask a human for the SERVICE PERIOD a prepayment or a customer advance covers, when nobody "
+        + "has recorded one. Say WHY it is absent and what the source read did and did not return. "
+        + "You supply no dates: a service period a model derived can never become a durable "
+        + "accounting fact, so this question always asks a person for the first and last day it "
+        + "covers and how they know that period. Do NOT use it when a term is already recorded - "
+        + "the record is the record - and never use it to confirm a period you were given.",
+      inputSchema: answerPrepaymentTermInputSchemaV6,
     }),
     [READ_KNOWLEDGE_SOURCE_TOOL]: tool({
       description:

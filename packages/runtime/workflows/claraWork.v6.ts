@@ -73,7 +73,9 @@ import {
   markRunningStep,
   mintHookTokenStep,
   openWorkQuestionStep,
-  particularsQuestionV4,
+  faProposalFromInputsV6,
+  loadFaProposalInputsStepV6,
+  particularsQuestionV6,
   readKnowledgeDriftStepV6,
   recheckAuthorityStepV3,
   runWorkSegmentStepV6,
@@ -285,7 +287,13 @@ export async function claraWork_v6(input: { taskId: string }): Promise<{ taskId:
           await emitWorkStatusStepV3(work.workId, work.clientId, "awaiting_input");
           const hookToken = await mintHookTokenStep();
           const hook = createHook<WorkResume>({ token: hookToken });
-          const asked = particularsQuestionV4(pending);
+          // #933 (A10) - THE PROPOSAL, DERIVED BEFORE THE QUESTION OPENS. The read never throws
+          // and the derivation cannot fail: a register this run cannot read, or a shape the
+          // module's own schema refuses, yields `null` and the question opens exactly as v5's did.
+          // What a proposal adds is the ONE key `proposalSourceRef` puts beside the asset id, and
+          // `apps/web/components/work/work-question-form.tsx` already reads that shape.
+          const proposalInputs = await loadFaProposalInputsStepV6(work, pending);
+          const asked = particularsQuestionV6(pending, faProposalFromInputsV6(proposalInputs));
           // A DOOR CALL RAISES, AND A RAISE HERE MUST NOT UNDO A POSTED ENTRY. Unwrapped, a
           // refusal from `clara.open_work_question` reached the outer catch and settled the Work
           // `failed`/`internal` with "Nothing was posted" — which would be FALSE: the acquisition

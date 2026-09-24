@@ -41,6 +41,10 @@
       "note": "#652 — frozen BY CLOSURE, not by marker: chatTurn_v20 imports the accrual schema and `accrualFromInput`, so check-frozen-workflows.mjs's import closure hash-locks this file and apps/web does NOT import it — it cannot: nothing under apps/web imports @clara/runtime and no @clara/* package is in apps/web's dependencies (apps/web/lib/checkout/stripe-session.test.ts:444-446 states the same reason for the same app: \"apps/web cannot import @clara/runtime (it is not a dependency; this app builds for Workers off its own set)\"). The browser keeps a hand-maintained MIRROR of this vocabulary instead — ACCRUAL_METHODS / ACCRUAL_FREQUENCIES / ACCRUAL_DAY_RULES / ACCRUAL_TIMEZONE / ACCRUAL_DAY_OF_MONTH_MAX in apps/web/lib/accruals/api.ts, consumed by apps/web/lib/work/accrual-draft.ts — and this hash lock does NOT cover it, nor does any test pin the two to each other, so a change here needs the mirror moved in the same commit. DEPLOY ORDER: migration 0222 (clara.create_accrual_adjustment_for) must be live BEFORE this image serves a chat turn. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live.",
       "deployed": true
     },
+    "packages/runtime/lib/accrual-basis.v2.ts": {
+      "sha256": "92ac2e35ae68ce713f11ebfeb3802385b5ef850088ae6ffbbd876c061f744db4",
+      "note": ""
+    },
     "packages/runtime/lib/capability-registry-v2.mjs": {
       "sha256": "2024074b3a226c0c44cafdac668260fc3728c1d6eb67591a14d77f3692709857",
       "note": "",
@@ -55,6 +59,10 @@
       "sha256": "24b44be1ef3a56ef0399bac1287e81f9aa43e82dc5eb3b36346311459ca9cfdf",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/lib/fa-particulars-proposal.ts": {
+      "sha256": "49d583fc7dc9e89717dcdf1a285bbc2b1c0b757430d00d919b281fc307cd51c3",
+      "note": ""
     },
     "packages/runtime/lib/fixed-asset-acquisition.ts": {
       "sha256": "9846bdbdf33c374994fb9033ea8765f7b3dd64e9016867b6d2177a544868a6d9",
@@ -85,20 +93,40 @@
       "sha256": "423f0ca6e4cf8cd7ffee37f841e2e76420cb7cc2f8494840e72bc146806c65b7",
       "note": "#985 (the 2026-09-25 cut phase) - frozen BY CLOSURE, not by marker: chatTurn_v22's read_opening_source tool calls this module's parseOpeningTargets, the same route core src/openingRoutes.ts calls, so the freeze lint hash-locks it. THE COST IS EXACTLY THIS FILE: it has no relative imports of its own, so nothing travels with it, and #656 kept it that way on purpose (its OPENING_TB_REFUSAL_ENVELOPE_KEY comment spells the producer's envelope key out rather than importing lib/opening-tb-produce.mjs, 'the door must not gain an import edge into the producer, which would freeze the producer the day a Clara tool imports this door'). Its four other importers (src/openingRoutes.ts, lib/opening-tb-cells.mjs, lib/opening-tb-produce.mjs, lib/egress.mjs) keep importing it and stay editable; what is frozen is this file's own text. A behavioural change to the opening parse is therefore a NEW module plus a chatTurn successor that imports it, never an edit here (owner ruling 2026-09-15, packages/runtime/README.md). NOT deploy-locked yet."
     },
+    "packages/runtime/lib/payroll-fact-state.ts": {
+      "sha256": "f98833037a9f3410c46a89655774f07eeb409208f295b7cf7f53b93758edae6f",
+      "note": ""
+    },
     "packages/runtime/lib/periodic-adjustment-basis.ts": {
       "sha256": "9670d5b96365a1c7613e25846069ad569be9bce95fc0865c7795f1b5220b6a5a",
       "note": "#643 — frozen BY CLOSURE, not by marker: chatTurn_v19 imports the adjustment schemas and basis builders, so check-frozen-workflows.mjs's import closure hash-locks this file and apps/web does NOT import it — nothing under apps/web imports @clara/runtime and no @clara/* package is in apps/web's dependencies. The periodic-adjustment form keeps a hand-maintained MIRROR of these rules in apps/web/lib/work/periodic-adjustment.ts (its header calls every rule there a mirror of one the database enforces); this hash lock does not cover it. Note corrected 2026-09-17 (wave 2026-09-15, successors re-review R2): the earlier sentence said the web form IMPORTS this module, which it cannot — the file's bytes and sha256 are untouched, only this prose moved. DEPLOY ORDER: migration 0194 must be live BEFORE this image serves a chat turn. NOT deploy-locked yet.",
       "deployed": true
+    },
+    "packages/runtime/lib/prepayment-schedule-basis.ts": {
+      "sha256": "bac097b27f45ea9b639d4fe8525e337f12268176a558d9fcca5587e7b86ccaa4",
+      "note": ""
+    },
+    "packages/runtime/lib/revenue-recognition-basis.ts": {
+      "sha256": "ba212504ded78fb7bfdc86650b497c0395fe9f12d22a9d4d72bca5f25d484abe",
+      "note": ""
     },
     "packages/runtime/lib/staff-expense-claim-basis.ts": {
       "sha256": "a3727b07502d0a52fd5f0a6317909cb15c5998cc4aff1f1f386fcca022f0f6df",
       "note": "#638 — frozen BY CLOSURE, not by marker: chatTurn_v20 imports the claim schema, `claimFromInput` and `localClaimRefusal`, so check-frozen-workflows.mjs's import closure hash-locks this file. It is subject to the SAME hash lock as a frozen body: after the ceremony stamps `deployed: true`, a change here ships only with a new chatTurn successor. DEPLOY ORDER: migration 0221 (clara.admit_staff_expense_claim_work) must be live BEFORE this image serves a chat turn. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live.",
       "deployed": true
     },
+    "packages/runtime/lib/staff-expense-claim-basis.v2.ts": {
+      "sha256": "e5d2ab70e2314e78150fa3d38c5f3ad3e046929dcd522953536aa421b33fcbc1",
+      "note": ""
+    },
     "packages/runtime/lib/trade-invoice-basis.ts": {
       "sha256": "a6e1a045d093b221025df38a0b29c0f0dbe35c2c433df7f2bd787ec3e84ea993",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/lib/trade-invoice-basis.v2.ts": {
+      "sha256": "22facb184321f51588221c58e17771ab7ef6ce684b6bd39b218c78c9385e9c90",
+      "note": ""
     },
     "packages/runtime/lib/work-trace-bounds.mjs": {
       "sha256": "dfc4d9425898cb99a8c75678e6ba22b2c353958671cfa8722008a43708de8f0f",
@@ -880,11 +908,11 @@
       "note": "#985 - chatTurn_v22's steps. runModelSegmentStepV22 is the one new step (the bundle gate derives that exact name from the registry pin); every other step is v10's or v21's, reached by import, so a run journalled under v21 resumes on identical step identities. NOT deploy-locked yet."
     },
     "packages/runtime/workflows/chatTurn.v22.prompt.ts": {
-      "sha256": "38cf0dc66908c1ef4d43e462c3046248e21df74b8e3c89c0c5870255cb80835c",
+      "sha256": "1024b2a9dc71b25a414da9e7e62b54e560b085c997bc52a418d0aa3e5019fcc2",
       "note": "#985 - chatTurn_v22's prompt: v21's text plus ONE stanza, READING AN OPENING SOURCE. No new wire kind (ClaraPartV22 IS ClaraPartV21 by reference) and no new C-19 coding-intent arm - the tool mints no terminal card, so a successful read must not collect the coding-incomplete refusal. NOT deploy-locked yet."
     },
     "packages/runtime/workflows/chatTurn.v22.tools.ts": {
-      "sha256": "a9f7b0cd9370aabc0b834da28a14f7f8fc354dc5bb02f72179b78411d0d4bade",
+      "sha256": "520ecad9c88a1dff6f1031a618929f188950ff91a7a1165ec4971a06b893ebac",
       "note": "#985 - chatTurn_v22's tool map: buildToolsV21's thirty-nine by import plus read_opening_source. The tool calls the route core parseOpeningTargets(client, {seedId, firmId, reassert}) on a clara_runtime connection and never clara.record_opening_targets_parsed itself, and it restates the browser route's bookkeeper+ floor through clara.resolve_chat_principal rather than importing lib/authz.mjs (which would freeze the runtime's auth boundary for every route). NOT deploy-locked yet."
     },
     "packages/runtime/workflows/chatTurn.v22.ts": {
@@ -1279,19 +1307,23 @@
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v6.impl.ts": {
-      "sha256": "a896dc6b05b424433e34bb4e33f7cf3b8f07ba7162b6dd8d9a51d1cc4af2443c",
+      "sha256": "9ef5987a5be68d8e5926021b5e77e76a645bec400b4a2cdc3cdf673ef48ddbf6",
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v6.prompt.ts": {
-      "sha256": "f7fb47f9531da83ff6a2b637968aab8afa49ca65dbf6b9be57020677e5f331bd",
+      "sha256": "66f4f0a77b89bfbd4a7ab7438c0b32a10391cd2cd97088e4907485b0d3009657",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v6.schemas.ts": {
+      "sha256": "6c070ee6bb81ed1ef1249656977416b7c5e44fdbc1d54fca4691946db9f6191d",
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v6.tools.ts": {
-      "sha256": "d72969bd70ddc2c50f01e3413813edec646f8c399d4feb18156377de74376578",
+      "sha256": "a8a72ee7d5478cd06f7a7248fd72ea499c6a4e2196a2056a09c73b99fe33062f",
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v6.ts": {
-      "sha256": "789115efdfdd7a2da3ff33e17d0f1120f46e518dba27f20ac280961fa1bf742a",
+      "sha256": "73365a3f4802038466009ef8bcf9e0ecfc295fd62f443c782b73437f513036d7",
       "note": ""
     },
     "packages/runtime/workflows/clientOnboarding.v1.ts": {

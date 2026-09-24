@@ -26,7 +26,7 @@
 import { ToolLoopAgent, hasToolCall, isStepCount } from "ai";
 import type { ModelMessage } from "ai";
 import { getWritable, getWorkflowMetadata } from "workflow";
-import { pools, type PgExec } from "./chatTurn.v15.infra.js";
+import { pools, readScoped, type PgExec, type ToolCtx } from "./chatTurn.v15.infra.js";
 import { resolveModel } from "./chatTurn.v15.infra.js";
 import {
   classifyWorkError,
@@ -73,6 +73,20 @@ import {
   ASK_QUESTION_TOOL,
   buildClaraWorkToolsV6,
 } from "./claraWork.v6.tools.js";
+import {
+  ANSWER_PREPAYMENT_TERM_TOOL,
+  PREPAYMENT_TERM_FIELDS,
+  PREPAYMENT_TERM_QUESTION,
+} from "./claraWork.v6.schemas.js";
+import {
+  deriveFaParticularsProposal,
+  faParticularsProposalSchema,
+  proposalSourceRef,
+  type FaParticularsProposal,
+  type FaProposalInputs,
+  type FaProposalSibling,
+} from "../lib/fa-particulars-proposal.js";
+import type { AskQuestionInputV3 } from "./claraWork.v3.tools.js";
 import {
   CLARA_WORK_BUDGETS_V6,
   CLARA_WORK_BUNDLE_V6,
@@ -790,6 +804,10 @@ export async function runWorkSegmentStepV6(
       hasToolCall(ASK_QUESTION_TOOL),
       hasToolCall(ANSWER_ACCRUAL_TERM_TOOL),
       hasToolCall(ASK_KNOWLEDGE_CONFLICT_TOOL),
+      // #915's term park is a QUESTION, so it stops the loop exactly as the other three do. The
+      // two source READS do not, and that asymmetry is the point of them: a run reads a recorded
+      // term IN ORDER to keep going.
+      hasToolCall(ANSWER_PREPAYMENT_TERM_TOOL),
       stoppedOnTerminalWorkTool,
     ],
   });
@@ -824,7 +842,7 @@ export async function runWorkSegmentStepV6(
     });
   }
 
-  const question = findQuestionCallV4(result.steps as never);
+  const question = findQuestionCallV6(result.steps as never);
   const parts: ClaraWorkPartV6[] = [];
   const text = String(result.text ?? "").trim();
   if (text) parts.push({ type: "text", text });
@@ -1164,4 +1182,199 @@ export function sourceCorrectionQuestionV6(brief: SourceCorrectionBriefV6): {
 export function sourceCorrectionConfirmedV6(answer: unknown): boolean {
   if (!answer || typeof answer !== "object") return false;
   return (answer as Record<string, unknown>).confirm === "record";
+}
+
+// ---------------------------------------------------------------------------
+// #1135 / #915's term park - the FOURTH question arm.
+//
+// v4's finder reads three tools; v6 reads four. The new one is `answer_prepayment_term`, and like
+// v4's two narrow ones it supplies NEITHER the question nor the fields from the model's call: both
+// come from this closure's own constants. That is where "#939's park may not accept a period the
+// model derived" actually lives - there is no path from a tool input to these dates.
+// ---------------------------------------------------------------------------
+
+/** v4's own private helper, restated because a deployed body does not export it. */
+function questionFieldsV6(fields: ReadonlyArray<Record<string, unknown>>): AskQuestionInputV3["fields"] {
+  return fields.map((f) => Object.assign({}, f)) as unknown as AskQuestionInputV3["fields"];
+}
+
+type RawCallV6 = { type?: string; toolName?: string; toolCallId?: unknown; input?: unknown };
+
+/**
+ * The question call a segment ended on. v4's THREE arms, reached by calling v4's own finder, plus
+ * this cut's fourth.
+ *
+ * THE FOURTH IS CHECKED FIRST and the delegation second, because v4's finder walks the same steps
+ * and would answer `null` for a call it has never heard of - so asking it first would simply
+ * discard the prepayment park.
+ */
+export function findQuestionCallV6(
+  steps: ReadonlyArray<{ content?: ReadonlyArray<RawCallV6> }>,
+): AskedQuestionV4 | null {
+  for (let i = steps.length - 1; i >= 0; i -= 1) {
+    for (const part of steps[i]?.content ?? []) {
+      if (part.type !== "tool-call") continue;
+      if (part.toolName !== ANSWER_PREPAYMENT_TERM_TOOL) continue;
+      const input = (part.input ?? {}) as Record<string, unknown>;
+      const reason = typeof input.reason === "string" ? input.reason.trim() : "";
+      // A QUESTION NOBODY CAN ACT ON IS WORSE THAN NONE: a call with no stated reason parks
+      // nothing, exactly as v4's narrow arms refuse one.
+      if (!reason) continue;
+      const context = typeof input.context === "string" && input.context.trim() ? input.context.trim() : undefined;
+      const raw = input.source_ref;
+      const sourceRef =
+        raw !== null && typeof raw === "object" && typeof (raw as { kind?: unknown }).kind === "string"
+          ? (raw as AskQuestionInputV3["source_ref"])
+          : undefined;
+      return {
+        toolCallId: String(part.toolCallId ?? ""),
+        toolName: ANSWER_PREPAYMENT_TERM_TOOL,
+        question: PREPAYMENT_TERM_QUESTION,
+        reason,
+        context,
+        sourceRef,
+        fields: questionFieldsV6(PREPAYMENT_TERM_FIELDS as unknown as ReadonlyArray<Record<string, unknown>>),
+      };
+    }
+  }
+  return findQuestionCallV4(steps as never);
+}
+
+// ---------------------------------------------------------------------------
+// #1135 / #933 (A10) - the dependent-particulars PROPOSAL.
+//
+// WHAT THE CUT TAKES IS `wave4-lane05-fix.md`'s CORRECTED contract, not the ticket report's own
+// sections 2 and 3. Taking those verbatim would ship the previous-calendar-day defect: without the
+// `::text` cast node-postgres maps a Postgres `date` onto a JS `Date` at LOCAL midnight, whose UTC
+// spelling under Asia/Kuala_Lumpur is the day before - and every depreciation charge from then on
+// would be computed from a date one day early. The derivation refuses a `Date` by name, so a
+// forgotten cast is a loud failure rather than a wrong date; the cast is what makes it never
+// happen.
+//
+// THE PROPOSAL IS NOT A MODEL ACT. The dependent question is opened by the workflow BODY after a
+// commit, so v6's tool roster gains nothing for it and no tool takes an input for it. What it
+// changes is ONE key of the question the body already opens.
+// ---------------------------------------------------------------------------
+
+/**
+ * The inputs the derivation needs, read under v4's OWN credential.
+ *
+ * IT NEVER THROWS, and that posture is v4's for the same read: a register the run cannot read is
+ * not a reason to withhold a question. A failed read yields `null`, the question opens without a
+ * block, and every surface renders today's empty form.
+ */
+export async function loadFaProposalInputsStepV6(
+  work: LoadedWork,
+  pending: PendingFixedAssetV4,
+): Promise<FaProposalInputs | null> {
+  "use step";
+  const ctx: ToolCtx = { firmId: work.firmId, clientId: work.clientId, createdBy: work.initiator, taskId: "" };
+  try {
+    return await readScoped(ctx, async (c: PgExec) => {
+      // (a) THIS asset's own account, acquisition date and completeness. `::text` IS LOAD-BEARING
+      //     (see this section's header).
+      const own = await c.query(
+        `select fa.asset_account_code,
+                fa.acquired_date::text as acquired_date,
+                (fa.depreciation_start_date is not null and fa.depreciation_method is not null)
+                  as particulars_complete
+           from clara.fixed_assets fa
+          where fa.client_id = $1::uuid and fa.id = $2::uuid`,
+        [work.clientId, pending.assetId],
+      );
+      const row = (own.rows[0] ?? null) as Record<string, unknown> | null;
+      if (!row) return null;
+      const assetAccount = row.asset_account_code == null ? null : String(row.asset_account_code);
+
+      // (b) the account's OTHER completed, live rows. `residual_cents` is NOT selected: the
+      //     proposal's residual is the firm's nil default by the owner's #932 decision and is never
+      //     read off a ground, so carrying it would only invite a half-adoption.
+      //
+      //     A NULL ACCOUNT NARROWS EVERY GROUND, and that is the derivation's own rule rather than
+      //     an accident: with `$3` null this statement yields nothing, because `= null` is never
+      //     true, and a row on no account grounds only on inputs that are also on no account.
+      const siblingRows = await c.query(
+        `select fa.asset_account_code, fa.depreciation_method, fa.useful_life_months,
+                fa.depreciation_rate_bps
+           from clara.fixed_assets fa
+          where fa.client_id = $1::uuid
+            and fa.asset_account_code = $3::text
+            and fa.id <> $2::uuid
+            and fa.superseded_at is null
+            and fa.status in ('active','pending')
+            and fa.depreciation_method is not null
+            and fa.depreciation_start_date is not null
+          order by fa.created_at desc
+          limit 50`,
+        [work.clientId, pending.assetId, assetAccount],
+      );
+      const siblings: FaProposalSibling[] = [];
+      for (const sibling of siblingRows.rows as Record<string, unknown>[]) {
+        siblings.push({
+          assetAccount: sibling.asset_account_code == null ? null : String(sibling.asset_account_code),
+          particularsComplete: true,
+          method: sibling.depreciation_method == null ? null : String(sibling.depreciation_method),
+          usefulLifeMonths: sibling.useful_life_months == null ? null : Number(sibling.useful_life_months),
+          rateBps: sibling.depreciation_rate_bps == null ? null : Number(sibling.depreciation_rate_bps),
+        });
+      }
+      return {
+        asset: {
+          assetId: pending.assetId,
+          description: pending.description,
+          costCents: pending.costCents,
+          nonDepreciable: pending.nonDepreciable,
+          particularsComplete: row.particulars_complete === true,
+          assetAccount,
+          acquiredDate: row.acquired_date == null ? null : String(row.acquired_date),
+        },
+        siblings,
+        // knowledge / retiredPolicy: OMITTED on this frontier - `clara.knowledge_keys` catalogues
+        // no depreciation key yet, and the retired-policy relation is unreachable from this
+        // credential. Both grounds are built and ranked in the derivation, so cataloguing the key
+        // is the whole of the later change.
+      };
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * v4's question with ONE key changed. `question`, `reason`, `context` and `fields` are v4's, BY
+ * CALL rather than by copy, so the two can never drift; only `sourceRef` moves, to carry the
+ * proposal beside the asset id.
+ *
+ * A PROPOSAL THAT FAILS ITS OWN SCHEMA IS TREATED AS ABSENT. That is a defect rather than a
+ * refusal, and the answer to a defect is the question v5 already opened - never a block the
+ * particulars door would later refuse, sitting on a durable question a person reads hours later.
+ */
+export function particularsQuestionV6(
+  pending: PendingFixedAssetV4,
+  proposal: FaParticularsProposal | null,
+): ReturnType<typeof particularsQuestionV4> {
+  const base = particularsQuestionV4(pending);
+  const checked = proposal === null || !faParticularsProposalSchema.safeParse(proposal).success
+    ? null
+    : proposal;
+  return {
+    question: base.question,
+    reason: base.reason,
+    context: base.context,
+    sourceRef: proposalSourceRef(pending.assetId, checked) as unknown as AskQuestionInputV3["source_ref"],
+    fields: base.fields,
+  };
+}
+
+/** The derivation itself, from inputs the step above read. It is PURE and it cannot fail: every
+ *  input is optional, and an absent ground produces a narrower proposal rather than an error. */
+export function faProposalFromInputsV6(inputs: FaProposalInputs | null): FaParticularsProposal | null {
+  if (inputs === null) return null;
+  try {
+    return deriveFaParticularsProposal(inputs);
+  } catch {
+    // The derivation REFUSES a `Date` by name (see the header). A throw here is this closure's own
+    // wiring mistake, and the honest answer to it is the question v5 already opened.
+    return null;
+  }
 }
