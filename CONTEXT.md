@@ -141,9 +141,10 @@ owed to the customs department is not revenue and never becomes revenue.
 _Avoid_: An invoice — the advance was received and posted before any schedule existed, and nothing
 here touches MyInvois; usage-based or milestone recognition, which needs a measure of progress this
 estate does not record and is refused by name; a schedule over the gross receipt, which would
-recognise the tax as income; revising a running schedule to correct its term — the correction is a
-new schedule from the next period; "configured" as a synonym for "recognised", which is a different
-fact and a different count.
+recognise the tax as income; revising a running schedule to correct its term — a correction
+supersedes the statement and moves no schedule, and this estate opens no replacement schedule at
+all: one recognition carries one schedule, ended or running; "configured" as a synonym for
+"recognised", which is a different fact and a different count.
 
 **On-behalf-of door**:
 The second entrance to a write a person may make, for the times Clara makes it FOR them in a
@@ -213,7 +214,9 @@ about the span it buys has changed. It is not the same fact as a superseded term
 period on a document that already carries a live one supersedes the old row whatever the new one
 says, so a second verification that restates the same two dates supersedes a row and corrects
 nothing. Only a corrected term makes an allocation already derived from the old one wrong, and only
-a corrected term is grounds for telling a firm its schedule has to be rebuilt.
+a corrected term is grounds for telling a firm the difference exists — which is as far as the estate
+goes today: one recognition carries one schedule, so the schedule itself cannot be rebuilt and a
+surface names the difference for a reviewer rather than offering a replacement.
 _Avoid_: Reading "the row this schedule rode is no longer live" as "the term was corrected" — the
 first is bookkeeping about rows, the second is a statement about the client's affairs, and a
 surface that confuses them tells a firm to abandon a running amortisation for no reason; treating a

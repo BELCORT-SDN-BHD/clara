@@ -5354,6 +5354,25 @@ pinned: it is an UPDATE with no INSERT, so its loser blocks on the row lock, mat
 takes the door's own typed `not_enrolled` arm — driven in `p940.enrol.race`'s second half rather
 than argued.
 
+### Not in this file: the correction path (L04-SPEC-04, owner-blocked)
+
+`uq_prepayment_schedules_source` (0223) and `uq_revenue_recognition_schedules_source` (0308) are
+plain UNIQUE constraints on `source_entry_id`: no status predicate, no partial index. One
+recognition entry carries one schedule, for ever. Driven on `clara_l04` in
+`p939.supersede.running` and `p941.supersede.running`: after a stated term is corrected the door
+answers CLR13 `prepayment_schedule_exists` / `revenue_recognition_schedule_exists`, and it answers
+the SAME once the plan has been ended through `clara.end_accounting_plan` — ending opens nothing.
+So "a new schedule from the next period", which #939 AC4, #941 AC3 and owner decision 3 all name
+as the correction path, exists in no door of this estate.
+
+Nothing here builds one, because what a replacement would be derived FROM is an owner decision (the
+un-amortised balance of the schedule that ran, or a fresh recognition entry) and what happens to the
+running schedule's future periods is a second. What this lane did instead is make every surface say
+the limitation rather than advise an act the database refuses: the corrected-term banner, the
+stated-term form, the ended-schedule note, the lapsed-authority explanation and the period-line
+explanation on both registers. Until the ruling lands, neither register may be advertised as
+supporting term correction.
+
 ### What this file deliberately does not do
 
 - It does not widen `clara.accounting_plans.authority_kind` or touch `clara._authority_ref_refusal`,

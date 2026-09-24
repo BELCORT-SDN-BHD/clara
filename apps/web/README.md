@@ -1004,6 +1004,20 @@ is the second half of the same discipline: the field arrives as unvalidated json
 — a web build ahead of its database, or a rolled-back migration under a live runtime — is falsy,
 which would paint the warning on every prepayment in the firm.
 
+**And no sentence on either register offers a replacement schedule** (L04-SPEC-04). Measured on the
+lane database in `p939.supersede.running` / `p941.supersede.running`:
+`uq_prepayment_schedules_source` and `uq_revenue_recognition_schedules_source` carry no status
+predicate, so `clara.create_prepayment_schedule` and `clara.create_revenue_recognition_schedule`
+answer CLR13 `…schedule_exists` for a second schedule over the same recognition BOTH while the
+first is running and after it has been ended through `clara.end_accounting_plan`. Five strings used
+to send a person to configure one anyway — the corrected-term banner, the stated-term form, the
+ended-schedule note, the lapsed-authority explanation (`explainAuthority`; 0193's
+`clara.revise_accounting_plan` moves the SCHEDULE and never `authorised_by`, so reassigning
+authority is not a door either) and the period-line explanation (`explainPeriodLine`, the corrected-
+term case itself). Each states the limitation now and names the act that does exist. A door that
+opens a replacement is owed to an owner ruling; until it lands, neither register may be advertised
+as supporting term correction.
+
 ## #939 — where a prepayment's term came from
 
 A prepayment recognised with NO document is amortised over a service period a named person states
