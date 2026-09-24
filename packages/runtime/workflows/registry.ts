@@ -996,6 +996,9 @@ export { invoiceFacts_v1 };
 export { witnessFacts_v3 };
 // #945: payrollFacts_v1 is the `payrollFacts:` pointer and its only version.
 export { payrollFacts_v1 };
+// #948: agreementFacts_v1 is the `agreementFacts:` pointer and its only version — the same
+// shape payrollFacts_v1 carries three lines above, for the same reason.
+export { agreementFacts_v1 };
 export { firmInterview_v3 };
 export { clientOnboarding_v4 };
 export { clientOnboarding_v5 };
@@ -1066,6 +1069,7 @@ export const workflowBodies: readonly string[] = Object.freeze([
   "witnessFacts_v2",
   "witnessFacts_v3",
   "payrollFacts_v1",
+  "agreementFacts_v1",
   "autoDraft_v1",
   "autoDraft_v2",
   "autoDraft_v3",
@@ -1101,6 +1105,7 @@ export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
   statementFacts: "statementFacts_v3",
   witnessFacts: "witnessFacts_v3",
   payrollFacts: "payrollFacts_v1",
+  agreementFacts: "agreementFacts_v1",
   autoDraft: "autoDraft_v10",
   firmInterview: "firmInterview_v3",
   clientOnboarding: "clientOnboarding_v5",
