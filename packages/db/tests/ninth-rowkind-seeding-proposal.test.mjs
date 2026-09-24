@@ -10,7 +10,7 @@
 //   (1) NO client produces a `seeding_proposal` row — not one with open proposals in an OPEN
 //       batch (the state that used to chase), and not one with none at all.
 //   (2) EVERY OTHER row kind is untouched: the eight survivors this file's own fixtures can
-//       produce are each OBSERVED by name, at the FULL 31-key row shape, and the three columns
+//       produce are each OBSERVED by name, at the FULL 33-key row shape, and the three columns
 //       the retired CTE alone ever populated
 //       (client_name / batch_ids / open_proposal_count) are now null on EVERY row — the named
 //       residual 0288 §C records rather than recutting ten CTEs to drop three dead columns.
@@ -49,7 +49,7 @@ let live = false;
 let executed = 0;
 let w = null;
 
-// The full, exact 31-key shape every clara.list_review_queue row carries. Sourced from the LIVE
+// The full, exact 33-key shape every clara.list_review_queue row carries. Sourced from the LIVE
 // json builder, never re-typed by hand from a migration's first text. 0288 does NOT move it:
 // the three seeding-only keys stay in the envelope and are null everywhere (0288 §C's named
 // residual). work-question-reads.test.mjs keeps its own independent copy of this roster on
@@ -64,6 +64,11 @@ const FULL_ROW_KEYS = [
   // #974 (0260): authority_id, gated exactly like asset_id/advance_id (derived from the
   // shared `id` at json-build time) — present, usually null, on EVERY row.
   "authority_id",
+  // #942 (0304): accrual_side and accrual_plan_status, gated exactly like authority_id above —
+  // both are derived from the shared `id` at json-build time, so they are PRESENT, and null, on
+  // EVERY row; only an accrual_bill_conflict row carries a value. The envelope therefore went
+  // 31 -> 33 keys estate-wide.
+  "accrual_side", "accrual_plan_status",
 ].sort();
 
 /** clara.list_review_queue still emits TEN row kinds after 0288 spliced the eleventh out. These
@@ -185,7 +190,7 @@ cell("0288: NO client produces a seeding_proposal row — not one carrying open 
   noteLane("0288: the seeding_proposal row kind is gone for every client, firm-wide and client-scoped, while its proposals stay readable");
 });
 
-cell("0288: the surviving row_kinds are untouched — the EIGHT this file can produce are each OBSERVED by name at the FULL 31-key shape, with the three seeding-only columns now null on EVERY row", async () => {
+cell("0288: the surviving row_kinds are untouched — the EIGHT this file can produce are each OBSERVED by name at the FULL 33-key shape, with the three seeding-only columns now null on EVERY row", async () => {
   const { users, firms, clients } = w;
   const seen = {};
   const need = (kind) => { assert.ok(seen[kind], `row_kind='${kind}' never landed in ANY envelope this cell read — every surviving kind must be OBSERVED, not merely possible`); };
@@ -253,7 +258,7 @@ cell("0288: the surviving row_kinds are untouched — the EIGHT this file can pr
       "no envelope may carry a seeding_proposal row after 0288");
     assert.deepEqual(
       [...Object.keys(row)].sort(), FULL_ROW_KEYS,
-      `row_kind='${row.row_kind}' (id=${row.id}) carries a DIFFERENT key set than the pinned 31-key shape — a key was added, dropped or renamed (got ${JSON.stringify([...Object.keys(row)].sort())})`,
+      `row_kind='${row.row_kind}' (id=${row.id}) carries a DIFFERENT key set than the pinned 33-key shape — a key was added, dropped or renamed (got ${JSON.stringify([...Object.keys(row)].sort())})`,
     );
     // 0288 §C's named residual, asserted rather than assumed: the three columns the retired CTE
     // alone ever populated are now null EVERYWHERE, on every kind, in every envelope.
