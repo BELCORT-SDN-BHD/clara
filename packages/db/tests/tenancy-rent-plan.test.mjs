@@ -547,3 +547,174 @@ test("S2 · a financing agreement is not a tenancy, and this lane proposes nothi
   assert.deepEqual(proposal.proposed, [], "a hire purchase proposes no tenancy term at all");
   assert.equal(proposal.reason, "not_a_tenancy", "…and says why, by name");
 });
+
+// ---------------------------------------------------------------------------
+// S3 — the standard branch the owner ruled on 2026-09-20 (MPERS Section 20 / MFRS 16).
+//
+// A cell per branch, exactly as the ruling asks: MPERS level rent DRAFTS; MFRS over 12 months
+// ASKS; MFRS 12 months or less DRAFTS; a stated escalation ASKS under BOTH frameworks.
+// ---------------------------------------------------------------------------
+
+/** The client's reporting framework, recorded through the estate's OWN knowledge door — never
+ *  hand-inserted. `reporting_framework` is an authority-bearing POLICY key, so only an asserted
+ *  source may fill it; `user_statement` is the asserted source a person's own statement takes. */
+async function setFramework(sub, client, code, { scope = "client" } = {}) {
+  await humanQuery(
+    sub,
+    `select clara.capture_knowledge(p_knowledge_key => 'reporting_framework',
+        p_value => $1::jsonb, p_basis => $2, p_op_key => $3,
+        p_scope_kind => $4, p_client => $5, p_source_kind => 'user_statement')`,
+    [
+      JSON.stringify({ framework_code: code, framework_label: `${code} (p949 fixture)` }),
+      "the engagement letter records the framework these accounts are prepared on",
+      opk949("framework"),
+      scope,
+      scope === "client" ? client : null,
+    ],
+  );
+}
+
+/** Records the four terms Clara proposed, verbatim, as a person confirming what she read. */
+async function recordProposed(sub, client, document, extra = []) {
+  const proposal = await proposeTerms(sub, document);
+  const terms = proposal.proposed.map((p) => ({ ...p }));
+  return recordTerms(sub, { client, document, terms: [...terms, ...extra] });
+}
+
+const treatmentOf = async (client, document) =>
+  (
+    await rootQuery("select clara._tenancy_lease_treatment($1::uuid,$2::uuid) as t", [client, document])
+  ).rows[0].t;
+
+/** The escalation a person records off the side letter: RM 3,960.00 from 2027-01-05. */
+const ESCALATION_TERM = {
+  term_key: "escalation",
+  escalation: { effective_from: ESCALATION_FROM, new_amount_cents: ESCALATED_CENTS, printed_raw: "3,960.00" },
+  basis_kind: "person_stated",
+  basis: "clause 4(b) of the side letter raises the rent in the second year",
+};
+
+async function tenancyFor(sub, { months = "24", framework = null } = {}) {
+  const client = await freshClient(sub);
+  await seedTenancyChart(sub, client);
+  if (framework) await setFramework(sub, client, framework);
+  const doc = await readTenancy(sub, client, {
+    answers: months === "24" ? {} : { "contract.agreement.term_months": value(months) },
+  });
+  return { client, doc };
+}
+
+test("S3 · MPERS with level rent DRAFTS, and the basis names MPERS Section 20", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+
+  const tr = await treatmentOf(client, doc.documentId);
+  assert.equal(tr.drafts, true, `MPERS + level rent is the ordinary case: ${JSON.stringify(tr)}`);
+  assert.equal(tr.framework_code, "MPERS");
+  assert.equal(tr.reason, null);
+  assert.equal(tr.standard, "MPERS Section 20");
+  assert.match(tr.basis, /straight-line/i, "the written basis says what the standard asks for");
+  assert.match(tr.basis, /MPERS Section 20/);
+  assert.match(tr.basis, /MFRS 16/, "…and names the other framework too, so a reader sees which one was applied and why");
+  assert.equal(Number(tr.monthly_rent_cents), RENT_CENTS);
+  assert.equal(tr.term_months, 24);
+});
+
+test("S3 · MFRS over 12 months ASKS: a right-of-use asset and a lease liability are not a rent expense", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MFRS" });
+  await recordProposed(sub, client, doc.documentId);
+
+  const tr = await treatmentOf(client, doc.documentId);
+  assert.equal(tr.drafts, false, "Clara never auto-posts a treatment that may not comply");
+  assert.equal(tr.reason, "mfrs_lease_over_twelve_months");
+  assert.equal(tr.standard, "MFRS 16");
+  assert.match(tr.question, /right-of-use asset/i, "the question states what the standard asks");
+  assert.match(tr.question, /lease liability/i);
+  assert.equal(tr.term_months, 24, "…and it states the term it read, so the accountant can decide");
+  assert.equal(Number(tr.monthly_rent_cents), RENT_CENTS, "…and the rent it read");
+});
+
+test("S3 · MFRS with a term of 12 months or less DRAFTS: the short-term lease exemption", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MFRS", months: "12" });
+  await recordProposed(sub, client, doc.documentId);
+
+  const tr = await treatmentOf(client, doc.documentId);
+  assert.equal(tr.drafts, true, `a 12-month lease is short-term: ${JSON.stringify(tr)}`);
+  assert.equal(tr.standard, "MFRS 16");
+  assert.equal(tr.term_months, 12);
+  assert.equal(tr.reason, null);
+  assert.match(tr.basis, /short-term/i);
+});
+
+test("S3 · a stated escalation ASKS under BOTH frameworks — straight-line is not the month's cash rent", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+
+  for (const framework of ["MPERS", "MFRS"]) {
+    const { client, doc } = await tenancyFor(sub, { framework, months: framework === "MFRS" ? "12" : "24" });
+    await recordProposed(sub, client, doc.documentId, [ESCALATION_TERM]);
+
+    const tr = await treatmentOf(client, doc.documentId);
+    assert.equal(tr.drafts, false, `${framework}: a stated escalation stops the draft`);
+    assert.equal(tr.reason, "escalation_stated");
+    assert.equal(Number(tr.escalation.new_amount_cents), ESCALATED_CENTS,
+      "…and the escalation it read travels with the question");
+    assert.match(tr.question, /escalation/i);
+    assert.match(tr.question, /averaged|straight-line/i, "…naming the treatment the standard asks for");
+  }
+});
+
+test("S3 · a client whose framework nobody recorded ASKS rather than assuming one", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub);
+  await recordProposed(sub, client, doc.documentId);
+
+  const tr = await treatmentOf(client, doc.documentId);
+  assert.equal(tr.drafts, false);
+  assert.equal(tr.reason, "framework_not_established");
+  assert.equal(tr.framework_code, null);
+  assert.equal(tr.framework_in_force, "none");
+  assert.match(tr.question, /framework/i);
+});
+
+test("S3 · a client exception shadows the firm default, and a framework outside MPERS/MFRS asks", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+
+  // The FIRM default is MFRS; THIS client is an MPERS private entity.
+  const { client, doc } = await tenancyFor(sub);
+  await setFramework(sub, client, "MFRS", { scope: "firm" });
+  await setFramework(sub, client, "MPERS");
+  await recordProposed(sub, client, doc.documentId);
+
+  const tr = await treatmentOf(client, doc.documentId);
+  assert.equal(tr.framework_code, "MPERS", "the client's own exception wins over the firm default");
+  assert.equal(tr.framework_in_force, "client_exception");
+  assert.equal(tr.drafts, true);
+
+  // A framework the branch cannot decide from is a question, not a guess.
+  const other = await tenancyFor(sub, { framework: "SPECIAL_PURPOSE_TAX_MANAGEMENT" });
+  await recordProposed(sub, other.client, other.doc.documentId);
+  const tr2 = await treatmentOf(other.client, other.doc.documentId);
+  assert.equal(tr2.drafts, false);
+  assert.equal(tr2.reason, "framework_not_decisive");
+  assert.equal(tr2.framework_code, "SPECIAL_PURPOSE_TAX_MANAGEMENT");
+});
+
+test("S3 · a tenancy whose terms were never recorded drafts nothing, and says which term is missing", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+
+  const tr = await treatmentOf(client, doc.documentId);
+  assert.equal(tr.drafts, false);
+  assert.equal(tr.reason, "terms_incomplete");
+  assert.deepEqual(tr.missing_terms.sort(), ["monthly_rent", "term_end", "term_start"]);
+});

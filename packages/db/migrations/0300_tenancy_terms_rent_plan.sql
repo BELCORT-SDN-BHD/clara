@@ -771,3 +771,214 @@ revoke all on function clara.propose_contract_terms(uuid) from public;
 grant execute on function clara.propose_contract_terms(uuid) to clara_authenticated;
 
 reset role;
+
+set role clara_fn_owner;
+
+-- =====================================================================================
+-- §E  THE LESSEE ACCOUNTING BRANCH (the OWNER'S RULING of 2026-09-20).
+--
+--     TWO BODIES. `clara._client_reporting_framework` answers "which framework are this
+--     client's accounts prepared on, and who said so"; `clara._tenancy_lease_treatment` walks
+--     the ruling's own branch and answers "may Clara draft a monthly rent expense here, or must
+--     she state what she read and let the accountant decide".
+--
+--     THE FRAMEWORK READ. `reporting_framework` is a knowledge key (0192/#644): an
+--     authority-bearing POLICY whose value carries {framework_code, framework_label, ...}
+--     verbatim as the interview folds it. Its own catalog label says "DESCRIPTIVE in this slice
+--     -- no posting or presentation code reads this row". THIS BODY IS THE FIRST READER, and it
+--     reads it to ASK A QUESTION, never to post one: the whole point of the branch below is that
+--     the framework decides whether Clara may draft, not what she may post.
+--
+--     PRECEDENCE, and why it is re-derived here rather than taken from
+--     clara.get_knowledge_applicability: that read is a human-context door (it calls
+--     clara._human_ctx and raises CLR11), and this body is an internal reached from a definer
+--     that has ALREADY settled the firm and the client. It applies the SAME precedence that read
+--     applies -- a live CLIENT record shadows a live FIRM record, each inside its effective
+--     window -- and it answers `ambiguous` rather than picking when two live records of one
+--     scope carry different framework codes under different applicability conditions. A
+--     conditional framework is a real thing a firm may record; choosing between two of them from
+--     a tenancy is not this lane's judgement to make.
+--
+--     THE BRANCH, in the ruling's own order and with its own words in the sentences:
+--       0. THE TERMS MUST BE RECORDED. No monthly rent, no first day, no last day -> nothing to
+--          decide about. `terms_incomplete`, naming which are missing.
+--       1. A STATED ESCALATION ASKS, UNDER BOTH FRAMEWORKS. "Straight-line means the total rent
+--          averaged over the term, so with a stated escalation the monthly expense differs from
+--          the month's cash rent." Clara reads the escalation and states it; she does not average
+--          anything, because whether the increases merely follow expected general inflation is a
+--          judgement about the future that no body here can make.
+--       2. THE FRAMEWORK MUST BE ESTABLISHED. Not recorded -> `framework_not_established`; a
+--          framework that is neither MPERS nor MFRS -> `framework_not_decisive`. Each ASKS.
+--       3. MPERS -> DRAFTS. Section 20: a lessee expenses operating-lease payments on a
+--          straight-line basis over the lease term, and with level rent the straight line IS the
+--          monthly rent.
+--       4. MFRS with a term of 12 MONTHS OR LESS -> DRAFTS. MFRS 16's short-term lease
+--          exemption: the lessee may expense the payments straight-line instead of recognising a
+--          right-of-use asset.
+--       5. MFRS with a term OVER 12 months -> ASKS. `mfrs_lease_over_twelve_months`: the lessee
+--          recognises a right-of-use asset and a lease liability, then depreciation and interest
+--          -- not a rent expense.
+--
+--     THE LOW-VALUE EXEMPTION IS NOT A BRANCH HERE, and that is deliberate rather than an
+--     omission. MFRS 16 also exempts a lease of a LOW-VALUE asset, but the asset a tenancy of
+--     premises conveys is never low value, and this lane only ever sees a tenancy (§D admits no
+--     other class). A body that offered the exemption would be offering it for a case it cannot
+--     arise in. The written basis says so out loud so a reader does not go looking for it.
+--
+--     IT MEASURES NOTHING IT CANNOT READ. No discount rate, no present value, no right-of-use
+--     asset, no lease-liability schedule: full MFRS 16 measurement is out of scope by the
+--     ruling's own last line and is a later ticket.
+--
+--     STABLE, ungranted, reached from the granted draft read and the confirm door alone.
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+create or replace function clara._client_reporting_framework(p_client uuid)
+  returns jsonb language plpgsql stable set search_path = clara, pg_temp as $crf$
+declare
+  v_firm uuid; v_today date; v_codes text[]; v_scope text; v_record uuid; v_code text;
+begin
+  select cl.firm_id into v_firm from clara.clients cl where cl.id = p_client;
+  if v_firm is null then
+    return jsonb_build_object('framework_code', null, 'in_force', 'none', 'record_id', null);
+  end if;
+  v_today := (now() at time zone 'Asia/Kuala_Lumpur')::date;
+
+  for v_scope in select unnest(array['client','firm']) loop
+    select array_agg(distinct r.value->>'framework_code'),
+           (array_agg(r.id order by r.recorded_at desc))[1]
+      into v_codes, v_record
+      from clara.knowledge_records r
+     where r.firm_id = v_firm and r.state = 'live'
+       and r.knowledge_key = 'reporting_framework'
+       and r.scope_kind = v_scope
+       and (v_scope = 'firm' or r.client_id = p_client)
+       and (r.effective_from is null or r.effective_from <= v_today)
+       and (r.effective_to is null or r.effective_to >= v_today)
+       and nullif(btrim(coalesce(r.value->>'framework_code','')),'') is not null;
+    if coalesce(array_length(v_codes,1),0) = 1 then
+      v_code := v_codes[1];
+      return jsonb_build_object('framework_code', v_code, 'record_id', v_record,
+        'in_force', case when v_scope = 'client' then 'client_exception' else 'firm_default' end);
+    elsif coalesce(array_length(v_codes,1),0) > 1 then
+      -- Two live records of ONE scope carrying DIFFERENT codes under different applicability
+      -- conditions. A real firm may record exactly that; choosing between them from a tenancy
+      -- is not this lane's judgement.
+      return jsonb_build_object('framework_code', null, 'record_id', null,
+        'in_force', 'ambiguous', 'codes', to_jsonb(v_codes),
+        'scope', v_scope);
+    end if;
+  end loop;
+
+  return jsonb_build_object('framework_code', null, 'in_force', 'none', 'record_id', null);
+end $crf$;
+revoke all on function clara._client_reporting_framework(uuid) from public;
+
+comment on function clara._client_reporting_framework(uuid) is
+  '#949: which reporting framework this client''s accounts are prepared on, from the reporting_framework knowledge key -- a live CLIENT record shadows a live FIRM record, each inside its effective window, and two live records of one scope carrying different codes answer `ambiguous` rather than picking. Ungranted; the first reader of a key 0192 registered as descriptive, and it reads it only to decide whether Clara may DRAFT.';
+
+create or replace function clara._tenancy_lease_treatment(p_client uuid, p_document uuid)
+  returns jsonb language plpgsql stable set search_path = clara, pg_temp as $tlt$
+declare
+  v_fw jsonb; v_code text; v_rent bigint; v_start date; v_end date; v_months int;
+  v_esc jsonb; v_missing text[] := '{}';
+  v_standard text; v_reason text := null; v_question text := null; v_drafts boolean := false;
+  v_basis text;
+begin
+  -- THE WRITTEN ACCOUNTING BASIS. It names BOTH standards on every answer, because a person
+  -- reading "Clara drafted a rent expense" needs to see the rule that let her and the rule that
+  -- would have stopped her.
+  v_basis := 'MPERS Section 20: a lessee expenses operating-lease payments on a straight-line '
+    || 'basis over the lease term, so with LEVEL rent the straight line is the monthly rent. '
+    || 'MFRS 16: a lessee recognises a right-of-use asset and a lease liability for a lease over '
+    || '12 months, and only a short-term lease (12 months or less) or a low-value asset may be '
+    || 'expensed straight-line -- the low-value exemption cannot arise for premises, so it is '
+    || 'not offered here. A stated escalation makes the straight-line expense differ from the '
+    || 'month''s cash rent, which is a judgement about the term rather than a figure this lane '
+    || 'can read, so Clara states it and the accountant decides.';
+
+  select ct.amount_cents into v_rent from clara.contract_terms ct
+   where ct.document_id = p_document and ct.term_key = 'monthly_rent' and ct.superseded_at is null;
+  select ct.term_date into v_start from clara.contract_terms ct
+   where ct.document_id = p_document and ct.term_key = 'term_start' and ct.superseded_at is null;
+  select ct.term_date into v_end from clara.contract_terms ct
+   where ct.document_id = p_document and ct.term_key = 'term_end' and ct.superseded_at is null;
+  select ct.escalation into v_esc from clara.contract_terms ct
+   where ct.document_id = p_document and ct.term_key = 'escalation' and ct.superseded_at is null;
+
+  if v_rent is null then v_missing := v_missing || 'monthly_rent'::text; end if;
+  if v_start is null then v_missing := v_missing || 'term_start'::text; end if;
+  if v_end is null then v_missing := v_missing || 'term_end'::text; end if;
+
+  -- The term in WHOLE MONTHS, from the recorded first and last day. The last day is inclusive,
+  -- so the span measured is [first day, last day + 1 day): 5 Jan 2026 to 4 Jan 2028 is 24 months.
+  if v_start is not null and v_end is not null and v_end >= v_start then
+    v_months := (extract(year from age((v_end + 1), v_start))::int * 12)
+                + extract(month from age((v_end + 1), v_start))::int;
+  end if;
+
+  v_fw := clara._client_reporting_framework(p_client);
+  v_code := v_fw->>'framework_code';
+
+  if coalesce(array_length(v_missing,1),0) > 0 then
+    v_reason := 'terms_incomplete';
+    v_question := 'Record the tenancy''s terms before a rent plan can be proposed: '
+      || array_to_string(v_missing, ', ') || ' has not been recorded for this agreement.';
+    v_standard := null;
+  elsif v_esc is not null then
+    v_reason := 'escalation_stated';
+    v_standard := case when v_code = 'MFRS' then 'MFRS 16' else 'MPERS Section 20' end;
+    v_question := format(
+      'This tenancy states an escalation to %s from %s. Straight-line means the total rent '
+      || 'AVERAGED over the term, so the monthly expense differs from the month''s cash rent of '
+      || '%s unless the increases only follow expected general inflation. That is a judgement '
+      || 'about the term, so Clara has drafted nothing: decide the treatment and confirm it.',
+      to_char((nullif(btrim(coalesce(v_esc->>'new_amount_cents','')),'')::bigint)/100.0,'FM999G999G990D00'),
+      coalesce(v_esc->>'effective_from','(no date stated)'),
+      to_char(v_rent/100.0,'FM999G999G990D00'));
+  elsif v_code is null then
+    v_reason := 'framework_not_established';
+    v_question := 'Nobody has recorded which reporting framework these accounts are prepared on. '
+      || 'MPERS expenses an operating lease straight-line; MFRS 16 recognises a right-of-use '
+      || 'asset and a lease liability for a lease over 12 months. Record the framework in '
+      || 'Knowledge, or decide the treatment and confirm it.';
+  elsif v_code not in ('MPERS','MFRS') then
+    v_reason := 'framework_not_decisive';
+    v_question := format(
+      'These accounts are prepared on %s, which this branch does not decide a lessee treatment '
+      || 'from. MPERS Section 20 expenses an operating lease straight-line; MFRS 16 recognises a '
+      || 'right-of-use asset and a lease liability for a lease over 12 months. Decide the '
+      || 'treatment and confirm it.', v_code);
+  elsif v_code = 'MPERS' then
+    v_drafts := true; v_standard := 'MPERS Section 20';
+  elsif v_months is not null and v_months <= 12 then
+    v_drafts := true; v_standard := 'MFRS 16';
+  else
+    v_reason := 'mfrs_lease_over_twelve_months'; v_standard := 'MFRS 16';
+    v_question := format(
+      'These accounts are prepared on MFRS and this lease runs %s months. MFRS 16 has the lessee '
+      || 'recognise a right-of-use asset and a lease liability, then depreciation and interest -- '
+      || 'not a rent expense. Only a short-term lease of 12 months or less may be expensed '
+      || 'straight-line. Clara has drafted nothing: the rent she read is %s a month, from %s to '
+      || '%s. Decide the treatment and confirm it.',
+      coalesce(v_months::text,'an unmeasurable number of'),
+      to_char(v_rent/100.0,'FM999G999G990D00'),
+      to_char(v_start,'YYYY-MM-DD'), to_char(v_end,'YYYY-MM-DD'));
+  end if;
+
+  return jsonb_build_object(
+    'treatment_version','v1', 'drafts', v_drafts,
+    'framework_code', v_code, 'framework_in_force', v_fw->>'in_force',
+    'framework_record_id', v_fw->>'record_id',
+    'monthly_rent_cents', v_rent,
+    'term_start', to_char(v_start,'YYYY-MM-DD'), 'term_end', to_char(v_end,'YYYY-MM-DD'),
+    'term_months', v_months, 'escalation', v_esc,
+    'missing_terms', to_jsonb(v_missing),
+    'standard', v_standard, 'basis', v_basis,
+    'reason', v_reason, 'question', v_question);
+end $tlt$;
+revoke all on function clara._tenancy_lease_treatment(uuid,uuid) from public;
+
+comment on function clara._tenancy_lease_treatment(uuid,uuid) is
+  '#949 (owner ruling 2026-09-20): the lessee accounting branch. MPERS Section 20 with level rent DRAFTS a monthly rent expense; MFRS 16 DRAFTS only for a short-term lease of 12 months or less and otherwise ASKS (right-of-use asset + lease liability); a stated escalation ASKS under both, because straight-line means the total averaged over the term. Every answer carries the written accounting basis naming both standards, the term and the rent it read, and -- where it asks -- the question the accountant answers. It measures nothing: no discount rate, no present value, no schedule. Ungranted.';
+
+reset role;
