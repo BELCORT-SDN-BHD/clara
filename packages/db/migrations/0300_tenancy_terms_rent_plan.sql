@@ -587,3 +587,187 @@ revoke all on function clara.get_contract_terms(uuid) from public;
 grant execute on function clara.get_contract_terms(uuid) to clara_authenticated;
 
 reset role;
+
+set role clara_fn_owner;
+
+-- =====================================================================================
+-- §D  clara.propose_contract_terms(p_document) -- WHAT CLARA CAN ALREADY READ (AC1).
+--
+--     The terms #948's landed lane ALREADY banked, each carrying the clara.document_regions row
+--     it was read from, plus -- said out loud -- the terms it could not read and why. This is a
+--     pure read: it writes nothing, and a person turns it into a record through
+--     clara.record_contract_terms.
+--
+--     THE FOUR READABLE TERMS AND THEIR ONE DERIVATION.
+--       monthly_rent  <- contract.agreement.instalment_amount   (a READING)
+--       deposit       <- contract.agreement.deposit             (a READING)
+--       term_start    <- contract.agreement.agreement_date      (a DERIVATION: the day the
+--                        agreement was signed. A tenancy whose premises are handed over on a
+--                        LATER date states that date in its own words and a person corrects the
+--                        term, which is exactly why the row says `derived_from_regions` and
+--                        carries a basis sentence naming the rule.)
+--       term_end      <- term_start + term_months - 1 day       (a DERIVATION from TWO regions;
+--                        the last day is INCLUSIVE, so a 24-month term from 5 January 2026 ends
+--                        on 4 January 2028.)
+--
+--     AND THE ONE IT CANNOT READ AT ALL: the escalation. `agreementFacts_v1` is FROZEN at eleven
+--     run-level questions and none of them asks about a rent review, so the honest answer is
+--     `no_question_in_the_questionnaire` -- never silence, and never a zero.
+--
+--     ONLY A TENANCY. The evaluator classifies the page itself (#948 SecD's closed roster); a
+--     hire purchase, a finance lease or a supply contract proposes NOTHING and says
+--     `not_a_tenancy`. `operating_lease` is deliberately NOT admitted here: a lessee's operating
+--     lease of premises would take the same treatment, but this lane has never seen a real page
+--     of that class and admitting one on the strength of a word in a title would be the lane
+--     guessing. A later ticket widens the roster with a page in front of it.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+create or replace function clara._tenancy_term_regions(p_document uuid)
+  returns table(field_path text, region_id uuid, extraction_id uuid)
+  language sql stable set search_path = clara, pg_temp as $ttr$
+  select r.field_path, r.id, r.extraction_id
+    from clara.document_regions r
+    join clara.document_extractions e on e.id = r.extraction_id
+   where e.document_id = p_document and e.engine_kind = 'agreement_text_facts' and e.status = 'done'
+     and e.version_n = (select max(e2.version_n) from clara.document_extractions e2
+                         where e2.document_id = p_document
+                           and e2.engine_kind = 'agreement_text_facts' and e2.status = 'done');
+$ttr$;
+revoke all on function clara._tenancy_term_regions(uuid) from public;
+
+comment on function clara._tenancy_term_regions(uuid) is
+  '#949: every typed-fact region #948''s persist door banked for the NEWEST agreement reading of one document, by field path. Ungranted; the ONE place this lane resolves a term to the region that prints it.';
+
+create or replace function clara.propose_contract_terms(p_document uuid)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp
+  as $pct$
+declare
+  c record; v_client uuid; v_state jsonb; v_extraction uuid;
+  v_class text; v_proposed jsonb := '[]'::jsonb; v_not_read jsonb := '[]'::jsonb;
+  v_rent_region uuid; v_dep_region uuid; v_date_region uuid; v_term_region uuid;
+  v_rent bigint; v_dep bigint; v_months int; v_start date;
+  v_f jsonb; v_state_of text;
+begin
+  c := clara._human_ctx(clara.role_rank('viewer'));
+  select f.client_id into v_client from clara.document_filings f
+   where f.document_id = p_document and f.firm_id = c.firm and f.retired_at is null
+   order by f.filed_at desc limit 1;
+  if v_client is null then
+    raise exception 'document % is not a live filing in your firm', p_document using errcode='CLR11';
+  end if;
+
+  select e.id, e.envelope->'contract_state' into v_extraction, v_state
+    from clara.document_extractions e
+   where e.document_id = p_document and e.engine_kind = 'agreement_text_facts' and e.status = 'done'
+   order by e.version_n desc, e.extracted_at desc limit 1;
+  if v_state is null then
+    return jsonb_build_object('document_id', p_document, 'client_id', v_client,
+      'agreement_class', null, 'extraction_id', null,
+      'proposed', '[]'::jsonb, 'not_read', '[]'::jsonb, 'reason', 'agreement_not_read');
+  end if;
+
+  v_class := v_state->>'agreement_class';
+  if v_class is distinct from 'tenancy' then
+    return jsonb_build_object('document_id', p_document, 'client_id', v_client,
+      'agreement_class', v_class, 'extraction_id', v_extraction,
+      'proposed', '[]'::jsonb, 'not_read', '[]'::jsonb, 'reason', 'not_a_tenancy');
+  end if;
+
+  select tr.region_id into v_rent_region from clara._tenancy_term_regions(p_document) tr
+   where tr.field_path = 'contract.agreement.instalment_amount';
+  select tr.region_id into v_dep_region from clara._tenancy_term_regions(p_document) tr
+   where tr.field_path = 'contract.agreement.deposit';
+  select tr.region_id into v_date_region from clara._tenancy_term_regions(p_document) tr
+   where tr.field_path = 'contract.agreement.agreement_date';
+  select tr.region_id into v_term_region from clara._tenancy_term_regions(p_document) tr
+   where tr.field_path = 'contract.agreement.term_months';
+
+  -- 1 - THE MONTHLY RENT. A figure the page printed and both channels read the same way.
+  v_f := v_state->'facts'->'contract.agreement.instalment_amount';
+  v_state_of := v_f->>'state';
+  v_rent := nullif(v_f->>'printed_cents','')::bigint;
+  if v_state_of = 'established' and v_rent is not null and v_rent > 0 and v_rent_region is not null then
+    v_proposed := v_proposed || jsonb_build_array(jsonb_build_object(
+      'term_key','monthly_rent','amount_cents',v_rent,'printed_raw',v_f->>'printed_raw',
+      'basis_kind','document_region','source_region_ids',jsonb_build_array(v_rent_region),
+      'basis','the monthly rent this tenancy prints, read by the contract lane'));
+  else
+    v_not_read := v_not_read || jsonb_build_array(jsonb_build_object(
+      'term_key','monthly_rent','reason',coalesce(v_state_of,'agreement_not_read')));
+  end if;
+
+  -- 2 - THE DEPOSIT. Zero is admitted here and nowhere else in this lane: a tenancy that states
+  --     "no deposit" has stated a term, and `not printed` is a different answer again.
+  v_f := v_state->'facts'->'contract.agreement.deposit';
+  v_state_of := v_f->>'state';
+  v_dep := nullif(v_f->>'printed_cents','')::bigint;
+  if v_state_of = 'established' and v_dep is not null and v_dep_region is not null then
+    v_proposed := v_proposed || jsonb_build_array(jsonb_build_object(
+      'term_key','deposit','amount_cents',v_dep,'printed_raw',v_f->>'printed_raw',
+      'basis_kind','document_region','source_region_ids',jsonb_build_array(v_dep_region),
+      'basis','the deposit this tenancy states; signing does not say the money moved'));
+  else
+    v_not_read := v_not_read || jsonb_build_array(jsonb_build_object(
+      'term_key','deposit','reason',coalesce(v_state_of,'agreement_not_read')));
+  end if;
+
+  -- 3 - THE TERM'S FIRST DAY, derived from the signing date the page printed.
+  v_f := v_state->'facts'->'contract.agreement.agreement_date';
+  v_state_of := v_f->>'state';
+  v_start := case when v_state_of = 'established'
+                  then clara._agreement_signed_date(v_f->>'printed_raw') end;
+  if v_start is not null and v_date_region is not null then
+    v_proposed := v_proposed || jsonb_build_array(jsonb_build_object(
+      'term_key','term_start','term_date',to_char(v_start,'YYYY-MM-DD'),
+      'printed_raw',v_f->>'printed_raw',
+      'basis_kind','derived_from_regions','source_region_ids',jsonb_build_array(v_date_region),
+      'basis','the day the agreement was signed; correct it where the tenancy commences later'));
+  else
+    v_not_read := v_not_read || jsonb_build_array(jsonb_build_object(
+      'term_key','term_start','reason',
+      case when v_state_of = 'established' then 'signing_date_unreadable'
+           else coalesce(v_state_of,'agreement_not_read') end));
+  end if;
+
+  -- 4 - THE TERM'S LAST DAY. Needs BOTH the first day and the printed term in months, and it is
+  --     INCLUSIVE: 24 months from 5 January 2026 ends on 4 January 2028.
+  v_f := v_state->'facts'->'contract.agreement.term_months';
+  v_state_of := v_f->>'state';
+  v_months := case when v_state_of = 'established' and btrim(coalesce(v_f->>'printed_raw','')) ~ '^[0-9]{1,3}$'
+                   then btrim(v_f->>'printed_raw')::int end;
+  if v_start is not null and v_months is not null and v_months > 0
+     and v_date_region is not null and v_term_region is not null then
+    v_proposed := v_proposed || jsonb_build_array(jsonb_build_object(
+      'term_key','term_end',
+      'term_date',to_char((v_start + make_interval(months => v_months) - interval '1 day')::date,'YYYY-MM-DD'),
+      'printed_raw',v_f->>'printed_raw',
+      'basis_kind','derived_from_regions',
+      'source_region_ids',jsonb_build_array(v_date_region, v_term_region),
+      'basis',format('%s months from the first day, the last day included', v_months)));
+  else
+    v_not_read := v_not_read || jsonb_build_array(jsonb_build_object(
+      'term_key','term_end','reason',
+      case when v_start is null then 'term_start_not_established'
+           when v_state_of = 'established' then 'term_months_unreadable'
+           else coalesce(v_state_of,'agreement_not_read') end));
+  end if;
+
+  -- 5 - THE ESCALATION -- never read by this family, and the proposal says so rather than
+  --     staying silent. A FROZEN questionnaire has eleven questions and none of them is a rent
+  --     review; a person records it with their own basis.
+  v_not_read := v_not_read || jsonb_build_array(jsonb_build_object(
+    'term_key','escalation','reason','no_question_in_the_questionnaire'));
+
+  return jsonb_build_object('document_id', p_document, 'client_id', v_client,
+    'agreement_class', v_class, 'extraction_id', v_extraction,
+    'proposed', v_proposed, 'not_read', v_not_read, 'reason', null);
+end $pct$;
+
+comment on function clara.propose_contract_terms(uuid) is
+  '#949 AC1: the tenancy terms #948''s banked reading already establishes -- the monthly rent and the deposit as READINGS, the term''s first and last day as DERIVATIONS from the same regions -- each carrying the clara.document_regions row it came from, beside the terms this lane could not read and why (an escalation has no question in the frozen questionnaire at all). Writes nothing; a person turns it into a record through clara.record_contract_terms. viewer+, clara_authenticated only.';
+
+revoke all on function clara.propose_contract_terms(uuid) from public;
+grant execute on function clara.propose_contract_terms(uuid) to clara_authenticated;
+
+reset role;

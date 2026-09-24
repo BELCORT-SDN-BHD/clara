@@ -189,7 +189,7 @@ function envelope({ channel = "text", answers = {} } = {}) {
 /** Files a tenancy agreement and drives it through #948's OWN lane — the router, the claim and
  *  the persist door — so every term this file reads is a term the landed lane banked, with the
  *  regions it banked them at. Nothing here is hand-inserted. */
-async function readTenancy(sub, client, { answers = {} } = {}) {
+async function readTenancy(sub, client, { answers = {}, visionAnswers = null } = {}) {
   const firm = await firmOf(client);
   if (!(await hasWitnessConsent(client))) {
     const evidence = await consentEvidenceDoc(sub, { firm });
@@ -220,13 +220,22 @@ async function readTenancy(sub, client, { answers = {} } = {}) {
         input_pin: ocr, prompt_hash: "p949-text", envelope: envelope({ channel: "text", answers }),
         citations: [{ field_path: "contract.agreement.instalment_amount", region_idx: 1 }],
       }),
-      JSON.stringify({ input_pin: sha, prompt_hash: "p949-vision", envelope: envelope({ channel: "vision", answers }) }),
+      JSON.stringify({ input_pin: sha, prompt_hash: "p949-vision",
+        envelope: envelope({ channel: "vision", answers: visionAnswers ?? answers }) }),
       1,
     ])
   ).rows[0].receipt;
   assert.equal(receipt.status, "done", `mandatory setup: the tenancy read settled (got ${JSON.stringify(receipt)})`);
   return { ...doc, firm, client, ocrExtractionId: ocr, textExtractionId: receipt.text_extraction_id };
 }
+
+/** The same tenancy, read DIFFERENTLY by the two channels on one question: the text channel
+ *  sees RM 3,600.00 of rent and the vision channel sees RM 3,500.00. #948's evaluator settles
+ *  that as `channels_disagree` and this lane must never propose a term in that state. */
+const readTenancyContested = (sub, client) =>
+  readTenancy(sub, client, {
+    visionAnswers: { "contract.agreement.instalment_amount": value("3,500.00") },
+  });
 
 const regionIdFor = async (documentId, fieldPath) =>
   (
@@ -453,4 +462,88 @@ test("S1 · the record is scoped like the documents estate: another firm's human
     [doc.documentId],
   );
   assert.equal(rows.rows[0].n, 0, "…and the ROW ITSELF is invisible under RLS, not merely behind the door");
+});
+
+// ---------------------------------------------------------------------------
+// S2 — what Clara can already read (AC1's other half)
+// ---------------------------------------------------------------------------
+
+const proposeTerms = async (sub, document) => {
+  const r = await humanQuery(sub, namedCall("propose_contract_terms", [{ name: "p_document" }]), [document]);
+  return r.rows[0].result;
+};
+
+const byKey = (list, key) => list.find((x) => x.term_key === key) ?? null;
+
+test("S2 · a read tenancy proposes the rent, the deposit and the term, each carrying the region it came from", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const client = await freshClient(sub);
+  await seedTenancyChart(sub, client);
+  const doc = await readTenancy(sub, client);
+
+  const proposal = await proposeTerms(sub, doc.documentId);
+  assert.equal(proposal.agreement_class, "tenancy", "the proposal says what page it read");
+
+  const rent = byKey(proposal.proposed, "monthly_rent");
+  assert.ok(rent, "the monthly rent is proposed");
+  assert.equal(Number(rent.amount_cents), RENT_CENTS);
+  assert.equal(rent.printed_raw, "3,600.00", "…with the rendering the page actually carries");
+  assert.equal(rent.basis_kind, "document_region", "…as a READING, not a derivation");
+  assert.deepEqual(
+    rent.source_region_ids,
+    [await regionIdFor(doc.documentId, "contract.agreement.instalment_amount")],
+    "…and the region is #948's own banked region for that question",
+  );
+
+  const deposit = byKey(proposal.proposed, "deposit");
+  assert.ok(deposit, "the deposit is proposed");
+  assert.equal(Number(deposit.amount_cents), DEPOSIT_CENTS);
+  assert.equal(deposit.basis_kind, "document_region");
+
+  const start = byKey(proposal.proposed, "term_start");
+  assert.equal(start.term_date, TERM_START, "the first day comes off the signing date the page printed");
+  assert.equal(start.basis_kind, "derived_from_regions", "…and says so: a derivation is never dressed as a reading");
+  assert.deepEqual(start.source_region_ids, [await regionIdFor(doc.documentId, "contract.agreement.agreement_date")]);
+
+  const end = byKey(proposal.proposed, "term_end");
+  assert.equal(end.term_date, TERM_END, "24 months from 2026-01-05, the last day inclusive, is 2028-01-04");
+  assert.equal(end.basis_kind, "derived_from_regions");
+  assert.equal(end.source_region_ids.length, 2, "…derived from BOTH regions it needed, and naming them");
+
+  const escalation = byKey(proposal.not_read, "escalation");
+  assert.ok(escalation, "the escalation is NOT proposed, and the proposal says so out loud");
+  assert.equal(escalation.reason, "no_question_in_the_questionnaire");
+  assert.equal(byKey(proposal.proposed, "escalation"), null, "…and it is nowhere in the proposed set");
+});
+
+test("S2 · a term the two readings disagree about is not proposed, and the proposal names the state it is in", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const client = await freshClient(sub);
+  await seedTenancyChart(sub, client);
+  // The vision channel reads the rent as 3,500.00; the text channel reads 3,600.00.
+  const doc = await readTenancyContested(sub, client);
+
+  const proposal = await proposeTerms(sub, doc.documentId);
+  assert.equal(byKey(proposal.proposed, "monthly_rent"), null, "a contested rent is never proposed");
+  const missing = byKey(proposal.not_read, "monthly_rent");
+  assert.ok(missing, "…it is reported as not read");
+  assert.equal(missing.reason, "channels_disagree", "…carrying the evaluator's OWN state, not a word this file invents");
+  assert.ok(byKey(proposal.proposed, "deposit"), "the terms that DID agree are still proposed");
+});
+
+test("S2 · a financing agreement is not a tenancy, and this lane proposes nothing for it", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const client = await freshClient(sub);
+  await seedTenancyChart(sub, client);
+  const doc = await readTenancy(sub, client, {
+    answers: { "contract.agreement.kind": value("Hire Purchase Agreement") },
+  });
+
+  const proposal = await proposeTerms(sub, doc.documentId);
+  assert.equal(proposal.agreement_class, "hire_purchase");
+  assert.deepEqual(proposal.proposed, [], "a hire purchase proposes no tenancy term at all");
+  assert.equal(proposal.reason, "not_a_tenancy", "…and says why, by name");
 });
