@@ -22,11 +22,14 @@
 -- a same-commit roles-bootstrap twin" law — 0160 was the first role-minting
 -- migration since this file was last synced), 0163_checkout_gate_c3_folded_door
 -- (clara_auth_wall + its clara_auth_wall_login shell — FS-4 C-3's pre-session
--- confirmation-attempt wall), and deploy/storage-provision.sql
+-- confirmation-attempt wall), 0309_invite_preview_public_door.sql (clara_invite_preview
+-- + its clara_invite_preview_login shell — #871's signed-out invite preview, the same
+-- NOLOGIN group + NOLOGIN shell shape C-3 established), and deploy/storage-provision.sql
 -- (clara_storage_docs). Derived and cross-checked against a live-shaped rig (apply
 -- 0001..0010 to a scratch DB → query pg_roles / pg_auth_members) — the census
 -- pre-0160 reproduced exactly (14 clara_% roles + clara_storage_docs); 0160 adds two
--- more and C-3 adds two more (18 schema-lane roles + clara_storage_docs).
+-- more, C-3 adds two more and 0309 adds two more (20 schema-lane roles +
+-- clara_storage_docs).
 -- CONVERGENCE SCOPE: on a FRESH target this produces the exact
 -- census. It does NOT remove unexpected EXTRA memberships/settings on a pre-existing
 -- role and it does NOT normalize NOLOGIN over a pre-existing login shell — so it is
@@ -99,14 +102,18 @@ declare
     'clara_stripe_webhook', -- 0160 (FS-4 C-2, PR #484): the Stripe webhook sweep's own
                         -- NOLOGIN group role, holding exactly the record/apply EXECUTE
                         -- surface and no table grants
-    'clara_auth_wall'   -- FS-4 C-3: the confirmation-attempt wall's own NOLOGIN group
+    'clara_auth_wall',  -- FS-4 C-3: the confirmation-attempt wall's own NOLOGIN group
+    'clara_invite_preview' -- #871 (0309): the SIGNED-OUT invite preview's own NOLOGIN group,
+                        -- holding exactly one EXECUTE (clara.preview_invite_by_token) and no
+                        -- table grant anywhere
   ];
   -- Login SHELLS: created NOLOGIN here; a LIVE project flips them to LOGIN out of band.
   logins text[] := array['clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login',
                          'clara_freeform_login',
     'clara_wake_bank_login',  -- 0121: nologin shell until PR-2's DSN/pool ceremony
     'clara_stripe_webhook_login', -- 0160: member shell for clara_stripe_webhook
-    'clara_auth_wall_login']; -- C-3: member shell for clara_auth_wall
+    'clara_auth_wall_login', -- C-3: member shell for clara_auth_wall
+    'clara_invite_preview_login']; -- #871 (0309): member shell for clara_invite_preview
 begin
   -- Fail closed: never run on a live project (a login shell already LOGIN) w/o override.
   foreach r in array logins loop
@@ -283,7 +290,7 @@ end $$;
 
 -- ---------------------------------------------------------------------------
 -- 3. VERIFY (evidence — the DR drill / dr-verify diffs this against the source
---    census). Expect: 19 clara_% roles total (18 schema lanes + clara_storage_docs), all
+--    census). Expect: 21 clara_% roles total (20 schema lanes + clara_storage_docs), all
 --    rolcanlogin=f rolsuper=f rolbypassrls=f connlimit=-1; clara_agent_ro carries
 --    {default_transaction_read_only=on}; clara_storage_docs is rolinherit=f, the rest rolinherit=t.
 -- ---------------------------------------------------------------------------

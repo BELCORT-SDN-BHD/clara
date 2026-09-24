@@ -379,9 +379,11 @@ Use session pooling for the durable engine and dedicated LISTEN/advisory-lock co
 | Bank wake | `CLARA_BANK_DATABASE_URL` | Lazy; fails on use without configuration |
 | Stripe webhook | `CLARA_STRIPE_WEBHOOK_DATABASE_URL` | Lazy |
 | Pre-session auth wall | `CLARA_AUTH_WALL_DATABASE_URL` | Lazy |
+| Signed-out invite preview (#871) | `CLARA_INVITE_PREVIEW_DATABASE_URL` | Lazy |
 
 The corresponding login roles, SET ROLE targets and probe roster are defined in
-`lib/pools.mjs`, `lib/freeform-read.mjs`, `lib/checkout-pools.mjs` and `lib/lane-probe.mjs`.
+`lib/pools.mjs`, `lib/freeform-read.mjs`, `lib/checkout-pools.mjs`,
+`lib/invite-preview-pool.mjs` and `lib/lane-probe.mjs`.
 Provision LOGIN/passwords before enabling the relevant lane. Pool maxima are configurable; measure
 actual connection headroom before increasing them, including engine, consumer and probe sessions.
 
@@ -1046,6 +1048,52 @@ its register row in the SAME transaction, a replayed intentKey births no twin, a
 database commit and the workflow checkpoint leaves the register row standing and the respawned
 engine returns the SAME asset id, and the runtime particulars door refuses a demoted initiator by
 name while writing no journal when it succeeds. It skips cleanly below migration 0216.
+
+### #933 — the proposal that question now carries (`lib/fa-particulars-proposal.ts`)
+
+#932 gave an enrolled fixed-asset account a person-set default depreciation policy: an acquisition
+on a covered account is born COMPLETE and no question opens. #883's second half is the account
+nobody has set a policy for, where the #639 question still parks the Work — and the owner's
+2026-09-18 ruling is that it no longer parks an EMPTY form. `deriveFaParticularsProposal` is that
+derivation, PURE (every fact is passed in) and tested on its own by
+`tests/fa-particulars-proposal-unit.test.mjs`:
+
+* **A person stays the author of every depreciation estimate.** A driver is proposed only where a
+  ground exists, in this order of authority: the **enrolment** (no accumulated-depreciation account
+  admits `none` alone — the door's own rule, not an estimate), a **recorded knowledge note**, this
+  account's own **retired default policy**, then the account's other **completed assets where they
+  agree**. A split account grounds nothing, and where nothing grounds a method the block carries
+  `method: null` and the reason SAYS so.
+* **One account rule on all three grounds.** A ground speaks for a row only when its OWN account
+  IS that row's account — and `asset_account_code` is nullable, so a row on no account grounds on
+  nothing but inputs that are also on no account. Two recorded notes that disagree ground nothing,
+  exactly as two siblings that disagree do; a note naming THIS account governs outright, and a
+  split at that narrower tier does not fall back to the client-wide ones.
+* **The two facts that are not estimates are always proposed**: the in-service date is the
+  acquisition's own posting date and the residual is nil (both the owner's 2026-09-18 decisions on
+  #932, applied to the same question). The residual is never read off a ground — none of the three
+  ground types carries one — because half-adopting a ground's own residual under a sentence saying
+  "the same" is exactly what the owner's default rules out.
+* **`acquiredDate` is a `YYYY-MM-DD` Asia/Kuala_Lumpur calendar STRING, never a `Date`.** The
+  successor's read spells it `fa.acquired_date::text`; a caller that forgets the cast is REFUSED
+  with a message naming it, because `node-postgres` maps a `date` onto local midnight whose UTC
+  spelling is the previous calendar day — and that day is the driver every depreciation charge is
+  computed from.
+* `reason` is ONE line of prose naming the ground, the account and the two facts — a proposal
+  nobody can check is a proposal nobody should confirm. Its 400-character cap is this module's own
+  rule about its own prose and `reasonFor` guarantees it; `description` carries NO cap, because the
+  particulars door carries none and a surface pre-fills that value straight back into it.
+* `proposalSourceRef` EXTENDS #639's `{kind:'fixed_asset', asset_id}` stanza with the block.
+  `clara.agent_interruptions.source_ref` is constrained to "null or an object" and nothing more
+  (0180:183), so this needs **no migration**; `packages/db/tests/fa-particulars-proposal.test.mjs`
+  drives that on a live database rather than reading it off the file.
+* The **knowledge ground is wired and unfed** on this frontier: `clara.knowledge_keys` is a closed,
+  code-populated catalogue and none of its fourteen keys is about depreciation, so no recorded
+  record can state one until a key is catalogued (a migration #933 does not own).
+
+The block is consumed by `apps/web/lib/registers/fa-particulars-proposal.ts` on all three answering
+surfaces. `claraWork_v6` is the cut that puts it on the wire; until then the derivation ships
+unwired, and this ticket's report carries the successor contract in full.
 
 ## Evaluation
 

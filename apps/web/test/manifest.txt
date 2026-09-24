@@ -201,6 +201,7 @@ components/firm/firm-home/firm-home-states.test.tsx
 components/firm/firm-home/firm-legal-standing-tile.test.tsx
 components/firm/firm-home/firm-portfolio.test.tsx
 components/firm/fixed-asset-incomplete-affordance.test.tsx
+components/firm/fixed-asset-proposal-prefill.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
 components/firm/needs-you-counts.test.tsx
@@ -215,6 +216,7 @@ components/firm/work-question-affordance.test.tsx
 components/invite-accept-a11y.test.tsx
 components/invite-accept-form.test.tsx
 components/invite-accept-keyboard.test.tsx
+components/invite-accept-signed-out-preview.test.tsx
 components/journals/formatted-date.test.tsx
 components/journals/journal-entries-table.test.tsx
 components/journals/journals-a11y.test.tsx
@@ -262,6 +264,7 @@ components/registers/fa-authority-ceremony.test.tsx
 components/registers/fa-charge-ledger.test.tsx
 components/registers/fa-detail-tab-url.test.tsx
 components/registers/fa-particulars-fields.test.tsx
+components/registers/fa-proposal-prefill.test.tsx
 components/registers/fa-register-tie.test.tsx
 components/registers/fa-revision-timeline.test.tsx
 components/registers/fa-row-actions.test.tsx
@@ -320,6 +323,7 @@ components/work/work-knowledge-block.test.tsx
 components/work/work-question-drift-banner.test.tsx
 components/work/work-question-form.test.tsx
 components/work/work-question-panel.test.tsx
+components/work/work-question-proposal.test.tsx
 components/work/work-restate.test.tsx
 components/work/work-saved-views.test.tsx
 e2e/cell-budget-census.test.ts
@@ -410,6 +414,7 @@ lib/firm/capacity-doors.test.ts
 lib/firm/commercial-format.test.ts
 lib/firm/commercial-reads.test.ts
 lib/firm/home-facts.test.ts
+lib/firm/invite-preview-public.test.ts
 lib/firm/invite-preview.test.ts
 lib/firm/navigation-label.test.ts
 lib/firm/needs-you-agreement-posting.test.ts
@@ -473,6 +478,7 @@ lib/registers/counterparty.test.ts
 lib/registers/depreciation.test.ts
 lib/registers/fa-account-profiles.test.ts
 lib/registers/fa-depreciation-policies.test.ts
+lib/registers/fa-particulars-proposal.test.ts
 lib/registers/fa-refusal-field.test.ts
 lib/registers/fixed-assets.test.ts
 lib/registers/knowledge.test.ts

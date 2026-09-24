@@ -180,6 +180,9 @@ export const CHAIN_MINTED_ROLES = Object.freeze([
   // 0163_checkout_gate_c3_folded_door.sql — the confirmation-attempt wall (the D6 fix)
   "clara_auth_wall",
   "clara_auth_wall_login",
+  // 0309_invite_preview_public_door.sql — #871's signed-out invite preview lane
+  "clara_invite_preview",
+  "clara_invite_preview_login",
 ]);
 
 /** A defense-in-depth check on the literal roster's own shape (never trust a hand-typed list blindly). */

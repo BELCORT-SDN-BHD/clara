@@ -94,6 +94,9 @@ import {
   validateField,
 } from "@/lib/work/question-fields";
 import { formatCents } from "@/lib/bank/money";
+import {
+  proposalAnswerDraft, readFaParticularsProposal,
+} from "@/lib/registers/fa-particulars-proposal";
 import type { WorkAnswerValue, WorkQuestionAccount } from "@/lib/work/questions";
 
 /** Who speaks when this form changes state. See the header: "self" is the default and the honest
@@ -161,7 +164,27 @@ export function WorkQuestionForm({
     [userId, record.firm_id, record.client_id, record.question_id, record.question_version],
   );
 
-  const [draft, setDraft] = useState<WorkAnswerDraft>(() => readWorkAnswerDraft(draftKey) ?? {});
+  /**
+   * #933 — CLARA'S PROPOSAL, PRE-FILLED, AND A SAVED DRAFT ALWAYS WINS.
+   *
+   * A dependent depreciation-particulars question opened by `claraWork_v6` or later carries a
+   * typed proposal in its `source_ref` (0180 constrains that column to "null or an object" and
+   * nothing more, which is why it needed no migration). Reading it here means the conversation,
+   * the asset page and Needs-you all pre-fill from ONE block rather than three opinions.
+   *
+   * THE ORDER IS THE WHOLE RULE. What the person typed and did not send is restored FIRST and is
+   * never overwritten — that draft is exactly what this machinery exists to protect, and a
+   * suggestion arriving on a later mount must not replace a decision somebody already made. The
+   * proposal seeds only a form that has nothing in it.
+   *
+   * A QUESTION CARRYING NO BLOCK — every #639 question opened before that cut, and there are real
+   * ones — seeds nothing, and this form behaves exactly as it did.
+   */
+  const [draft, setDraft] = useState<WorkAnswerDraft>(() => {
+    const saved = readWorkAnswerDraft(draftKey);
+    if (saved !== null && saved !== undefined) return saved;
+    return proposalAnswerDraft(fields, readFaParticularsProposal(record.source_ref));
+  });
   const [note, setNote] = useState<string>(() => String(readWorkAnswerDraft(draftKey)?.note ?? ""));
   const [step, setStep] = useState(0);
   // #885 (second fix round) — A CORRECTED SOURCE OPENS CONVERGED. Asking a person to fill in a
@@ -551,6 +574,11 @@ function QuestionHeading({ record }: { record: WorkQuestionRecord }) {
         </p>
       ) : null}
       {record.context ? <p className="text-xs text-secondary-ink">{record.context}</p> : null}
+      {/* #933 — WHERE THE PRE-FILLED VALUES CAME FROM. A proposal nobody can check is a proposal
+          nobody should confirm, so the derivation's own one line renders beside the question's own
+          reason — they answer different questions ("why are you asking?" and "why these values?")
+          and collapsing them would lose one. Absent on every question that carries no proposal. */}
+      <ProposalNote record={record} />
       {/* THE SUPPORTING SOURCE (#629's own acceptance line: "the missing fact, reason and supporting
           source"). Rendered from the record, identically on B3, B4 and B6, and only when the run
           actually named one — an absent source prints nothing rather than "unknown". It is NOT a
@@ -894,6 +922,22 @@ export function sourceRefText(source: Record<string, unknown> | null | undefined
   if (kind === null) return null;
   const id = typeof source.id === "string" && source.id.trim() !== "" ? source.id.trim() : null;
   return id === null ? kind : `${kind} ${id}`;
+}
+
+/** #933 — Clara's one line, and the sentence that says whose decision this is. Renders nothing at
+ *  all when the question carries no proposal, which is every question below the `claraWork_v6`
+ *  frontier. */
+function ProposalNote({ record }: { record: WorkQuestionRecord }) {
+  const t = useTranslations("WorkQuestion");
+  const proposal = readFaParticularsProposal(record.source_ref);
+  if (proposal === null || proposal.reason.trim() === "") return null;
+  return (
+    <div className="flex flex-col gap-1" data-testid="work-question-proposal">
+      <p className="text-xs font-medium text-foreground">{t("proposalLabel")}</p>
+      <p className="text-xs text-secondary-ink">{proposal.reason}</p>
+      <p className="text-xs text-secondary-ink">{t("proposalHelp")}</p>
+    </div>
+  );
 }
 
 /** WHICH convergence sentence to show. The refusal's own reason when there is one; otherwise the

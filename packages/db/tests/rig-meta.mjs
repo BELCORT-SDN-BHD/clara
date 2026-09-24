@@ -1450,6 +1450,23 @@ export const CHECKOUT_GATE_C3_COHORT = [
   ...CHECKOUT_GATE_C3_HUMAN_FNS, ...CHECKOUT_GATE_C3_AUTH_WALL_FNS,
 ];
 
+// #871 [0309] — THE SIGNED-OUT INVITE PREVIEW's own lane, on 0163's shape one lane over: a NOLOGIN
+// group role (`clara_invite_preview`) that holds EXACTLY ONE EXECUTE and no relation privilege
+// anywhere, plus the NOLOGIN shell that inherits it. The owner's ruling of 2026-09-23 on #871 is
+// the spec: an invitee who has not signed in sees which firm and role an invite names, through a
+// read no browser and no client credential can reach.
+//   preview_invite_by_token — token + peppered origin digest in; {outcome:preview,…} for an OPEN
+//     invite (pending / issuer_lapsed), the SINGLE {outcome:not_previewable} for an unknown,
+//     expired, revoked or accepted token, or {outcome:rate_limited,…} from its own 15-minute /
+//     5-attempt wall. Never the plaintext token, never the unmasked address, never the inviter.
+// NO TABLE COHORT IS OWED. 0309 mints ONE relation, `clara.invite_preview_attempts` (the wall's
+// evidence); `governedRlsFailures()`'s arm (b) already fails any clara base table that is not
+// RLS-enabled AND forced without being told it exists, and a gated cohort in the 0037/C-2 shape
+// buys nothing for a single table — "partial" is not a state one table can be in (0244's own note
+// above states the same disposition).
+const INVITE_PREVIEW_PUBLIC_0309_FNS = ["preview_invite_by_token"];
+export const INVITE_PREVIEW_PUBLIC_0309_COHORT = [...INVITE_PREVIEW_PUBLIC_0309_FNS];
+
 // #621 (0185 legal acceptance): versioned legal CONTENT and ACCEPTANCE, for both kinds.
 //   get_current_legal_documents — the current text of every kind for the calling person (the
 //     published row, else the newest draft) with that caller's own acceptance beside it. A door
@@ -3580,6 +3597,12 @@ export const ALLOWED = {
   // effective set, so both sides of the membership are catalog-censused.
   "clara_auth_wall": new Set(CHECKOUT_GATE_C3_AUTH_WALL_FNS),
   "clara_auth_wall_login": new Set(CHECKOUT_GATE_C3_AUTH_WALL_FNS),
+  // #871 [0309]'s isolated signed-out invite-preview lane, on the same footing: the NOLOGIN member
+  // shell inherits the group's exact effective set, so both sides of that membership are censused
+  // across the WHOLE catalog — which is what makes "this lane reaches ONE function and nothing
+  // else" a measured property rather than a claim about one probe.
+  "clara_invite_preview": new Set(INVITE_PREVIEW_PUBLIC_0309_FNS),
+  "clara_invite_preview_login": new Set(INVITE_PREVIEW_PUBLIC_0309_FNS),
   // #618 — THE SIX ROLES THIS CENSUS NEVER PROBED, and what their absence cost.
   //
   // `grantMatrixFailures` iterates Object.keys(ALLOWED). F-A6 PR-1's own comment above states
@@ -4238,6 +4261,12 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("FS-4 C-2 projected Stripe store", CHECKOUT_GATE_C2_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-6 apps/web read doors", CHECKOUT_GATE_C6_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-3 folded checkout door", CHECKOUT_GATE_C3_COHORT, liveNames));
+  // #871 — frontier-tolerant like every cohort here: absent entirely on a pre-0309 chain, and a
+  // PARTIAL cohort is impossible for a one-name roster, which is exactly why it is still listed
+  // (a RENAMED or retired door falls out of `liveNames` and is named here rather than silently
+  // becoming an `unattributed` finding in the operation census).
+  failures.push(...cohortFailures("#871 signed-out invite preview",
+    INVITE_PREVIEW_PUBLIC_0309_COHORT, liveNames));
   // #621 — frontier-tolerant like every cohort here: absent entirely on a pre-0185 chain, and a
   // PARTIAL cohort (one of the three retired or renamed without truing this roster) is named.
   failures.push(...cohortFailures("#621 legal acceptance", LEGAL_ACCEPTANCE_0185_COHORT, liveNames));

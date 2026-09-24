@@ -101,6 +101,13 @@ import {
   AUTH_WALL_LOGIN,
   AUTH_WALL_ROLE,
 } from "./checkout-pools.mjs";
+// #871: the eighth lane, in its own module for the reason that module's header states.
+import {
+  INVITE_PREVIEW_DSN_VAR,
+  INVITE_PREVIEW_LANE,
+  INVITE_PREVIEW_LOGIN,
+  INVITE_PREVIEW_ROLE,
+} from "./invite-preview-pool.mjs";
 
 const TEST_MODE = process.env.RELAY_TEST_MODE === "1";
 
@@ -127,9 +134,9 @@ function cycleMs() {
 }
 
 /**
- * The full seven-lane roster: this runtime's four `pools.mjs` lanes (derived there from the
- * same private mapping the pools themselves use), plus the freeform lane and the two checkout
- * lanes, composed from THEIR OWN exported constants. Nothing here re-types a login, a role or a
+ * The full EIGHT-lane roster: this runtime's four `pools.mjs` lanes (derived there from the
+ * same private mapping the pools themselves use), plus the freeform lane, the two checkout
+ * lanes and #871's signed-out invite-preview lane, composed from THEIR OWN exported constants. Nothing here re-types a login, a role or a
  * DSN variable name — "spelling is not identity", and a roster that spells its members itself
  * is a second source of truth that drifts. #617 extended that to the lane NAMES themselves
  * (FREEFORM_LANE / STRIPE_WEBHOOK_LANE / AUTH_WALL_LANE / pools.mjs's own LANE_NAMES), because
@@ -142,6 +149,10 @@ export const LANE_ROSTER = Object.freeze([
   Object.freeze({ lane: FREEFORM_LANE, dsnVar: FREEFORM_DSN_VAR, login: FREEFORM_LOGIN, role: FREEFORM_ROLE, eager: true }),
   Object.freeze({ lane: STRIPE_WEBHOOK_LANE, dsnVar: STRIPE_WEBHOOK_DSN_VAR, login: STRIPE_WEBHOOK_LOGIN, role: STRIPE_WEBHOOK_ROLE, eager: false }),
   Object.freeze({ lane: AUTH_WALL_LANE, dsnVar: AUTH_WALL_DSN_VAR, login: AUTH_WALL_LOGIN, role: AUTH_WALL_ROLE, eager: false }),
+  // #871: LAZY for the same reason the two checkout lanes are — 0309 ships both roles NOLOGIN and
+  // the credential is an operator ceremony that follows the migration, so an unconfigured lane
+  // reports `skipped`, never an error.
+  Object.freeze({ lane: INVITE_PREVIEW_LANE, dsnVar: INVITE_PREVIEW_DSN_VAR, login: INVITE_PREVIEW_LOGIN, role: INVITE_PREVIEW_ROLE, eager: false }),
 ]);
 
 /**

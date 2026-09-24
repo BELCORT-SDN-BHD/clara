@@ -163,7 +163,7 @@ import { handlePlansSupabase } from "./plans-mock.mjs";
 // `/rest/v1/rpc/preview_invite` (0224, which no other lane and no CORE branch answers). Those
 // are EXTENSIONS, not handovers — nothing here used to answer them — and they are what lets a
 // browser leg drive `/invite/:token` past verification to the preview step.
-import { handleMembersLifecycleSupabase } from "./members-lifecycle-mock.mjs";
+import { handleMembersLifecycleSupabase, handleMembersInvitePreviewRuntime } from "./members-lifecycle-mock.mjs";
 // #649's client-creation lane — the identity-candidates read and the birth door. Both branches
 // gate on the request's own subject (for these two verbs the subject IS the free-text name: the
 // door takes no id) and fall through otherwise, so it can run anywhere in the chain below; it is
@@ -1252,6 +1252,10 @@ const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, 
   // #636, BEFORE the documents-intake runtime lane: its two routes live under
   // /api/intake/batches, a prefix that lane never claims, and the cancel route falls through on a
   // batch id it did not mint.
+  // #871, FIRST because it claims ONE exact path (`/api/invite-preview`) and, within it, only the
+  // two `ct` tokens this lane minted — so it cannot swallow anything another walk owns, and no
+  // other handler claims that prefix.
+  if (await handleMembersInvitePreviewRuntime(request, response, url)) return true;
   if (await handleIntakeBatchRuntime(request, response, url)) return true;
   if (await handleDocumentsIntakeRuntime(request, response, url)) return true;
   if (await handleChatParityRuntime(request, response, url)) return true;

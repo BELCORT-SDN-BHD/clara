@@ -1,7 +1,10 @@
 import { getTranslations } from "next-intl/server";
+import { headers } from "next/headers";
 
 import { InviteAcceptForm } from "@/components/invite-accept-form";
 import { INVITE_CLARA_TOKEN_PARAM } from "@/lib/identity/doors";
+import { readPublicInvitePreview } from "@/lib/firm/invite-preview-public";
+import { proxyObservedClientIp } from "@/lib/rate-wall-courier";
 
 export async function generateMetadata() {
   const t = await getTranslations("Invite");
@@ -88,5 +91,29 @@ export default async function InvitePage({
   const raw = query[INVITE_CLARA_TOKEN_PARAM];
   const inviteToken = typeof raw === "string" && raw !== "" ? raw : null;
 
-  return <InviteAcceptForm token={token} inviteToken={inviteToken} />;
+  // #871 — THE SIGNED-OUT PREVIEW, READ HERE AND NOWHERE ELSE. The owner's ruling of 2026-09-23
+  // puts this read behind a server-only database door reached through the runtime: this server
+  // component holds the service token for the length of one request, forwards the address its own
+  // edge observed (`CLARA_TRUSTED_CLIENT_IP_HEADER`) so the runtime can key its rate wall, and
+  // hands the ANSWER — four masked fields — down as a prop. The credential never becomes a prop,
+  // a payload or a URL, and the browser never learns the endpoint exists.
+  //
+  // WITH NO CLARA TOKEN THERE IS NOTHING TO LOOK UP, so no call is made: the `ct` parameter is the
+  // only thing that identifies an invitation (the path segment is Supabase's own `token_hash`, and
+  // feeding it to the door would refuse every time — see the note above).
+  //
+  // NEVER THROWS, AND NEVER BLOCKS: `readPublicInvitePreview` turns every failure into a typed
+  // outcome, and the form renders the sign-in step either way.
+  let signedOutPreview = null;
+  if (inviteToken !== null) {
+    const headerBag = await headers();
+    signedOutPreview = await readPublicInvitePreview({
+      token: inviteToken,
+      clientIp: proxyObservedClientIp((name) => headerBag.get(name)),
+    });
+  }
+
+  return (
+    <InviteAcceptForm token={token} inviteToken={inviteToken} signedOutPreview={signedOutPreview} />
+  );
 }

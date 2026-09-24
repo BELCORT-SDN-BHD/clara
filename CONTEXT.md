@@ -325,6 +325,18 @@ _Avoid_: Resending the same invitation; a pending invitation shown as a member; 
 creation of a new firm as a synonym for joining one; a per-firm seat count as a reason to refuse
 one (see **Admission capacity**).
 
+**Signed-out invite preview**:
+What the invite landing page can say about an invitation BEFORE anyone signs in: the firm's display
+name, the invited role, the effective status and a masked address — nothing else, and only while
+the invitation is still open. It is served by a server-only database door no browser, no client
+credential and no service key can reach, and an unknown, expired, revoked or already-accepted token
+gets ONE and the same answer, so possession of a link never reveals whether it exists. Reading it
+is a courtesy, not an admission: rate-limited, and when it is refused the page simply carries on to
+sign-in without the block.
+_Avoid_: A synonym for the signed-in preview (that one proves the reader's address and is a
+different door); a verdict on whether the invitation will be accepted — only `accept_invite`
+decides that; treating a hidden preview as a dead link.
+
 **Issuer lapsed**:
 The fifth effective status a still-`pending` invitation can read, computed at READ TIME by one
 expression the invitee's preview and the admin roster BOTH carry, when the invitation's issuer no
@@ -913,6 +925,27 @@ change are born from it — an asset a prior version already birthed keeps its o
 _Avoid_: A rule the product infers from an asset's own evidence (that is exactly what Depreciation
 particulars is not); a class finer than the account; a back-fill of an asset already waiting; a
 value an acquisition itself states (that always wins, because a policy fills only what is absent).
+
+**Depreciation particulars proposal**:
+What Clara proposes when an acquisition lands on an enrolled asset account that carries no default
+depreciation policy: a method, a useful life or rate, a residual and an in-service date, with the ONE
+line she derived them from. It travels inside the dependent particulars question and pre-fills every
+answering entrance, and it is never applied on its own — a person confirms it or edits it, and what
+is recorded is what they confirmed, under their name. A driver is proposed only where a ground
+exists: the enrolment's own rule (an enrolment with no accumulated-depreciation account admits "not
+depreciated" and nothing else), a recorded note about this client, the account's own retired policy,
+or the account's other completed assets WHERE THEY AGREE. A ground speaks for a row only when its
+own account IS that row's account, on every one of those grounds alike; and grounds of one kind that
+disagree ground nothing, whether they are two assets or two recorded notes. Where nothing grounds a
+method the proposal says so and leaves it empty; only the two facts that are not estimates — the
+acquisition's posting date and a nil residual — are always proposed, and the residual is the firm's
+default rather than a value read off whatever ground supplied the method.
+_Avoid_: A useful life inferred from an asset's name or class; a method picked between two of the
+account's own assets — or two of the client's own recorded notes — that disagree; a ground borrowed
+from an account that is not this row's; a residual taken from the ground the method came from; a
+proposal applied without a person; a value a surface repaired into a plausible one; treating the
+reason line as the question's own reason (that says why Clara is asking; this says where the values
+came from).
 
 **Depreciation change class**:
 What KIND of change a revision to an asset's depreciation particulars is, recorded on the generation

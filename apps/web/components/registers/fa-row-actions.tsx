@@ -19,6 +19,8 @@ import { FaDoorDialog } from "./FaDoorDialog";
 import { toDialogRefusal } from "@/components/common/dialog-refusal";
 import { faRefusalControlId } from "@/lib/registers/fa-refusal-field";
 import { FaParticularsFields, EMPTY_PARTICULARS, particularsReadyToSubmit } from "./fa-particulars-fields";
+import { FaProposalNote } from "./fa-proposal-note";
+import { useFaParticularsProposal } from "./use-fa-particulars-proposal";
 import { fmtCents } from "@/lib/registers/money";
 import {
   completeFixedAssetParticulars, completeIntent, reviseFixedAssetParticulars, reviseIntent,
@@ -59,6 +61,12 @@ export function CompleteParticularsDialog({ clientId, asset, busy, act, error }:
   // doors. A CLOSED DIALOG ENDS THE DECISION: the next press is a new completion and mints a new
   // key (`onClosed` below), same as `ReviseParticularsDialog`.
   const decision = useDepreciationDecisionKey();
+  // #933 — CLARA'S PROPOSAL, READ WHEN THE DIALOG OPENS AND NOT BEFORE. It is the same block the
+  // Work question carries (`clara.agent_interruptions.source_ref`), so the person sees the SAME
+  // proposal here as in Needs-you and in the conversation — through the one hook both register-side
+  // entrances share (`./use-fa-particulars-proposal.ts`), which owns the read-on-open,
+  // seed-only-an-untouched-form and clear-on-close rules.
+  const seedFromProposal = useFaParticularsProposal({ clientId, assetId: asset.id }, setParticulars);
 
   return (
     <FaDoorDialog
@@ -70,7 +78,13 @@ export function CompleteParticularsDialog({ clientId, asset, busy, act, error }:
       refusal={toDialogRefusal(error)}
       refusalFocusId={faRefusalControlId(idPrefix, error)}
       confirmDisabled={!particularsReadyToSubmit(particulars)}
-      onClosed={() => decision.renew()}
+      onOpen={seedFromProposal.seed}
+      onClosed={() => {
+        decision.renew();
+        // A CLOSED DIALOG ENDS THE DECISION, and the seed goes with it: the next open is a fresh
+        // completion, re-read and re-seeded, never a stale proposal from a previous visit.
+        seedFromProposal.clear();
+      }}
       onConfirm={() =>
         act(async () => {
           const intent = completeIntent({ clientId, assetId: asset.id, particulars });
@@ -80,6 +94,7 @@ export function CompleteParticularsDialog({ clientId, asset, busy, act, error }:
         })
       }
     >
+      <FaProposalNote proposal={seedFromProposal.proposal} />
       <FaParticularsFields idPrefix={idPrefix} value={particulars} onChange={setParticulars} />
     </FaDoorDialog>
   );

@@ -29,6 +29,9 @@ import {
   type InvitePreviewRole,
   type InvitePreviewRow,
 } from "@/lib/firm/invite-preview";
+// #871 — TYPE ONLY. The reader itself runs on the SERVER (the page's own component); this file
+// imports nothing from it that could pull a credential-holding module into a client bundle.
+import type { PublicInvitePreviewOutcome } from "@/lib/firm/invite-preview-public";
 import { isDoorRefusal } from "@/lib/doors";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -109,6 +112,32 @@ type Failure = {
  *  the database actually holds. */
 function knownRole(role: string): InvitePreviewRole | null {
   return (INVITE_PREVIEW_ROLES as readonly string[]).includes(role) ? (role as InvitePreviewRole) : null;
+}
+
+/** THE THREE FACTS AN INVITATION PREVIEW STATES, rendered once and used twice (#871). Both
+ *  previews on this journey answer the same question — "which firm, at which role, for which
+ *  address?" — and they differ only in WHEN they can be asked and WHICH door answered:
+ *  `clara.preview_invite_by_token` before anyone signs in, `clara.preview_invite` after
+ *  verification has proven the reader's address. Two copies of this list would be two places for
+ *  the mask, the role vocabulary or a label to drift. */
+function InvitePreviewFacts({ firm, role, maskedEmail }: { firm: string; role: string; maskedEmail: string }) {
+  const t = useTranslations("Invite.preview");
+  const tRoles = useTranslations("Members.roles");
+  return (
+    <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+      <dt className="text-muted-foreground">{t("firmLabel")}</dt>
+      <dd className="font-medium text-foreground">{firm}</dd>
+      <dt className="text-muted-foreground">{t("roleLabel")}</dt>
+      <dd className="font-medium text-foreground">
+        {knownRole(role) ? tRoles(role as InvitePreviewRole) : role}
+      </dd>
+      {/* A HINT, never an address: both doors mask it (0224 §A, 0309 §C) and this renders what
+          was sent. Nothing here reconstructs an address, and no form on this journey has an
+          email field — the acceptance door reads it from the verified JWT claim. */}
+      <dt className="text-muted-foreground">{t("emailLabel")}</dt>
+      <dd className="font-medium text-foreground">{maskedEmail}</dd>
+    </dl>
+  );
 }
 
 /** A governed refusal as this surface renders it: the DB's own CLR code and
@@ -437,12 +466,18 @@ function VerificationFailureFace({ failure }: { failure: Failure }) {
 export function InviteAcceptForm({
   token,
   inviteToken,
+  signedOutPreview = null,
   createSupabaseClient = createClient,
 }: {
   /** Supabase's `token_hash` from the URL path segment. */
   token: string;
   /** Clara's own invite token. Nullable — see the header's "TWO TOKENS". */
   inviteToken: string | null;
+  /** #871 — what the SERVER read before this page was sent, through the runtime's server-only
+   *  door (`lib/firm/invite-preview-public.ts`). A prop rather than a read of this component's
+   *  own, because the credential that reaches that door lives on the server and must never come
+   *  near a browser. `null` when the link carried no Clara token to look up. */
+  signedOutPreview?: PublicInvitePreviewOutcome | null;
   /** The transport seam. Defaults to the real browser client; see
    *  `InviteAuthClient` for why it is substitutable and what it cannot do. */
   createSupabaseClient?: () => InviteAuthClient;
@@ -712,7 +747,37 @@ export function InviteAcceptForm({
           <h1 className="text-base font-semibold">{t("confirmTitle")}</h1>
           <CardDescription>{t("confirmDescription")}</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-4">
+          {/* #871 — THE SIGNED-OUT PREVIEW, ABOVE THE CONTROL THAT CONSUMES THE LINK. The owner's
+              ruling of 2026-09-23: an invitee sees which firm and role the link names BEFORE they
+              sign in. The answer was read on the SERVER, through a door no browser and no client
+              credential can reach, and arrives here as a prop.
+
+              A FAILED READ RENDERS NOTHING AT ALL, deliberately — not even an "we couldn't check"
+              line. There is nothing for a person to do about it at this point in the journey, the
+              step below is unchanged either way, and a signed-out surface that announced a verdict
+              would be a SECOND place that blocks an invitation. The post-verification preview
+              already owns that, with a reader whose address `clara.preview_invite` has checked. */}
+          {signedOutPreview?.ok ? (
+            <section
+              aria-labelledby="invite-signed-out-preview-heading"
+              className="rounded-lg border border-border bg-muted/40 p-4"
+            >
+              <h2 id="invite-signed-out-preview-heading" className="text-sm font-semibold">
+                {tPreview("heading")}
+              </h2>
+              <InvitePreviewFacts
+                firm={signedOutPreview.preview.firm_name}
+                role={signedOutPreview.preview.role}
+                maskedEmail={signedOutPreview.preview.masked_email}
+              />
+              {/* #872's notice, on the same terms it carries after verification: a NOTICE, never a
+                  block, and it claims nothing about whether accepting will succeed. */}
+              {signedOutPreview.preview.status === "issuer_lapsed" ? (
+                <p className="mt-3 max-w-prose text-xs text-muted-foreground">{tPreview("issuerLapsedNote")}</p>
+              ) : null}
+            </section>
+          ) : null}
           <Button
             type="button"
             className="w-full"
@@ -856,19 +921,11 @@ export function InviteAcceptForm({
             <h2 id="invite-preview-heading" className="text-sm font-semibold">
               {tPreview("heading")}
             </h2>
-            <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-              <dt className="text-muted-foreground">{tPreview("firmLabel")}</dt>
-              <dd className="font-medium text-foreground">{preview.preview.firm_name}</dd>
-              <dt className="text-muted-foreground">{tPreview("roleLabel")}</dt>
-              <dd className="font-medium text-foreground">
-                {knownRole(preview.preview.role) ? tRoles(preview.preview.role as InvitePreviewRole) : preview.preview.role}
-              </dd>
-              {/* A HINT, never an address: the door masks it (0224 §A) and this renders what it
-                  sent. Nothing here reconstructs an address, and the form still has no email
-                  field — the door reads that from the verified JWT claim. */}
-              <dt className="text-muted-foreground">{tPreview("emailLabel")}</dt>
-              <dd className="font-medium text-foreground">{preview.preview.masked_email}</dd>
-            </dl>
+            <InvitePreviewFacts
+              firm={preview.preview.firm_name}
+              role={preview.preview.role}
+              maskedEmail={preview.preview.masked_email}
+            />
             <p className="mt-3 max-w-prose text-xs text-muted-foreground">{tPreview("roleNote")}</p>
             {/* #872 — a NOTICE, never a block: the owner ruling is explicit that acceptance stays
                 open in this state, so the ONLY difference from `pending` is this one line.

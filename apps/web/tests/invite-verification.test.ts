@@ -155,9 +155,11 @@ describe("the OTP purpose is not caller-controlled", () => {
       .filter((name) => name.length > 0);
     assert.deepEqual(
       [...props].sort(),
-      ["createSupabaseClient", "inviteToken", "token"],
+      ["createSupabaseClient", "inviteToken", "signedOutPreview", "token"],
       "closed world: `token` is Supabase's token_hash, `inviteToken` is Clara's invite token, "
-        + "`createSupabaseClient` is the transport seam — and NO OTP purpose is among them",
+        + "`createSupabaseClient` is the transport seam, `signedOutPreview` is ticket 871's "
+        + "server-read answer (four masked fields, no token and no credential) — and NO OTP "
+        + "purpose is among them",
     );
     assert.doesNotMatch(form, /EmailOtpType/);
   });
@@ -232,12 +234,15 @@ describe("the OTP purpose is not caller-controlled", () => {
       "the page must IMPORT the constant, never re-type the string (spelling is not identity)",
     );
 
-    // And what the route hands the form is exactly the two tokens — the
-    // closing half of the census, so a purpose cannot arrive as a prop either.
+    // And what the route hands the form is exactly the two tokens plus ticket 871's already-read
+    // preview — the closing half of the census, so a purpose cannot arrive as a prop either.
+    // `signedOutPreview` is an ANSWER, not an input: four masked fields the SERVER read from a
+    // door no browser can reach, carrying no token, no address and no credential (see
+    // `lib/firm/invite-preview-public.ts`), and nothing in this page can make it name a purpose.
     assert.match(
       page,
-      /<InviteAcceptForm token=\{token\} inviteToken=\{inviteToken\} \/>/,
-      "the form is handed the two tokens and nothing else",
+      /<InviteAcceptForm token=\{token\} inviteToken=\{inviteToken\} signedOutPreview=\{signedOutPreview\} \/>/,
+      "the form is handed the two tokens and the server-read preview, and nothing else",
     );
   });
 
