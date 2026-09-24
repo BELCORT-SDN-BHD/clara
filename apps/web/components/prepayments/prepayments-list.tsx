@@ -17,6 +17,7 @@
 // A second implementation of "when is this due" in TypeScript is the drift 0193's DB-owned
 // arithmetic exists to prevent, so this file computes no date at all.
 
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 
@@ -25,11 +26,15 @@ import { DataTableCard } from "@/components/common/data-table-card";
 import { SectionHeader } from "@/components/common/section-header";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
+import { NativeSelect } from "@/components/common/native-select";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Money } from "@/components/journals/money";
 import { PrepaymentBoundaryStatement, PrepaymentConfigurationStatement } from "./prepayment-statement";
 import { PrepaymentAttentionBand } from "./prepayment-attention";
-import { loadPrepaymentAttention, loadPrepayments, type PrepaymentListRow } from "@/lib/prepayments/api";
+import {
+  loadPrepaymentAttention, loadPrepayments,
+  type PrepaymentListRow, type PrepaymentTermSource,
+} from "@/lib/prepayments/api";
 import { prepaymentCreateHref, prepaymentDetailHref } from "@/lib/navigation/tree";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 
@@ -37,7 +42,16 @@ export function PrepaymentsList({ clientId }: { clientId: string }) {
   const t = useTranslations("Prepayments");
   const schedules = useAsyncRead(() => loadPrepayments(clientId));
   const attention = useAsyncRead(() => loadPrepaymentAttention(clientId));
-  const rows = schedules.data ?? [];
+  const all = schedules.data ?? [];
+  // #939 — THE FILTER IS OVER THE READ THIS LIST ALREADY HOLDS, never a second call. Both lanes
+  // arrive in one answer (`clara.list_prepayment_schedules` returns every schedule of the client
+  // with its `term_source`), so re-reading to narrow would be a second answer to one question and
+  // a second chance to disagree with itself.
+  const [termSource, setTermSource] = useState<PrepaymentTermSource | "">("");
+  const rows = useMemo(
+    () => (termSource === "" ? all : all.filter((r) => r.term_source === termSource)),
+    [all, termSource],
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -68,6 +82,26 @@ export function PrepaymentsList({ clientId }: { clientId: string }) {
           {t("listHeading")}
         </SectionHeader>
         <p className="max-w-prose text-sm text-muted-foreground">{t("listBody")}</p>
+        {/* #939 — THE TERM-SOURCE FILTER. A prepayment amortised over a period a PERSON stated and
+            one amortised over a period a document states are the same schedule with different
+            provenance, and a firm reviewing its own judgements wants exactly one of those groups.
+            A labelled native Select, so the control is a control rather than a row of toggles
+            whose state a reader has to infer. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="text-xs text-muted-foreground" htmlFor="prepayment-term-source-filter">
+            {t("termSourceFilterLabel")}
+          </label>
+          <NativeSelect
+            id="prepayment-term-source-filter"
+            className="w-auto"
+            value={termSource}
+            onChange={(e) => setTermSource(e.target.value as PrepaymentTermSource | "")}
+          >
+            <option value="">{t("termSourceAll")}</option>
+            <option value="document_service_period">{t("termSourceDocument")}</option>
+            <option value="human_stated">{t("termSourceStated")}</option>
+          </NativeSelect>
+        </div>
         <DataState
           loading={schedules.loading}
           error={schedules.error}
@@ -123,6 +157,15 @@ function ScheduleRow({ clientId, row }: { clientId: string; row: PrepaymentListR
         {row.term_moved === true ? (
           <span className="mt-1 block" data-testid="prepayment-row-term-corrected">
             <Badge variant="outline">{t("termCorrectedBadge")}</Badge>
+          </span>
+        ) : null}
+        {/* #939 — WHERE THE TERM CAME FROM, on the row where a person first meets the schedule.
+            `=== "human_stated"`, never a truthiness test on the absence of a document id: the
+            field arrives as unvalidated jsonb, and a web build ahead of its database would paint
+            this marker on every schedule in the firm if it inferred the lane from a null. */}
+        {row.term_source === "human_stated" ? (
+          <span className="mt-1 block" data-testid="prepayment-row-term-stated">
+            <Badge variant="secondary">{t("termStatedBadge")}</Badge>
           </span>
         ) : null}
       </TableCell>

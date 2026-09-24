@@ -1016,6 +1016,68 @@ is the second half of the same discipline: the field arrives as unvalidated json
 — a web build ahead of its database, or a rolled-back migration under a live runtime — is falsy,
 which would paint the warning on every prepayment in the firm.
 
+**What either register may say about a SECOND schedule** (L04-SPEC-04). Two different facts, and
+running them together is what made eight sentences wrong — first in one direction and then in the
+other. Measured on the lane database:
+
+- A plain reconfiguration is still refused. `uq_prepayment_schedules_source_live` and
+  `uq_revenue_recognition_schedules_source_live` (0317) admit one LIVE schedule per recognition, so
+  `clara.create_prepayment_schedule` and `clara.create_revenue_recognition_schedule` still answer
+  CLR13 `…schedule_exists` over a recognition that carries one, running or ended
+  (`p939.supersede.running`, `p941.supersede.running`, and the last arm of `p939.replace.clean`,
+  which asks again after a replacement and gets the LIVE schedule's id back). And reassigning a
+  plan's authority is not a door either: 0193's `clara.revise_accounting_plan` moves the SCHEDULE
+  and never `authorised_by`.
+- A replacement derived from a CORRECTED TERM does exist, and it is what #939 AC4 and #941 AC3
+  name. `clara.replace_prepayment_schedule` / `clara.replace_revenue_recognition_schedule` (0317)
+  end the predecessor's plan, leave every period it has already taken up untouched, and open a new
+  schedule from the first month it has not, over the balance those months did not consume
+  (`p939.replace.clean`, `p939.replace.posted`, `p941.replace.posted`). The door refuses unless
+  the term on record has actually MOVED — a re-statement of the same two dates is not grounds
+  (`p939.replace.refuses`, axis `term_unmoved`).
+
+Eight strings used to say the first fact as though it were the whole truth, after an earlier round
+had said the opposite: the corrected-term banner and the stated-term note on both registers, the
+ended-schedule note on both, `explainAuthority` and `explainPeriodLine`. Each now says which of
+the two acts is refused and which one takes over the periods still to run.
+
+**No correction CONTROL is on either register yet.** #939 AC5 and #941 AC6 enumerate the surfaces
+those tickets buy and neither names one, so the doors are reachable from the database seam and not
+from a button. The form a replacement would need is the configuration form's authority picker over
+again, which is a surface decision rather than a wording one; the successor contract for it is in
+`docs/plan/active/riders-2026-09-20/reports/wave4-lane04-fix-3.md`.
+
+## #939 — where a prepayment's term came from
+
+A prepayment recognised with NO document is amortised over a service period a named person states
+(`clara.prepayment_stated_terms`, migration 0305). The resulting schedule behaves exactly like a
+document-backed one — the same whole-calendar-month straight line, the same cent remainder, the same
+monthly Work — so PROVENANCE is the whole difference, and every surface has to carry it rather than
+let "a person said so" read as "the invoice says so".
+
+- **The list** marks the row with a word (**Term stated by a person**, never a colour) and offers a
+  **Term came from** filter. The filter runs over the rows the list already holds: both lanes arrive
+  in one `clara.list_prepayment_schedules` answer, so re-reading to narrow would be a second answer
+  to one question.
+- **The detail** renders the stated trio — who stated the term, when and WHY — as its own block,
+  because on this lane there is no invoice behind it and the reason a named person gave is the whole
+  audit trail a reviewer has. It renders NO "open the document" link when `document_id` is null: a
+  button leading to `?document=null` promises evidence that does not exist.
+- **The attention band** takes its next act from the read's own `next_step` token
+  (`configure_schedule` / `record_document_service_period` / `state_service_period`) and never infers
+  it from the absence of a document id. The fallback, for a database at an earlier frontier,
+  reproduces the pre-0305 behaviour exactly and never guesses "state the period" — on such a
+  frontier there is no door to state one through.
+- **The form** carries the act itself. `clara.record_prepayment_stated_term` is bookkeeper-floored,
+  human-lane only, with no agent grant and no wake wrapper, so every value is typed by the person at
+  the screen and none is prefilled from anything a model produced. The write runs inside
+  `attention.act`, so the prompt disappears because the DATABASE reports a live term, never because
+  the component decided it had succeeded.
+
+Every one of these tests `term_source === "human_stated"` rather than the absence of a document id,
+for the reason #919's own discipline states: the field arrives as unvalidated jsonb, and a web build
+ahead of its database must paint nothing rather than infer a lane.
+
 **The coverage footer is not the tie.** Mapped/unmapped counts and cents live in the target panel,
 labelled as coverage, with no percentage — and deliberately OUTSIDE `OpeningDryrunStrip`, whose own
 law is that it mints no numeral and re-derives no tie. C-25's defect was exactly a coverage figure
@@ -2042,3 +2104,120 @@ Three things that component now says which neither surface said before:
 
 The accrual form's method hint is rule-dependent for the same reason (#937): it stated that one rule
 exists, beside a control that offers two.
+
+## #940 — which accounts hold prepayments, and what the surfaces say when none do
+
+Before migration 0306 any ordinary asset account could be amortised: the prepaid-leg wall is
+NEGATIVE (not a control account, not a bank account, not inactive, not reserved by another
+register), so a deposit or a prepaid tax passed it. A per-client ROSTER now carries the positive
+statement — this account holds prepayments — and it gates both the schedule door and the attention
+band's candidate arm. Three surfaces change.
+
+**`components/registers/prepayment-accounts-panel.tsx` — the roster itself**, on the Registers page
+beside the fixed-asset account profiles (the ticket's own placement: this is an account-ENROLMENT
+panel, and the Registers page is where this client's account enrolments live). It reads
+`clara.prepayment_account_enrolments` DIRECTLY through `lib/registers/prepayment-accounts.ts` — that
+relation carries a real SELECT grant to `clara_authenticated` under forced RLS, the same Q3
+read-the-tables mechanism `lib/registers/fa-account-profiles.ts` uses — so `useHydratedPart`'s
+`act()` re-reads the live roster after every enrol/retire rather than painting its own answer.
+
+* **The empty state names the consequence**, not the emptiness: "No account is enrolled as a
+  prepayment account for this client yet. Until one is, no prepayment here can be amortised." It is
+  gated on `loading`, because on THIS panel that sentence is load-bearing.
+* **Every row shows the REASON.** It is the whole audit trail a later reader has for why this
+  account was treated as a prepayment account; stored and hidden would make it a label.
+* **The enrol dropdown offers only what the door's POSITIVE rule admits** — this client's active,
+  non-control ASSET accounts — and never tries to pre-empt the door's five negative axes. Those are
+  the estate's own judgement (`clara._adj_line_eligibility_breach`, carried through with its own
+  axis), and a client-side copy could disagree with it.
+* **Confirm is disabled until a reason is typed.** The door refuses a blank one by name and stays
+  the backstop; a person should not be sent to the database to be told to type a sentence.
+* **The retire dialog says the sentence a person could otherwise get wrong**: it closes the account
+  to NEW schedules, and a schedule already running keeps posting to the end of its term.
+
+**`components/prepayments/prepayment-form.tsx` — why there may be nothing to choose.** Arm B can now
+be empty for a NEW reason, and "this client has nothing unamortised" and "no account is enrolled, so
+nothing here could ever be configured" are different facts with different next acts. The form reads
+the roster and, when it is genuinely EMPTY, says which and links to the panel. The claim is gated on
+a real empty ARRAY, never on a null: a read that failed claims nothing at all about the roster,
+which is the false-absence class review law 2 exists for, and
+`prepayments-roster-gate.test.tsx`'s second cell drives the failed read to prove it.
+
+**The refusal is discriminated by its AXIS, not its reason.** `prepayment_source_unfit` covers five
+different facts; `prepaid_account_not_enrolled` is the only one whose remedy lives on another page,
+so it is the only one that gets a sentence and a link beside the database's own words. Read off
+`DoorRefusal.detail.axis`, never inferred from the message.
+
+**`prepaymentAccountsHref`** (`lib/navigation/tree.ts`) is one helper rather than three spellings of
+`/registers?tab=fixedAssets`, so a later move of the panel is one edit.
+
+**The browser leg.** `prepayments.walk.roster` runs the whole journey in one browser — read the
+roster, retire it, meet the form's empty-roster banner, follow its link back, enrol the account
+again with a typed reason, and configure the SAME prepayment that was refused minutes earlier. It
+carries its own recognition and schedule ids, runs last in the file, and leaves the account
+enrolled; `prepayments-mock.mjs` gates every arm-B row on the roster, because every arm-B row is an
+offer and the door would refuse one on an unenrolled account.
+
+**Copy is EN only.** The brief asks for "en and zh copy"; this build ships a single static locale
+(`i18n/request.ts` pins `const locale = "en"` and `messages/` holds `en.json` alone), so there is no
+zh catalogue for the strings to land in. The namespace is `PrepaymentAccounts`, plus five keys in
+`Prepayments` for the form's banner and the roster refusal.
+
+
+## #941 — the Deferred revenue destination, and a roster that now holds two purposes
+
+A customer's advance is the mirror of a prepayment: the same evaluator, the same cadence, the same
+monthly Work. It is NOT the same table on screen. A prepayment is money the client PAID ahead (an
+asset being released into expense) and an advance is money it RECEIVED ahead (a liability being
+earned as revenue), so `deferred-revenue` is its own destination beside `prepayments` rather than a
+view of it — one table for both would need a sign column to tell a reader which side of the books a
+row is on.
+
+**Three persistent statements, not two.** The list, the form and the detail all carry the no-invoice
+boundary ("a recognition schedule never issues an invoice and never touches MyInvois — the advance
+was received before any of this, which is what makes it deferred"), the
+configuration-is-not-a-posting boundary, and this lane's OWN third: service tax is never recognised
+as revenue. That last sentence is the one an accountant needs WHILE they decide, so it is on screen
+before any read resolves and it is never a toast.
+
+**Both attention arms, with the READ's own next act.** Arm A is "the last period did not post" and
+arm B is "received in advance, not yet recognised". Arm B's next act is
+`next_step` — `configure_schedule`, `record_document_service_period` or `state_service_period` — read
+off the door's answer, never inferred from the absence of a document id: a web build ahead of its
+database would get that wrong for every row. The two acts that lead to the configure form share one
+destination with the receipt in the query string, and differ only in their label, because a person
+who has to state a term and then configure a schedule should not have to find the page twice.
+
+**The form asks five things and derives everything else.** Which posted advance, which instruction
+authorises it, which revenue account each period credits, why that account, and what the schedule is
+for. There is no amount field, no date field, no cadence control and no pattern control, and
+`lib/deferred-revenue/schedule.ts` computes no money and no date at all: the amount is the receipt's
+own credited liability leg, the term is its carrier's, the allocation and the cadence are the frozen
+evaluator's. `941.form.derives_nothing` holds that as a cell over the door's actual payload.
+
+**Two facts a surface must never confuse.** `posted_periods` counts periods with a COMMITTED
+receipt, never admitted Work, and the corrected-term badge is keyed on `term_moved === true` — an
+ABSENT field paints nothing, because a truthiness test would put the warning on every schedule in
+the firm.
+
+**The roster panel stops being purpose-blind (`components/registers/prepayment-accounts-panel.tsx`).**
+The form's empty state sends a bookkeeper to that panel, and until this ticket the panel could only
+enrol a PREPAYMENT: it read one arm of the roster, offered asset accounts only, and called both
+doors with the default purpose — a live pointer to a dead end. It now reads the whole live roster,
+prints each row's own purpose as a word (never inferred from the account's type, which is the door's
+judgement), asks what the account holds BEFORE which account it is (the answer decides which
+accounts can be offered at all), and carries the purpose into both doors. Retire carries the row's
+purpose because the roster is keyed on (client, account, purpose): the default would have closed a
+different enrolment from the row whose control a person pressed.
+
+**The browser leg.** `deferred-revenue-walk.spec.ts` runs three cells on
+`deferred-revenue-mock.mjs`: the list (three statements, both arms, `2 of 12 periods`, and the
+term-source filter narrowing the answer the page already holds), the configure journey (an attention
+row lands on a form that already knows the receipt; a refused configure keeps every field, prints
+the database's own words and says the advance is still posted; the retry recognises twelve whole
+months with the remainder in the final one), and a running schedule's detail (a posted period told
+from a refused one in the database's own word, and the who/when/why behind a person-stated term).
+
+**Copy is EN only**, for the reason #940 records above: this build ships a single static locale, so
+the brief's "en and zh copy" has no zh catalogue to land in. The namespace is `DeferredRevenue`,
+plus six keys in `PrepaymentAccounts` for the panel's purpose control and its row badges.

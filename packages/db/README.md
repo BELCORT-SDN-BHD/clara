@@ -5410,7 +5410,6 @@ file, and the corrected FIRST-APPLY branch was exercised for real: in one rolled
 the live router body was reversed through the block's own five (anchor, replacement) pairs, the
 pre-image installed, the block run, and all four arms re-read out of the catalog.
 
-
 ## #949 — a tenancy's contract-terms record, and the recurring rent plan a person confirms (0300)
 
 `0300_tenancy_terms_rent_plan.sql` closes the tenancy half of #926's question 7. It builds on
@@ -5582,7 +5581,6 @@ posting or presentation code reads this row". `clara._client_reporting_framework
 reader, and it reads the key only to decide whether Clara may DRAFT, never to post: a live CLIENT
 record shadows a live FIRM record inside its effective window, and two live records of one scope
 carrying different codes answer `ambiguous` rather than picking.
-
 
 ## Riders wave 4, lane 01 — the review fix round (0296–0300)
 
@@ -6115,6 +6113,515 @@ shared `fixed-asset-acquisition-fixtures.mjs`, so it is dormant below 0216):
 Vacuity control: with the fixture changed to park the question WITHOUT a proposal, cells 1–3 go
 red and 4–5 stay green; the fixture was then restored byte for byte.
 
+## 0305 — a prepayment with no document is amortised from a person-stated service period (#939, riders wave 4, lane 04)
+
+`ck_je_basis` (0003) admits a MEMO-ONLY journal entry: the client paid a year of insurance and said
+so, the accountant recorded the payment against a prepaid asset, and no invoice ever arrived.
+`clara.prepayment_schedule_v1` reads its term off `clara.document_service_periods`, which is keyed
+to a DOCUMENT, so such an entry answered `prepayment_term_underivable` naming
+`journal_entries.document_id` and the lane stopped there — a prepaid asset on the books with nothing
+amortising it, and no remedy but inventing a document. The accrual lane already accepts a
+person-stated period with no document; `0305_prepayment_stated_term.sql` brings the prepayment lane
+level with it.
+
+**The second term carrier.** `clara.prepayment_stated_terms` sits at RECOGNITION-ENTRY grain, not
+document grain, because the recognition entry is the only durable thing a memo-only term is about.
+It is NOT a nullable `document_id` on `clara.document_service_periods`: that relation's tenancy is a
+composite FK onto `clara.documents(id, firm_id)`, its liveness index is `unique (document_id) where
+superseded_at is null`, and its congruence trigger resolves region → extraction → document — making
+the column nullable would void all three at once, on the table the accrual lane and the prepayment
+lane share. Its discipline is that relation's own, column for column: supersede-never-mutate
+(`t_pst_supersede_only`), one live row per source entry (`uq_prepayment_stated_term_live`), a
+REQUIRED free-text `reason`, a recorded `stated_by`/`stated_at`, finite and domain-bounded dates,
+and the SAME 120-month cap computed with the SAME arithmetic the evaluator uses
+(`ck_pst_max_periods` is `ck_dsp_max_periods`' expression verbatim — the owner's decision 5 is "the
+same cap", and a cap computed a second way would be a second cap). Forced RLS with an owner policy
+and a SELECT-only, firm-predicated, bookkeeper-floored human policy.
+
+**One human door, and no machine lane at all.**
+`clara.record_prepayment_stated_term(client, source_entry, period_start, period_end, reason, op_key)`
+is bookkeeper-floored (the owner's decision 2: the same floor as recording a document's service
+period), `clara_authenticated` ONLY, with `clara._reserve_op` idempotency taken before any mutable
+validation. There is no agent grant and NO WAKE WRAPPER — the owner's default 6: a period a model
+supplied would be a model-generated value entering a durable artifact, so the model may only ever
+ask the fixed two-date question. The tail asserts that by a `pg_proc` count (exactly one function
+is named for the stated term), not by convention. The door refuses a document-bound recognition by
+name (`prepayment_stated_term_source_has_document`, naming
+`clara.record_document_service_period` as the remedy): two live terms for one prepayment would have
+no rule for which wins.
+
+**Prestate pins are PER BODY, not global.** 0285 (#919) pinned its two recut bodies under one mode
+and refused a half-and-half reading. That coupling is right for two bodies recut for one reason in
+one go and wrong here: 0305 recuts four bodies for four different reasons, and sibling tickets of
+the same lane recut some of the same reads immediately after it. Each body therefore admits exactly
+two pre-images of its OWN — its measured live `sha256(prosrc)`, or a body already carrying this
+file's `#939` attribution — and anything else is real drift and refuses by name. The mode each body
+was found in is reported in the notice, so a half-and-half reading is visible rather than silent.
+`clara.prepayment_schedule_v1` is pinned UNCONDITIONALLY at both ends of the file: it is a
+registered single-member `clara.evaluator_versions` closure and this file never touches it, so a
+changed sha is always a finding.
+
+**The second evaluator.** `clara.prepayment_schedule_v2(total_cents, account_code, release_side,
+term_start, term_end)` is `clara.prepayment_schedule_v1`'s formula UNCHANGED — whole-calendar-month
+straight line, a month charged iff the term covers its FIRST day, the remainder wholly in the final
+period — with the amount, the released account, the released SIDE and the term supplied as
+arguments. What changes is who decides: v1 reads the term off `clara.document_service_periods` and
+the amount off "the one debited asset leg", so the EVALUATOR picks both the source leg and the term
+source; v2 moves those two choices to the DOOR, because they are exactly what #939 makes
+conditional. `release_side` is an argument rather than a default because a prepaid ASSET is released
+by credit and a deferred-revenue LIABILITY by debit, and getting that wrong posts the books
+backwards — which is also how the #941 deferred-revenue mirror rides the same evaluator.
+
+It calls no other `clara` function and reads no table, which is what keeps its own
+`clara.evaluator_versions` registration a genuine SINGLE-MEMBER closure (registering an N-member
+closure freezes N bodies estate-wide). The 120-month cap lives inside v2 as well as on both
+carriers: v1 can never meet a longer term because its carrier refuses to hold one, but v2's term is
+an argument and without the wall it would emit a 121st line for a term no door admits.
+`prepayment_schedule_v2` is NOT in `frozen-evaluators.json`: that lint discovers only the
+`clara.evaluate_*` spelling (`check-frozen-evaluators.mjs:62`), which is why
+`clara.prepayment_schedule_v1` has no entry there either — the DB-side freeze
+(`clara.verify_evaluator_freeze()`, run by `migrate.mjs` between every migration body and its
+commit) is what binds both.
+
+**The registration is a ONE-SHOT act, including for this file's own author.**
+`clara.evaluator_version_members` is append-only and `clara.evaluator_versions` refuses DELETE, so
+the freeze block is guarded by a presence test rather than an upsert. A redo after an edit to the
+v2 body therefore leaves a stale member hash and `verify_evaluator_freeze()` fails that apply —
+loudly, which is correct: once registered, a changed formula is a `_v3`, never an edit.
+
+**The door picks the lane, and only the lane is new.** `clara.create_prepayment_schedule` now reads
+the recognition entry once and branches on the one fact that decides it — whether it binds a
+document. The document lane is 0223's body unchanged: `clara.prepayment_schedule_v1`, its returned
+refusals re-raised, the `clara.document_service_periods` row re-read so the schedule names the exact
+term it rode. The memo-only lane asks v1's three fitness arms IN THE DOOR (posted; exactly one
+debited asset leg; a fiscal year that admits the term) with 0140's own tokens, sentences and payload
+keys, then calls `clara.prepayment_schedule_v2` with the leg it picked, the `'credit'` side a
+prepaid asset is released by, and the live stated term. v2 cannot ask those arms — it reads no table
+by design, which is what keeps its closure at one member — so the door asks them, which is the
+ticket's own line: the door, not the evaluator, picks the source leg and the term source. The
+prepaid-leg eligibility wall is asked AFTER the branch, so it guards both lanes.
+
+The refusal a memo-only prepayment used to get named `journal_entries.document_id`, which told a
+firm its prepayment could never be amortised at all. It now carries
+`missing: "prepayment_stated_terms"` and `remedy: "clara.record_prepayment_stated_term"` — 0140's
+"the refusal NAMES what to record and where", finally true for this lane too. `schedule_version`
+reads `v1` on a document-backed schedule and `v2` on a human-stated one, and
+`evaluator_version_id` resolves by the entrypoint signature the branch chose rather than by a
+literal.
+
+**Both reads are extended, not forked.** `term_live`, `term_superseded_by`, `term_moved`,
+`term_current_start` and `term_current_end` keep their exact #919 meanings and are now computed
+against WHICHEVER carrier the schedule rode, chosen by `term_source`. A surface written against
+#919 keeps working; forking them into `document_term_live` / `stated_term_live` would have made
+every reader ask which pair to trust. ADV-02 carries over unchanged, because
+`clara.record_prepayment_stated_term` supersedes unconditionally too. Three fields are genuinely
+new: `term_source`, and `term_stated_by` / `term_stated_at` / `term_reason`, which are NULL on the
+document lane rather than filled from the document's own recorder — "a person stated this term" is
+a different claim from "somebody typed a service period off an invoice".
+
+`list_prepayment_schedules`' join onto `clara.document_service_periods` was INNER (0285) and is now
+LEFT. That is a fix, not a refactor: the moment a schedule exists with no document row it would
+have been ABSENT from its own firm's list — live in the books, invisible on the screen.
+`clara.get_prepayment_schedule`'s envelope is now built as two `jsonb_build_object` calls
+concatenated with `||`, because that function is variadic and PostgreSQL refuses more than 100
+arguments (54023, measured here the moment the five new keys were added).
+
+**Arm B of the attention read stops hiding memo-only prepayments.** Its
+`je.document_id is not null` filter was not arbitrary — with no other carrier a memo-only
+recognition could never be configured, so listing it would have offered an action that could only
+refuse — but with #939 it hides exactly the prepayments this ticket exists to rescue. Each
+candidate now carries `term_carrier` (which carrier its term would live in), `has_live_term`
+computed against that carrier, and `next_step` as a closed token: `configure_schedule`,
+`record_document_service_period`, or `state_service_period`. A token rather than a sentence,
+because the copy is the surface's and the fact is the database's. `clara._adj_line_eligibility_breach`
+is now the only thing keeping an ordinary memo-only receivable out of the band, so
+`p939.attention.memo_only` drives that wall on this lane rather than assuming it carries over.
+
+**The closed-wave floor moves in the same PR that moves it.** Registering `prepayment_schedule` v2
+adds a ninth row to `clara.evaluator_versions`, and three closed-world censuses count that roster by
+name and version: `delta-contract.test.mjs`, `delta-catalog-phase.mjs` and
+`epsilon-contract.test.mjs`. Each of them also runs the test-time one-way deploy ceremony over every
+registered closure EXCEPT a named exclusion list — so without an entry the ceremony flips v2 on
+sight (measured on the lane rig the moment 0305 applied: the floor read one too many, and
+`_tf_evaluator_deploy_once` makes that flip irreversible without disabling the trigger). v2 joins
+`evaluate_fs_pack_agent` v1, `evaluate_metric` v2 and `prepayment_schedule` v1 on the exclusion list
+for the reason all three are there: evaluator versions are BORN undeployed and the flip is a
+separate ceremony act. The rosters are extended, never loosened — each addition is conditional on
+the row existing, so the censuses stay exact on a pre-0305 chain too.
+
+## 0306 — a per-client roster of prepayment accounts gates amortisation ahead of the shared wall (#940, riders wave 4, lane 04)
+
+`clara.prepayment_schedule_v1` (0140) takes "the one debited asset leg" verbatim and never asks
+WHICH asset. 0223 put `clara._adj_line_eligibility_breach` (0042) on that leg and 0305 carried the
+same wall onto the memo-only lane, but that wall is NEGATIVE — not a control account, not a bank
+account, not inactive, not reserved by the fixed-asset or staff-advance rosters — so an ordinary
+asset account with no class, no bank stamp and no reserved role passes it on both lanes. A utility
+deposit, an inventory purchase or a prepaid tax could therefore be amortised into expense for a
+whole stated term with every entry balanced and every period receipted, and arm B ADVERTISED them
+with a "configure the schedule" action beside each. 0223's own header named the missing half and
+said why it had not been built: "a roster would need a chart-level classification this estate does
+not carry".
+
+**Why it is not a chart classification, measured rather than assumed.** `coa_accounts.account_class`
+admits only `payable` and `receivable`, and the shared wall refuses ANY non-null class as a control
+account — so a `prepaid` member of that enum would make every prepaid account INELIGIBLE (#911's own
+triage measurement, 2026-09-17, and the reason the owner's ruling rejected option D). The positive
+classification needs its own carrier, and the estate already has the shape: the per-client enrolment
+register.
+
+**The roster.** `clara.prepayment_account_enrolments` is `clara.staff_advance_accounts`' (0043)
+shape, which is itself `clara.fa_account_profiles`' (0041) clone — an immutable
+`[enrolled_at, retired_at]` interval, version-forward on any change, a REQUIRED non-blank reason,
+a no-delete + no-truncate pair, forced RLS and a SELECT-only application grant. Per CLIENT, not a
+mark on the firm's template (owner decision 1: the same template account is a prepayment for one
+client and an ordinary deposit for the next). One live row per `(client, account, purpose)`
+(`uq_prepayment_account_enrolments_live`).
+
+Two things it does NOT copy from those two:
+
+* **an update guard.** 0041 and 0043 both carry none, and say so. Here the REASON is the fact the
+  roster exists to hold, and a reason that could be rewritten in place is a label rather than a
+  basis, so `_tf_pae_retire_only` admits exactly one update — the retirement stamp — and refuses a
+  retired row outright. The version-forward path never needs an in-place edit (it retires and
+  inserts), so the guard costs the doors nothing.
+* **the op-key columns.** 0043 carries `created_op_key`/`retired_op_key`; `clara.op_receipts`
+  already records which decision wrote which row, and 0041's profile carries neither.
+
+**The purpose is a closed set from birth.** `purpose in ('prepayment', 'deferred_revenue')`.
+Deferred revenue (#941) is the mirror of this lane — a credited LIABILITY released over the same
+term by the same evaluator — and it needs the same positive roster with a different account-type
+rule. A second relation would give two answers to one question, so the owner's 2026-09-18 ruling is
+"No second roster is ever opened". The COLUMN admits the second purpose today; the DOOR refuses it
+by name (`prepayment_account_enrolment_invalid` / `purpose_rule_not_stated`) until #941 states that
+rule, because admitting a purpose whose rule does not exist would enrol a liability under the asset
+rule.
+
+**The two doors.** `clara.enrol_prepayment_account(p_client, p_account, p_purpose, p_reason,
+p_op_key)` and `clara.retire_prepayment_account(p_client, p_account, p_purpose, p_op_key)`, both at
+the BOOKKEEPER floor and granted to `clara_authenticated` alone — no agent grant, no wake wrapper,
+asserted by `pg_proc` count in §TAIL rather than by convention. Enrolment answers every reason an
+account cannot hold prepayments (owner decision 6, "the refusal happens at enrolment with a stated
+reason, not later at the schedule door"):
+
+| axis | source |
+|---|---|
+| `account_unknown` / `account_inactive` / `control_account` / `bank_account` / `account_reserved` | `clara._adj_line_eligibility_breach`, the ESTATE's own rule, carried through with its own axis |
+| `not_asset_class` | the one positive rule this purpose adds — a prepayment is a prepaid ASSET |
+| `reason_missing` | owner decision 4 |
+| `purpose_unknown` / `purpose_rule_not_stated` | the closed set, and the arm #941 opens |
+| `not_enrolled` (retire) | a no-op that answered "done" would let a panel report a retirement that never happened |
+
+Re-enrolling with the SAME reason is idempotent; a RESTATED reason retires the live row and inserts
+a fresh one, so the basis a schedule was configured under stays readable for as long as the schedule
+does.
+
+**One spelling, four callers.** `clara._prepayment_account_enrolled(client, code, purpose)` is the
+whole roster question, `stable security definer` and granted to NOBODY (it is reached only from a
+definer body, exactly as the shared wall is). §D's recut of `clara.create_prepayment_schedule` calls
+it; §E's recut of `clara.list_prepayment_attention` calls it in arm B's candidate predicate; #915's
+OBO twin and #941's deferred-revenue mirror call it with their own purpose. A predicate copied into
+four bodies is four chances for the band and the door to disagree, and the brief's own criterion is
+"the door and arm B agree both ways".
+
+**The order is roster-then-wall, and that is the brief's.** An account that fails both is told about
+the roster, because the reason it can never be enrolled is stated at the enrolment door. The wall is
+UNCHANGED and still guards the accounts the roster admits — an account enrolled while it was
+eligible and bound as a bank account the next day answers `prepaid_account_ineligible` with the
+shared helper's own breach, which `p940.schedule.roster_gate` drives rather than asserts. §0 pins
+`clara._adj_line_eligibility_breach` and `clara._acct_role_reserved` UNCONDITIONALLY and §TAIL
+re-measures the first after the file has run: "this file does not change the wall" is a claim, and
+the sha is the evidence.
+
+**Nothing on the admission path asks the roster** (owner decision 3/5). Retiring an account closes
+it to NEW schedules and nothing else: `p940.retire.future_only` retires the account BEFORE a single
+period has posted — the worst case — and then drives the monthly scan, the Work claim and a real
+posting through the OBO door to a committed receipt, with the stored allocation byte-identical
+afterwards and no roster row back-filled by any of it.
+
+**Prestate pins, measured on `clara_l04` after 0305:**
+
+| signature | `sha256(prosrc)` | mode |
+|---|---|---|
+| `clara.create_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)` | `d1d3b5326009c6d1149075d5fcb1c6eff943c4c59034685b59c4fa3ec0c50f4a` | bimodal (recut by §D) |
+| `clara.list_prepayment_attention(uuid)` | `745ca3032410529233eb2bcad143553cb6a6b89026350fb5cb4450fe740093e9` | bimodal (recut by §E) |
+| `clara._adj_line_eligibility_breach(uuid,jsonb)` | `727fceade766c85a8fc4753d03e6e071a9008334e149266488e5d5232dd98021` | **unconditional** — asked, never edited |
+| `clara._acct_role_reserved(uuid,text)` | `e1b44ed0c2449c4e4947e40b0d9d2675da73d02c7365e90453382e158ebf69cd` | **unconditional** — the reserved-account axis rests on it |
+
+Per body, not global, for 0305's own stated reason: three sibling tickets of this lane (#915, #941,
+#1036) recut some of the same bodies immediately after this file, so a global mode would refuse a
+legitimate estate in which a sibling had already moved one of them. Each body admits its measured
+pre-image or a body already carrying this file's `#940` attribution, and anything else refuses BY
+NAME.
+
+**Gate module, cohort, chain.** `tests/prepayment-account-roster-preintegration-gate.mjs` (stem
+`prepayment_account_roster$`, env `CLARA_ALLOW_MISSING_PREPAYMENT_ACCOUNT_ROSTER`);
+`PREPAYMENT_ACCOUNT_ROSTER_0306_COHORT` in `tests/rig-meta.mjs` (the two human doors on the
+`clara_authenticated` roster, `_tf_pae_retire_only` and `_prepayment_account_enrolled` ungranted),
+bimodal like 0305's; the `--import` entry in `package.json` in MIGRATION ORDER, immediately after
+`prepayment-stated-term-preintegration-gate.mjs`.
+
+**The shared scene builder enrols.** Every prepayment battery in this package reaches its
+recognition through `prepaidScene` (`tests/f-a4-pr2a-fixtures.mjs`), so that builder now enrols its
+prepaid account through the REAL door, guarded on that door's exact signature — a database pinned
+before 0306 is unaffected. `prepaymentRosterGateLive()` is the shared probe a cell asks when its
+expected REFUSAL differs either side of this frontier; `p653.schedule.prepaid_leg_ineligible` is the
+one such cell, and it now measures the wall's judgement where it speaks after 0306 — at the
+enrolment door.
+
+## 0307 — the prepayment-schedule door gets its `clara_runtime` twin, on the human door's own body (#915, riders wave 4, lane 04)
+
+`clara.create_prepayment_schedule` is granted to `clara_authenticated` alone and is
+`_human_ctx`-fronted at the bookkeeper rank; 0223 defined no `_for` twin, and the three reads are
+`clara_authenticated`-only. The runtime pool runs as `clara_runtime` and carries no JWT, so both
+contracts written at the foot of `packages/runtime/lib/prepayment-schedule-basis.ts` — the chat tool
+`start_prepayment_schedule_work` and the Work term park's `read_prepayment_source` — could only ever
+return a grant refusal, which is why that module is still outside every frozen closure and why the
+PRD's chat-entrance line for prepayment amortisation is not yet true.
+
+**What this file adds.** An actor-explicit OBO twin
+`clara.create_prepayment_schedule_for(p_client, p_author, p_source_entry, p_expense_account,
+p_expense_basis, p_purpose, p_authority_ref, p_op_key)` in `clara.create_accrual_adjustment_for`'s
+shape (0222) — `clara_runtime` only, the initiator named in an ARGUMENT and re-checked LIVE against
+this firm's memberships — and one narrow machine-lane read,
+`clara.read_prepayment_source_for(p_firm, p_client, p_source_entry)`.
+
+### Why a shared core rather than a second body
+
+This is the one place the file departs from 0222's precedent, and the reason is measurable in 0222
+itself: the accrual pair duplicates its validation across two doors and has already drifted —
+`clara._accrual_plan_core` still resolves authority with 0222's own `exists` probes while
+`clara.create_accounting_plan` was narrowed by #977/0250 to refuse an instruction that is not a
+PERSON's, so the accrual OBO lane accepts an authority reference the human lane refuses. The
+prepayment door's body is ~500 lines (the term-carrier branch, #940's roster gate, 0042's shared
+negative wall, the expense half, the allocation, the basis rung, the plan, the insert race and the
+audit), and #915's own acceptance criterion is "the twin's refusal vocabulary matches the human
+door's for every shared rule". Two copies of that body make that criterion a promise; one body makes
+it a fact.
+
+So the file EXTRACTS rather than copies:
+
+| function | who runs it | what it owns |
+|---|---|---|
+| `clara.create_prepayment_schedule` | `clara_authenticated` | the op key, `clara._human_ctx(bookkeeper)`, the client ladder |
+| `clara.create_prepayment_schedule_for` | `clara_runtime` | the op key, a null-author wall, the client ladder, the LIVE authority recheck |
+| `clara._prepayment_schedule_core` | nobody (definer-internal) | everything else, byte for byte what the human door ran after 0306 |
+| `clara._prepayment_plan_core` | nobody (definer-internal) | the amortisation plan step for the OBO lane |
+
+The core's ONE new branch is `p_lane`, a closed set of two that raises on anything else. It decides
+which plan step runs and nothing else.
+
+### Why the OBO lane needs its own plan step
+
+`clara.create_accounting_plan` resolves its actor through `clara._human_ctx` → `clara.jwt_sub()`,
+and a `clara_runtime` connection carries no `request.jwt.claims`: nesting it would raise CLR04
+`no authenticated actor` on every OBO call. `clara._accrual_plan_core` exists for exactly that
+reason and `clara._prepayment_plan_core` is its sibling for the amortisation kind. It copies 0193's
+authority ladder verbatim AND asks `clara._authority_ref_refusal` (0250/#977) — the line the accrual
+core does not have — so the two prepayment lanes answer `authority_ref_invalid` (object / kind / id),
+`authority_ref_unresolved` and `authority_ref_not_human_instruction` identically. It takes no op key
+of its own: the outer `create_prepayment_schedule` reservation already covers the whole
+configuration, which is the ONE deliberate difference between the lanes (the human lane additionally
+holds 0193's nested `op_key || ':plan'` receipt).
+
+### One op-key namespace, and the author is not in the hash
+
+The reservation is taken inside the shared core under the verb name `create_prepayment_schedule`,
+over a payload hash of the CALLER'S OWN ARGUMENTS — client, source entry, expense account, expense
+basis, purpose, authority — and NOT over the author. That is what makes the ticket's convergence
+true in both directions: a chat configuration whose response was lost and the human replay of the
+same decision under the same key return one answer, one `clara.op_receipts` row and one schedule.
+A hash that included the author would turn that replay into an `op_key reused with different args`
+refusal, which is the defect `_reserve_op` exists to prevent.
+
+### The machine-lane read
+
+`clara.read_prepayment_source_for` is `clara.read_knowledge_record_for`'s posture (0230): SCOPE
+EXPLICIT (firm and client are arguments, never inferred from a JWT the caller does not have),
+`clara_runtime` ONLY, one subject, `stable`, and NO BYTES — there is no bytes key and there never
+will be; the byte door is 0190's and is not reachable from a term read. It answers the entry's
+status, posting date and bound document ID (an identifier, not content), the one debited asset leg
+and its cents (or the candidate count when it is not exactly one), the RECORDED term from either
+carrier — `clara.document_service_periods` or #939's `clara.prepayment_stated_terms` — with its
+period, its basis KIND and the basis TEXT a person wrote, and the schedule that already amortises
+the recognition if there is one. With no term recorded it reports the ABSENCE and names the HUMAN
+door that fills it, never an empty term a run could read as "no term is needed".
+
+Its consumer is `claraWork`'s term park, which cannot be cut until `claraWork_v6` (the report for
+#915 carries the successor contract in full). The read is built now because a migration is not a
+workflow cut's to write.
+
+**Scalars, not records.** §E declares scalar locals rather than plpgsql `record`s, and the reason is
+a defect this file met on the rig: a `record` that no `select into` ever reaches raises
+`record "v_sp" is not assigned yet` the moment a field is read — so a memo-only recognition (no
+document, hence no document-carrier select) made the read RAISE instead of reporting the absence it
+exists to report. The same held for the prepaid leg when an entry debits zero or many asset
+accounts.
+
+### What it deliberately does not do
+
+* It does not widen `clara.create_prepayment_schedule`'s ACL. `clara_runtime` still cannot execute
+  it — an OBO call must name its human, and a runtime grant on the human door would be a
+  configuration that names nobody. 0306's tail asserted that ("human-only until #915"); this file
+  keeps it true by adding a door rather than a grant, and its own tail re-asserts it.
+* It grants the agent role and both wake roles NOTHING. The legacy
+  `clara.wake_establish_prepayment_schedule` (the template lane, wake source asserted disabled) is
+  untouched: #1036 is the ticket that reroutes it onto this door.
+* It opens no agent path to recording a service period or to enrolling a prepayment account. Both
+  stay human doors with no wake wrapper (hard constraint 2; owner decision 4 of 2026-09-18).
+
+### Prestate pins
+
+One recut body, bimodal (its measured pre-image, or a body already carrying this file's `#915`
+attribution), and six neighbours pinned UNCONDITIONALLY because the extracted core calls all six
+verbatim and this file edits none of them:
+
+| signature | `sha256(prosrc)` | mode |
+|---|---|---|
+| `clara.create_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)` | `446a8dcd060ca7e274012e7a15baa6f5c54e912ee7c53633748adc26b88340b0` | bimodal (recut by §C) |
+| `clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)` | `99f6078775c07440122cde4f180c2f2f11aea7fcd5f0504cb6ffe6c8776cb424` | unconditional |
+| `clara._authority_ref_refusal(text,uuid,uuid,uuid)` | `c4148f6d95cd03876d6b8efe97d658e07e493e1743a075e1fe81901fd8fa61b7` | unconditional |
+| `clara._prepayment_account_enrolled(uuid,text,text)` | `0c10eafa94824a00a5d4c7b08ae1ba093d52f0e4f2c0b953a7951b46a27948db` | unconditional |
+| `clara._adj_line_eligibility_breach(uuid,jsonb)` | `727fceade766c85a8fc4753d03e6e071a9008334e149266488e5d5232dd98021` | unconditional |
+| `clara.prepayment_schedule_v1(uuid,uuid)` | `ecbc76053272a2abb6055740062895d6feb308ffae348a6363391190046727f2` | unconditional |
+| `clara.prepayment_schedule_v2(bigint,text,text,date,date)` | `9f5123adf67fcbf573b994efa60d27b1aa35beab8ced54ffbc4a3078896f0194` | unconditional |
+
+§TAIL re-measures all six after the file has run: "this file only extracts and adds" is a claim, and
+the shas are the evidence. The pin on `clara.create_accounting_plan` is load-bearing in an unusual
+way — this file deliberately does NOT call it on the OBO lane, so a change to it is a change to one
+lane only, and the pin is what makes that visible instead of silent.
+
+**Post-0307 live shas**, for whoever recuts these next (#941, #1036):
+
+| signature | `sha256(prosrc)` |
+|---|---|
+| `clara.create_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)` | `62f909b7802faacf1d8b18e4040e9bf70f99ce344f7120bc35f37be7c0e54879` |
+| `clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)` | `acf5d120aa7f3a6e751ce3a21d02e7bdced202067540ec1d81a85396de4b82aa` |
+| `clara._prepayment_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)` | `0b34d44d70fa92f78f1d13dcf7866ce38aa99f7a6d2430cf329a48e4a7cd17dc` |
+| `clara.create_prepayment_schedule_for(uuid,uuid,uuid,text,text,text,jsonb,text)` | `230db25c762adb1283f5d96f9334f797cf5b30ef54b7a8395a39cf111770f98a` |
+| `clara.read_prepayment_source_for(uuid,uuid,uuid)` | `6475458ed34d9b9ef357f8fb6e4eb9766042e30e1252c30d607fabd1a120495b` |
+
+#941's deferred-revenue mirror and #1036's wake reroute now have ONE body to reach rather than two:
+a lane that adds a rule adds it to `clara._prepayment_schedule_core` and both entrances have it.
+
+**Gate module, cohort, chain.** `tests/prepayment-schedule-obo-preintegration-gate.mjs` (stem
+`prepayment_schedule_obo_twin$`, env `CLARA_ALLOW_MISSING_PREPAYMENT_SCHEDULE_OBO`);
+`PREPAYMENT_SCHEDULE_OBO_0307_COHORT` in `tests/rig-meta.mjs` (the twin and the read on the
+`clara_runtime` roster, the two cores ungranted), bimodal like 0306's; the `--import` entry in
+`package.json` in MIGRATION ORDER, immediately after
+`prepayment-account-roster-preintegration-gate.mjs`.
+
+## 0308 — a receipt a customer paid ahead is recognised as revenue over its service period (#941, riders wave 4, lane 04)
+
+The expense side of the release lane has been complete since 0223/0305/0306/0307: a prepaid ASSET,
+released by credit into expense, month by month. The REVENUE side had nothing. A customer who pays a
+year of membership up front leaves the firm with a contract LIABILITY (MFRS 15 / MPERS §23 — the
+entity owes a service, not money) and no way to earn it: the money sat in a liability account until
+somebody remembered to journal it out by hand.
+
+**What this file adds.** A `revenue_recognition_schedule` accounting-plan kind, a
+`clara.revenue_recognition_schedules` relation in `clara.prepayment_schedules`' exact shape, the
+deferred-revenue arm of #940's enrolment door, a recognition door with the OBO twin and the
+machine-lane read #915 gave the expense side, the monthly admission arm, and three human reads (a
+list, a detail, an attention band) in 0223's own shape.
+
+### The accounting, stated so a reviewer can check it against the standard
+
+One entry a month, `Dr deferred revenue / Cr the revenue account the accountant chose`, whole
+calendar months, straight line, the cent remainder wholly in the final period, until the liability
+clears to zero. Two rules are structural rather than conventional:
+
+* **SST output tax is never recognised as revenue.** Output tax on an advance is owed to the Royal
+  Malaysian Customs Department under the Service Tax Act 2018; it is not revenue and never becomes
+  revenue. §F excludes any credited leg stamped `special_acc_type = 'sst_output'` from the candidate
+  set BY THE ESTATE'S OWN STAMP rather than by code or name, so a receipt of `Dr bank / Cr deferred
+  revenue / Cr SST output` has exactly ONE candidate liability leg. That is an impossibility removed
+  from the set, not a choice made between two legs — which is why it cannot be wrong for a client
+  whose chart numbers its tax accounts differently.
+* **Straight line is the only pattern.** Usage-based and milestone recognition need a measure of
+  progress this estate does not carry, and inventing one would be the database choosing a number.
+  Anything else is refused by name, `recognition_pattern_unsupported`.
+
+The evaluator is #939's FROZEN `clara.prepayment_schedule_v2`, ridden with `release_side = 'debit'`
+— the argument #939 put there for exactly this caller ("a prepaid ASSET is released by credit and a
+deferred-revenue LIABILITY by debit"). No second arithmetic exists on this side of the books.
+
+### Why a second relation rather than a `kind` column on `clara.prepayment_schedules`
+
+That table's own CHECK pins `plan_kind = 'amortisation_schedule'` and its columns are named for the
+expense side (`prepaid_account_code`, `expense_account_code`, `expense_account_basis`). Widening it
+would either file a liability schedule under columns that name it wrongly, or rename columns that
+four batteries, three reads and a web surface already spell. `clara.revenue_recognition_schedules`
+is that table COLUMN FOR COLUMN with three renamed for this side, which is what the brief asks for.
+
+`clara.prepayment_schedules` is byte-identical after this file, and §TAIL re-measures the five
+prepayment bodies this file relies on to prove it.
+
+### The refusal tokens are this lane's own
+
+0140's five prepayment tokens say "prepayment", and a bookkeeper recognising a customer's advance on
+a Deferred revenue page would be told the wrong half of the books. The SHAPE is carried over token
+for token — `_source_unfit` with an `axis`, `_term_underivable` with a `missing` and a `remedy`,
+`_target_ineligible` / `_target_underivable` — so every surface that renders one renders the other
+with no second grammar.
+
+| token | when |
+|---|---|
+| `deferred_revenue_source_unfit` | the entry is not approved, has no single credited liability leg, or that leg's account is not on the roster (`axis: deferred_account_not_enrolled`) |
+| `deferred_revenue_term_underivable` | no live service period and no live stated term stands for it |
+| `revenue_target_ineligible` / `revenue_target_underivable` | the credited revenue account is unknown, inactive or not an income account; or its written basis is missing |
+| `deferred_revenue_amount_below_period_granularity` | the advance cannot divide over that many months without a period recognising nothing |
+| `deferred_revenue_schedule_exists` | that receipt already has a schedule |
+| `recognition_pattern_unsupported` | any pattern but straight line |
+
+### §A — the second purpose stops being a column and becomes a rule
+
+0306 carried `purpose in ('prepayment','deferred_revenue')` on the COLUMN from birth and refused the
+second value at the door, because the account-type rule was this ticket's to state. It now branches:
+`prepayment` wants a prepaid ASSET (`axis: not_asset_class`), `deferred_revenue` a contract
+LIABILITY (`axis: not_liability_class`). The CONTROL axis is already discharged by the shared
+negative wall above it, so the arm adds the TYPE and nothing else. The roster stays keyed on
+(client, account, purpose), so the two arms version forward independently and neither can retire the
+other's enrolment.
+
+### The prestate pins, with their modes
+
+Six RECUT bodies (each admits its measured pre-image OR a body already carrying `#941`, so a redo is
+safe) and nine KEPT neighbours (pinned unconditionally). Measured on the lane rig after 0307.
+
+| recut signature | pre-image `sha256(prosrc)` |
+|---|---|
+| `clara.enrol_prepayment_account(uuid,text,text,text,text)` | `d55dcbdebd05a7d07adc8f1e8988d8ba440fdfed99b2573c24ea7f8ff07b56a1` |
+| `clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)` | `99f6078775c07440122cde4f180c2f2f11aea7fcd5f0504cb6ffe6c8776cb424` |
+| `clara._assert_plan_schedule(text,text,text,integer,text,date,date,text)` | `1aca2dc26d5a9d0ac5ead59144561eb3292feb9df520f45982952604a9666b40` |
+| `clara._prepayment_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)` | `0b34d44d70fa92f78f1d13dcf7866ce38aa99f7a6d2430cf329a48e4a7cd17dc` |
+| `clara._plan_admit_occurrence(uuid,date,text,text,boolean)` | `a34744199379ebf9fbdcbbd19cd68768ef228409533f19dfcf0daa0c3393ec46` |
+| `clara.preview_accounting_plan(uuid,integer)` | `49416814c59f54bc43d07ee0d795b87edb40aa41c6b54e058ed12fc81a7b05c6` |
+
+| kept neighbour | `sha256(prosrc)` |
+|---|---|
+| `clara._adj_line_eligibility_breach(uuid,jsonb)` | `727fceade766c85a8fc4753d03e6e071a9008334e149266488e5d5232dd98021` |
+| `clara._prepayment_account_enrolled(uuid,text,text)` | `0c10eafa94824a00a5d4c7b08ae1ba093d52f0e4f2c0b953a7951b46a27948db` |
+| `clara.prepayment_schedule_v2(bigint,text,text,date,date)` | `9f5123adf67fcbf573b994efa60d27b1aa35beab8ced54ffbc4a3078896f0194` |
+| `clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)` | `acf5d120aa7f3a6e751ce3a21d02e7bdced202067540ec1d81a85396de4b82aa` |
+| `clara._authority_ref_refusal(text,uuid,uuid,uuid)` | `c4148f6d95cd03876d6b8efe97d658e07e493e1743a075e1fe81901fd8fa61b7` |
+| `clara._assert_journal_basis(jsonb)` | `2ba8e307098f4d5c6214ad48770b84eb574f0edf55cab11f5e122b5adbcc3684` |
+| `clara.prepayment_schedule_v1(uuid,uuid)` | `ecbc76053272a2abb6055740062895d6feb308ffae348a6363391190046727f2` |
+| `clara._plan_amortisation_period_line(uuid,date)` | `88d712d7f9b8e4edc8ece28936a75bfd30611476842dd6f7113d36735192578c` |
+| `clara._plan_occurrence_basis(jsonb,date,text,uuid,jsonb)` | `cef3264e2a8956dc3d08259b6c1f6bf90bd5c155c7f473f88504f778f611829e` |
+
+The prestate also asserts three preconditions that are not shas: `clara.prepayment_stated_terms` and
+`clara.prepayment_account_enrolments` exist, the purpose CHECK already admits `deferred_revenue`,
+and a PUBLISHED platform chart template carries `2030` as a LIABILITY — the wave-4 pre-step (0295,
+`my_sme_starter` version 2, v1 retired) is the first half of this ticket and this file mints no
+chart row at all.
+
+**Gate module, cohort, chain.** `tests/deferred-revenue-preintegration-gate.mjs` (env
+`CLARA_ALLOW_MISSING_DEFERRED_REVENUE`); `DEFERRED_REVENUE_0308_COHORT` in `tests/rig-meta.mjs`
+(the three human reads and the write on `clara_authenticated`, the OBO twin and the machine-lane
+read on `clara_runtime`, the cores and the trigger function ungranted), bimodal like 0307's; the
+`--import` entry in `package.json` in MIGRATION ORDER, immediately after
+`prepayment-schedule-obo-preintegration-gate.mjs`.
+
 ## 0309 — a signed-out invitee can see which firm and role an invite names (#871, riders wave 4 lane 05)
 
 **The question, in plain words.** Someone clicks an invite link. Before they sign in, can the page
@@ -6330,6 +6837,364 @@ through fd.05 are unmoved and stay 0240-only.
 `create or replace function`; the grant/revoke pairs are idempotent. The prestate detects its own
 redo by the same signal 0248 uses — both recut bodies already calling the new rule — and refuses a
 PARTIAL signal (one caller updated, the other not) rather than guessing.
+
+## 0315 — the agent-lane prepayment wake door stops proposing a retired 0045 template (#1036, riders wave 4, lane 04)
+
+`clara.wake_establish_prepayment_schedule` (0140, wrapper 12) still called
+`clara._agent_prepayment_schedule_core`, which called `clara._propose_adjustment_template_core` and
+could mint a `proposed` `clara.adjustment_templates` row — a row #927 (0282) left no door to sign, no
+belt to run (#928, 0283) and no advisory to name (#929, 0283). The path could not fire in production
+(the wake's only `clara.wake_fn_allowlist` row is `wake_kind = close_prep`, and that source's
+`clara.wake_engine_sources` row is `enabled = false`), but it was a live, callable body, and
+`plan-overlap-template-arm-retired.test.mjs`'s `p929.containment` cell existed to pin exactly that
+residual until this ticket closed it (the wave-3 integration ruling, 2026-09-23).
+
+**What this file does.** The wrapper's SAME NAME and SAME SEVEN ARGUMENTS now delegate to
+`clara._prepayment_schedule_core` — #915/#939/#940's shared body, already proven identical for the
+`'human'` and `'obo'` lanes — through a THIRD lane, `'wake'`, which **refuses by name**:
+CLR03 `wake_authority_absent`, naming the wake kind it refused, the task that asked, and
+`clara.create_prepayment_schedule` as the door that CAN configure this. Nothing durable is written.
+`clara._agent_prepayment_schedule_core` and `clara._propose_adjustment_template_core` are never
+reached from this wrapper again, which is the residual #1036 exists to close.
+
+### Why the lane refuses rather than configuring (the fix round, 2026-09-24)
+
+The FIRST cut of this file gave the wake lane its own plan step,
+`clara._prepayment_plan_core_wake`, in `clara._obo_plan_core`'s shape MINUS the
+authority-instruction wall, writing `authority_kind = 'explicit_instruction'` with
+`authorised_by = clara.agent_user_id()`. Two measured facts killed it (review findings ADV-01 and
+L04-SPEC-02):
+
+1. **It could never post.** `clara.agent_user_id()` holds ZERO `clara.firm_memberships` rows, and
+   `clara._plan_admit_occurrence` (0308) hands the plan's `authorised_by` straight to
+   `clara.admit_journal_work`, whose core raises CLR11 `client_not_found` for an author with no
+   membership. Driven side by side on `clara_l04`: the wake plan's first occurrence answered
+   `{"admitted":false,"code":"CLR11","reason":"client_not_found"}`; an identical human-lane plan
+   answered `{"admitted":true,…}`. Both the belt (`clara.wake_due_plan_occurrences`) and the human
+   catch-up (`clara.request_plan_catch_up`) route through that ONE body, so no path could post. A
+   schedule that looks configured and posts nothing, every month, with no audit row and no Work, is
+   the failure 0308's own `clara._assert_plan_schedule` comment names as the worst this lane can
+   have.
+2. **It lied in the one column a reader filters on.** `clara.accounting_plans.authority_kind` is a
+   closed one-member CHECK whose member means "a person instructed this"; only `authority_ref` was
+   honest about the clocked lane.
+
+The wall the first cut stepped around is `clara._authority_ref_refusal`, narrowed by #977/0250 and
+described by 0307 as "the wall that stops a wake run or an autodraft from authorising its own
+amortisation schedule". A `close_prep` wake is exactly that caller: its credential is minted with
+`on_behalf_of` FORBIDDEN BY CONSTRUCTION (0138:827-830, "there is no directing human on the clocked
+lane"). That wall is the estate's accounting-authority control and it is right; the ticket's "with
+the same validation … a person's own creation gets" cannot be honoured for the plan step, because a
+person's own creation supplies a person. So the lane answers the one thing that is true, and writes
+nothing.
+
+**What would re-open the lane** is an OWNER decision on plan authority for the clocked lane: either
+a directing human the estate can name for an unattended run, or a widened
+`clara.accounting_plans.authority_kind` TOGETHER WITH an admission body that accepts an
+agent-authored plan. Both are changes to the plan-authority model that #1036's own "Out of scope:
+any change to the prepayment door's own rules" forbids this file to make.
+
+| function | who runs it | what it owns |
+|---|---|---|
+| `clara.wake_establish_prepayment_schedule` | `clara_wake_interactive` (unchanged) | `clara._close_wake_ctx`, the purpose/authority framing, the delegation |
+| `clara._prepayment_schedule_core` | nobody (definer-internal, unchanged signature) | everything the human and OBO lanes already ran, plus the `'wake'` refusal ahead of all of it |
+| `clara._prepayment_plan_core_wake` | — | **dropped** by the fix round; the estate is back to TWO plan-writing bodies for this family, both asking `clara._authority_ref_refusal` |
+| `clara._agent_prepayment_schedule_core` | nobody (definer-internal, retired) | an unconditional refusal — kept present at its exact signature/ACL |
+
+### No multiplicity key
+
+The retired core derived one per (task, verb, CLIENT) (0140:3618-3621, design close-key-1 Annex E),
+because two source entries amortised in ONE wake task would otherwise collide on a single
+`clara._reserve_op(create_prepayment_schedule, …)` slot. This lane reserves nothing — it refuses
+before the reservation — so the derived key would name an operation that never happens. It returns
+with the lane if the owner re-opens it.
+
+### The template core is retired 0282's own way
+
+`clara._agent_prepayment_schedule_core` — now caller-less — is recut to an unconditional refusal at
+its exact pre-#1036 signature and ACL (ungranted, `clara_fn_owner` only), kept present rather than
+dropped so a future reader who resolves it by name finds a sentence, not an absence.
+`clara._propose_adjustment_template_core` is untouched (a non-regression pin) and, once this file
+lands, has NO caller anywhere in the `clara` schema's own text — the tail measures that by scanning
+`pg_proc.prosrc`, not by trusting the two bodies above to say so.
+
+### §E — the stated reason stops crossing the bookkeeper floor (ADV-02)
+
+`clara.prepayment_stated_terms` carries policy `p_pst_human`
+(`clara.actor_role_rank() >= clara.role_rank('bookkeeper')`), and 0305's own comment says why:
+"this table holds a professional's STATED REASON, the same data class 0140 walled off there".
+`clara.document_service_periods` carries the IDENTICAL policy, and the document-lane branch of the
+same reads projects only the DATES — `sp.basis` is never returned. But all four schedule reads are
+SECURITY DEFINER entering at `clara.role_rank('viewer')`, so the policy never ran for them, and each
+projected `term_reason`, `term_stated_by` and `term_stated_at` to any viewer of the firm. Driven on
+`clara_l04` before the fix: carol, a viewer of the owning firm, read `count(*) = 0` from the table
+directly and the whole stated sentence back from `clara.get_prepayment_schedule`,
+`clara.list_prepayment_schedules`, `clara.get_revenue_recognition_schedule` and
+`clara.list_revenue_recognition_schedules`. The impact was live —
+`apps/web/lib/navigation/tree.ts` gives both registers `minimumRole: 'viewer'`.
+
+The four reads are re-emitted whole (0305's and 0308's own text, never a splice) with one gate
+added. Below the floor the three fields come back null and a fifth, `term_reason_withheld`, is true
+— **only when a statement actually exists**, so a surface can say "recorded; visible to bookkeepers
+and above" instead of "none", and can never mistake an absent statement for a hidden one. It is a
+FIELD wall, not a narrower read: everything else a viewer could see, they still see.
+
+### §F — the stating door refuses the three carrier bounds by name (ADV-03)
+
+0305's own comment beside `ck_pst_finite` / `ck_pst_domain` / `ck_pst_max_periods` says "The door
+refuses these BY NAME so a caller gets a reason; these exist so no OTHER writer, now or later, can
+get past them" — and the door did not. Driven as a bookkeeper before the fix: `1899-01-01` →
+SQLSTATE 23514 `ck_pst_domain` with a null detail; `'infinity'` → the same; a 200-month term →
+23514 `ck_pst_max_periods`. None carries a `detail.reason`, so no surface can classify them, and
+all three are reachable from `apps/web/components/prepayments/prepayment-form.tsx`, which validates
+presence, order and a non-blank reason and nothing else.
+`prepayment-stated-term-fixtures.mjs` had declared `datesNotFinite`, `datesOutOfDomain` and
+`termTooLong` since #939 with nothing raising them. The door now asks finite → domain → inverted →
+cap, in that order (`'infinity'` is also out of domain, so finiteness first is what makes the
+answer say the thing that is actually wrong), and each refusal carries the bound it broke. The
+constraints stay: they are the backstop for any OTHER writer.
+
+### §G — a reversed source entry is not schedulable, on either lane (ADV-05)
+
+`clara.reverse_entry` leaves the original at status `approved` and sets `reversed_by`, so a
+REFUNDED advance passed the status wall. Driven on the rig: a 90000-sen advance reversed through
+the real door, then `clara.create_revenue_recognition_schedule` returned a schedule of 90000 over
+3 periods — a plan that would post Dr deferred revenue / Cr revenue against money the client got
+back, recognising revenue on a cancelled performance obligation (MFRS 15 / MPERS section 23) and
+driving the liability into a debit balance. The prepayment twin did the same against a refunded
+prepaid asset. The lane's two halves disagreed: `clara.list_revenue_recognition_attention`,
+`clara.list_prepayment_attention` and #940's band all filter `je.reversed_by is null`, so the band
+would never offer a receipt the door was accepting. That predicate is now asked by
+`clara._revenue_recognition_core` (§G), `clara._prepayment_schedule_core` (§B, above the
+document/memo branch so neither carrier can drift) and `clara.record_prepayment_stated_term` (§F,
+which already read `reversed_by` and never looked at it) — one rule, three doors, three bands.
+
+### §H — the enrolment race is answered by name (ADV-04)
+
+`clara.enrol_prepayment_account`'s version-forward block locks the LIVE row, and with no live row
+there is nothing to lock: two sessions both fall through and the loser meets
+`uq_prepayment_account_enrolments_live` at its INSERT. Driven with two real connections, each a
+distinct bookkeeper of the same firm: session A returned an enrolment, session B returned
+`{"code":"23505","constraint":"uq_prepayment_account_enrolments_live"}` with no detail. The
+invariant held — one live row — but the answer was unclassifiable, and every sibling door this lane
+wrote already re-raises typed on exactly this shape. The insert is now wrapped in
+`exception when unique_violation` and re-raised as CLR13 `prepayment_account_enrolment_raced`,
+naming the enrolment that stands. `clara.retire_prepayment_account` is left byte-unchanged and
+pinned: it is an UPDATE with no INSERT, so its loser blocks on the row lock, matches zero rows and
+takes the door's own typed `not_enrolled` arm — driven in `p940.enrol.race`'s second half rather
+than argued.
+
+### Not in this file: the correction path (it is in 0317)
+
+`uq_prepayment_schedules_source` (0223) and `uq_revenue_recognition_schedules_source` (0308) were
+plain UNIQUE constraints on `source_entry_id`: no status predicate, no partial index, so one
+recognition entry carried one schedule for ever and the correction path #939 AC4, #941 AC3 and
+owner decision 3 all name existed in no door. Migration 0317 builds it; see
+"0317 — the term-correction doors" below. Nothing in THIS file changes, and the two cells that
+measured the old behaviour (`p939.supersede.running`, `p941.supersede.running`) still stand,
+because what they actually prove is still true: a corrected term never moves a schedule that is
+already running, and `clara.create_prepayment_schedule` still refuses a second schedule over a
+recognition that carries a LIVE one, ended or not.
+
+### What this file deliberately does not do
+
+- It does not widen `clara.accounting_plans.authority_kind` or touch `clara._authority_ref_refusal`,
+  `clara.create_accounting_plan`, `clara._obo_plan_core` or `clara._prepayment_plan_core` — the
+  human and OBO plan lanes are pinned unconditionally and take neither branch this file adds.
+- It does not change the roster gate, the expense-account wall, the term derivation or the
+  dedupe/idempotency machinery `clara._prepayment_schedule_core` already carries for every lane —
+  the `'wake'` branch adds ONE refusal ahead of all of them and changes nothing else.
+- It does not enable `clara.wake_engine_sources.close_prep` (out of scope, the ticket's own words).
+  The flag stays exactly as #927/#929 left it, and the refusal is unconditional on it — measured
+  with the flag flipped true inside a rolled-back transaction in
+  `prepayment-wake-reroute.test.mjs`'s `p1036.refused`.
+- It does not write `clara.agent_act_receipts`. That table's F-A4 Tier-A/B/C rung discipline
+  belonged to the retired core; the `'wake'` lane now RAISES, exactly as a human's or a chat
+  configuration's refusals do, and a raised refusal writes nothing anywhere — there is no durable
+  act left for a receipt to describe.
+
+**Prestate pins, MEASURED on `clara_l04` after 0308 and before the first apply** — RECUT (bimodal:
+their measured pre-image, or a body already carrying `#1036`):
+
+| signature | `sha256(prosrc)` |
+|---|---|
+| `clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)` | `acf5d120aa7f3a6e751ce3a21d02e7bdced202067540ec1d81a85396de4b82aa` |
+| `clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)` | `143d4526bea145be8529b77c95a1438fb0753c17c11dc57e4f742edfd3130c9f` |
+| `clara._agent_prepayment_schedule_core(jsonb,uuid,uuid,text,text,text,jsonb,text)` | `9be069dafd6884f9aed991e162bb64719d6e70d5841d11bb08011bbf8f7649c7` |
+| `clara.get_prepayment_schedule(uuid)` (§E) | `a97e8a660b2c8092fc2d867452081e98806507b2a6a322ddd95769e404d9dcd2` |
+| `clara.list_prepayment_schedules(uuid)` (§E) | `5e9312153959799fb74aced026513c71efcf1bd89665a71693546c38cafcb671` |
+| `clara.get_revenue_recognition_schedule(uuid)` (§E) | `7cb0eb58be588bf0faab283c9ddcfe83f702f7a1f2c2c133b97714cf6a019cad` |
+| `clara.list_revenue_recognition_schedules(uuid)` (§E) | `075a90ecfe7ee698610716534c5dfdc402ccf56c109f17fb93c03b5d6d031235` |
+| `clara.record_prepayment_stated_term(uuid,uuid,date,date,text,text)` (§F) | `8a7a2fe5a4b274ea5fbe789b02ef97946c927789bd0398863beb8f54d3947f98` |
+| `clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)` (§G) | `5f71dbc2fe984a06c9c60f62bbaaefc8d34e3f0db607bfdfdcb9d409a2152b6d` |
+| `clara.enrol_prepayment_account(uuid,text,text,text,text)` (§H) | `dc122ca3a216b7eae3d1d4678b2921911a1045f1ea761db5f3467685c8a1f554` |
+
+UNCONDITIONAL neighbours (must not have moved; the file relies on their live shape but never
+touches them):
+
+| signature | `sha256(prosrc)` |
+|---|---|
+| `clara._propose_adjustment_template_core(jsonb,uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb,text)` | `b975d0af972d7f620834b6d223a0366782b4be276ffc52165c094a84389ee810` |
+| `clara._close_wake_ctx(text,text,uuid,text)` | `5327c96be6ab4f930570c089e33cd8734bfae9a604f559ff02e9fa8959e9258e` |
+| `clara._prepayment_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)` | `266499b22d5e71c2095fccb570c301349810a0742129f33765e03f3060f72e7a` |
+| `clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)` | `c8e990986a06b132e3dad40e47225968562336b48ad6c01a4a09104784c09188` |
+| `clara.create_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)` | `62f909b7802faacf1d8b18e4040e9bf70f99ce344f7120bc35f37be7c0e54879` |
+| `clara.create_prepayment_schedule_for(uuid,uuid,uuid,text,text,text,jsonb,text)` | `230db25c762adb1283f5d96f9334f797cf5b30ef54b7a8395a39cf111770f98a` |
+| `clara._assert_plan_schedule(text,text,text,integer,text,date,date,text)` | `ce0b24fd9d46531722ed80e83915444817731ad759a4a2c36f2147064bcd0c78` |
+| `clara._assert_journal_basis(jsonb)` | `2ba8e307098f4d5c6214ad48770b84eb574f0edf55cab11f5e122b5adbcc3684` |
+| `clara._plan_overlap_warning(uuid,jsonb,uuid)` | `c2566349405844d14c94ba57836ee9256878001f744ad627b0337ae5b8caf7dc` |
+| `clara._plan_due_events(date,text,text,integer,boolean,date,date,integer)` | `66100718e518a0d587bab68dc63ffb5efb24f95b7d2b899cef3f55d3e3be3384` |
+| `clara._audit(uuid,uuid,uuid,text,text,uuid,jsonb)` | `000c730cd29d6544b014ecb0635fc30d9a238f23cdbd8d224ae8f4331086e2f1` |
+| `clara.retire_prepayment_account(uuid,text,text,text)` (§H's deliberate non-change) | `5a0fc662384760a5303c1cdffb02793967761013137d859dafe2239f118e8f63` |
+
+Note that `clara.create_accounting_plan`'s live sha had already moved since #915's own report (0308,
+#941, widened it to admit `revenue_recognition_schedule`) — pinned here at its value measured on
+this rig after 0308, per the wave-3 addendum's "pin what is LIVE" rule, not copied from an earlier
+migration's header.
+
+Applied via `pnpm db:migrate`; `clara.schema_migrations` reads 294 total, max
+`0315_prepayment_wake_reroute`. Redo-safe by construction (#957): every object is a
+`create or replace function` (three recut) or a `drop function if exists`, and the file writes no
+row and no schema object at all. Its prestate's residual census is MODE-AWARE — exactly one clara
+function mentions the template core on a FIRST apply, zero on a REDO, because by then this file has
+already retired that one caller. (The first cut expected 1 unconditionally and therefore could not
+be redone at all; found and fixed in the fix round.)
+
+**Gate module, cohort, chain.** `tests/prepayment-wake-reroute-preintegration-gate.mjs` (env
+`CLARA_ALLOW_MISSING_PREPAYMENT_WAKE_REROUTE`); no new `rig-meta.mjs` cohort — the one new function
+is UNGRANTED, and `operation-census`/`rig-isolation`'s grant-matrix census (T17) is measured over
+application grants, so an ungranted internal needs no cohort row to stay invisible to it (confirmed
+by running T17 green with `rig-meta.mjs` untouched); the `--import` entry in `package.json` in
+MIGRATION ORDER, at the end of the chain (0315 is the newest migration).
+
+**Tests.** `tests/prepayment-wake-reroute.test.mjs` (new: the reroute driven end to end on a real
+`clara_wake_interactive` session — the typed refusal with `close_prep` flipped true in a rolled-back
+transaction and zero durable rows of any kind, the authority wall answering AHEAD of every input
+wall, the refusal's stability across a fresh credential, the absence of any body that writes a plan
+under `clara.agent_user_id()`, the template core's zero-caller census, and the wrapper's own
+unchanged shape — each refusal cell paired with the HUMAN door on the same scene, whose plan is
+driven through `clara._plan_admit_occurrence` and admits);
+`tests/prepayment-stated-term.test.mjs` (`p939.reads.reason_floor`, new) and
+`tests/revenue-recognition.test.mjs` (`p941.reads.reason_floor`, new) — a viewer of the owning firm
+driven through all four reads beside a bookkeeper on the same schedule, with the table's own policy
+measured alongside so the read and the table are asserted to agree; `tests/plan-overlap-template-arm-retired.test.mjs` (`p929.containment` replaced by
+`p1036.containment-closed` — the residual it pinned is closed, not merely held shut by a flag, and
+the three containment facts it named are re-measured as unchanged rather than as a tripwire);
+`tests/f-a4-pr2a-wrapper.test.mjs` (the Tier-A/B/C agent-drafts/human-signs/belt-posts battery for
+this door — W13\*/W45\*/W14\*/W15/W16/W39/W40/W38\*/W5 — retired with the pipeline it tested;
+`fa4p2a.W13-retired` proves the old `agent_act_receipts` discipline is genuinely gone rather than
+merely un-asserted); `tests/f-a4-pr2a-books.test.mjs` (W34 retired — its human half went at 0282 —
+but **W35 / W35-mutant / W31 RETARGETED rather than deleted**: their subjects are an accounting
+claim about the books and a lifecycle claim about the fiscal year, both still live rules, so they
+are re-driven through the LIVE human door, the plan lane, the catch-up window and the real posting
+belt — prepaid to exactly zero on a total that does not divide evenly, the stopping-one-short
+mutant, and `fiscal_years.successor` refused by name then cleared by opening the year; W44 and W32,
+which never drove this wrapper, are untouched);
+`tests/prepayment-account-roster.test.mjs` (`p940.enrol.race`, new: a real two-connection race on
+both roster doors).
+
+## 0317 — the term-correction doors: a mis-stated term opens a replacement schedule (#939 AC4 / #941 AC3, riders wave 4, lane 04)
+
+**What it closes.** #939 AC4, #941 AC3 and owner decision 3 (2026-09-18) all name the same act —
+"a new schedule from the next period" — and until this file the estate performed none.
+`uq_prepayment_schedules_source` (0223) and `uq_revenue_recognition_schedules_source` (0308) were
+unconditional `unique (source_entry_id)` constraints, so a replacement was refused CLR13 while the
+first schedule ran and refused identically after it had been ended through
+`clara.end_accounting_plan`. A firm that mis-stated a term was left with a wrong amortisation
+running and no remedy at all.
+
+**The derivation is PROSPECTIVE, and the ticket chose it.** "already-posted periods are never
+touched" plus "from the next period" is a change in accounting estimate applied prospectively
+(MPERS section 10 / MFRS 108): the months the plan has already taken up stand, and the balance they
+did not consume is re-spread over what is still open of the corrected term. The alternative —
+treating the first amortisation as an error, reversing it and re-deriving — is a prior-period
+correction, and the same sentence excludes it. No new professional judgement is asked of the
+estate: the judgement is the TERM, and a named person stated it through
+`clara.record_prepayment_stated_term` or `clara.record_document_service_period`.
+
+**The two doors.** `clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text)` and
+`clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)` — `(p_client, p_schedule,
+p_reason, p_authority_ref, p_op_key)`, bookkeeper floor in their own bodies, `clara_authenticated`
+ONLY. There is no OBO twin and no wake wrapper, and the tail asserts the absence by pg_proc count:
+re-deriving a client's books is a judgement with a named person behind it. Each ends the
+predecessor's plan through 0193's own door with the correction's stated reason, creates a NEW plan
+under a FRESH instruction (the correction is a new decision, and the instruction that authorised
+the first schedule spoke about the first term), stamps the predecessor with its successor and
+inserts the replacement naming what it replaced.
+
+**Two shared predicates, both ungranted.** `clara._schedule_term_correction(text,uuid)` is
+`clara.get_prepayment_schedule`'s own #919 liveness predicate lifted verbatim, so the READ and the
+DOOR can never disagree about whether a term was corrected; `term_live` is the audit fact and
+`moved` is the one an act may be taken on, because both term doors supersede unconditionally and a
+re-statement of the same two dates is grounds for nothing (ADV-02).
+`clara._schedule_open_remainder(uuid,jsonb,bigint)` answers two questions that must not be
+conflated: WHERE the replacement may start is the day after the latest ADMITTED occurrence (not a
+committed receipt — an admitted Work is a month the estate has taken responsibility for, and
+re-opening it could post it twice), and WHAT it re-spreads is the total less the periods actually
+admitted, matched to their own due date. The plan scanner admits the latest due event per run, so a
+schedule whose earlier month was never picked up has a GAP before the boundary: that month's share
+is still in the prepaid account (or the deferred-revenue liability) and is part of the remaining
+balance. Charging it to a plan that is about to end would leave a balance nothing ever clears.
+
+**The uniqueness rule is qualified, never dropped.** Both relations gain the
+`clara.prepayment_stated_terms` supersession shape (`superseded_by` deferred, `superseded_at`, the
+paired CHECK) plus `replaces_schedule_id` so the chain reads forwards as well as back, and the
+unconditional constraint is replaced by a partial unique index over `superseded_at is null`. STAMP
+FIRST, INSERT SECOND is load-bearing: the predecessor must leave that index before the successor
+enters it, which is what the deferred FK is for. Both append-only triggers are recut to admit
+exactly one update — the stamp — by comparing the WHOLE row with the stamp removed, so a column
+added later is covered by construction rather than by a name list.
+
+**Four bodies recut for one reason.** `clara._prepayment_schedule_core`,
+`clara._revenue_recognition_core`, `clara.read_prepayment_source_for` and
+`clara.read_revenue_recognition_source_for` each read `where source_entry_id = … and firm_id = …`
+and take ONE row. That was one row by construction before this file; afterwards a corrected
+recognition carries a chain, and an unqualified read would hand a surface an arbitrary member of it
+— the schedule a refusal names, and the schedule claraWork is told about. Each site now asks
+`and s.superseded_at is null`; nothing else in any of the four moved.
+
+**Prestate pins, MEASURED on `clara_l04` after 0315 and before the first apply** — RECUT (bimodal:
+their measured pre-image, or a body already carrying `0317`):
+
+| signature | sha256(prosrc) |
+|---|---|
+| `clara._tf_prepayment_schedules_append_only()` | `21d1fe05f5c9cc837a6f80bd8ec36954c46a395054b2c8278b938140202aa18c` |
+| `clara._tf_revenue_recognition_schedules_append_only()` | `aaaa4202ad8c5b7adb40accf897290753763d26257c0903dcf5d743804437d5e` |
+| `clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)` | `78bbfce7ae46b3445a93689700958f727a1b795cdf483c7c522beef4f7b46ee2` |
+| `clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)` | `03417b7903a6bf04ea49199bb6af27375537d49707874025b9ec62507705bf24` |
+| `clara.read_prepayment_source_for(uuid,uuid,uuid)` | `6475458ed34d9b9ef357f8fb6e4eb9766042e30e1252c30d607fabd1a120495b` |
+| `clara.read_revenue_recognition_source_for(uuid,uuid,uuid)` | `00501a388ada95f1a7db9fccf9ad1d94f04c0067083fd3c457ee9a06ecbe06ab` |
+
+…and KEPT (neighbours both doors nest, refused if any of them moved):
+`clara.prepayment_schedule_v2` `9f5123adf67fcbf573b994efa60d27b1aa35beab8ced54ffbc4a3078896f0194`,
+`clara._prepayment_account_enrolled` `0c10eafa94824a00a5d4c7b08ae1ba093d52f0e4f2c0b953a7951b46a27948db`,
+`clara._adj_line_eligibility_breach` `727fceade766c85a8fc4753d03e6e071a9008334e149266488e5d5232dd98021`,
+`clara._assert_journal_basis` `2ba8e307098f4d5c6214ad48770b84eb574f0edf55cab11f5e122b5adbcc3684`,
+`clara.end_accounting_plan` `b3d6f214b2fa8e875ad3bce966bf51557f235b3b0d046a06cdb0e208b58f870c`,
+`clara.create_accounting_plan` `c8e990986a06b132e3dad40e47225968562336b48ad6c01a4a09104784c09188`.
+The tail re-measures `clara.prepayment_schedule_v1`
+(`ecbc76053272a2abb6055740062895d6feb308ffae348a6363391190046727f2`) and v2, so this file cannot
+have moved a frozen evaluator.
+
+**The FIRST-APPLY branch of the bimodal prestate was taken for real** (wave-3 rule): the first
+apply on `clara_l04` recorded `0317 prestate OK — 7 FIRST, 0 REDO`, and every redo after it
+recorded the REDO branch for all seven. The integrator's from-scratch chain is the check that
+matters after that.
+
+**Gate module, cohort, chain.** `tests/schedule-term-correction-preintegration-gate.mjs` (env
+`CLARA_ALLOW_MISSING_SCHEDULE_TERM_CORRECTION`); `rig-meta.mjs` gains the
+`SCHEDULE_TERM_CORRECTION_0317_COHORT` (two human doors, two ungranted predicates) with its bimodal
+check and the two door names on the `clara_authenticated` roster; the `--import` entry in
+`package.json` in MIGRATION ORDER, after 0315's.
+
+**Tests.** `tests/prepayment-stated-term.test.mjs` (five new cells: `p939.replace.clean`,
+`p939.replace.posted`, `p939.replace.refuses`, `p939.replace.boundary`, `p939.replace.posture`);
+`tests/revenue-recognition.test.mjs` (`p941.replace.posted`, `p941.replace.refuses`);
+`tests/prepayment-schedule-obo.test.mjs` and `tests/revenue-recognition.test.mjs`'s own grant
+censuses each learn the one new human name, asked at the 0317 frontier rather than assumed. Each
+new cell asks that frontier itself, because the batteries they live in are gated on 0305's and
+0308's stems, which are true long before this file exists.
+
 ## 0318 — the year-end pair rule reads its sibling at the incoming applicability, and an impossible pair no longer aborts a promotion (#1031 fix round, riders wave 4, lane 06)
 
 `0318_knowledge_fye_pair_applicability.sql` fixes 0310, which is applied and therefore immutable.

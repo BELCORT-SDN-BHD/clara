@@ -65,6 +65,7 @@ const LANE_MOCKS = [
   "chat-parity-mock.mjs",
   "client-create-mock.mjs",
   "counterparty-identity-mock.mjs",
+  "deferred-revenue-mock.mjs",
   "depreciation-mock.mjs",
   "document-correction-mock.mjs",
   "documents-intake-mock.mjs",
@@ -618,6 +619,17 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // lifecycle doors this lane REUSES rather than re-cuts, so they are a declared share with
   // `plans-mock.mjs` below, each side gated on its own plan id.
   "prepayments-mock.mjs": { unscopeable: [], debt: [] },
+  // #941's deferred-revenue lane, built to the same shape as the prepayment lane beside it:
+  // every handler names this lane's own client id or schedule id before it answers and falls
+  // through otherwise — the four PostgREST reads (`clients` by `id`, and `coa_accounts`,
+  // `prepayment_account_enrolments` and `accounting_work` by `client_id`) and all four RPC verbs.
+  // The `prepayment_account_enrolments` read is the configure form's roster read, which
+  // `prepayments-mock.mjs` answers for ITS client and this lane for its own; it is a RELATION
+  // read rather than a door, so the verb census below cannot see it and it is declared here
+  // instead. The authority PICKER reads `clara.list_accounting_work`, answered through
+  // `deferredRevenueWorkListPage` beside the three lanes already spliced into `serve-built.mjs`'s
+  // single reader for that verb. None of this lane's four verbs is claimed by any other mock.
+  "deferred-revenue-mock.mjs": { unscopeable: [], debt: [] },
   // #625's membership-lifecycle lane, declaring neither list. Its scope is the signed-in PERSONA
   // rather than a client id, because the three relations it answers carry no client at all — they
   // are firm-altitude reads keyed on the caller. `serve-built.mjs` passes the address it already
@@ -1502,10 +1514,18 @@ const SHARED_RPC_VERBS: Record<string, string[]> = {
   // `depreciation-mock.mjs` on its own two client ids and its own asset id; neither can answer
   // for the other's walk, which is what makes these declared shares rather than collisions.
   get_fixed_asset: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
-  get_depreciation_authority: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
-  list_depreciation_runs: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
-  list_fixed_assets: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
-  fa_register_tie: ["depreciation-mock.mjs", "fixed-asset-mock.mjs"],
+  // #940 — AND THE PREPAYMENT LANE JOINS FOUR OF THEM, for a reason that is placement rather than
+  // appetite: the per-client PREPAYMENT-ACCOUNT roster panel sits beside the fixed-asset account
+  // profiles on the Registers page, so the roster walk renders that whole tab and the tab's four
+  // reads have to be answered for a client `fixed-asset-mock.mjs` and `depreciation-mock.mjs` do
+  // not own. `prepayments-mock.mjs` answers each one EMPTY — the honest shape each door gives a
+  // client with no fixed assets — and gates every arm on `PREPAY.clientId` first; the two owning
+  // lanes run FIRST in `serve-built.mjs`'s chain and fall through for a client that is not theirs.
+  // `get_fixed_asset` is deliberately NOT joined: the roster walk opens no asset detail.
+  get_depreciation_authority: ["depreciation-mock.mjs", "fixed-asset-mock.mjs", "prepayments-mock.mjs"],
+  list_depreciation_runs: ["depreciation-mock.mjs", "fixed-asset-mock.mjs", "prepayments-mock.mjs"],
+  list_fixed_assets: ["depreciation-mock.mjs", "fixed-asset-mock.mjs", "prepayments-mock.mjs"],
+  fa_register_tie: ["depreciation-mock.mjs", "fixed-asset-mock.mjs", "prepayments-mock.mjs"],
   get_document_extract: ["document-correction-mock.mjs", "documents-viewer-mock.mjs"],
   // #949 joins both shares: the document detail reads them on mount in ITS lane too, and an
   // unanswered read paints a standing failure banner over the very panel that lane's walk is

@@ -1,10 +1,31 @@
-// F-A4 PR-2a -- Annex A's END-TO-END pair (W34 twin equivalence, W35 the books actually close),
-// the six-reader wall (W44), F4's month-scoped receipt key (W32) and the self-healable FY refusal
-// (W31).
+// F-A4 PR-2a -- Annex A's END-TO-END books claim (W35), the self-healable FY refusal (W31), the
+// six-reader wall (W44) and F4's month-scoped receipt key (W32).
 //
-// W35 is the cell that matters most in this file: it is the only place the whole train is asked
-// whether it posts CORRECT BOOKS -- propose, sign, run every occurrence, and watch the prepaid
-// asset reach EXACTLY zero on a total that does not divide evenly.
+// [#1036] W34 (twin equivalence) is RETIRED: it compared the agent core's durable state with the
+// human PROPOSE door's, and #927 (0282) retired that human door to a typed refusal, so there is no
+// door left to be equivalent to.
+//
+// [#1036, THE FIX ROUND 2026-09-24] W35 / W35-mutant / W31 are RETARGETED, not retired. The first
+// cut of this lane deleted all three on the ground that they drove wrapper 12 through the 0045
+// template pipeline (propose -> a human SIGNS -> the belt POSTS), which #1036 dismantles. That is
+// true of their MACHINERY and false of their SUBJECT: W35's subject is an ACCOUNTING claim about
+// the books -- "the prepaid asset reaches EXACTLY zero and the expense side totals the term, with
+// the remainder wholly in the final period" -- and W31's is a LIFECYCLE claim -- "a term running
+// past the fiscal year refuses by name, and the same lane can clear it by opening the successor
+// year". Both rules are alive; only the entrance moved. Deleting them left the prepayment lane
+// with NO end-to-end proof that its schedules close the books at all (measured: after the
+// deletion, a repo-wide grep for a prepaid-to-zero assertion returned only the deferred-revenue
+// side and a tie-out), and no cell anywhere asserting `fiscal_years.successor`. So both are
+// re-driven below through the LIVE human door -- `clara.create_prepayment_schedule`, the plan
+// lane, the catch-up window and the real posting belt -- which is the same evidence the retired
+// pipeline used to give, against the pipeline that actually ships. #927's own release precedent
+// ("every one of those files was retargeted at the retired shape, never deleted, never skipped")
+// is the house rule this follows.
+//
+// W44 and W32 are UNTOUCHED: neither drives wrapper 12 -- W44 mints its own templates directly
+// through `mintTemplate` and W32 drives an unrelated close verb
+// (`clara._agent_mint_month_snapshot_core`, the daily-close month-snapshot wake, not the
+// prepayment limb) -- so neither cell's premise moved.
 
 import test, { before } from "node:test";
 import assert from "node:assert/strict";
@@ -12,48 +33,34 @@ import { noteLane } from "./rig-runtime-helpers.mjs";
 import { humanQuery } from "./rig-helpers.mjs";
 import { withTxn } from "./rig-txn.mjs";
 import {
-  ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, wake12, caught, uniq,
-  proposeTemplate, pair, templateById, receiptsForTask, opk, derivedOpKey, MODEL,
-  mintTemplate, makeTemplateLive, adjTemplateDoorsRetired,
+  ensurePrepay, prepayGate, prepaidScene, rootQuery, caught, uniq, pair, receiptsForTask, derivedOpKey,
+  MODEL, mintTemplate, opk,
 } from "./f-a4-pr2a-fixtures.mjs";
+import {
+  prepaymentScene, createPrepaymentSchedule, prepaymentLaneReady, statedTermScene,
+  recordStatedTerm, statedTermLaneReady, openDefaultFY, monthEndAfter, PREPAY_REASON,
+  wakeDuePlanOccurrences, requestPlanCatchUp, occurrenceRows, workRow, claimWorkRun,
+  settleWorkRun, mintClientObo, wakeRecordJournalEntry, receiptsForWork,
+} from "./prepayment-stated-term-fixtures.mjs";
 
 let skipped = 0;
 const markSkip = () => { skipped += 1; };
 before(async () => { await ensurePrepay(noteLane); });
 
-// [#927] `clara.sign_adjustment_template` became one typed refusal at migration 0282 (owner
-// ruling #788: retire the 0045 recurring-adjustment template lane). W35's subject is THE BOOKS --
-// what a live schedule-bearing template posts -- so it keeps its full assertion set and takes the
-// frontier-aware live-maker; the cell whose subject IS the human door (W34's twin equivalence)
-// asserts the retirement instead.
-const sign = (sub, client, template) => makeTemplateLive(sub, { client, template });
-
-// THE OCCURRENCE BELT IS clara_runtime's, not a human's -- measured: the door holds EXECUTE for
-// clara_fn_owner and clara_runtime only, and a human call answers 42501. That is the design's own
-// division (F-A4 writes no journal line; the existing belt posts after a human signature), so the
-// cell uses the estate's OWN runtime helper rather than inventing a call.
-const runOccurrence = async (_sub, client, template, ps, pe) => {
-  const { runOccurrence: run } = await import("./x42-adj-core.mjs");
-  return run({ client, template, periodStart: ps, periodEnd: pe });
-};
-
-/** Approve every outstanding occurrence draft for one template, through the governed door. The
- *  belt admits ONE unreviewed draft per template at a time, so this is called between runs. */
-async function approveOutstanding(sc, template) {
-  const { approveEntry } = await import("./wave-a-reads.mjs");
-  const rows = await rootQuery(
-    `select id, revision_token from clara.journal_entries
-      where client_id=$1 and status='draft' and flags ? 'recurring_adjustment'
-        and (flags -> 'recurring_adjustment' ->> 'template_id') = $2 order by created_at`,
-    [sc.client, template]);
-  for (const e of rows.rows) {
-    await approveEntry(sc.bob, { entry: e.id, expectedRevision: e.revision_token,
-      opKey: opk("fa4p2a-runappr") });
+/** The LIVE prepayment lane's own frontier (0223), layered on top of the F-A4 one: the retargeted
+ *  cells drive `clara.create_prepayment_schedule`, which a pre-0223 chain does not carry. */
+async function liveLaneGate(t) {
+  if (prepayGate(t, markSkip)) return true;
+  if (!(await prepaymentLaneReady())) {
+    markSkip();
+    t.skip("the live prepayment lane (0223) is absent -- probed at the live catalog");
+    return true;
   }
-  return rows.rows.length;
+  return false;
 }
 
-/** The net movement on one account across every APPROVED line of a client, in cents. */
+/** The net movement on one account across every APPROVED line of a client, in cents. Restored with
+ *  W35: the books claim is asserted on the LEDGER, never on the schedule's own projection. */
 async function accountNet(client, code) {
   const r = await rootQuery(
     `select coalesce(sum(jl.debit_cents - jl.credit_cents), 0)::bigint as net
@@ -62,172 +69,156 @@ async function accountNet(client, code) {
   return Number(r.rows[0].net);
 }
 
+/** Admit every period this schedule owes and POST each one through the real belt. Returns the
+ *  posted entry ids, oldest first. */
+async function postEveryPeriod(scene, made, tag) {
+  await wakeDuePlanOccurrences({ limit: 100 });
+  await requestPlanCatchUp(scene.bob, {
+    plan: made.plan_id, from: made.effective_from, to: made.effective_to });
+  const admitted = (await occurrenceRows(made.plan_id)).filter((o) => o.work_id);
+  const obo = await mintClientObo({ firm: scene.firm, obo: scene.bob, client: scene.client });
+  const entries = [];
+  for (const occ of admitted) {
+    const w = await workRow(occ.work_id);
+    await claimWorkRun({ task: w.current_task_id, runId: opk(`${tag}-run`) });
+    const entry = await wakeRecordJournalEntry(obo.secret, {
+      client: scene.client, work: occ.work_id, logicalOpId: w.logical_op_id, basis: w.basis });
+    assert.equal(entry.posted, true, `the period due ${occ.due_date} did not reach the books`);
+    await settleWorkRun({
+      task: w.current_task_id, outcome: "completed", result: { entry_id: entry.entry_id } });
+    const receipts = await receiptsForWork(occ.work_id);
+    assert.equal(receipts.filter((x) => x.outcome === "committed").length, 1,
+      "exactly one committed receipt stands for each period");
+    entries.push(entry.entry_id);
+  }
+  return entries;
+}
+
 // ---------------------------------------------------------------------------------------------
-// W35 -- THE BOOKS ACTUALLY CLOSE.
+// W35 (RETARGETED) -- THE BOOKS ACTUALLY CLOSE.
 // ---------------------------------------------------------------------------------------------
-test("fa4p2a.W35 end-to-end over the ruled convention: the prepaid asset reaches EXACTLY zero and the expense side totals the term", async (t) => {
-  if (prepayGate(t, markSkip)) return;
+test("fa4p2a.W35 end-to-end over the LIVE prepayment lane: the prepaid asset reaches EXACTLY zero and the expense side totals the term, on a total that does not divide evenly", async (t) => {
+  if (await liveLaneGate(t)) return;
   // 100000 sen over 3 months does NOT divide evenly (33333 x 3 = 99999), so the final period must
   // absorb the remainder. A cell run on a total that divided evenly would pass with the remainder
   // rule broken.
   const CENTS = 100000;
-  const sc = await prepaidScene("w35", { cents: CENTS });
-  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
+  const scene = await prepaymentScene("w35live", { cents: CENTS, termMonthsBack: 4, termMonths: 3 });
 
-  const opened = await accountNet(sc.client, sc.prepaid);
+  const opened = await accountNet(scene.client, scene.prepaid);
   assert.equal(opened, CENTS, "the prepaid asset does not open at the amount the entry posted");
+  assert.equal(await accountNet(scene.client, scene.target), 0, "nothing is expense yet");
 
-  const drafted = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
-  assert.equal(drafted.status, "acted", `the draft was refused: ${JSON.stringify(drafted).slice(0, 300)}`);
-  const tmpl = await templateById(drafted.template_id);
-  assert.equal(tmpl.status, "proposed");
+  const made = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.entry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+  assert.equal(Number(made.total_cents), CENTS);
+  assert.equal(made.period_count, 3);
 
-  // A HUMAN SIGNS. R6's whole point: the agent drafts, the professional signs, and this is the
-  // untouched admin door doing it.
-  const signed = await sign(sc.alice, sc.client, drafted.template_id);
-  assert.ok(signed, "the admin sign door refused the agent's proposal");
-  const live = await templateById(drafted.template_id);
-  assert.equal(live.status, "live", "the template did not go live at signature");
-  assert.ok(live.signed_by, "a live template with no signatory");
-
-  // EVERY OCCURRENCE RUNS, through the existing belt's own door -- and each is APPROVED before the
-  // next is run. The belt refuses otherwise ("an occurrence draft for this template is outstanding;
-  // approve or withdraw it before running another period"), which is the estate keeping one
-  // unreviewed draft per template rather than letting a schedule stack up unapproved. Measured; the
-  // first cut ran all three and then approved, and never got past the second.
-  const periods = live.schedule.map((s) => [s.period_start, s.period_end]);
-  assert.equal(periods.length, 3);
-  const { approveEntry } = await import("./wave-a-reads.mjs");
-  for (const [ps, pe] of periods) {
-    await runOccurrence(sc.alice, sc.client, drafted.template_id, ps, pe);
-    await approveOutstanding(sc, drafted.template_id);
-  }
-  const entries = await rootQuery(
-    `select id, status from clara.journal_entries
-      where client_id=$1 and flags ? 'recurring_adjustment'
-        and (flags -> 'recurring_adjustment' ->> 'template_id') = $2 order by created_at`,
-    [sc.client, drafted.template_id]);
-  assert.equal(entries.rows.length, 3, `expected three occurrence entries, found ${entries.rows.length}`);
-  assert.ok(entries.rows.every((e) => e.status === "approved"), "an occurrence was left unapproved");
-  void approveEntry;
+  const entries = await postEveryPeriod(scene, made, "w35live");
+  assert.equal(entries.length, 3, "the schedule owes three periods and three entries posted");
 
   // THE ASSERTION THE WHOLE TRAIN EXISTS FOR.
-  const prepaidAfter = await accountNet(sc.client, sc.prepaid);
+  const prepaidAfter = await accountNet(scene.client, scene.prepaid);
   assert.equal(prepaidAfter, 0,
     `the prepaid asset did not reach zero -- it stands at ${prepaidAfter} sen, so the schedule either under- or over-charged`);
-  const expenseAfter = await accountNet(sc.client, sc.target);
-  assert.equal(expenseAfter, CENTS,
-    `the expense side totals ${expenseAfter}, not the term's ${CENTS}`);
+  assert.equal(await accountNet(scene.client, scene.target), CENTS,
+    "the expense side does not total the term");
 
   // AND THE REMAINDER IS IN THE FINAL PERIOD, not smeared: periods 1..n-1 carry the base.
-  const amounts = live.schedule.map((s) =>
-    Number(s.lines.find((l) => Number(l.debit_cents) > 0).debit_cents));
-  assert.deepEqual(amounts, [33333, 33333, 33334],
-    "the remainder is not wholly in the final period");
-
-  // THE TWO REAL POSTING CONSUMERS EXECUTED HERE, named (Codex P7). W44 drives the due oracle, the
-  // sign projection and two shared helpers; THESE two are the ones a helper call cannot stand in
-  // for, and this cell has already run them for real above:
-  //   * clara._adj_run_occurrence_core -- every occurrence posted through run_adjustment_occurrence;
-  //   * clara._adj_on_approve          -- every occurrence approved through the governed door.
-  // Both ran against a SCHEDULED template and neither refused, which is the claim H.3 needs: under
-  // a congruent schedule they behave exactly as they do for a flat one. Asserted on the ledger
-  // rather than on their return values, because the books are the thing that must be right.
   const perPeriod = await rootQuery(
-    `select to_char(je.posting_date,'YYYY-MM') as m, sum(jl.debit_cents)::bigint as dr
-       from clara.journal_entries je join clara.journal_lines jl on jl.entry_id = je.id
-      where je.client_id = $1 and je.status = 'approved' and jl.account_code = $2
-        and je.flags ? 'recurring_adjustment'
-        and (je.flags -> 'recurring_adjustment' ->> 'template_id') = $3
-      group by 1 order by 1`, [sc.client, sc.target, drafted.template_id]);
-  assert.equal(perPeriod.rows.length, 3,
-    "the occurrence poster did not post one approved entry per scheduled period");
+    `select jl.debit_cents::bigint as dr
+       from clara.journal_lines jl join clara.journal_entries je on je.id = jl.entry_id
+      where je.id = any($1::uuid[]) and jl.account_code = $2 and jl.debit_cents > 0
+      order by je.posting_date`, [entries, scene.target]);
   assert.deepEqual(perPeriod.rows.map((r) => Number(r.dr)), [33333, 33333, 33334],
-    "the poster materialised the same amount for every period -- the per-period resolver is not being used");
-  noteLane(`W35: prepaid ${opened} -> 0, expense -> ${expenseAfter}, periods ${amounts.join("/")}`);
+    "the remainder is not wholly in the final period");
+  noteLane(`W35: prepaid ${opened} -> 0, expense -> ${CENTS}, periods 33333/33333/33334`);
 });
 
 test("fa4p2a.W35-mutant stopping ONE occurrence short leaves the prepaid account NON-ZERO", async (t) => {
-  if (prepayGate(t, markSkip)) return;
-  // Without this the cell could be asserting a tautology -- a books read that always says zero
-  // proves nothing about the schedule.
+  if (await liveLaneGate(t)) return;
+  // Without this the cell above could be asserting a tautology -- a books read that always says
+  // zero proves nothing about the schedule.
   const CENTS = 100000;
-  const sc = await prepaidScene("w35m", { cents: CENTS });
-  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
-  const drafted = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
-  await sign(sc.alice, sc.client, drafted.template_id);
-  const live = await templateById(drafted.template_id);
-  for (const s of live.schedule.slice(0, 2)) {          // TWO of three, deliberately
-    await runOccurrence(sc.alice, sc.client, drafted.template_id, s.period_start, s.period_end);
-    await approveOutstanding(sc, drafted.template_id);
+  const scene = await prepaymentScene("w35mlive", { cents: CENTS, termMonthsBack: 4, termMonths: 3 });
+  const made = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.entry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+
+  await wakeDuePlanOccurrences({ limit: 100 });
+  await requestPlanCatchUp(scene.bob, {
+    plan: made.plan_id, from: made.effective_from, to: made.effective_to });
+  const admitted = (await occurrenceRows(made.plan_id)).filter((o) => o.work_id);
+  assert.equal(admitted.length, 3);
+  const obo = await mintClientObo({ firm: scene.firm, obo: scene.bob, client: scene.client });
+  for (const occ of admitted.slice(0, 2)) {              // TWO of three, deliberately
+    const w = await workRow(occ.work_id);
+    await claimWorkRun({ task: w.current_task_id, runId: opk("w35m-run") });
+    const entry = await wakeRecordJournalEntry(obo.secret, {
+      client: scene.client, work: occ.work_id, logicalOpId: w.logical_op_id, basis: w.basis });
+    await settleWorkRun({
+      task: w.current_task_id, outcome: "completed", result: { entry_id: entry.entry_id } });
   }
-  const left = await accountNet(sc.client, sc.prepaid);
+  const left = await accountNet(scene.client, scene.prepaid);
   assert.notEqual(left, 0,
     "two of three occurrences left the prepaid account at ZERO -- W35 is reading something other than the ledger");
-  assert.equal(left, 100000 - 33333 - 33333);
+  assert.equal(left, CENTS - 33333 - 33333);
 });
 
 // ---------------------------------------------------------------------------------------------
-// W34 -- TWIN EQUIVALENCE.
+// W31 (RETARGETED) -- THE FY REFUSAL IS SELF-HEALABLE.
 // ---------------------------------------------------------------------------------------------
-test("fa4p2a.W34 the agent core and the human door, given IDENTICAL inputs, produce byte-identical durable state", async (t) => {
-  if (prepayGate(t, markSkip)) return;
-  // Differing only in the two ctx-derived fields. If these ever diverge, the extraction has stopped
-  // being a MOVE and become a second implementation.
-  // [#927] THE HUMAN HALF OF THIS TWIN RETIRED at 0282: `clara.propose_adjustment_template` is
-  // one typed refusal, so there is no longer a human door to be equivalent TO. Above that
-  // frontier the cell asserts that, and the equivalence runs in full on a pre-0282 chain.
-  if (await adjTemplateDoorsRetired()) {
-    const sc0 = await prepaidScene("w34r", { cents: 90000 });
-    const e = await caught(() => proposeTemplate(sc0.alice, {
-      client: sc0.client, name: `w34r-${uniq()}`, start: "2025-02-01", end: "2025-02-28",
-      lines: pair(sc0.target, sc0.prepaid, 100) }));
-    assert.ok(e, "the human door answered -- it must REFUSE once 0282 is applied");
-    assert.equal(JSON.parse(e.detail).reason, "adjustment_template_lane_retired",
-      "the human half of the twin is retired (#927); the agent core it was compared with is untouched");
-    noteLane("W34 -- the human door retired at 0282; the twin-equivalence claim runs on a pre-0282 chain");
+test("fa4p2a.W31 a term running past the fiscal year refuses BY NAME on the live door, naming the successor year as what is missing -- and opening that year clears the SAME call", async (t) => {
+  if (await liveLaneGate(t)) return;
+  if (!(await statedTermLaneReady())) {
+    markSkip();
+    t.skip("#939's stated-term lane (0305) is absent -- probed at the live catalog");
     return;
   }
-  const sc = await prepaidScene("w34", { cents: 90000 });
-  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
-  const agent = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
-  assert.equal(agent.status, "acted");
-  const a = await templateById(agent.template_id);
+  // The refusal is a SELF-HEALABLE state, not a dead end, and the estate has been bitten by a rung
+  // whose "blocked" state nothing ever drove to resolution. So the cell drives the resolution.
+  const scene = await statedTermScene("w31live", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
+  const fy = await rootQuery(
+    "select to_char(ends_on,'YYYY-MM-DD') as ends from clara.fiscal_years where id = $1", [scene.fy]);
+  const endsOn = fy.rows[0].ends;
+  const year = Number(endsOn.slice(0, 4));
 
-  // The HUMAN door, THE SAME INPUTS, on a twin client so the duplicate guard does not intervene.
-  // DATES COME BACK FORMATTED BY THE DATABASE. A DATE column arrives as a JS Date at LOCAL
-  // midnight, so toISOString() shifts it a day west of UTC -- feeding the door a start of
-  // 2025-01-31 for a schedule that begins 2025-02-01, which the coverage clause then refused. The
-  // wall was right; my fixture was reformatting its own inputs.
-  const dates = await rootQuery(
-    `select to_char(start_date,'YYYY-MM-DD') as s, to_char(end_date,'YYYY-MM-DD') as e
-       from clara.adjustment_templates where id = $1`, [agent.template_id]);
-  const iso = (which) => (which === "start" ? dates.rows[0].s : dates.rows[0].e);
-  const sc2 = await prepaidScene("w34b", { cents: 90000 });
-  const human = await proposeTemplate(sc2.alice, {
-    client: sc2.client, name: a.name, start: iso('start'), end: iso('end'),
-    lines: a.lines, schedule: a.schedule, memo: a.memo_template });
-  const h = await templateById(human.template_id);
+  // A TERM THAT RUNS INTO THE YEAR AFTER THIS ONE, stated through the real door.
+  const past = await monthEndAfter(`${year + 1}-01-01`, 5);
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: scene.termStart, end: past,
+    reason: "#1036 W31: the cover runs into the following financial year" });
 
-  for (const col of ["cadence", "auto_reverse", "memo_template", "status"]) {
-    assert.deepEqual(h[col], a[col], `the two paths disagree on ${col}`);
-  }
-  assert.deepEqual(h.lines, a.lines, "the canonical lines differ");
-  assert.deepEqual(h.schedule, a.schedule, "the schedules differ");
-  assert.equal(h.content_hash, a.content_hash,
-    "the content hashes differ -- the two paths did not produce the same signed content");
-  // The two ctx-derived fields are EXPECTED to differ, and the cell says which.
-  assert.notEqual(h.proposed_by, a.proposed_by, "the agent's draft is attributed to the human");
+  const blocked = await caught(() => createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef, opKey: opk("w31-blocked") }));
+  assert.ok(blocked, "a term past the FY with no successor year open must refuse");
+  const detail = JSON.parse(blocked.detail);
+  assert.equal(detail.reason, PREPAY_REASON.termUnderivable);
+  assert.equal(detail.missing, "fiscal_years.successor",
+    "the refusal must NAME the successor year as the missing thing, so a person knows what to open");
+  assert.equal(detail.fy_ends_on.slice(0, 10), endsOn);
 
-  // MUTANT: perturb ONE line's order in the human's input and the hashes must diverge, proving the
-  // comparison is live rather than trivially true.
-  const sc3 = await prepaidScene("w34c", { cents: 90000 });
-  const perturbed = await proposeTemplate(sc3.alice, {
-    client: sc3.client, name: a.name, start: iso('start'), end: iso('end'),
-    lines: [...a.lines].reverse(), schedule: a.schedule, memo: a.memo_template });
-  const p = await templateById(perturbed.template_id);
-  assert.notEqual(p.content_hash, a.content_hash,
-    "reversing the line order left the content hash unchanged -- W34's comparison cannot see a difference");
+  // MUTANT: the same call again, still refused -- the refusal is the YEAR'S ABSENCE, not a flake.
+  const still = await caught(() => createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef, opKey: opk("w31-still") }));
+  assert.equal(JSON.parse(still.detail).reason, PREPAY_REASON.termUnderivable,
+    "the refusal is not stable -- it was a flake, not a state");
+
+  // ===== THE SELF-HEAL, ACTUALLY DRIVEN. Open the successor year through the estate's own door
+  // and the SAME configuration succeeds. Without this the "self-healable, not a dead end" claim
+  // would be a sentence rather than a demonstration.
+  await openDefaultFY(scene.alice, {
+    client: scene.client, startsOn: `${year + 1}-01-01`, tag: "W31 successor" });
+  const made = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef, opKey: opk("w31-healed") });
+  assert.ok(made.schedule_id, "opening the successor year did not clear the refusal");
+  assert.equal(made.term_end, past, "…and the schedule runs to the term that was refused before");
+  noteLane("W31: fiscal_years.successor refused by name, then cleared by opening the year");
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -242,11 +233,10 @@ test("fa4p2a.W44 the DUE ORACLE, the SIGN PROJECTION and the two shared helpers 
   // shows the helper is amount-blind, not that _adj_run_occurrence_core and _adj_on_approve are.
   // NO CLAIM STRONGER THAN ITS EXECUTION SURVIVES, so the title is now the execution.
   //
-  // THE TWO REAL POSTING CONSUMERS ARE DRIVEN IN W35, where the scaffolding already exists: that
-  // cell runs every occurrence through clara.run_adjustment_occurrence and approves each through
-  // the governed door, which is _adj_run_occurrence_core and _adj_on_approve executing for real on
-  // a scheduled template -- and it asserts the resulting BOOKS. That is the stronger evidence, and
-  // it lives where the fixture that earns it lives.
+  // THE TWO REAL POSTING CONSUMERS WERE DRIVEN in this file's own retired W35 cell, whose
+  // subject (the wrapper's proposed template) is gone (#1036); the claim they behave alike on a
+  // scheduled template survives here through the two helpers below, which is what this cell
+  // measures on its own.
   //
   // Congruence clause (a) is why the helpers below can be blind at all: they project
   // (account, direction) and DISCARD magnitudes, so a congruent schedule is invisible to them BY
@@ -338,115 +328,7 @@ test("fa4p2a.W32 (F4) two DIFFERENT months minted in ONE task write TWO receipts
     "the receipts are not month-scoped -- a receipt for this verb must say which month it was about");
 });
 
-// ---------------------------------------------------------------------------------------------
-// W31 -- the FY refusal is SELF-HEALABLE.
-// ---------------------------------------------------------------------------------------------
-test("fa4p2a.W31 a term running past the FY refuses -- and the SAME lane can clear it by opening the successor year", async (t) => {
-  if (prepayGate(t, markSkip)) return;
-  // The conductor's note on design §13 item 4: under R6/HIGH-1 the clocked lane may lawfully open
-  // the successor year itself, so this refusal is a SELF-HEALABLE state, not a dead end. The estate
-  // has been bitten by a rung whose "blocked" state nothing ever drove to resolution.
-  const sc = await prepaidScene("w31");
-  const fy = await rootQuery(
-    "select id, to_char(ends_on,'YYYY-MM-DD') as ends from clara.fiscal_years where id = $1", [sc.fy]);
-  const endsOn = fy.rows[0].ends;
-  // A term that runs a year past this FY's end.
-  const past = `${Number(endsOn.slice(0, 4)) + 1}-06-30`;
-  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: past,
-    basis: "a term running past the fiscal year" });
-  const blocked = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
-  assert.equal(blocked.status, "refused", "a term past the FY with no successor must refuse");
-  const toks = (blocked.rung_vector ?? []).map((v) => v.token);
-  assert.ok(toks.includes("prepayment_term_underivable"), `got ${toks.join(",")}`);
-  const missing = (blocked.rung_vector ?? []).find((v) => v.missing)?.missing;
-  assert.equal(missing, "fiscal_years.successor",
-    "the refusal must NAME the successor year as the missing thing, so the lane knows what to open");
-
-  // MUTANT: leave the year unopened and re-run in a NEW session -- still refuses, so the refusal is
-  // the year's absence and not a flake.
-  const { mintClosePrepSession } = await import("./f-a4-pr1c-fixtures.mjs");
-  const s2 = await mintClosePrepSession(sc.firm, sc.client);
-  const still = await wake12(s2, { client: sc.client, entry: sc.entry, target: sc.target });
-  assert.equal(still.status, "refused", "the refusal is not stable -- it was a flake, not a state");
-
-  // ===== THE SELF-HEAL, ACTUALLY DRIVEN (Codex C5) =====
-  // An earlier cut of this cell claimed the refusal was self-healable and then only re-confirmed
-  // it in a fresh session -- it never invoked the verb it advertised. Under R6/HIGH-1 the clocked
-  // lane may open the successor year ITSELF, so the cell now does exactly that and proves the same
-  // draft then ACTS. Without this the "self-healable, not a dead end" claim was a sentence, not a
-  // demonstration.
-  const { callWake } = await import("./f-a4-pr1c-fixtures.mjs");
-  // THE HUMAN-FACT HALF IS MEASURED, NOT NARRATED (Codex P6 / native N3, converged blind). An
-  // earlier cut simply called set_client_fy_end and described the division of labour in a comment
-  // -- so a fixture that already carried FY-end state would have sailed through the claim without
-  // ever demonstrating it. The sequence is now asserted in order:
-  //   1. the lane TRIES to open the year and is REFUSED by name;
-  //   2. the FY-end fact is positively read as ABSENT;
-  //   3. the human states it, and the door's own result is asserted;
-  //   4. only then does the lane open the year;
-  //   5. and the same draft ACTS.
-  const s3 = await mintClosePrepSession(sc.firm, sc.client);
-  const openArgs = (s, label, startsOn) => [
-    [{ name: "p_client", cast: "uuid" }, { name: "p_label" }, { name: "p_starts_on", cast: "date" },
-     { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_op_key" }],
-    [sc.client, label, startsOn, "f-a4-pr2a W31: the lane clears its own blocker",
-     JSON.stringify(MODEL), derivedOpKey(s.task, "wake_open_fiscal_year", sc.client)]];
-
-  // (1) THE LANE CANNOT INVENT THE FY END -- observed, with its token.
-  const nextStartEarly = `${Number(endsOn.slice(0, 4)) + 1}-01-01`;
-  const blockedOpen = await callWake(s3.secret, "wake_open_fiscal_year",
-    ...openArgs(s3, `FY${Number(endsOn.slice(0, 4)) + 1}`, nextStartEarly));
-  assert.equal(blockedOpen.status, "refused",
-    `the lane opened a year with no FY-end fact on file: ${JSON.stringify(blockedOpen).slice(0, 250)}`);
-  assert.ok((blockedOpen.rung_vector ?? []).some((v) => v.token === "fy_end_not_on_file"),
-    `expected fy_end_not_on_file, got ${JSON.stringify(blockedOpen.rung_vector).slice(0, 200)}`);
-
-  // (2) THE ABSENCE IS READ, not inferred from the refusal (review law 2 -- a refusal is a derived
-  // state; only a read of the fact register is positive evidence that it was absent).
-  // READ AT ITS REAL HOME, measured rather than assumed: clara.set_client_fy_end writes
-  // clients.fy_end_month / fy_end_day. It is NOT a client_facts row, which is where my first cut
-  // looked -- and finding nothing there, the assertion failed for the wrong reason.
-  const before = await rootQuery(
-    "select fy_end_month, fy_end_day from clara.clients where id = $1", [sc.client]);
-  assert.equal(before.rows[0].fy_end_month, null,
-    "the client already carried an FY end -- this fixture cannot demonstrate the human half");
-  assert.equal(before.rows[0].fy_end_day, null);
-
-  // (3) THE HUMAN STATES IT, and the door's own answer is asserted rather than discarded.
-  const stated = await humanQuery(sc.alice,
-    "select clara.set_client_fy_end($1::uuid,$2::int,$3::int,$4) as r",
-    [sc.client, 12, 31, opk("fa4p2a-fyend")]);
-  assert.ok(stated.rows[0].r, "the FY-end door returned nothing");
-  const after = await rootQuery(
-    "select fy_end_month, fy_end_day from clara.clients where id = $1", [sc.client]);
-  assert.equal(after.rows[0].fy_end_month, 12, "the human's FY-end statement did not land");
-  assert.equal(after.rows[0].fy_end_day, 31);
-  const nextStart = `${Number(endsOn.slice(0, 4)) + 1}-01-01`;
-  // (4) NOW the lane opens the year -- a FRESH session, because the blocked attempt above burned
-  // this verb's derived key for s3's task.
-  const s3b = await mintClosePrepSession(sc.firm, sc.client);
-  const opened = await callWake(s3b.secret, "wake_open_fiscal_year",
-    ...openArgs(s3b, `FY${Number(endsOn.slice(0, 4)) + 1}`, nextStart));
-  assert.equal(opened.status, "acted",
-    `the lane could not open the successor year after the human stated the FY end: ${JSON.stringify(opened).slice(0, 300)}`);
-
-  // THE SAME DRAFT NOW ACTS, in a fresh session, with a real schedule and an honest receipt.
-  const s4 = await mintClosePrepSession(sc.firm, sc.client);
-  const healed = await wake12(s4, { client: sc.client, entry: sc.entry, target: sc.target });
-  assert.equal(healed.status, "acted",
-    `the refusal did not clear after the lane opened the year: ${JSON.stringify(healed).slice(0, 300)}`);
-  const tmpl = await templateById(healed.template_id);
-  assert.ok(tmpl.schedule, "the healed act drafted no schedule");
-  assert.equal(tmpl.status, "proposed");
-  assert.ok(Number(healed.period_count) > 0, "the healed schedule carries no periods");
-  const rec = await receiptsForTask(s4.task);
-  const act = rec.find((r) => r.act_kind === "prepayment_schedule" && r.verdict === "acted");
-  assert.ok(act, "the healed act left no acted receipt");
-  assert.equal(act.subject_kind, "adjustment_template");
-  assert.equal(act.subject_id, healed.template_id, "the receipt names a different template");
-});
-
 test("fa4p2a.armed-skip the focused run records ZERO skips", async () => {
   assert.equal(skipped, 0, `${skipped} cell(s) skipped -- a focused PR-2a run must fail rather than skip`);
-  void caught; void withTxn; void receiptsForTask;
+  void caught; void withTxn; void receiptsForTask; void derivedOpKey; void MODEL;
 });

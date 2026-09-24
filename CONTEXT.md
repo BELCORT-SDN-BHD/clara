@@ -84,21 +84,85 @@ posted one; treating an amortisation period's amount as the same as every other 
 
 **Prepayment schedule**:
 The derived amortisation of ONE posted prepayment: the recognition entry that put it on the books,
-the prepaid account read off that entry's own single debited asset leg — and judged ELIGIBLE by the
-same rule every other lane uses, so a receivable control, a bank account or a reserved role is
-refused rather than amortised — the Service period its document states, the expense account a
+the prepaid account read off that entry's own single debited asset leg — ENROLLED on the client's
+Prepayment account roster, and judged ELIGIBLE by the same rule every other lane uses, so an account
+nobody enrolled, or a receivable control, a bank account or a reserved role, is refused rather than
+amortised — the Service period its document states, the expense account a
 person judged with the grounds they stated, and the exact allocation across whole calendar months
 with the remainder wholly in the final period. It is DERIVED, not typed: the amount, the period
 count, the per-period figures, the cadence and the authority window all come from the frozen
 evaluator's reading of rows this database already holds, and the only things a person supplies are
 which prepayment, under WHOSE INSTRUCTION, which expense account, why, and what the schedule is
-for. It configures an Accounting plan of kind `amortisation_schedule`; the belt
-admits each period.
-_Avoid_: A recurring adjustment template — the 0045 template lane was retired 2026-09-18 (#788,
-delivered by #927–#929), except for one PARKED agent entrance that still mints one and must be
-retired or rerouted before it is ever unparked; an editable table of period amounts; a schedule
-that pays anything — the money left the bank before the schedule existed; "configured" as a
-synonym for "posted", which is a different fact and a different count.
+for — through their own door, or through the On-behalf-of door Clara uses in a conversation, which
+records the same person and shares the same idempotency key. A PERSON IS NOT OPTIONAL: the plan the
+schedule configures is authorised by a named human, and every month's Work is admitted as that
+human, so the agent-lane close_prep wake — which names nobody by construction — refuses rather than
+configuring something no belt could ever post. It configures an Accounting plan of kind
+`amortisation_schedule`; the belt admits each period.
+_Avoid_: A recurring adjustment template — the 0045 template lane was fully retired 2026-09-18
+(#788, delivered by #927–#929); its one remaining live entrance, the agent-lane close_prep wake, was
+REROUTED onto this door rather than left parked (#1036, the 2026-09-23 integration ruling) and never
+mints one again; a schedule an unattended run configured for itself — that lane refuses by name
+(`wake_authority_absent`) because the estate has no person for it to post as; an editable table of
+period amounts; a schedule that pays anything — the money left the bank before the schedule
+existed; "configured" as a synonym for "posted", which is a different fact and a different count.
+
+**Prepayment account roster**:
+The per-client list of accounts a firm has enrolled as holding prepayments. It is the POSITIVE half
+of prepayment eligibility: the shared wall every lane uses is negative — is this leg a control
+account, a bank account, inactive, reserved by another register — and an ordinary asset account with
+none of those marks passes it, so a deposit or a prepaid tax could be amortised into expense for a
+whole term. Enrolling is a bookkeeper's judgement about THIS client's chart, recorded with the
+one-line reason the person gave and kept as an immutable interval: re-stating the reason opens a new
+enrolment rather than editing the old one, so the basis a schedule was configured under stays
+readable for as long as the schedule does. Retiring closes the account to NEW schedules only — a
+schedule already running posts to the end of its term, because nothing on the monthly admission path
+asks the roster. One roster carries both purposes a release schedule can have (a prepaid asset, and
+deferred revenue's credited liability), so a firm never has two answers to "may this account carry a
+release schedule".
+_Avoid_: A mark on the firm's standard chart template — the same template account is a prepayment
+for one client and an ordinary deposit for the next; a new member of the chart's account class,
+which the shared wall reads as a CONTROL account and would make every prepaid account ineligible; a
+back-check of schedules already running, or an automatic enrolment derived from history; reading a
+retirement as "that amortisation stops"; a second roster for deferred revenue.
+
+**Revenue recognition schedule**:
+The derived recognition of ONE receipt a customer paid ahead: the entry that put the advance on the
+books, the deferred-revenue account read off that entry's own single credited liability leg —
+ENROLLED on the client's Prepayment account roster under the deferred-revenue purpose, and judged
+ELIGIBLE by the same rule every other lane uses — the Service period its document states or a person
+stated, the revenue account a person judged with the grounds they wrote, and the exact allocation
+across whole calendar months with the remainder wholly in the final period. It posts Dr deferred
+revenue / Cr revenue, one entry a month, until the liability clears to zero. It is the mirror of a
+Prepayment schedule and rides the SAME frozen evaluator, released on the other side; it configures an
+Accounting plan of kind `revenue_recognition_schedule`, and the belt admits each period. Service tax
+is never part of it: an output-tax leg on the same receipt is not a candidate at all, because tax
+owed to the customs department is not revenue and never becomes revenue.
+_Avoid_: An invoice — the advance was received and posted before any schedule existed, and nothing
+here touches MyInvois; usage-based or milestone recognition, which needs a measure of progress this
+estate does not record and is refused by name; a schedule over the gross receipt, which would
+recognise the tax as income; revising a running schedule to correct its term — a correction
+supersedes the statement and moves no schedule; the replacement is a SEPARATE schedule that takes
+over the months the first one has not recognised, and at most one schedule over a receipt is ever
+live; "configured" as a synonym for "recognised", which is a different fact and a different count.
+
+**On-behalf-of door**:
+The second entrance to a write a person may make, for the times Clara makes it FOR them in a
+conversation. It is a separate function whose name ends `_for`, granted to the runtime lane and to
+nobody else, and it differs from the human door in exactly one thing: it takes the human's identity
+as an ARGUMENT instead of reading it from their session, because the runtime connection carries no
+session. It then proves that identity rather than trusting it — the membership must be live in this
+firm at the moment the books are written, at the same role floor the human door applies — and a
+human who is not a member of the firm at all is answered exactly as an unknown client is, so the
+pair can never be used to learn whose client is whose. Everything else is the SAME body, so the two
+entrances cannot answer one rule two ways, and both share one idempotency namespace whose key
+identifies the DECISION and not who typed it: a configuration Clara made and a person's own replay
+of it under the same key converge on one receipt and one record.
+_Avoid_: A widened grant on the human door — that would be a write with no named human at all;
+"the agent's own authority" — the authority is always the person the door acts for, and the
+instruction it cites must be a person's; a second copy of the human door's body, which is how two
+entrances start answering the same rule differently; treating an on-behalf-of write as something a
+wake or agent lane may reach, or as a way around a judgement only a person may state.
 
 **Service period**:
 The span of time an accrued or prepaid cost belongs to, stated by an identified person — for a
@@ -115,17 +179,64 @@ an extracted or inferred period; a term the product derived from an invoice's ow
 a date range it saw, or a conversation it summarised; treating a corrected term as something a
 revision re-derives — a re-derived allocation is a new schedule.
 
+**Stated service period**:
+A Service period a named person states for a prepayment that evidences NO document — the client
+paid a year of insurance and said so, the payment was recorded as a memo journal, and no invoice
+ever arrived. It is the same fact as a service period and carries the same discipline (a required
+reason, a recorded actor, supersede-never-mutate, one live statement per recognition entry, the
+same 120-month cap), but it is anchored to the RECOGNITION ENTRY rather than to a document,
+because the entry is the only durable thing it is about. A schedule derived from one behaves
+exactly like a document-backed schedule — the same whole-calendar-month straight line, the same
+remainder, the same monthly Work — so the only difference is the Term source, and the surface
+says which. It is human-stated by law for the same reason a document's period is: there is no
+agent grant and no wake wrapper, and Clara may ask the fixed two-date question but never answers
+it.
+_Avoid_: A period read off anything — a memo line, a filename, a bank narrative, a conversation
+Clara summarised; a default term; a nullable document on the document-grain carrier — the two
+carriers are separate relations and the document one is shared with the accrual lane; correcting a
+stated term by moving a running schedule — a correction supersedes the statement and a re-derived
+allocation is a new schedule.
+
+**Term source**:
+WHICH carrier a prepayment schedule's term came from: the document's own service period, or a
+person's stated service period. It is a recorded column on the schedule, paired structurally with
+the carrier it names, so a schedule can never claim a provenance it cannot point at. It is not
+the same fact as HOW the term was arrived at (stated by a person versus read off a page by an
+extraction) — that is the term's own basis kind, and a document's period can be human-stated
+while its source is still the document.
+_Avoid_: Inferring the source from the absence of a document id; treating a human-stated term as
+weaker evidence than a document's — both are a named person's statement with recorded grounds, and
+what differs is what the statement is anchored to.
+
 **Corrected term**:
 A service period a person has RE-STATED with different dates, so what the document is taken to say
 about the span it buys has changed. It is not the same fact as a superseded term ROW: recording a
 period on a document that already carries a live one supersedes the old row whatever the new one
 says, so a second verification that restates the same two dates supersedes a row and corrects
 nothing. Only a corrected term makes an allocation already derived from the old one wrong, and only
-a corrected term is grounds for telling a firm its schedule has to be rebuilt.
+a corrected term is grounds for either of the two acts the estate offers: naming the difference for
+a reviewer, and opening a Replacement schedule for the months the first one has not taken up. The
+allocation already derived is never rebuilt in place — it is a derived record — and a re-statement
+that moved neither date is grounds for nothing.
 _Avoid_: Reading "the row this schedule rode is no longer live" as "the term was corrected" — the
 first is bookkeeping about rows, the second is a statement about the client's affairs, and a
 surface that confuses them tells a firm to abandon a running amortisation for no reason; treating a
 corrected term as something a revision re-derives — a re-derived allocation is a new schedule.
+
+**Replacement schedule**:
+The schedule that takes over a Prepayment schedule or a Revenue recognition schedule whose term was
+found to be wrong: the predecessor's plan is ended, its allocation is left exactly as it stands, and
+a new schedule is derived from the CORRECTED term over the months the predecessor has not taken up,
+for the balance those months did not consume. The treatment is PROSPECTIVE — a change in accounting
+estimate, not a correction of an error — because the months already taken up are never touched, and
+that is the ticketed ruling rather than a choice the code made. The predecessor and its successor
+name each other, so the chain reads both ways, and at most one schedule over a recognition is live
+at a time.
+_Avoid_: Reading it as a revision — a revision moves a plan's schedule and this is a second schedule
+with its own plan and its own authority; reading "the plan ended" as grounds for one — only a
+corrected term is, and ending a plan on its own opens nothing; expecting it to re-open a month the
+plan has already admitted a Work for, which would post that month twice; expecting it where nothing
+is left to re-spread, which is refused by name.
 
 **Plan catch-up**:
 Admitting due events that already passed, over a window a person names. Oldest first, bounded per

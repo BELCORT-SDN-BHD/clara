@@ -32,6 +32,10 @@ import { DataState, ErrorMessage } from "@/components/firm/data-state";
 import { LoadingState } from "@/components/common/state";
 import { CompleteParticularsDialog, ReviseParticularsDialog, DisposeDialog } from "./fa-row-actions";
 import { FaAccountProfilesPanel } from "./fa-account-profiles-panel";
+// #940 — the per-client PREPAYMENT-account roster, beside the fixed-asset account profiles (the
+// ticket's own placement). It is an ACCOUNT-ENROLMENT panel and this is where this client's
+// account enrolments live; it shares this register's chart read rather than opening a second one.
+import { PrepaymentAccountsPanel } from "./prepayment-accounts-panel";
 import { FaRegisterTieBanner } from "./fa-register-tie-banner";
 import { DepreciationAuthorityPanel } from "./depreciation-authority-panel";
 
@@ -194,6 +198,7 @@ export function FixedAssetsRegister({ clientId }: { clientId: string }) {
       </div>
 
       <FaAccountProfilesPanel clientId={clientId} accounts={accounts} onActed={bumpRefresh} />
+      <PrepaymentAccountsPanel clientId={clientId} accounts={accounts} />
       <FaRegisterTieBanner clientId={clientId} refreshToken={refreshToken} />
       <DepreciationAuthorityPanel clientId={clientId} onPosted={afterDepreciationPosted} />
     </div>

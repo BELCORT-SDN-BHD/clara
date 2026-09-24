@@ -270,6 +270,21 @@ async function main() {
       }), "gpt-5.6-terra"]));
   const instructionWork = instr.rows[0].r.work_id;
 
+  // #940 — THE PREPAID ACCOUNT IS ENROLLED ON THE CLIENT'S PREPAYMENT ROSTER. Migration 0306 asks a
+  // POSITIVE roster before the shared negative wall: `create_prepayment_schedule` refuses an
+  // account nobody enrolled with `prepayment_source_unfit` / `prepaid_account_not_enrolled`. Probed
+  // by EXACT SIGNATURE rather than by migration number, so this walk still runs against a database
+  // pinned before 0306 — where the door exists and asks no roster.
+  const rosterDoor = await rig.rootQuery(
+    "select to_regprocedure('clara.enrol_prepayment_account(uuid,text,text,text,text)') is not null as ok");
+  if (rosterDoor.rows[0]?.ok) {
+    await rig.humanQuery(owner,
+      `select clara.enrol_prepayment_account(p_client=>$1::uuid,p_account=>$2::text,
+         p_purpose=>'prepayment',p_reason=>$3::text,p_op_key=>$4::text) as r`,
+      [client, PREPAID, "p653 e2e: this account holds the client's prepaid subscriptions", rig.opk("enrol")]);
+    console.log(`[prepay-e2e] enrolled ${PREPAID} on the #940 prepayment roster`);
+  }
+
   const sched = await rig.humanQuery(owner,
     `select clara.create_prepayment_schedule(p_client=>$1::uuid,p_source_entry=>$2::uuid,
        p_expense_account=>$3,p_expense_basis=>$4,p_purpose=>$5,p_authority_ref=>$6::jsonb,p_op_key=>$7) as r`,
