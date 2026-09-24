@@ -30,7 +30,7 @@ import {
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 11;
+const EXPECTED_CELLS = 12;
 
 before(async () => {
   ready = await (async () => {
@@ -587,6 +587,93 @@ cell("p939.replace.clean — with nothing yet posted, correcting the term and th
     "configuring a third schedule over a recognition that already carries a replacement");
   assert.equal(refused.detail.schedule_id, replacement.schedule_id,
     "…and it names the schedule that STANDS, never the superseded one");
+});
+
+cell("p939.replace.posted — a month the plan has already taken up is never re-opened and never re-charged: the replacement starts the day after it, re-spreads the balance the books still carry (including a month the scanner never picked up), and the admitted occurrence with its COMMITTED receipt is byte-identical afterwards", async () => {
+  // FOUR CHARGED MONTHS STRADDLING TODAY, so the plan's own scanner takes up exactly one of them
+  // and the others stay open. 90000 sen over four months is 22500 a month with no remainder — a
+  // worked example, so every number below comes from the term rather than from the code.
+  const scene = await statedTermScene("replacePosted", {
+    cents: 90000, termMonthsBack: 2, termMonths: 4, memoCents: 90000 });
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    start: scene.termStart, end: scene.termEnd });
+  const made = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef });
+  assert.equal(made.period_count, 4);
+  assert.deepEqual((made.period_lines ?? []).map((l) => Number(l.amount_cents)),
+    [22500, 22500, 22500, 22500]);
+  const rowBefore = await scheduleRow(made.schedule_id);
+
+  // ---- ONE MONTH REACHES THE BOOKS. Not an admitted Work: a COMMITTED receipt, which is the only
+  // thing that means money moved — and the fact AC4's "posted occurrences and their receipts are
+  // unchanged" is about.
+  await wakeDuePlanOccurrences({ limit: 100 });
+  const occBefore = await occurrenceRows(made.plan_id);
+  assert.equal(occBefore.length, 1, "one scan admits the latest due event at or before today");
+  const takenUp = String(occBefore[0].due_date).slice(0, 10);
+  const secondPeriodEnd = await monthEndAfter(scene.termStart, 1);
+  assert.equal(takenUp, secondPeriodEnd,
+    "…which is this term's SECOND month, so the first one is a gap the scanner never picked up");
+  const workId = occBefore[0].work_id;
+  const w = await workRow(workId);
+  await claimWorkRun({ task: w.current_task_id, runId: opk("p939-rep-run") });
+  const obo = await mintClientObo({ firm: scene.firm, obo: scene.bob, client: scene.client });
+  const posted = await wakeRecordJournalEntry(obo.secret, {
+    client: scene.client, work: workId, logicalOpId: w.logical_op_id, basis: w.basis });
+  assert.equal(posted.posted, true, "the amortisation charge really reached the books");
+  await settleWorkRun({
+    task: w.current_task_id, outcome: "completed", result: { entry_id: posted.entry_id } });
+  const receiptsBefore = (await receiptsForWork(workId)).filter((r) => r.outcome === "committed");
+  assert.equal(receiptsBefore.length, 1, "exactly one committed receipt stands before the correction");
+
+  // ---- THE CORRECTION: the cover runs a month LONGER than the firm was first told.
+  const newEnd = await monthEndAfter(scene.termStart, 4);
+  assert.notEqual(newEnd, scene.termEnd, "the correction really moves the term");
+  const corrected = await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.memoEntry, start: scene.termStart, end: newEnd,
+    reason: "#939 battery: the policy schedule showed the cover ran five months, not four" });
+
+  const replacement = await replacePrepaymentSchedule(scene.bob, {
+    client: scene.client, schedule: made.schedule_id, authorityRef: scene.authorityRef });
+
+  // ---- THE PROSPECTIVE BOUNDARY. One month was taken up, so the replacement begins with the
+  // month after it, and the remaining 67500 sen — the 22500 the scanner never picked up plus the
+  // 45000 that was never due — is re-spread over the THREE months the corrected term leaves open:
+  // 22500 each, which is the worked example rather than the code's own arithmetic.
+  const firstOpenStart = await monthStartBack(0);
+  assert.equal(replacement.admitted_periods, 1);
+  assert.equal(Number(replacement.admitted_cents), 22500);
+  assert.equal(replacement.term_start, firstOpenStart,
+    "the replacement starts the day after the month the plan took up, never on top of it");
+  assert.equal(replacement.first_open_period_start, firstOpenStart);
+  assert.equal(replacement.term_end, newEnd);
+  assert.equal(replacement.period_count, 3);
+  assert.equal(Number(replacement.total_cents), 67500);
+  assert.deepEqual((replacement.period_lines ?? []).map((l) => Number(l.amount_cents)),
+    [22500, 22500, 22500]);
+  // NOTHING IS LOST AND NOTHING IS CHARGED TWICE: what the books have taken up plus what the
+  // replacement will charge is exactly the payment.
+  assert.equal(Number(replacement.admitted_cents) + Number(replacement.total_cents), 90000);
+
+  // ---- THE POSTED MONTH AND ITS RECEIPT ARE UNTOUCHED — AC4's own sentence, driven through the
+  // CORRECTION rather than only through a restatement that did nothing.
+  const occAfter = await occurrenceRows(made.plan_id);
+  assert.deepEqual(occAfter.map((o) => [o.due_date, o.work_id, o.attempt]),
+    occBefore.map((o) => [o.due_date, o.work_id, o.attempt]),
+    "the occurrences are the same rows, in the same state");
+  assert.deepEqual((await receiptsForWork(workId)).filter((r) => r.outcome === "committed")
+    .map((r) => [r.id, r.outcome]), receiptsBefore.map((r) => [r.id, r.outcome]),
+    "the committed receipt is the SAME receipt");
+  const rowAfter = await scheduleRow(made.schedule_id);
+  assert.deepEqual(rowAfter.period_lines, rowBefore.period_lines,
+    "the predecessor's stored allocation never moved");
+  assert.equal((await planRow(made.plan_id)).status, "ended");
+  assert.equal(await liveScheduleCountFor(scene.memoEntry), 1);
+  assert.equal((await scheduleSupersession(replacement.schedule_id)).replaces_schedule_id,
+    made.schedule_id);
+  assert.equal(replacement.stated_term_id, corrected.stated_term_id);
 });
 
 // ===========================================================================================

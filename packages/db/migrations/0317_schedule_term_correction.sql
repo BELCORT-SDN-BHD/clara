@@ -196,13 +196,15 @@ begin
   -- 5 · NEITHER DOOR THIS FILE MINTS MAY ALREADY EXIST UNDER A DIFFERENT SHAPE.
   if exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
               where n.nspname = 'clara' and p.proname = 'replace_prepayment_schedule'
-                and pg_get_function_identity_arguments(p.oid) <> 'uuid, uuid, text, jsonb, text') then
+                and pg_get_function_identity_arguments(p.oid)
+                      <> 'p_client uuid, p_schedule uuid, p_reason text, p_authority_ref jsonb, p_op_key text') then
     raise exception '0317 prestate: a clara.replace_prepayment_schedule of another shape exists'
       using errcode='CLR10';
   end if;
   if exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
               where n.nspname = 'clara' and p.proname = 'replace_revenue_recognition_schedule'
-                and pg_get_function_identity_arguments(p.oid) <> 'uuid, uuid, text, jsonb, text') then
+                and pg_get_function_identity_arguments(p.oid)
+                      <> 'p_client uuid, p_schedule uuid, p_reason text, p_authority_ref jsonb, p_op_key text') then
     raise exception '0317 prestate: a clara.replace_revenue_recognition_schedule of another shape exists'
       using errcode='CLR10';
   end if;
@@ -420,12 +422,23 @@ begin
                     is distinct from (v_r.rode_start, v_r.rode_end)));
 end $c0317_tc$;
 
--- WHICH PERIODS HAS THIS PLAN ALREADY TAKEN UP? The boundary is an ADMITTED occurrence, never a
--- committed receipt, and the difference is load-bearing: the moment `clara.accounting_plan_*`
--- admits a Work for a period, the estate has taken responsibility for posting it, and a replacement
--- that re-opened that month would race the Work already in flight and could post the same month
--- twice. A period whose admitted Work later failed is recovered through the plan's OWN catch-up
--- window (`clara.list_prepayment_attention`'s arm A offers it), not by re-deriving the schedule.
+-- WHICH PERIODS HAS THIS PLAN ALREADY TAKEN UP? Two different questions, and conflating them is
+-- how a correction loses a client's money or charges it twice:
+--
+--   · WHERE the replacement may start is the day after the LATEST admitted occurrence. It is an
+--     ADMITTED occurrence, never a committed receipt: the moment the plan lane admits a Work for a
+--     period the estate has taken responsibility for posting it, and a replacement that re-opened
+--     that month would race a Work already in flight and could post the same month twice.
+--   · WHAT the replacement re-spreads is the total LESS the periods that were actually admitted,
+--     matched to their own due date. The plan scanner admits the latest due event per run, so a
+--     schedule whose earlier month was never picked up has a GAP before the boundary: that month's
+--     share is still sitting in the prepaid account (or the deferred-revenue liability), so it is
+--     part of the remaining balance and is re-spread over the open term. Charging it to a plan that
+--     is about to end would leave a balance nothing ever clears.
+--
+-- A period whose admitted Work later failed is NOT re-spread here: it is recovered through the
+-- plan's own catch-up window (`clara.list_prepayment_attention`'s arm A offers it by name), and
+-- counting it twice is exactly what this split avoids.
 create or replace function clara._schedule_open_remainder(
   p_plan uuid, p_period_lines jsonb, p_total bigint)
 returns jsonb language plpgsql stable security definer set search_path = clara, pg_temp
@@ -435,21 +448,21 @@ begin
   select max(o.due_date) into v_cutoff
     from clara.accounting_plan_occurrences o
    where o.plan_id = p_plan and o.leg = 'primary' and o.work_id is not null;
-  if v_cutoff is not null then
-    for v_x in select value from jsonb_array_elements(coalesce(p_period_lines, '[]'::jsonb)) loop
-      if (v_x ->> 'period_end')::date <= v_cutoff then
-        v_admitted := v_admitted + 1;
-        v_cents := v_cents + coalesce((v_x ->> 'amount_cents')::bigint, 0);
-      end if;
-    end loop;
-  end if;
+  for v_x in select value from jsonb_array_elements(coalesce(p_period_lines, '[]'::jsonb)) loop
+    if exists (select 1 from clara.accounting_plan_occurrences o
+                where o.plan_id = p_plan and o.leg = 'primary' and o.work_id is not null
+                  and o.due_date = (v_x ->> 'period_end')::date) then
+      v_admitted := v_admitted + 1;
+      v_cents := v_cents + coalesce((v_x ->> 'amount_cents')::bigint, 0);
+    end if;
+  end loop;
   return jsonb_build_object(
     'cutoff', v_cutoff,
     'admitted_periods', v_admitted,
     'admitted_cents', v_cents,
     'remaining_cents', p_total - v_cents,
     -- THE FIRST OPEN DAY. The cadence is `last_day_of_month`, so a cutoff is always a month end and
-    -- the day after it is the first day of the first month nothing has taken up.
+    -- the day after it is the first day of the first month this plan has not taken up.
     'next_start', case when v_cutoff is null then null else (v_cutoff + 1) end);
 end $c0317_or$;
 
@@ -2579,17 +2592,31 @@ begin
       using errcode='CLR10';
   end if;
 
-  -- 2 · EVERY EXISTING SCHEDULE IS LIVE. This file re-derives nothing, so the estate it leaves
-  --     behind must be the estate it found, with one more column that is null everywhere.
-  select count(*)::int into v_n from clara.prepayment_schedules where superseded_at is not null;
+  -- 2 · THE CHAIN READS BOTH WAYS OR NOT AT ALL. Asserted rather than assumed, and asserted in a
+  --     form that holds on a FIRST apply (where no row is superseded, so both counts are 0) and on
+  --     a REDO of a rig that has already driven corrections: a stamped predecessor names the
+  --     successor that names it back, and a successor that claims a predecessor is the one that
+  --     predecessor points at. A half-written chain is a schedule a surface cannot place.
+  select count(*)::int into v_n from clara.prepayment_schedules s
+   where (s.superseded_by is not null
+          and not exists (select 1 from clara.prepayment_schedules t
+                           where t.id = s.superseded_by and t.replaces_schedule_id = s.id))
+      or (s.replaces_schedule_id is not null
+          and not exists (select 1 from clara.prepayment_schedules t
+                           where t.id = s.replaces_schedule_id and t.superseded_by = s.id));
   if v_n <> 0 then
-    raise exception '0317 tail: % prepayment schedules are already superseded, which this file never does', v_n
+    raise exception '0317 tail: % prepayment schedule(s) carry a half-written supersession chain', v_n
       using errcode='CLR10';
   end if;
-  select count(*)::int into v_n
-    from clara.revenue_recognition_schedules where superseded_at is not null;
+  select count(*)::int into v_n from clara.revenue_recognition_schedules s
+   where (s.superseded_by is not null
+          and not exists (select 1 from clara.revenue_recognition_schedules t
+                           where t.id = s.superseded_by and t.replaces_schedule_id = s.id))
+      or (s.replaces_schedule_id is not null
+          and not exists (select 1 from clara.revenue_recognition_schedules t
+                           where t.id = s.replaces_schedule_id and t.superseded_by = s.id));
   if v_n <> 0 then
-    raise exception '0317 tail: % recognition schedules are already superseded, which this file never does', v_n
+    raise exception '0317 tail: % recognition schedule(s) carry a half-written supersession chain', v_n
       using errcode='CLR10';
   end if;
 
