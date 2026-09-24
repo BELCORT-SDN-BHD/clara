@@ -881,8 +881,17 @@ begin
       using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"object"}';
   end if;
   v_ref_kind := p_authority_ref ->> 'kind';
-  if v_ref_kind is null or v_ref_kind not in ('accounting_work','chat_task') then
-    raise exception 'a plan authority reference names an accounting_work or a chat_task'
+  -- RIDERS WAVE 4 INTEGRATION: the THIRD kind, because "verbatim from
+  -- clara.create_accounting_plan" above is a claim this file's own cells MEASURE --
+  -- p915.obo.refusals_match and p941.obo.authority drive both entrances on the same state
+  -- and require the same sentence byte for byte. Lane 01's 0300 added
+  -- contract_confirmation to the human door, so the twin carries it too or the parity
+  -- breaks. It admits nothing new in substance: clara._authority_ref_refusal, which 0300
+  -- also widened, still resolves the reference under the same firm-and-client ladder, and
+  -- a contract_confirmation row IS a named person's own confirmation -- exactly the
+  -- "person's instruction" #977 requires and an agent run cannot manufacture.
+  if v_ref_kind is null or v_ref_kind not in ('accounting_work','chat_task','contract_confirmation') then
+    raise exception 'a plan authority reference names an accounting_work, a chat_task or a contract_confirmation'
       using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"kind"}';
   end if;
   begin
