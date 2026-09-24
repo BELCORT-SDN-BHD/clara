@@ -34,6 +34,39 @@ function skipUnlessReset(t) {
   if (!RESET_OK) { markSkip(); t.skip("destructive (drops schema clara); set CLARA_RIG_ALLOW_RESET=1 on an ISOLATED DB to run ALONE"); return true; }
   return false;
 }
+
+/**
+ * `reset()` (drops schema `clara`) PLUS the shared literal-roster role sweep, for a file that
+ * runs FIVE full 0001→frontier replays in one process. Same helper, same reason and same third
+ * gate as `rig-docs-upgrade.test.mjs`'s `resetForFullReplay()`, `s6-upgrade.test.mjs`,
+ * `rig-events-upgrade.test.mjs`, `checkout-convergence-upgrade.test.mjs` and the two shared
+ * upgrade kits (review-518-r2 F1). Requires `CLARA_RIG_ALLOW_ROLE_SWEEP=1`, which this file's own
+ * step in `closed-wave-upgrade-drills/action.yml` now sets; absent it `sweepChainMintedRoles`
+ * refuses by name rather than skipping silently.
+ *
+ * WHY THIS FILE WAS THE LAST ONE WITHOUT IT (#1041). `reset()` drops only schema `clara`, while
+ * roles are CLUSTER-WIDE — so the roles one replay mints survive into the next, and `0154`'s tail
+ * hard-asserts the cluster's `clara%` count (`0154:3788`). When this drill was written the whole
+ * chain WAS 0001..0011, far below 0154, so it genuinely needed no sweep and its CI step says so.
+ * The chain then grew past 0154 while `MIG_DIR` kept meaning "every migration on disk", and the
+ * step this drill got in #1023 has never once been reached: the `closed-wave-drills` job stopped
+ * at an earlier drill in every dispatch. MEASURED on a disposable PG 17 cluster, 2026-09-24, with
+ * the first replay green and every later one dead at the same line:
+ *
+ *     migration 0154_binding_proposal_pr_1 failed and was rolled back: binding proposal pr-1
+ *     tail: the clara role count moved from 14 to 18 — this file mints no role and owes no
+ *     roles-bootstrap twin  [CLR10]
+ *
+ * three of this file's four cells (the two that bootstrap twice, and the idempotent-re-run cell).
+ */
+async function resetForFullReplay() {
+  const { reset } = await import("../scripts/reset.mjs");
+  const { guardedReset } = await import("./rig-reset-guard.mjs");
+  const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
+  await guardedReset(reset, { log: () => {} });
+  await sweepChainMintedRoles({ log: () => {} });
+}
+
 /** A temp migrations dir carrying ONLY 0001..NN (never touches/reads 0011 content). */
 function exportUpTo(maxNum) {
   const tmp = mkdtempSync(join(tmpdir(), `clara-wa-up${maxNum}-`));
@@ -138,18 +171,16 @@ async function surfaceClean() {
 
 test("probe 26: 0011 compiles clean on FRESH and on a 0010-UPGRADE image, and the two catalogs are IDENTICAL (overloads/ACLs/policies/triggers/constraints/taxonomy)", async (t) => {
   if (skipUnlessReset(t)) return;
-  const { reset } = await import("../scripts/reset.mjs");
-  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
   // FRESH: reset → migrate ALL (0001→0011).
-  await guardedReset(reset, { log: () => {} });
+  await resetForFullReplay();
   await migrate({ dir: MIG_DIR, log: () => {} });
   if (!(await waveAReady())) { markSkip(); noteLane("0011 not on disk yet — fresh migrate reached 0010 only; parity probe skipped"); t.skip("0011 not yet built on disk"); return; }
   const freshBaseline = await taxonomyBaselineVersion(); // observed FIRST — see signature()'s taxonomy comment
   await surfaceClean();
   const sigFresh = await signature(freshBaseline);
   // UPGRADE: reset → migrate 0001→0010 → migrate ALL (applies only 0011).
-  await guardedReset(reset, { log: () => {} });
+  await resetForFullReplay();
   await migrate({ dir: exportUpTo(10), log: () => {} });
   await migrate({ dir: MIG_DIR, log: () => {} });
   const upgradeBaseline = await taxonomyBaselineVersion();
@@ -171,10 +202,8 @@ test("probe 26: 0011 compiles clean on FRESH and on a 0010-UPGRADE image, and th
 
 test("probe 26: re-running migrate after 0011 applies ZERO new migrations (idempotent, checksum-verified); the surface is unchanged", async (t) => {
   if (skipUnlessReset(t)) return;
-  const { reset } = await import("../scripts/reset.mjs");
-  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
-  await guardedReset(reset, { log: () => {} });
+  await resetForFullReplay();
   await migrate({ dir: MIG_DIR, log: () => {} });
   if (!(await waveAReady())) { markSkip(); t.skip("0011 not yet built on disk"); return; }
   const again = await migrate({ dir: MIG_DIR, log: () => {} });
@@ -197,15 +226,13 @@ test("probe 26: the migration runner REFUSES a duplicate version number (the saf
 
 test("probe 26: two independent fresh bootstraps reach an IDENTICAL surface (deterministic DDL, no ordering nondeterminism)", async (t) => {
   if (skipUnlessReset(t)) return;
-  const { reset } = await import("../scripts/reset.mjs");
-  const { guardedReset } = await import("./rig-reset-guard.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
-  await guardedReset(reset, { log: () => {} });
+  await resetForFullReplay();
   await migrate({ dir: MIG_DIR, log: () => {} });
   if (!(await waveAReady())) { markSkip(); t.skip("0011 not yet built on disk"); return; }
   const baseline1 = await taxonomyBaselineVersion();
   const sig1 = await signature(baseline1);
-  await guardedReset(reset, { log: () => {} });
+  await resetForFullReplay();
   await migrate({ dir: MIG_DIR, log: () => {} });
   const baseline2 = await taxonomyBaselineVersion();
   const sig2 = await signature(baseline2);
