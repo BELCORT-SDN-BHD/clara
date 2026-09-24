@@ -1,0 +1,132 @@
+{
+  "lens": "adversarial",
+  "lane": "wave 4 / lane 03",
+  "branch": "riders/w4-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "fixed_point": "cd2925391",
+  "diff": "git diff cd2925391...HEAD (39 files, +8157/-87)",
+  "commits": [
+    "346a6354c feat(db): #938 a bill posted inside an accrued period, and clara notices",
+    "0e689107c feat(web): #938 render \"a bill arrived for an accrued period\" and its two remedies",
+    "b511b116a test(e2e): #938 browser walk for the item and \"reverse now\", plus docs",
+    "f15baed9e feat(db): #937 an accrual may carry a person-stated amount per period",
+    "f12ed79a6 feat(web): #937 the accrual form states an amount for each period",
+    "f138d6da6 docs: #937 the per-period accrual lane, in both module READMEs",
+    "94c393cb0 feat(db): #942 the accrual lane gains a revenue side",
+    "cc92f2308 feat(web): #942 every accrual surface says which way it runs"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "Tenant isolation, rank floors, grants, op-key conflict on a changed payload, the two-session race and lock order on the one new door are all sound and were driven; the three new DB batteries and the five web test files re-run green. Four things break under attack. (1) BLOCKER: 0302 hard-pins clara.list_review_queue's prosrc sha, and lane 01's 0297 recuts that same body at a LOWER migration number, so the integrated chain dies at 0302 - proven by running 0302's own prestate block verbatim inside a rolled-back transaction. (2) the 'skip this period's next occurrence' remedy leaves the flagged period double-counted and the row on screen, so #938 AC3 is unmet for one of the two remedies. (3) once the accrual's plan is ended or paused the row is permanent and BOTH remedies refuse, contradicting the self-clearing law this lane wrote into CONTEXT.md. (4) for a #937 per-period accrual the row shows the window TOTAL as 'Accrual amount', not the amount that period actually accrued.",
+  "findings": [
+    {
+      "id": "ADV-01",
+      "ticket": 938,
+      "severity": "blocker",
+      "kind": "migration-collision",
+      "title": "0302 hard-pins clara.list_review_queue's prosrc sha; lane 01's 0297 recuts the same body first, so the integrated migration chain dies at 0302",
+      "file": "packages/db/migrations/0302_accrual_bill_conflict.sql (prestate sha pin ~L165-170; the all_rows anchor ~L281-295; the witness roster's ('null::int open_proposal_count', 10) ~L250-260)",
+      "evidence": "0302's prestate is an EXACT, non-bimodal pin: `if v_sha is distinct from 'f4a34c72e567bf825d4376d043ea23cc3d8bcd2d4f0caaee3a5d052bf8a25d69' then raise ... has DRIFTED`. Lane 01's #946 report (docs/plan/active/riders-2026-09-20/reports/wave4-lane01-ticket946.md:264) lists clara.list_review_queue(jsonb,jsonb,integer) PRE-image f4a34c72e567...a25d69 -> POST-image a315367fbd897e9422a6d809ae00c5d446a2c387cedcba4b73268c68ad44565e, spliced by 0297_payroll_summary_posting.sql (row_kind payroll_posting_blocked: one payroll_rows CTE + one union arm). 0297 sorts BEFORE 0302, so on the integrated chain 0297 applies first and 0302's pin can never be satisfied. PROVEN on clara_l03 inside ONE transaction that was rolled back (scratchpad/adv-lane03/probe2.mjs, probe3.mjs): (a) the live body was un-spliced by reversing 0304's two edits and 0302's one edit, and the result hashed to exactly f4a34c72e567bf82... - i.e. the reconstruction is the genuine pre-image; (b) one payroll-shaped row-kind arm (same shared 28-wide column vector, one extra `union all` inside the very block 0302 anchors on) was spliced in; (c) 0302's own prestate do-block, extracted verbatim from the migration by its $t938_pre$ tag, was executed and raised: CLR10 '#938 prestate: clara.list_review_queue has DRIFTED from its pinned pre-image (measured 93f29cd5de39790065fb9e81c5a8c505b86520d8850ef7eae535e6e1a0d34ffd)'; (d) with the prestate bypassed, 0302's splice block ($t938_lrq$) raised: CLR10 '#938 splice prestate: marker \"null::int open_proposal_count\" appears 11 time(s) IN CODE, expected 10', and its literal all_rows anchor would then match zero times. The transaction was rolled back and clara.list_review_queue re-measured unchanged. 0304's own postcheck (expected 11) fails for the same reason. 0304's header claims the splice 'composes with any other lane's arm in either order' - that claim is false, because 0302, which 0304 depends on, is not composable.",
+      "required_fix": "Make 0302's list_review_queue prestate BIMODAL/marker-tolerant the way 0304's own splice guard already is (accept the pinned pre-image OR any body that still carries the ten pre-existing row-kind markers), derive the all_rows anchor from the INSTALLED body instead of a literal block that names every existing arm, and replace the fixed `open_proposal_count` counts (10 in 0302's prestate, 11 in 0302's and 0304's postchecks) with a measured before/after delta of exactly +1 / +0. Until then the integrator must re-derive 0302 and 0304 against the body 0297 leaves behind."
+    },
+    {
+      "id": "ADV-02",
+      "ticket": 938,
+      "severity": "major",
+      "kind": "acceptance-criterion-unmet",
+      "title": "\"Skip this period's next occurrence\" leaves the flagged period double-counted and the row still on screen",
+      "file": "packages/db/migrations/0302_accrual_bill_conflict.sql (skip_plan_occurrence writes a marker for the NEXT due date, ~L410-520); apps/web/components/accruals/accrual-bill-conflicts.tsx; apps/web/components/firm/accrual-bill-conflict-affordance.tsx",
+      "evidence": "#938 AC3: 'each remedy leaves exactly one live expense for the period afterwards'. DRIVEN on clara_l03 (scratchpad/adv-lane03/advA.mjs): a posted accrual (plan 5ab7b929-ecac-48a5-ab44-c00244ed1f92, due 2026-07-31, 120,000) plus a document-sourced approved bill of 50,000 on the same expense account inside the same period -> list_review_queue returns 1 accrual_bill_conflict row. clara.skip_plan_occurrence(plan, 2026-07-31, ...) succeeds: {\"skipped\":true,\"due_date\":\"2026-08-31\"}. Re-read: STILL 1 accrual_bill_conflict row. The ledger for the flagged period still carries BOTH live debits on the accrual's own expense account: [{origin:'document',debit_cents:50000},{origin:'agent',debit_cents:120000}]. The skip only removes a FUTURE occurrence; it changes nothing about the period the row is about. The battery's p938.skip.* cells never re-read the queue after a skip and the e2e walk drives only 'Reverse now', so nothing in the lane catches it. It also contradicts the self-clearing sentence this lane added to CONTEXT.md (Settlement candidate row entry) and repeated in accrual-bill-conflicts.tsx's own header.",
+      "required_fix": "Either (a) make the skip remedy act on the period the row names (skip/void the flagged occurrence's own accrual, or pair the skip with the reversal), or (b) say in the ticket and on screen that 'skip' prevents the NEXT period only and does not resolve this one. Either way add a DB cell that re-reads list_review_queue after EACH remedy."
+    },
+    {
+      "id": "ADV-03",
+      "ticket": 938,
+      "severity": "major",
+      "kind": "stuck-state",
+      "title": "Once the accrual's plan is ended or paused the conflict row is permanent and BOTH remedies refuse",
+      "file": "packages/db/migrations/0302_accrual_bill_conflict.sql (bill_rows carries no plan-status predicate; skip refuses a non-active plan); clara.request_plan_catch_up refuses plan_ended/plan_paused; apps/web/components/accruals/accrual-bill-conflicts.tsx and apps/web/components/firm/accrual-bill-conflict-affordance.tsx render both buttons unconditionally",
+      "evidence": "DRIVEN on clara_l03 (scratchpad/adv-lane03/advG.mjs): posted accrual + same-period document bill -> 1 accrual_bill_conflict row. clara.end_accounting_plan (the ordinary door for 'the client cancelled the standing instruction') -> {status:'ended', changed:true}. Re-read: the row is STILL returned (1). 'Reverse now' -> CLR10 {\"reason\":\"plan_ended\"} ('only an active plan can catch up'). 'Skip this period's next occurrence' -> CLR10 {\"reason\":\"plan_ended\"} ('only an active plan''s next occurrence can be skipped'). The period still carries two live expense postings (document 50,000 + agent 120,000). pause_accounting_plan gives the same dead end via {\"reason\":\"plan_paused\"}. So a routine act leaves a permanent Needs-you item offering two actions that can never succeed, on a period that stays double-counted - while CONTEXT.md, as this lane edited it, says the row 'clears itself the moment the underlying facts stop producing it'.",
+      "required_fix": "Choose and implement one: exclude non-active plans from bill_rows (raise the conflict only while a remedy exists); or let 'reverse now' reach a period of an ended plan whose reversal is still inside the leg-aware ceiling; or render the item read-only with the reason when the plan is not active. Add a cell that ends the plan and asserts what the row and both doors then do."
+    },
+    {
+      "id": "ADV-04",
+      "ticket": 937,
+      "severity": "major",
+      "kind": "wrong-number-on-screen",
+      "title": "For a stated_period_amount accrual the conflict row shows the window TOTAL as \"Accrual amount\", not what that period accrued",
+      "file": "packages/db/migrations/0302_accrual_bill_conflict.sql (bill_rows projects `aa.amount_cents`); apps/web/components/accruals/accrual-bill-conflicts.tsx (billConflictAmount); apps/web/messages/en.json (\"billConflictAmount\": \"Accrual amount: {amount}\")",
+      "evidence": "DRIVEN on clara_l03 (scratchpad/adv-lane03/advD.mjs): a two-period #937 accrual (2026-06-30 = 300,000; 2026-07-31 = 350,000; window total 650,000). The occurrence for 2026-07-31 posted 350,000 - read off clara.journal_lines, description 'the accrual period ending 2026-07-31'. A document-sourced approved bill of 295,000 inside that period surfaces the row, and the row carries amount_cents = 650000, which the Accruals-page item renders as 'Accrual amount: 6,500.00'. #937 changed what accrual_adjustments.amount_cents MEANS under the per-period rule (it is the window total - 0303's FOURTH MEASUREMENT, and en.json's own amountTotalHint says so) AFTER #938 had already written aa.amount_cents into the row; #942 re-spliced the same arm and did not revisit it. Nothing caught it because every accrual-bill-conflict cell uses a stated_amount accrual. The whole point of the row is to let a bookkeeper compare the bill with the accrual for that period.",
+      "required_fix": "In bill_rows resolve the flagged period's own figure - (clara._plan_accrual_period_line(o.plan_id, o.due_date) ->> 'amount_cents')::bigint when the live accrual's method rule is stated_period_amount, else aa.amount_cents - and add a cell that builds a per-period accrual, posts a bill in one period and asserts the row carries THAT period's amount."
+    },
+    {
+      "id": "ADV-05",
+      "ticket": 937,
+      "severity": "major",
+      "kind": "stale-copy",
+      "title": "The accrual form's method hint still says \"one rule is recorded because one rule is performed\", beside a control that now offers two",
+      "file": "apps/web/components/accruals/accrual-form.tsx:522 (hint={t(\"methodHint\")}); apps/web/messages/en.json \"Accruals\".\"methodHint\"",
+      "evidence": "The key is untouched by this lane (git diff cd2925391...HEAD -- apps/web/messages/en.json shows no change to methodHint) and still reads: 'One rule is recorded because one rule is performed: this release accrues the amount stated above in every period of the authority window. It selects a figure a person stated; it calculates none.' It is rendered unconditionally as the hint of the method <select>, which #937 widened to stated_amount + stated_period_amount (ACCRUAL_METHODS in apps/web/lib/accruals/api.ts) and whose second option reads 'The amount stated for each period separately'. The form therefore states, next to the control, that only one rule exists and that every period accrues the amount above - exactly what the second rule does not do. #937's AC3 is 'the method control offers the two rules'; the sentence beside it denies it. No cell asserts the hint text (the 937.form cells assert the option list only), so the green whole-suite does not cover it.",
+      "required_fix": "Rewrite Accruals.methodHint for the two-rule world, or make it rule-dependent as fieldAmount/amountTotalHint already are on the same form, and add a cell asserting the hint rendered under each rule."
+    },
+    {
+      "id": "ADV-06",
+      "ticket": 942,
+      "severity": "minor",
+      "kind": "copy-not-carried-to-the-revenue-side",
+      "title": "Two user-facing strings still describe the expense side only, on a surface #942 made two-sided",
+      "file": "apps/web/messages/en.json \"Accruals\".\"billConflictsBody\" and \"NeedsYou\".\"rowKinds\".\"accrual_bill_conflict\"; apps/web/components/firm/accrual-bill-conflict-affordance.tsx",
+      "evidence": "0304's own splice widened the DATABASE sentence so a revenue accrual reads 'A document-sourced invoice or receipt posted inside the accrued period ...', for the stated reason that 'a bookkeeper reading \"a bill arrived\" about an accrued FEE is being told the wrong story'. The two strings in en.json were not widened: the Accruals-page section body still reads 'A document-sourced entry hit this accrual's own EXPENSE ACCOUNT inside the period it accrues', and the Needs-you row title is 'A bill arrived for an accrued period' on both sides. On the revenue side the account is the income account and the document is an invoice or receipt. #942 AC2 asks the surfaces to name the side; billConflictSide does it for the Accruals item only - the Needs-you affordance renders neither the side nor the period, although the row now carries accrual_side.",
+      "required_fix": "Make the two strings side-aware, and render accrual_side in the Needs-you affordance the way the Accruals item already does."
+    },
+    {
+      "id": "ADV-07",
+      "ticket": 938,
+      "severity": "note",
+      "kind": "idempotency",
+      "title": "skip_plan_occurrence's dedupe hash omits p_reason, so a replay with a different reason answers success and silently keeps the first reason",
+      "file": "packages/db/migrations/0302_accrual_bill_conflict.sql (clara._hash(jsonb_build_object('plan', p_plan, 'after_due', p_after_due)))",
+      "evidence": "DRIVEN on clara_l03 (scratchpad/adv-lane03/advC.mjs, C1): the same op key with the same plan and after_due but the reason changed from 'REASON ONE' to 'REASON TWO - A COMPLETELY DIFFERENT REASON' returns the FIRST receipt verbatim ({skipped:true, occurrence_id:86e55b45-536c-486e-89d4-0e2a3e4332ed}); the only marker on the plan records reason 'REASON ONE'. The caller is told their skip succeeded with a reason that was never recorded. A changed plan or a changed after_due IS a conflict (C2/C3 both raised CLR10 'op_key reused with different args'), so the omission is specific to the reason. Practical exposure is low because both web callers mint a fresh crypto.randomUUID() per click, but a retrying agent or a resent form would hit it.",
+      "required_fix": "Either include btrim(p_reason) in the dedupe hash, or state in the function comment and packages/db/README.md that the reason sits outside the idempotency key."
+    },
+    {
+      "id": "ADV-08",
+      "ticket": 938,
+      "severity": "note",
+      "kind": "comment-contradicts-code",
+      "title": "The row_kind's grounding comment says \"most recent\" posted occurrence; the SQL picks the OLDEST",
+      "file": "apps/web/lib/firm/needs-you.ts (REVIEW_QUEUE_ROW_KINDS entry for accrual_bill_conflict) vs packages/db/migrations/0302_accrual_bill_conflict.sql (bill_rows: select distinct on (o.plan_id) ... order by o.plan_id, o.due_date, je.posting_date, je.id)",
+      "evidence": "needs-you.ts states 'ONE row per accrual PLAN (never per occurrence) whose MOST RECENT posted, unreversed accrual occurrence has a document-sourced, approved journal entry ...'. The DISTINCT ON orders by o.due_date ASCENDING, so when a plan has two flagged periods the row names the OLDEST, and both remedies are then aimed at that older due date (both doors take row.period byte for byte). Harmless in the common one-period case, but the comment is what a later lane will build on.",
+      "required_fix": "Correct the comment to 'the earliest flagged period' (or order desc and say so), and add a cell with two flagged periods on one plan that pins which one the row names."
+    }
+  ],
+  "attacks_that_found_nothing": [
+    "Tenant isolation on clara.skip_plan_occurrence: another firm's owner naming a real plan of firm A, and the same caller naming a uuid that exists nowhere, answer IDENTICALLY - CLR11 {\"reason\":\"plan_not_found\"}, 'accounting plan not found in your firm'. No existence oracle (advB.mjs B2/B3; clara._plan_door_ctx puts the firm predicate inside the lookup).",
+    "Rank floor: a VIEWER of the same firm is refused CLR04 {\"reason\":\"insufficient_role\"}; a REMOVED member is refused CLR04 {\"reason\":\"actor_not_active\"} (advB.mjs B1, advC.mjs C5; the membership was restored and re-read as 'active').",
+    "Read floor: clara.list_review_queue's new arm inherits the existing clara._human_ctx(role_rank('viewer')) floor, which is byte-identical to get_accrual_adjustment's, list_accrual_adjustments' and list_accounting_plans' - AC1's 'role floor matches the accrual reads' holds (measured off pg_proc.prosrc).",
+    "Non-human lanes: clara_runtime, clara_agent_ro, clara_wake_interactive and clara_wake_proactive all get 42501 'permission denied for function skip_plan_occurrence' (advB.mjs B4). The door is granted to clara_authenticated alone.",
+    "Idempotency under a CHANGED payload: the same op key with a different plan, or the same plan with a different after_due, both raise CLR10 'op_key reused with different args' (advC.mjs C2/C3).",
+    "Race between two real connections: two concurrent skips of the same next due date under different op keys -> one succeeds, the other raises CLR13 {\"reason\":\"period_already_admitted\"}, and exactly ONE marker row exists afterwards (advC.mjs C4). Serialised by the `for update` on clara.accounting_plans.",
+    "Lock order: clara.skip_plan_occurrence takes `clara.accounting_plans ... for update` as RUNG 1, the same first lock clara._plan_admit_occurrence takes (its own line 18), so the new door cannot invert the plans-then-Work order against the admission core or against request_plan_catch_up.",
+    "'Reverse now' window over-reach: the window is [flagged due, first of the next month], so a schedule whose next due date falls on the 1st would have its NEXT primary admitted by the same click - but clara._assert_plan_schedule already refuses that configuration outright (CLR10 {\"reason\":\"reversal_collides_with_next_occurrence\"}, driven in advE.mjs), so the shape is unreachable.",
+    "The skip marker (leg='primary', work_id NULL) does not pollute clara._plan_covered_through, which requires o.work_id is not null.",
+    "An open-ended stated_period_amount accrual (which would make clara._assert_accrual_period_amounts walk its 4096-date guard and emit a huge `missing` array) is unreachable: clara._assert_accrual_term_window refuses it first with CLR10 accrual_term_window_mismatch (advF.mjs).",
+    "RLS on the new relation: clara.accrual_period_amounts has relrowsecurity AND relforcerowsecurity, relacl NULL, and one policy scoped to clara_fn_owner - byte-identical posture to clara.accrual_adjustments and clara.accounting_plan_occurrences.",
+    "Reversal amount resolution under #937: clara._plan_admit_occurrence resolves the REVERSAL leg's line from its own primary's due date (v_primary_due), not from the reversal date, so a per-period reversal undoes the amount that period actually posted.",
+    "Lane rule (a): 0304 inserts no chart-template row (its header says so; grep finds no 1180 insert), and p942.standard_chart applies the CURRENT published my_sme_starter (order by version desc limit 1) through clara.apply_coa_template and asserts 1180 Accrued Income is 0295's own asset row, non-control and active.",
+    "Lane rule (b): apps/web/lib/firm/needs-you.ts gains one row kind appended at the end of REVIEW_QUEUE_ROW_KINDS plus one optional field; nothing reformatted.",
+    "Lane rule (d): node scripts/check-frozen-workflows.mjs is untouched by this lane's files (packages/runtime has no diff), and both #937 and #942 carry a full successor contract for the chatTurn_v22 cut."
+  ],
+  "gates_rerun_by_this_reviewer": {
+    "packages/db tests/accrual-bill-conflict.test.mjs (full gate chain)": "9/9 pass, 0 skipped",
+    "packages/db tests/accrual-period-amounts.test.mjs (full gate chain)": "12/12 pass, 0 skipped",
+    "packages/db tests/accrual-revenue-side.test.mjs (full gate chain)": "8/8 pass, 0 skipped",
+    "packages/db tests/operation-census.test.mjs (full gate chain, no reset flags)": "10/10 pass",
+    "apps/web lib/accruals/api.test.ts + lib/work/accrual-draft.test.ts + components/accruals/{accrual-form,accrual-correction-form,accruals-list}.test.tsx": "90/90 pass, 0 failed",
+    "CI=true GITHUB_ACTIONS=true pnpm lint (worktree root)": "PASS"
+  },
+  "not_rerun": [
+    "pnpm typecheck and the whole apps/web unit suite (the lane reports 5017/5019 and PASS; not re-run here).",
+    "pnpm --filter @clara/web e2e accrual-walk on 3520/3521/3522 (the lane reports 20/20; no Next build was rebuilt for this review)."
+  ],
+  "probe_scripts": "C:\\Users\\zhant\\AppData\\Local\\Temp\\claude\\C--Users-zhant-Desktop-clara-rebuild\\2d0e3faa-4367-4726-8208-67089ecdd96a\\scratchpad\\adv-lane03\\ (probe1/2/3.mjs = the ADV-01 rolled-back proof; advA/B/C/D/E/F/G.mjs = the door probes). ADV-01 ran entirely inside one transaction that was rolled back, and clara.list_review_queue was re-measured unchanged afterwards. The advA-advG probes commit rows the way the batteries do, each in its own freshly built world."
+}

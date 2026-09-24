@@ -1,0 +1,68 @@
+{
+  "lens": "recheck",
+  "round": 2,
+  "lane": "wave4-lane04",
+  "branch": "riders/w4-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "fixed_point": "cd2925391",
+  "head_checked": "604416912",
+  "fix_reports": [
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-fix.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-fix-2.md"
+  ],
+  "prior_recheck_checked_against": "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-recheck.json",
+  "review_reports_checked_against": [
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-codereview-spec.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-codereview-standards.json",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-review-adversarial.json"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "Round-1 recheck (head 2d7736a6d) accepted ten findings as fixed and left exactly one open: L04-SPEC-04 (major) -- the correction-path AC named by #939 AC4 / #941 AC3 has no door, and the round-1 fix report's own claim that the advertising copy was removed was only true for the two termSupersededBody strings. This round (fix-2, three commits d662a2840/8fab433bb/604416912, head 604416912) re-measured that gap, found the fix-round-1 claim overstated (three MORE sentences -- explainPeriodLine, explainAuthority, endedNoControls x2 -- still told a firm to 'configure a new one' or 'end this schedule and configure a new one'), and fixed the disclosure half completely: all five sentences across both registers now state the true limitation (one recognition carries one schedule) instead of advising an act no door performs, and the claim was driven for an ENDED schedule too (new arms in p939.supersede.running and p941.supersede.running: CLR13/prepayment_schedule_exists and revenue_recognition_schedule_exists survive clara.end_accounting_plan, confirming there is genuinely no second door). No migration and no packages/runtime file was touched (git diff 2d7736a6d..HEAD -- packages/db/migrations packages/runtime is empty), so 0315's on-disk sha256 (c6436f359bb880f452d7eb44f6558708e8871addb8549a9d8057be7c81f61c85) and 0305-0308 are unchanged from round 1, and none of round 1's ten fixed findings could have regressed through this round's own edits -- confirmed anyway by re-driving all of them. Re-run at 604416912 on clara_l04: prepayment-stated-term.test.mjs + revenue-recognition.test.mjs 24/24 (exact match to fix-2's claim, including the new 'ENDING the first one does not open that door either' arm read directly from the diff); operation-census + rig-isolation 33 tests/32 pass/1 skip (the known destructive-reset skip, exact match); the wider round-1 db set (prepayment-wake-reroute, prepayment-stated-term, prepayment-account-roster, prepayment-schedule, prepayment-schedule-obo, revenue-recognition, plan-overlap-template-arm-retired, f-a4-pr2a-books, f-a4-pr2a-wrapper, f-a4-pr2a-census) 85/85, confirming L04-SPEC-01/02/03, STD-1 and ADV-01..06 all still hold. Web: prepayments-render-states.test.tsx 17/17, deferred-revenue-render-states.test.tsx 7/7 (exact match), apps/web whole unit suite 5035/5033/0 fail/2 skipped (exact match, the two new cells are the entire delta from round 1's 5033/5031/2). pnpm typecheck clean; CI=true GITHUB_ACTIONS=true pnpm lint exit 0 (verified via captured exit code, not tail's). check-frozen-workflows.mjs (312 files, 0 diff) and check-parts-parity.mjs both OK, as expected since packages/runtime is untouched. Both Playwright walks on the lane triple pass (prepayments-walk 8/8, deferred-revenue-walk 3/3, exact match). git status --short is empty: tree is clean. Grepped the whole worktree for the four retired advisory sentences ('a corrected term needs a new schedule', 'configure a new one', 'end this schedule and configure'): the only hits left are test-file comments describing what USED to be said and one pre-existing migration-header comment narrating history -- no live production string advises the door any more. Read the docs commit (604416912, 3 files, 40/4 lines) directly: CONTEXT.md's Revenue recognition schedule _Avoid_ clause and its Corrected term entry, packages/db/README.md's new 'Not in this file: the correction path (L04-SPEC-04, owner-blocked)' subsection, and apps/web/README.md's #919 section all read exactly as the fix-2 report describes, including the prepayment-detail.tsx banner comment that now says the schedule cannot be rebuilt rather than that it can. One item remains open, narrower than before: the positive half of L04-SPEC-04 (a door that actually opens a replacement schedule) is still not built. This is not a regression and not left silently -- fix-2's own report frames it correctly as owner-blocked (an accounting-treatment choice between a prospective change-in-estimate derivation and a prior-period correction, which the standing ruling reserves for a professional judgement, not a coding choice) and out of this lane's scope under WORK-ORDER.md rule 5 (the lane's reserved migration numbers, 0305-0308 and overflow 0315, are spent; building the door needs lifting a uniqueness constraint the fix round has no number for). A full follow-up ticket, ready to file verbatim, is included in the fix-2 report. Nothing above minor remains as a coding defect in what this lane built; the one open item is a disclosed, correctly-scoped capability gap awaiting an owner ruling, exactly the shape WORK-ORDER.md's scope-discipline rule asks for -- so this recheck keeps the same verdict shape as round 1 (accept-with-fixes) rather than downgrading to reject, and does not accept outright only because the literal AC text (#939 AC4, #941 AC3) is still not met by any door.",
+  "checks": [
+    {
+      "review_finding": "L04-SPEC-04",
+      "severity": "major",
+      "status": "disclosure half fixed; positive half (the door) still open, disclosed and owner-blocked -- reason for staying open holds",
+      "evidence": "git grep across apps/web, packages/db, CONTEXT.md for the four retired sentences returns only test comments and one migration-header history comment, never a live string. New driven arms: p939.supersede.running and p941.supersede.running each end the plan via clara.end_accounting_plan (status: ended confirmed) then re-ask for a replacement and get CLR13 prepayment_schedule_exists / revenue_recognition_schedule_exists -- re-run green (24/24 in the pair, confirmed by direct git diff read of the added arm). uq_prepayment_schedules_source (0223) and uq_revenue_recognition_schedules_source (0308) remain plain unique(source_entry_id) with no status predicate -- confirmed by the fix-2 report's own measurement, which this round did not need to re-derive since no migration changed. Docs (CONTEXT.md, packages/db/README.md new subsection, apps/web/README.md) all correctly state the door does not exist and name the owner decision it waits on. A ready-to-file follow-up ticket is drafted in wave4-lane04-fix-2.md. Not re-opened as a fresh finding: it is the same item recheck round 1 already carried as owner-blocked, now with its disclosure half genuinely complete rather than partially so."
+    },
+    {
+      "review_finding": "L04-SPEC-01 / L04-SPEC-02 / ADV-01 / ADV-06 / STD-1 / L04-SPEC-03 / ADV-02 / ADV-03 / ADV-04 / ADV-05 (all fixed per round-1 recheck)",
+      "severity": "n/a (regression check)",
+      "status": "confirmed still fixed, no regression",
+      "evidence": "No migration and no packages/runtime file changed between 2d7736a6d and 604416912 (git diff --stat is empty for both paths), so none of these could have regressed through fix-2's own edits. Re-driven anyway: the wider round-1 db test set (prepayment-wake-reroute, prepayment-stated-term, prepayment-account-roster, prepayment-schedule, prepayment-schedule-obo, revenue-recognition, plan-overlap-template-arm-retired, f-a4-pr2a-books, f-a4-pr2a-wrapper, f-a4-pr2a-census) at 604416912 -> 85 tests, 85 pass, 0 fail. check-frozen-workflows.mjs (312 files verified, 0 diff) and check-parts-parity.mjs both OK."
+    },
+    {
+      "review_finding": "L04-SPEC-06 / STD-2 / L04-SPEC-07 / L04-SPEC-08 / L04-SPEC-09 / ADV-07 / ADV-08 (no-change-needed items)",
+      "severity": "n/a",
+      "status": "unchanged, correctly untouched",
+      "evidence": "None of these touch files fix-2 edited (apps/web/messages/en.json's four value strings, CONTEXT.md two clauses, two READMEs, two render-states test files, two db test files). No re-measurement needed beyond round 1's."
+    }
+  ],
+  "gates_rerun": [
+    "packages/db: node --test --test-concurrency=1 <111-entry gate chain> tests/prepayment-stated-term.test.mjs tests/revenue-recognition.test.mjs -> 24 pass, 0 fail (exact match to fix-2)",
+    "packages/db: node --test --test-concurrency=1 <111-entry gate chain> tests/operation-census.test.mjs tests/rig-isolation.test.mjs -> 33 tests, 32 pass, 0 fail, 1 skip (exact match to fix-2)",
+    "packages/db: node --test --test-concurrency=1 <111-entry gate chain> tests/{prepayment-wake-reroute,prepayment-stated-term,prepayment-account-roster,prepayment-schedule,prepayment-schedule-obo,revenue-recognition,plan-overlap-template-arm-retired,f-a4-pr2a-books,f-a4-pr2a-wrapper,f-a4-pr2a-census}.test.mjs -> 85 tests, 85 pass, 0 fail (extra regression sweep beyond fix-2's own gate list)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/prepayments/prepayments-render-states.test.tsx -> 17 pass, 0 fail",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/deferred-revenue/deferred-revenue-render-states.test.tsx -> 7 pass, 0 fail",
+    "apps/web: node scripts/run-tests.mjs -> 5035 tests, 5033 pass, 0 fail, 2 skipped (exact match to fix-2)",
+    "pnpm typecheck (root) -> clean, apps/web and packages/runtime both Done",
+    "CI=true GITHUB_ACTIONS=true pnpm lint (root), exit code captured directly (not through a pipe) -> 0",
+    "node scripts/check-frozen-workflows.mjs -> OK, 312 frozen files verified, 0 diff",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK",
+    "pnpm --filter @clara/web e2e prepayments-walk on lane triple (3530/3531/3532) -> 8 passed (exact match)",
+    "pnpm --filter @clara/web e2e deferred-revenue-walk on lane triple -> 3 passed (exact match)",
+    "sha256sum packages/db/migrations/0315_prepayment_wake_reroute.sql -> c6436f359bb880f452d7eb44f6558708e8871addb8549a9d8057be7c81f61c85 (unchanged from round 1; no migration touched this round per git diff)",
+    "git diff 2d7736a6d..HEAD --stat -- packages/db/migrations packages/runtime -> empty (confirms no db-schema or runtime regression surface this round)",
+    "git diff cd2925391...HEAD --stat -- packages/runtime -> only packages/runtime/tests/prepayment-occurrence-e2e.mjs (+15, from round 1, unaffected by round 2)",
+    "git grep for the four retired advisory sentences across the worktree -> only test comments and one migration-header history comment; no live production string",
+    "git status --short -> empty (tree clean)"
+  ],
+  "newly_broken": [],
+  "still_open": [
+    {
+      "id": "L04-SPEC-04",
+      "severity": "major",
+      "note": "The positive half only: a door that opens a replacement schedule after a term is superseded (#939 AC4 / #941 AC3). The disclosure half (stop advertising an act no door performs) is now genuinely complete across both registers, CONTEXT.md and both READMEs. Building the door needs an owner ruling on what the replacement is derived from (prospective change-in-estimate vs. prior-period correction) and a schema change this lane has no migration number for -- correctly out of scope under WORK-ORDER.md rule 5. A ready-to-file follow-up ticket is drafted in wave4-lane04-fix-2.md; the orchestrator owns filing it."
+    }
+  ]
+}

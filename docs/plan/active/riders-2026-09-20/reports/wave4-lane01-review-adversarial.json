@@ -1,0 +1,154 @@
+{
+  "review": "wave4 lane01 - ADVERSARIAL lens (an addition to /code-review, reported separately)",
+  "fixed_point": "cd2925391",
+  "diff": "git diff cd2925391...HEAD  (49 commits, 84 files, +25407/-702)",
+  "branch": "riders/w4-lane01",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\635",
+  "database": "127.0.0.1:55741 / clara_l01 (0296..0300 all applied)",
+  "tickets": [
+    "944",
+    "945",
+    "946",
+    "947",
+    "948",
+    "949"
+  ],
+  "method": "Every defect below was driven on the live lane database through the real doors, inside a transaction that was ROLLED BACK. Probe scripts are in the session scratchpad (p1,p2,p3,p5,p8,p9,p10,p11,p12,p13,p14,raceA/raceB .sql).",
+  "verdict": "accept-with-fixes",
+  "findings": [
+    {
+      "id": "ADV-01",
+      "ticket": 947,
+      "severity": "blocker",
+      "kind": "ledger-arithmetic",
+      "title": "Reversing one payroll run silently marks a DIFFERENT, genuinely unpaid run as settled",
+      "where": "packages/db/migrations/0298_payroll_net_pay_settlement.sql section A, clara._payroll_net_pay_unsettled, CTE debit_total",
+      "evidence": "clara.reverse_entry builds the mirror with the legs swapped and does NOT copy flags (measured: mirror flags = {}), so a reversed payroll run leaves an approved, non-reversed 2040 DEBIT behind. debit_total excludes only payroll_obligation-flagged entries, not reversal mirrors, so that debit is FIFO-allocated against OTHER runs' credits. PROBE (scratchpad/p1.sql, rolled back), client c7e5fd1c-b7eb-489f-8c99-0f18c17dea78, four posted runs of 425570 each, all unsettled: driving clara.reverse_entry on the AUGUST run 83ee0c0c-87bb-479c-a906-1bbe0e2f95a7 (returned {\"status\":\"approved\",\"reversal_id\":\"3b2f939e-6255-4e91-8b25-e44f35813468\"}) left the MAY run d8369a81-c572-4f4c-acd0-43e9ff51218f at unsettled_cents = 0 (was 425570), and clara.get_payroll_settlement_candidates went from 4 runs offered to 2. The mirror's lines printed as '... 2040 Dr425570 Cr0'.",
+      "failure_scenario": "A firm reads the wrong month's payslip, posts it, then reverses it. The previous month's RM4,255.70 net pay - never paid - disappears from Needs you, from /bank's candidate list, and from clara.settle_payroll_net_pay (which now refuses it 'already_settled'). There is no route back except a hand entry, and nothing on screen says anything is missing.",
+      "required_fix": "Exclude reversal mirrors from the debit pool: add `and je.reversal_of is null` to debit_total. (Safe: a reversal of a SETTLEMENT entry mirrors Cr 2040, so it never appears in this pool anyway.) Add a cell that reverses one run and asserts every other run's unsettled_cents is unchanged."
+    },
+    {
+      "id": "ADV-02",
+      "ticket": 949,
+      "severity": "blocker",
+      "kind": "ledger-arithmetic",
+      "title": "The same reversal hole in the rent lane: reversing one month's rent settles an earlier unpaid month",
+      "where": "packages/db/migrations/0300_tenancy_terms_rent_plan.sql section H, clara._rent_payable_unsettled, CTE debits",
+      "evidence": "PROBE (scratchpad/p5.sql, rolled back), client 8060d129-eeeb-45d3-9f12-e9d61ebaaaa3, payable 2050: before - Feb 2026 unsettled 180000, Mar 2026 unsettled 360000. Driving clara.reverse_entry on the MARCH rent entry cf49aabc-7951-44f7-bfd4-9d4e360302a6 (mirror lines '6100 Dr0 Cr360000, 2050 Dr360000 Cr0') left ONE row: Feb 2026 with unsettled_cents = 0. February's genuinely unpaid RM1,800.00 vanished from the read, from Needs you and from the settlement door.",
+      "failure_scenario": "A bookkeeper reverses a rent accrual raised in error. An earlier month whose rent was never paid drops out of Needs you and out of clara.get_rent_settlement_candidates, and clara.settle_rent_payable refuses it.",
+      "required_fix": "Same one-line fix: `and je.reversal_of is null` in the debits sub-select."
+    },
+    {
+      "id": "ADV-03",
+      "ticket": 949,
+      "severity": "blocker",
+      "kind": "mis-attribution",
+      "title": "Any approved credit to the payable account becomes 'a month of rent on this tenancy' - the rent read is keyed on an account code, not on the plan",
+      "where": "packages/db/migrations/0300_tenancy_terms_rent_plan.sql section H, clara._rent_payable_unsettled: CTE credits joins clara.journal_lines on jl.account_code = pl.payable_account_code with no restriction to the plan's own entries, and CTE plans does `distinct on (cf.payable_account_code) ... order by cf.payable_account_code, cf.confirmed_at desc`",
+      "evidence": "PROBE (scratchpad/p14.sql, rolled back), client 8060d129: a hand-booked, entirely unrelated accrual Dr 6100 123400 / Cr 2050 123400, drafted and approved through the ordinary clara.draft_entry and clara.approve_entry doors, immediately produced a THIRD Needs-you row - row_kind 'rent_payable_unsettled', document_id fe37ad33-1d0f-4bd2-8b9e-469a64b5c86f, entry_id 0df22740-e4f4-4a23-b1e6-9fc75414e2c9, question_text 'Rent is posted for April 2026; the payment has not appeared.' - and a clara.get_rent_settlement_candidates entry for 123400 under that tenancy. The tenancy has nothing to do with the entry. AGGRAVATION: clara.confirm_tenancy_rent_plan refuses only a second plan on the SAME DOCUMENT ('this tenancy already runs a rent plan'), so a client with TWO tenancies both confirmed on the default 2050 is admitted; distinct on (payable_account_code) then keeps only the newest confirmation and attributes BOTH tenancies' rent months, and one mixed FIFO pool, to that one document. ASYMMETRY: #947's twin is keyed on je.flags->'payroll_run', a flag a human door cannot set (measured: clara._draft_entry_core reads p_flags only for is_year_end / tax_affecting / closing_transfer, so payroll_run cannot be forged). The rent twin has no equivalent key.",
+      "failure_scenario": "Clara tells a person 'Rent is posted for April 2026 on this tenancy; the payment has not appeared', offers a bank line, and clara.settle_rent_payable books Dr 2050 / Cr bank with a memo naming that tenancy - for money that belongs to a different obligation entirely. With two tenancies on 2050 the older tenancy's rent is presented under the newer tenancy's document and the two payment streams net against each other.",
+      "required_fix": "Key the credits on the plan, not on the account code: flag the rent entries the plan raises (the payroll lane's own flags->'payroll_run' idiom) or join through the plan occurrence that created the entry, and drop distinct on (payable_account_code) in favour of one row per live rent plan. Add cells for (a) an unrelated credit to the payable and (b) two tenancies sharing 2050."
+    },
+    {
+      "id": "ADV-04",
+      "ticket": 947,
+      "severity": "major",
+      "kind": "control-bypass",
+      "title": "Both settlement doors self-approve a HIGH-STAKES journal entry, bypassing the estate's distinct-checker gate",
+      "where": "0298 clara._settle_payroll_net_pay_core and 0300 clara._settle_rent_payable_core: insert into clara.journal_entries(... 'draft' ...) then `update clara.journal_entries set status='approved', checker_actor = c.actor` - no clara.is_high_stakes probe, no distinct checker, no attestation",
+      "evidence": "clara._approve_entry_core (the ordinary door) raises CLR05 'high-stakes entry needs a distinct checker' when clara.is_high_stakes(entry) and clara.eligible_checker_count(firm) >= 2, else demands a written self-attestation. PROBE (scratchpad/p9.sql, rolled back), firm c1ee9ec7-5f01-4684-bd06-54ac1a773cf5 (2 eligible checkers) with its high_stakes_amount_cents set to 100000 (an ordinary firm setting): one bookkeeper 8859294f alone called clara.settle_payroll_net_pay and the resulting entry e5f54ed9-d6f4-418c-a980-ffb9c07f8e52 came out status=approved, maker_actor = checker_actor (t), self_approval_attestation NULL, clara.is_high_stakes = t, debits 425570. CONTRAST (scratchpad/p10.sql): the SAME bookkeeper drafting the SAME entry by hand (Dr 2040 425570 / Cr 1010 425570) and approving it himself is refused - ERROR 'high-stakes entry needs a distinct checker', DETAIL {\"reason\":\"distinct_checker\"}. The receipt records via_wake_kind='interactive' and approval_arm='payroll_settlement_interactive' - an interactive HUMAN act, which is exactly the case maker-checker governs (the F-A2 exemption is for approval_arm='agent_unattended', which #946/#948's posts correctly use with checker_actor = clara.agent_user_id()).",
+      "failure_scenario": "A firm whose payroll or commercial rent exceeds its own high-stakes floor (very ordinary: ten staff, or premises at RM12,000 a month) finds that one bookkeeper can post and approve an unlimited settlement entry through /bank with no second pair of eyes, while the same entry booked by hand needs one.",
+      "required_fix": "Route the approval through clara._approve_entry_core (threading the ctx, the way the door already threads clara._match_bank_line_core), or probe clara.is_high_stakes on the new entry and refuse / demand an attestation with the same CLR05 tokens. Applies to BOTH settlement doors."
+    },
+    {
+      "id": "ADV-05",
+      "ticket": 949,
+      "severity": "major",
+      "kind": "accounting-treatment",
+      "title": "The MPERS arm never asks the finance-vs-operating classification question, however long the lease",
+      "where": "0300 clara._tenancy_lease_treatment: `elsif v_code = 'MPERS' then v_drafts := true; v_standard := 'MPERS Section 20';` - no term test on the MPERS branch",
+      "evidence": "PROBE (scratchpad/p12.sql, rolled back), client 00189f28-9421-4e49-b494-17f5e57bc6e5 (live knowledge_records reporting_framework = MPERS), tenancy 42a6967b-04d4-4f9f-837e-14f7cd6baf01. As it stands (24-month term): drafts=true. A named person then restated term_end as 2056-01-04 through the real clara.record_contract_terms door; the same body returned term_months=360, drafts=TRUE, reason=NULL, question=NULL, standard='MPERS Section 20'. clara.confirm_tenancy_rent_plan therefore accepts a 30-year lease of premises with NO written professional judgement, because its wall only fires when drafts is false. The MFRS arm on the identical term refuses ('mfrs_lease_over_twelve_months'). MPERS Section 20 requires the lessee to CLASSIFY the lease first (a lease for the major part of the asset's economic life, or whose present value of minimum lease payments is substantially all of fair value, is a FINANCE lease: an asset and a liability, not a rent expense). The file's own header asserts 'MPERS Section 20: a lessee expenses operating-lease payments on a straight-line basis' - it assumes the operating classification the standard makes the accountant establish.",
+      "failure_scenario": "A long ground or premises lease under MPERS is silently straight-lined as rent expense, understating assets and liabilities, with no question raised and no judgement recorded. The owner ruling's own principle - Clara asks for a professional judgement - is honoured on the MFRS side and skipped on the MPERS side.",
+      "required_fix": "Give the MPERS arm its own ask. The indicators the standard names are not readable from a tenancy page, which is precisely the case the ruling sends to a person: above a stated term threshold (or unconditionally) return drafts=false with reason='mpers_lease_classification' and a question naming the operating/finance test, so confirm_tenancy_rent_plan demands the written judgement it already knows how to demand."
+    },
+    {
+      "id": "ADV-06",
+      "ticket": 949,
+      "severity": "major",
+      "kind": "mis-attribution",
+      "title": "A tenancy deposit is called 'already coded' by any unrelated debit sitting in 1120",
+      "where": "0300 clara.get_tenancy_deposit_coding: coded_cents is the client's WHOLE 1120 balance (sum of debits minus credits over every approved, non-reversed entry), compared against each deposit individually",
+      "evidence": "PROBE (scratchpad/p13.sql, rolled back), client 86d6ad34-ed87-4804-ac3d-6bd54830403b, tenancy deposit 720000 on document b4f33b78-89f0-48f6-bdeb-309f31fec507. Before: coded_cents=0, already_coded=false, candidates=0. A person then hand-booked an unrelated RM8,000 utility deposit to 1120 through clara.draft_entry and clara.approve_entry. After: coded_cents=800000, already_coded=TRUE, candidates=0 - the tenancy deposit, never coded, stopped being offered. The same arithmetic makes two tenancy deposits on one client settle each other.",
+      "failure_scenario": "A client pays a utility deposit and a tenancy deposit. Coding the first makes AC5 declare the second already coded; the rental deposit never gets its 1120 entry and nobody is told.",
+      "required_fix": "Attribute the coding per deposit - match the 1120 debit to the tenancy (a flag or a document-bound entry, as elsewhere in this lane) rather than reading the account's total balance - or state 'the client's 1120 balance covers RM X of RM Y across N deposits' instead of a per-deposit already_coded boolean."
+    },
+    {
+      "id": "ADV-07",
+      "ticket": 945,
+      "severity": "minor",
+      "kind": "shared-file-churn",
+      "title": "Commit 3239e6b58 rewrites about 640 lines of the nine-lane shared apps/web/messages/en.json for formatting alone",
+      "where": "apps/web/messages/en.json (WORK-ORDER rule 7 names this file: 'nine other lanes edit them at the same time. Keep your hunk minimal, at the sorted position')",
+      "evidence": "git diff cd2925391...HEAD --numstat: 722 insertions / 641 deletions, of which commit 3239e6b58 alone is 652/640. Measured semantically (parse both blobs and flatten): 71 keys ADDED, 0 removed, 0 values changed, and every object's key ORDER preserved. The churn is a re-indentation of two blocks the base file carried at 4 spaces instead of 2 - ClientFinancial (base lines 830-968) and Plans (base lines 6431-6902) - visible as the hunks '@@ -830,139 +840,119 @@' and '@@ -6431,472 +6512,472 @@'. No formatter enforces it: the root lint script runs no prettier or JSON check over apps/web/messages, and the #945 ticket report does not mention en.json at all.",
+      "failure_scenario": "Any other wave-4 lane whose new key lands inside ClientFinancial or Plans takes a 600-line textual conflict the integrator must resolve by hand, for a change that alters nothing.",
+      "required_fix": "Revert the two re-indented blocks to their base bytes and keep only the 71 added keys, or hand the integrator the measurement above so the conflict can be resolved by taking this side wholesale."
+    },
+    {
+      "id": "ADV-08",
+      "ticket": 945,
+      "severity": "minor",
+      "kind": "lint-weakening",
+      "title": "The field-path lint now falls back silently where it used to fail loudly",
+      "where": "scripts/check-document-region-field-paths.mjs, new grammarSourceFile()",
+      "evidence": "grammarSourceFile() keeps only migration files matching BOTH /function\\s+clara\\._assert_field_path\\s*\\(/ AND /split_part\\(p_path, '.', 1\\) not in \\(/, and readFieldPathGrammar uses the highest such file. A future migration that recuts clara._assert_field_path with a different roster mechanism matches neither regex, is skipped, and the lint quietly keeps reading an OLDER file's namespace roster. The pre-change code pinned 0191 by name and THREW when the shape moved ('a mismatch means this script is reasoning about the wrong thing, the same failure posture role-census-reset.mjs's pinnedRoleCount uses for 0154'), which is the posture the header still claims.",
+      "failure_scenario": "The namespace roster moves; the lint passes against a stale roster and stops catching the literals it exists to catch.",
+      "required_fix": "Throw when the HIGHEST migration defining clara._assert_field_path is not the one grammarSourceFile picked - i.e. scan for the function name alone and require the roster shape on THAT file, rather than filtering the candidate set by the roster shape."
+    },
+    {
+      "id": "ADV-09",
+      "ticket": 949,
+      "severity": "minor",
+      "kind": "self-description-drift",
+      "title": "needs-you.ts's roster prose is two kinds behind its own roster, and one entry miscounts itself",
+      "where": "apps/web/lib/firm/needs-you.ts line 71 and the REVIEW_QUEUE_ROW_KINDS comments",
+      "evidence": "The header still reads 'The LIVE row_kind set is therefore THIRTEEN values' (updated for #946/#947 and not for #948/#949), while REVIEW_QUEUE_ROW_KINDS holds 15 entries (measured: draft, uncoded_filing, open_question, coding_task, compliance_watch, lint_finding, fixed_asset_incomplete, staff_advance_incomplete, work_question, depreciation_authority_pending, payroll_posting_blocked, payroll_net_pay_unsettled, agreement_posting_blocked, rent_payable_unsettled, rent_escalation_pending). rent_escalation_pending's own comment calls it 'the SIXTEENTH kind'; it is the fifteenth. This comment block is the roster's documented source of truth for the four lanes sharing the file this wave.",
+      "failure_scenario": "The next lane reads '13' and appends a kind numbered from the wrong base, or trusts the prose over the array.",
+      "required_fix": "One line: say FIFTEEN, and renumber rent_escalation_pending's comment."
+    },
+    {
+      "id": "ADV-10",
+      "ticket": 947,
+      "severity": "note",
+      "kind": "lock-oracle",
+      "title": "The settlement cores row-lock a caller-supplied journal entry BEFORE checking it belongs to the caller's firm",
+      "where": "0298 clara._settle_payroll_net_pay_core and 0300 clara._settle_rent_payable_core: `perform 1 from clara.journal_entries je where je.id = p_entry for update;` precedes the `e.client_id <> p_client or e.firm_id <> c.firm` refusal",
+      "evidence": "Read of both bodies. The refusal itself is correct and was driven: a foreign-firm owner is refused CLR11 on every one of the twelve new granted doors (scratchpad/p2.sql). But the FOR UPDATE runs first, so a caller who names another firm's entry id momentarily takes a row lock on it and can distinguish 'this id exists and another session holds it' (the call blocks) from 'this id does not exist' (immediate refusal) - a weak existence/activity oracle across the tenant wall.",
+      "failure_scenario": "Not exploitable for data, but it is the ordering the 0021 no-existence-oracle rule exists to prevent, and it lets a foreign caller hold a lock on another firm's row for the length of its own statement.",
+      "required_fix": "Resolve and firm-check the entry first (a plain select), then take FOR UPDATE on the row you have proved is yours."
+    },
+    {
+      "id": "ADV-11",
+      "ticket": 949,
+      "severity": "note",
+      "kind": "coverage-gap",
+      "title": "The candidate window (posting date plus or minus 10 days) is narrower than the door, so a late payment is never OFFERED",
+      "where": "0298 clara._payroll_settlement_bank_candidates and 0300 clara._rent_settlement_bank_candidates, p_window_days int default 10, called with p_around = the accrual's own posting_date",
+      "evidence": "Read of both bodies and of clara.get_payroll_settlement_candidates / clara.get_rent_settlement_candidates, which pass no window argument. Neither clara.settle_payroll_net_pay nor clara.settle_rent_payable applies any date window, so the DOOR would accept a line the READ never shows. Rent recognised on the 5th and paid on the 25th (an ordinary Malaysian tenancy) is 20 days out. The deposit read in the same file already passes 60.",
+      "failure_scenario": "A person sees 'the payment has not appeared' with an empty candidate list and no way to reach the line from that surface, although the settlement door would take it.",
+      "required_fix": "Widen the rent window to at least a month, or say on the row that a window was searched and name it."
+    }
+  ],
+  "controls_driven_and_not_broken": [
+    "TENANT ISOLATION - all twelve new granted doors refuse a foreign firm's owner (scratchpad/p2.sql, rolled back): get_contract_terms, propose_contract_terms, get_tenancy_rent_plan_draft, get_tenancy_escalation_revision, get_tenancy_deposit_coding, get_rent_settlement_candidates, get_payroll_settlement_candidates, record_contract_terms, confirm_tenancy_rent_plan, confirm_tenancy_rent_plan_revision, settle_rent_payable, settle_payroll_net_pay - CLR11 'not in your firm', with the same refusal for absent and foreign.",
+    "RANK FLOORS - a viewer of the OWNING firm is refused 'insufficient role' on all seven bookkeeper+ doors (scratchpad/p3.sql).",
+    "ROLE GRANTS - clara_runtime and clara_agent_ro get 'permission denied for function' on the human doors (scratchpad/p3.sql).",
+    "RACE, TWO REAL CONNECTIONS - two sessions settling the SAME run against the SAME line: B blocked 4.035 s behind A's open transaction (JE row lock, then the 203005004 client rung) and only proceeded after A rolled back (scratchpad/raceA.sql + raceB.sql).",
+    "APPEND-ONLY - a direct UPDATE of a live clara.contract_terms row is refused by clara._tf_contract_terms_append_only ('a contract term admits exactly one update: stamping its supersession, once', CLR08), even as superuser.",
+    "PERIOD WALL - the settlement cores insert into clara.journal_entries directly, but t_period_wall and t_period_wall_lines are table triggers, so a closed period is still enforced.",
+    "FLAG FORGERY - clara._draft_entry_core reads p_flags only for is_year_end / tax_affecting / closing_transfer, so a human cannot hand-book an entry that masquerades as a payroll run.",
+    "SPLICE ANCHORS - every list_review_queue and persist-door splice in 0297-0300 counts its anchor in BOTH the comment-stripped and the raw body and refuses anything but exactly 1.",
+    "FROZEN CLOSURE - node scripts/check-frozen-workflows.mjs: OK, 322 frozen files verified, 57 'use workflow' modules frozen and registered.",
+    "WAVE-4 LANE RULE (a) - no migration in this lane inserts a chart row (grep for coa_accounts / standard-chart inserts across 0296-0300: none).",
+    "GATE CHAIN ORDER - packages/db/package.json lists the five new preintegration gates in migration order after wave4-chart-rows."
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "axis": "standards",
+  "lane": "wave4-lane04",
+  "base": "cd2925391",
+  "diff_range": "cd2925391...HEAD",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "tickets_in_scope": [939, 940, 915, 941, 1036],
+  "sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    ".claude/skills/tdd/SKILL.md",
+    ".claude/skills/tdd/tests.md",
+    ".claude/skills/tdd/mocking.md",
+    ".claude/skills/code-review/SKILL.md (smell baseline)",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-ticket939.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-ticket940.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-ticket915.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-ticket941.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane04-ticket1036.md",
+    "packages/db/migrations/0305_prepayment_stated_term.sql",
+    "packages/db/migrations/0306_prepayment_account_roster.sql",
+    "packages/db/migrations/0307_prepayment_schedule_obo_twin.sql",
+    "packages/db/migrations/0308_deferred_revenue_recognition.sql",
+    "packages/db/migrations/0315_prepayment_wake_reroute.sql"
+  ],
+  "compliance_checks_passed": [
+    "No edit to docs/PRD.md or docs/ARCHITECTURE.md (git diff cd2925391...HEAD -- docs/PRD.md docs/ARCHITECTURE.md is empty).",
+    "No applied migration edited: `git diff cd2925391...HEAD --name-status -- packages/db/migrations/` shows only 5 files, all status A (added): 0305, 0306, 0307, 0308, 0315.",
+    "apps/web/lib/firm/needs-you.ts (4-lane shared file) is untouched by this lane's diff, matching every ticket report's own claim.",
+    "Shared files apps/web/test/manifest.txt, apps/web/e2e/e2e-fixture-ownership.test.ts, apps/web/e2e/serve-built.mjs, packages/db/package.json, packages/db/tests/rig-meta.mjs edited additively, at sorted/appended positions, minimal hunks -- consistent with WORK-ORDER.md rule 7.",
+    "packages/db/package.json's new --import gate entries (prepayment-stated-term, prepayment-account-roster, prepayment-schedule-obo, deferred-revenue, prepayment-wake-reroute) are appended immediately after wave4-chart-rows-preintegration-gate.mjs, i.e. in true migration order (0295 < 0305 < 0306 < 0307 < 0308 < 0315).",
+    "Every new relation (clara.prepayment_stated_terms 0305, clara.prepayment_account_enrolments 0306, clara.revenue_recognition_schedules 0308) has `enable row level security` + `force row level security`, and grants only SELECT (or, for revenue_recognition_schedules, no ACL at all) to clara_authenticated -- zero INSERT/UPDATE/DELETE grants to any application role anywhere in the 5 migration files (grepped for grant insert/update/delete/all: no hits).",
+    "SECURITY DEFINER + `set search_path = clara, pg_temp` (or `pg_catalog, pg_temp` for the evaluator-freeze registration block, per 0059's documented reason) is present on every new/recut function sampled.",
+    "Each migration carries a header, a numbered prestate (\u00a70) that pins every recut/kept body's live sha256(prosrc) MEASURED on the rig (not copied from an older file), redo-safety notes, and a \u00a7TAIL block re-measuring those same facts after the file has run -- confirmed present in all 5 files.",
+    "TDD vertical slicing at commit granularity: for #939/#940/#915, every `feat(db)` commit bundles its migration hunk with the test cells that exercise it in the same commit (checked via `git log --stat` on the migration + test-file pairs); no commit adds a whole battery of red tests with no accompanying implementation.",
+    "New web unit tests (deferred-revenue-roster-gate.test.tsx, etc.) mock only `fetch` -- the network boundary to PostgREST/RPC -- never an internal collaborator or React component; consistent with mocking.md's system-boundary rule.",
+    "apps/web/lib/deferred-revenue/api.ts and apps/web/lib/registers/prepayment-accounts.ts reach the database exactly as their own migrations grant (RPC-only for revenue_recognition_schedules, which the migration deliberately leaves with no table ACL; direct Q3 table read for prepayment_account_enrolments, which the migration deliberately grants SELECT for) -- code matches the documented access-pattern claim.",
+    "CONTEXT.md's new/edited entries (Prepayment schedule, Prepayment account roster, Revenue recognition schedule, On-behalf-of door, Stated service period, Term source) all follow the house `term` / `_Avoid_` shape.",
+    "packages/runtime/tests/prepayment-occurrence-e2e.mjs (a standalone World e2e driver, not a frozen workflow body) was edited safely, gated on exact function-signature probe rather than a migration-number check, so it still runs against an earlier-frontier database."
+  ],
+  "findings": [
+    {
+      "id": "STD-1",
+      "ticket": 1036,
+      "severity": "major",
+      "kind": "smell:duplicated-code",
+      "title": "clara._prepayment_plan_core_wake duplicates ~25 lines of clara._obo_plan_core's plan-write tail verbatim, the exact two-copies risk this lane's own #915 report argued against",
+      "evidence": "packages/db/migrations/0315_prepayment_wake_reroute.sql:237-276 (`_prepayment_plan_core_wake`, from `if p_purpose is null or btrim(p_purpose) = ''` through the closing `return jsonb_build_object('plan_id', ...)`) is line-for-line the same sequence as packages/db/migrations/0308_deferred_revenue_recognition.sql:611-676 (`_obo_plan_core`'s tail): the purpose-blank check, `clara._assert_plan_schedule(...)`, `clara._assert_journal_basis`, `_journal_basis_digest`, `pg_advisory_xact_lock(203005004, hashtext(p_client::text))`, the two `insert into clara.accounting_plans` / `clara.accounting_plan_revisions` statements with identical column lists, `clara._plan_overlap_warning`, the `clara._plan_due_events` jsonb_agg, the `clara._audit(...)` call with the same verb, and the same `return jsonb_build_object('plan_id', 'revision_id', 'revision', 'status', 'kind', 'next_occurrences', 'overlap_warning')` shape. Only the ~10-line authority-resolution preamble differs (an `_authority_ref_refusal` call in `_obo_plan_core` vs. a shape check on `{kind:'agent_wake', wake_kind, task_id}` in `_prepayment_plan_core_wake`) and a few local variable names (`p_author`/`p_actor`, `p_kind` literal vs argument).",
+      "why_it_matters": "This is exactly the risk #915's own report (docs/plan/active/riders-2026-09-20/reports/wave4-lane04-ticket915.md, 'why it departs from 0222's precedent') names and extracts against for the SCHEDULE body: 'Two copies make [AC4's promise] a promise; one body makes it a fact,' citing the accrual lane's own measured drift (`_accrual_plan_core` vs `create_accounting_plan`) as the cautionary example. #1036's migration header repeats the same argument ('So this file does to the PLAN STEP what #915 did to the SCHEDULE BODY: ONE body...') but does not actually apply it: the write tail below the authority check is now duplicated in a THIRD place instead of extracted into one shared inner function called by both `_obo_plan_core` and `_prepayment_plan_core_wake` after each resolves authority its own way. A later change to the audit payload shape, the overlap-warning call, or the due-events preview window has two call sites to update, and a maintainer who edits one (as `_accrual_plan_core` already demonstrates happened for the accrual family) can silently leave the other stale.",
+      "required_fix": "Extract the shared tail (advisory lock through the return shape) into one function, e.g. `clara._plan_write_core(p_kind, p_firm, p_client, p_actor, p_purpose, p_authority_kind, p_authority_ref, p_via, p_frequency, p_day_rule, p_day_of_month, p_timezone, p_effective_from, p_effective_to, p_basis)`, and have `_obo_plan_core` and `_prepayment_plan_core_wake` each resolve/validate authority in their own way and then delegate to it -- the same pattern #915 used to collapse the human and OBO schedule bodies into `_prepayment_schedule_core`. This is a forward-looking refactor for the next migration to take, since 0315 is already applied on this lane's database (never edit an applied migration); worth a follow-up ticket rather than a same-migration fix."
+    },
+    {
+      "id": "STD-2",
+      "ticket": 941,
+      "severity": "minor",
+      "kind": "test-quality:tdd-process",
+      "title": "The whole #941 web feature (3 pages, 5 components, 2 lib modules, a 471-line render-states test file) landed in one commit, and by the report's own account was inherited mid-flight rather than built in this session's own red-green cycles",
+      "evidence": "`git log --oneline --stat cd2925391..HEAD -- apps/web/components/deferred-revenue apps/web/lib/deferred-revenue apps/web/app` shows commit `adde3a6d9` alone adding 2,550 insertions across 11 files (3 route pages, `deferred-revenue-attention.tsx`, `deferred-revenue-detail.tsx`, `deferred-revenue-form.tsx`, `deferred-revenue-list.tsx`, `deferred-revenue-statement.tsx`, `deferred-revenue-render-states.test.tsx`, `lib/deferred-revenue/api.ts`, `lib/deferred-revenue/schedule.ts`) in a single commit. The ticket report (docs/plan/active/riders-2026-09-20/reports/wave4-lane04-ticket941.md, 'A note on what I inherited') states this tree was already present, UNCOMMITTED, on the branch when this session started, and that 'Everything from adde3a6d9 on is mine, including the repairs to what I inherited.'",
+      "why_it_matters": "WORK-ORDER.md rule 4 requires vertical slices -- 'one test \u2192 see it red for the right reason \u2192 the minimal code that turns it green' -- committed 'per green slice or per small group of slices,' specifically to avoid a whole feature landing as one undifferentiated block. Because this code predates the reviewing/authoring session, the git history cannot show whether it was actually built test-first in slices or written as a batch and tested afterward; the report is transparent about this and supplies vacuity controls (6bec1e822, 3e68d8ace) proving the cells it added on top actually bite against the inherited code, which mitigates but does not fully answer the process question for the inherited 2,550-line commit itself.",
+      "required_fix": "No code change needed. Worth a note to the orchestrator/integrator that #941's web layer's TDD provenance before this session picked it up is unverifiable from history alone, so if that layer is audited for test quality later, treat `deferred-revenue-render-states.test.tsx`'s cells authored before `adde3a6d9` as unverified-vertical-slice rather than confirmed-compliant."
+    }
+  ],
+  "smell_baseline_notes_not_filed_as_findings": [
+    "Duplicated Code (judgement call, not filed): deferred-revenue-form.tsx and prepayment-form.tsx overlap heavily (a normalized diff after substituting domain nouns is ~480 lines out of ~650). This matches an established repo convention already present before this lane (accruals/prepayments each have their own near-parallel list/detail/form/statement component family under apps/web/components/accruals and apps/web/components/prepayments), so the repo-overrides rule applies and this is not filed as a standards finding.",
+    "Primitive Obsession (judgement call, not filed): refusal axes and term-source values travel as bare `text` (e.g. `axis`, `term_source`) through SQL, TypeScript types and JSON payloads rather than a shared enum/union minted once. This is the estate's own pre-existing idiom for typed refusal tokens across the whole codebase (not introduced by this lane), so it is noted but not filed."
+  ],
+  "summary": "The lane's five migrations (0305/0306/0307/0308/0315) are unusually disciplined against this repo's own house law: per-body prestate pins measured live on the rig, tail assertions re-measuring the same facts, FORCE RLS + zero application-role DML on every new relation, SECURITY DEFINER with pinned search_path throughout, no applied migration edited, and CONTEXT.md/README updates in the same commits and in the house term/_Avoid_ shape. Shared cross-lane files (needs-you.ts, manifest.txt, e2e-fixture-ownership.test.ts, serve-built.mjs, rig-meta.mjs, package.json) were touched additively and minimally as WORK-ORDER.md rule 7 requires. TDD vertical-slice discipline holds at the commit level for the #939/#940/#915/#1036 database work. The one substantive standards finding is a real Duplicated Code smell in #1036's new `clara._prepayment_plan_core_wake`, which re-implements ~25 lines of `_obo_plan_core`'s plan-write tail verbatim instead of extracting it -- notable because the lane's own #915 report explicitly argued for exactly that extraction pattern to avoid the two-copies drift risk, and #1036's migration header repeats the same argument without applying it. A second, minor process note covers #941's inherited web commit, whose TDD provenance before this session predates verifiable history."
+}

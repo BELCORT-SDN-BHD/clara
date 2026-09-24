@@ -1,0 +1,171 @@
+{
+  "axis": "spec",
+  "lane": "wave4-lane03",
+  "branch": "riders/w4-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "fixed_point": "cd2925391",
+  "diff_command": "git diff cd2925391...HEAD",
+  "commits": [
+    "346a6354c feat(db): #938 a bill posted inside an accrued period, and clara notices",
+    "0e689107c feat(web): #938 render \"a bill arrived for an accrued period\" and its two remedies",
+    "b511b116a test(e2e): #938 browser walk for the item and \"reverse now\", plus docs",
+    "f15baed9e feat(db): #937 an accrual may carry a person-stated amount per period",
+    "f12ed79a6 feat(web): #937 the accrual form states an amount for each period",
+    "f138d6da6 docs: #937 the per-period accrual lane, in both module READMEs",
+    "94c393cb0 feat(db): #942 the accrual lane gains a revenue side",
+    "cc92f2308 feat(web): #942 every accrual surface says which way it runs"
+  ],
+  "spec_sources": [
+    "gh issue view 938 --comments (body + owner cross-reference 2026-09-18 + triage comment)",
+    "gh issue view 937 --comments (body only; the ticket carries ZERO comments — confirmed)",
+    "gh issue view 942 --comments (body + owner ruling 2026-09-20)"
+  ],
+  "verification_rerun": [
+    "packages/db tests/accrual-bill-conflict.test.mjs, full 109-gate chain, clara_l03 -> 9/9 pass",
+    "packages/db tests/accrual-period-amounts.test.mjs, full gate chain -> 12/12 pass",
+    "packages/db tests/accrual-revenue-side.test.mjs, full gate chain -> 8/8 pass",
+    "apps/web node --import ./test/bootstrap.mjs --import tsx --test lib/accruals/api.test.ts lib/work/accrual-draft.test.ts components/accruals/accrual-form.test.tsx components/accruals/accrual-correction-form.test.tsx components/accruals/accruals-list.test.tsx -> 90/90 pass",
+    "node scripts/check-frozen-workflows.mjs -> OK, 312 frozen files, no manifest diff",
+    "apps/web/messages: only en.json exists (zh claim verified)",
+    "live catalog on clara_l03: clara.list_prepayment_attention exists; no clara.list_accrual_attention"
+  ],
+  "verdict": "accept-with-fixes",
+  "findings": [
+    {
+      "id": "L03-SPEC-01",
+      "ticket": 938,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "#938 AC2: the Needs-you surface never names the bill",
+      "evidence": "AC2: \"The Accruals page AND NEEDS YOU render the item with the accrual, THE BILL and the period named\". apps/web/components/firm/accrual-bill-conflict-affordance.tsx (98 lines, the whole file) renders only an ErrorMessage, the skip-reason Input and the two Buttons — it contains no Link, no href and no reference to row.entry_id or row.document_id (grep for 'Link|href|entry' matches one comment line). The generic renderer apps/web/components/firm/needs-you-row.tsx renders question_text (line 149), amount_cents (168-171) and period (174-177) and never entry_id. Only apps/web/components/accruals/accrual-bill-conflicts.tsx:108-111 builds the 'View the bill' link (journalEntryHref). The ticket report wave4-lane03-ticket938.md asserts under AC2 that 'Both name the accrual (question_text), the bill (entry_id -> \"View the bill\" link) and the period' — that claim is true of the Accruals page only.",
+      "required_fix": "Render the bill on the Needs-you row for this kind — a journalEntryHref link from row.entry_id inside AccrualBillConflictAffordance is the smallest honest change — or record the gap explicitly and correct the AC2 claim in the ticket report."
+    },
+    {
+      "id": "L03-SPEC-02",
+      "ticket": 942,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "#942 AC3: an ISSUED invoice posted through the trade-invoice lane can never surface",
+      "evidence": "AC3: \"an ISSUED INVOICE or receipt posting to the accrual's revenue account inside a posted, un-reversed period surfaces with the same two remedies\". The read admits only document-filed entries: packages/db/migrations/0302_accrual_bill_conflict.sql:322 `and je.status='approved' and je.origin='document' and je.document_id is not null`, and 0304 splices only the side key and the sentence, never the predicate. A sales invoice admitted through the trade-invoice lane posts through clara._record_journal_entry_core (packages/db/migrations/0225_trade_invoices.sql:1844-1847, re-read live from pg_get_functiondef on clara_l03): `insert into clara.journal_entries(client_id,status,posting_date,memo,origin,maker_actor,flags) values (...,'agent',clara.agent_user_id(),...)` — origin='agent', document_id never set, and trade_invoices.kind admits 'sales_invoice' with a NULLABLE source_document_id. Such an invoice therefore double-counts the period's revenue against the un-reversed accrual with no warning. The only cell for this arm, p942.conflict (packages/db/tests/accrual-revenue-side.test.mjs:452-474), drives postedDocumentEntry — the filed-document route — exclusively. (#938's own AC1 says 'document-sourced journal entries', so the expense side is within its words; #942's AC3 widened the wording and the implementation did not follow.)",
+      "required_fix": "Either widen the predicate to reach agent/Work-admitted entries on the accrual's P&L leg (with a cell driving admit_trade_invoice for a sales_invoice), or state in the ticket and in packages/db/README.md's 0304 section that AC3 covers the filed-document route only and file the residual."
+    },
+    {
+      "id": "L03-SPEC-03",
+      "ticket": 938,
+      "severity": "major",
+      "kind": "cell-missing",
+      "title": "#938 AC3: no cell proves \"each remedy leaves exactly one live expense for the period\"",
+      "evidence": "AC3: \"Cells: same-period bill surfaces the item; next-period bill does not; EACH REMEDY LEAVES EXACTLY ONE LIVE EXPENSE FOR THE PERIOD AFTERWARDS; from-scratch apply.\" packages/db/tests/accrual-bill-conflict.test.mjs has nine cells (p938.read.same_period, .next_period, .different_account, .reverse_clears, p938.reverse_now.refuses_when_not_due, p938.skip.blocks_scan, .refusals, .idempotent, p938.role_floor); none reads clara.journal_lines or sums an account (grep for journal_lines returns nothing). The row clearing is asserted; the ledger arithmetic is not. The report itself names this under AC3 and under 'Anything unverified'. Note that #942 DID write the equivalent assertion on the revenue side (p942.posts, netOnAccount over journal_lines, accrual-revenue-side.test.mjs:262-281), so the shape exists in the lane and was simply not applied to #938's own AC.",
+      "required_fix": "Add one cell per remedy that sums clara.journal_lines on the accrual's P&L account for the flagged period after the act and asserts it equals the bill alone (reuse accrual-revenue-side.test.mjs's netOnAccount helper)."
+    },
+    {
+      "id": "L03-SPEC-04",
+      "ticket": 938,
+      "severity": "minor",
+      "kind": "requirement-narrowed",
+      "title": "#938 AC1: the read collapses to one row per plan, and the shared-file comment describes the opposite tie-break",
+      "evidence": "AC1 asks for a read that \"LISTS ... document-sourced journal ENTRIES\". packages/db/migrations/0302_accrual_bill_conflict.sql:299 uses `select distinct on (o.plan_id)` with `order by o.plan_id,o.due_date,je.posting_date,je.id` (line 339) — at most one row per plan, tie broken on the EARLIEST due date, which the migration header states outright (line 48-49: \"AT MOST ONE ROW PER PLAN ... ties break on the earliest due date\"). The grounding comment added to the shared file apps/web/lib/firm/needs-you.ts:166-168 says the opposite: \"ONE row per accrual PLAN ... whose MOST RECENT posted, unreversed accrual occurrence has a document-sourced ... entry\". A quarterly plan with two open occurrences, or one period carrying two bills, surfaces one row naming the earliest — not what the comment tells the next reader.",
+      "required_fix": "Correct the needs-you.ts comment to 'the earliest posted, unreversed occurrence' (ADDITIVE edit inside the existing block, per the lane's shared-file rule), or change the ordering to match the comment and re-measure."
+    },
+    {
+      "id": "L03-SPEC-05",
+      "ticket": 938,
+      "severity": "minor",
+      "kind": "cell-missing",
+      "title": "#938 AC1: the document-service-period route is implemented but uncelled",
+      "evidence": "AC1: \"whose posting date (OR THE DOCUMENT'S SERVICE PERIOD WHEN ONE IS RECORDED) falls inside an occurrence\". The branch exists — 0302:328-331, the `or exists (select 1 from clara.document_service_periods dsp ... dsp.period_start<=pw.period_end and dsp.period_end>=o.period_key)` arm, guarded by 0302:151's to_regclass check. Every cell in accrual-bill-conflict.test.mjs drives the posting_date route; none records a service period. The report names this as a follow-up. The fixture is already to hand (accrual-adjustments-fixtures.mjs's filedDocumentWithTerm).",
+      "required_fix": "One cell: a bill whose posting_date falls OUTSIDE the accrued period but whose recorded service period overlaps it must surface; the same bill with a superseded service period must not."
+    },
+    {
+      "id": "L03-SPEC-06",
+      "ticket": 942,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#942 AC2: the Needs-you inbox does not name the side; the kind label still says \"bill\" for a revenue accrual",
+      "evidence": "AC2: \"NEEDS-YOU ROWS NAME THE SIDE; en and zh.\" The DB row does carry accrual_side and a side-specific sentence (p942.conflict asserts both), but on the inbox surface the new field is rendered only by the Accruals-page component (accrual-bill-conflicts.tsx:103, t('billConflictSide')). apps/web/components/firm/needs-you-row.tsx renders question_text plus amount/period only, and AccrualBillConflictAffordance renders no side; meanwhile the bold kind label on every such row is apps/web/messages/en.json's `accrual_bill_conflict: \"A bill arrived for an accrued period\"` (needs-you-row.tsx:132), which reads wrong for a revenue accrual whose collision is an invoice or a receipt.",
+      "required_fix": "Render the side on the Needs-you row (the affordance is the additive place), and give the kind label wording that is true on both sides, e.g. \"A document arrived for an accrued period\"."
+    },
+    {
+      "id": "L03-SPEC-07",
+      "ticket": 942,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#942 AC2: the Accruals-page bill-conflict copy is expense-only on both sides",
+      "evidence": "AC2 asks the page, form and detail to \"gain the side (list filter, form control, COPY)\". apps/web/messages/en.json's new keys: `\"billConflictsHeading\": \"BILLS posted inside an accrued period\"` and `\"billConflictsBody\": \"A document-sourced entry hit this accrual's own EXPENSE ACCOUNT inside the period it accrues ...\"`. Both render above the revenue rows too (accrual-bill-conflicts.tsx renders one section for the client, not one per side), so a revenue accrual's item sits under a heading and a sentence that name the wrong leg. The per-row line beneath IS side-aware (billConflictSide).",
+      "required_fix": "Reword the section heading and body so they are true on both sides (\"a document-sourced entry hit this accrual's own profit-and-loss account\"), or key them by the side of the rows present."
+    },
+    {
+      "id": "L03-SPEC-08",
+      "ticket": 942,
+      "severity": "minor",
+      "kind": "requirement-missing",
+      "title": "#942 AC2: the zh half is not built (measured, not buildable in this ticket)",
+      "evidence": "AC2: \"en AND ZH.\" apps/web/messages/ contains en.json alone (verified: `ls apps/web/messages/`), and apps/web/i18n/request.ts's header records that adding en-GB/ms/zh is a routing.ts + middleware change on top of a translation pass over 23+ namespaces. The ticket report states this as a partial rather than glossing it, and follow-up 4 asks for an i18n lane. Recorded here so the AC is not closed as met.",
+      "required_fix": "Leave unbuilt; file the i18n-lane follow-up the report names and mark AC2 partial on the ticket rather than done."
+    },
+    {
+      "id": "L03-SPEC-09",
+      "ticket": 937,
+      "severity": "minor",
+      "kind": "requirement-narrowed",
+      "title": "#937 AC3: the final-period remainder rule governs only an even split",
+      "evidence": "The ticket body: \"the stated amounts must sum EXACTLY to the accrual's total, WITH ANY CENT REMAINDER PLACED IN THE FINAL PERIOD (the prepayment lane's `final_period` rule)\". The implementation makes the exact-sum rule law and the remainder a wall over exactly the shape it can govern — a set that IS an equal split with one odd period must place the odd period last; a genuinely uneven set (July 3,000 / August 3,500) never enters the arm. Cells pin the boundary in both directions (p937.walls.uneven; '937.periods: the final-period remainder governs an EVEN split and nothing else'). The report flags this as its own judgement call, and the ticket lists it among 'decisions taken with defaults the owner may flip on review'.",
+      "required_fix": "None mandatory: put the reading to the owner at the next grill, since the ticket's two halves cannot both be literal. Keep the two cells that pin the boundary."
+    },
+    {
+      "id": "L03-SPEC-10",
+      "ticket": 937,
+      "severity": "note",
+      "kind": "scope-beyond-ac",
+      "title": "#937: the correction form and clara.get_accrual_adjustment were widened beyond AC3's letter",
+      "evidence": "AC3 names \"THE ACCRUAL FORM\". The diff also widens apps/web/components/accruals/accrual-correction-form.tsx (+86/-…) and recuts clara.get_accrual_adjustment (0303 §G2, pre-image 98c967f6…, output 835c9dc7…) so the correction form can seed the block. The implementer's stated reason is that a stated_period_amount accrual would otherwise be uncorrectable from the browser at all — the ticket's own body makes correction the only amount-change path — which would be a dark feature under the standing 'beta, nothing dark' ruling. Self-flagged in the report ('a reviewer who disagrees can cut §G2 and the correction form's block').",
+      "required_fix": "Accept; the widening is argued from a standing owner ruling and is covered by cells (937.correct.*). No action beyond keeping it named in the ticket's closing note."
+    },
+    {
+      "id": "L03-SPEC-11",
+      "ticket": 937,
+      "severity": "note",
+      "kind": "evidence-weak",
+      "title": "#937 AC3: \"narrow-width usable\" is asserted structurally, never at a viewport",
+      "evidence": "AC3: \"(add/remove rows, KEYBOARD AND NARROW-WIDTH USABLE)\". Keyboard is asserted (every control a real select/input/button with its own label, plus the a11y rule scan). Narrow width rests on `flex flex-wrap items-end gap-2` with `min-w-40 flex-1` rows in accrual-period-amounts.tsx; the report states there is no viewport harness in this suite and the claim was not measured in a browser.",
+      "required_fix": "None for this ticket. If the wave wants the claim measured, the accrual walk already runs a real browser and could add one page.setViewportSize assertion."
+    },
+    {
+      "id": "L03-SPEC-12",
+      "ticket": 938,
+      "severity": "note",
+      "kind": "claim-overstated",
+      "title": "#938: the \"no accrual attention read exists\" measurement is narrower than the report states",
+      "evidence": "The report's AC1 section: \"No 'accrual attention read' existed on this base (measured: to_regprocedure finds no `list_accrual_attention` OR SIMILAR)\". Measured live on clara_l03: there is indeed no clara.list_accrual_attention, but clara.list_prepayment_attention DOES exist — the sibling plan lane's attention read, which is the closest precedent for AC1's phrase \"an arm on the existing accrual attention read\". Splicing clara.list_review_queue is still inside AC1's letter ('a new door, OR an arm') and AC2 independently requires the Needs-you surface, so the decision stands; only the absence claim is overstated.",
+      "required_fix": "Soften the sentence in the ticket report and in packages/db/README.md's 0302 section to name clara.list_prepayment_attention and say why the queue was chosen over that shape."
+    },
+    {
+      "id": "L03-SPEC-13",
+      "ticket": 938,
+      "severity": "note",
+      "kind": "classification",
+      "title": "#938: CONTEXT.md files accrual_bill_conflict as a NEIGHBOUR of the settlement-candidate family rather than a member",
+      "evidence": "CONTEXT.md's 'Settlement candidate row' entry gains: \"#938's ... row ... is a NEIGHBOUR on the same Needs-you roster that reuses the mechanics ... WITHOUT BEING A MEMBER of the settlement-candidate FAMILY itself: it offers no candidate to choose, only two remedies\". The owner's 2026-09-18 cross-reference on #938 groups #938, #947 and #949 as one shape and rules that whichever lands first defines it; the ticket's later triage comment reads that as answering membership 'yes in substance'. Nothing mechanical is broken — the derived/self-clearing/no-stored-lifecycle shape IS reused, no sibling glossary term was minted, and 'offers two remedies and never chooses' is arguably the family's own 'offers candidates and never chooses' — so this is a wording call on one sentence, raised because #947 and #949 will read that sentence next.",
+      "required_fix": "Put the one sentence to the owner before #947/#949 start, so the three tickets do not diverge on whether they are one family."
+    },
+    {
+      "id": "L03-SPEC-14",
+      "ticket": 942,
+      "severity": "note",
+      "kind": "residual-deferred",
+      "title": "#942: a correction landing between a posted accrual and its reversal strands the difference (measured, pre-existing, correctly deferred)",
+      "evidence": "The report's follow-up 2, measured in this lane: an accrual admitted at 300,000 posts 300,000; a correction to 275,000 revises the plan; the reversal admitted afterwards is built from the LIVE revision's basis and posts 275,000, leaving 25,000 on the balance-sheet leg permanently. It is identical on the expense side (0193's reversal basis plus #936's correction door), so it is not caused by #942 and is nobody's acceptance criterion. p942.correct deliberately asserts the SIDE of every leg rather than blessing the amounts.",
+      "required_fix": "File it against whichever lane owns 0193's reversal basis; do not widen #942 for it."
+    },
+    {
+      "id": "L03-SPEC-15",
+      "ticket": 937,
+      "severity": "note",
+      "kind": "deferral-correct",
+      "title": "#937 AC4 and #942 AC5 are successor contracts, not omissions",
+      "evidence": "#937 AC4 ('the conversation tool contract start_accrual_work widens ... a World e2e leg covers it') and #942 AC5 ('the start-accrual tool gains the side') both name a frozen carrier: packages/runtime/lib/accrual-basis.ts is line 39 of frozen-workflows.json and the tool is registered by chatTurn.v21.tools.ts (lines 829-844). Re-run here: node scripts/check-frozen-workflows.mjs -> OK, 312 frozen files, no manifest diff. The work order's wave-2+ addendum routes such a change to the ONE shared chatTurn_v22 / claraWork_v6 cut at the end of wave 4, and #942's own owner ruling (2026-09-20) re-points its stale v21/v5 reference there. Both reports carry a full successor contract (name, zod delta, door call with argument order, refusal mapping, part kind, prompt stanza, the World e2e leg) — checked present and specific in both.",
+      "required_fix": "None. The cut must consume BOTH contracts together: #937's period_amounts key and #942's side key land on the same p_accrual jsonb of clara.create_accrual_adjustment_for."
+    }
+  ],
+  "summary": "Three tickets, fifteen findings, no blocker. Every acceptance criterion outside the frozen conversation half is built and driven through real doors, and the three database batteries plus the lane's web cells were re-run here and are green (9/9, 12/12, 8/8, 90/90). Three findings are majors and all three are about an AC clause that the implementation narrows without saying so on the surface: #938's Needs-you item never names the bill AC2 asks for; #938 has no cell for AC3's 'exactly one live expense' although #942 wrote exactly that assertion for the revenue side; and #942's AC3 revenue arm can only ever see filed-document entries, so an issued sales invoice posted through the trade-invoice lane (origin='agent', no document_id) double-counts the period's revenue unwarned. The rest are narrowings the reports themselves flag (the remainder rule's scope, the service-period route's missing cell, zh), copy that is expense-flavoured on both sides, one shared-file comment that describes the opposite tie-break from the SQL, and one overstated 'nothing like this exists' measurement. The successor contracts for the chatTurn_v22 cut are present, specific and correctly deferred."
+}

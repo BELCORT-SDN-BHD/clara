@@ -1,0 +1,175 @@
+{
+  "axis": "spec",
+  "wave": 4,
+  "lane": "05",
+  "branch": "riders/w4-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "head": "0d119de8058d3bedc4696e58768369dd61bc6ff1",
+  "fixed_point": "cd2925391",
+  "diff_command": "git diff cd2925391...HEAD",
+  "commits": [
+    "42b4991a7 feat(runtime): #933 the depreciation-particulars proposal, derived",
+    "4d52cb2b1 test(db): #933 the proposal's transport, measured - source_ref carries it, no migration",
+    "0f57464ce feat(web): #933 the proposal reader every answering entrance pre-fills from",
+    "53c397830 feat(web): #933 the asset page dialog and the Needs-you inline form pre-fill from the proposal",
+    "cda7bd783 feat(web): #933 the conversation question form pre-fills from the proposal it carries",
+    "9e10ed6e3 docs(context): #933 the depreciation particulars proposal, as vocabulary",
+    "a1f8f7295 feat(db): #871 the signed-out invite preview door, its role pair and its own rate wall",
+    "2947bb72b feat(runtime): #871 the invite-preview pool and its pre-session courier route",
+    "6cdc0d580 feat(web): #871 the invite landing page previews the firm and role before sign-in",
+    "bb4ee097d test(web): #871 the prop and JSX censuses admit the server-read preview, deliberately",
+    "6502fece9 test(web): #871 the credential-holding reader is reachable only from the server",
+    "0d119de80 docs(db): #871 the operator ceremony that provisions the invite-preview credential"
+  ],
+  "spec_sources": [
+    "gh issue 933 (body + belcorttao 2026-09-19 triage correction: the successor is claraWork_v6, not v5; AC1's '(the cut #847, #882(a), #915 and #931 also ride)' clause is stale). No 2026-09-20 owner ruling on this ticket.",
+    "gh issue 871 (the body brief and the 2026-09-18 ready-for-agent brief are SUPERSEDED by the newest comment, 'Owner's ruling (2026-09-23) and the re-brief'; that re-brief's Desired behavior, Key interfaces, six acceptance criteria and Out of scope are the contract)",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md (rules 3, 4, 5, 8, 10 plus the wave-2 and wave-3 addenda)",
+    "lane prompt rules: (a) claraWork_v6 is frozen, so the successor contract goes in the report and the derivation core / three entrances / database side are built now; (b) #871 follows the 2026-09-23 ruling; (c) apps/web/lib/firm/needs-you.ts is not touched"
+  ],
+  "verdict": "accept-with-fixes",
+  "reruns": [
+    { "what": "packages/runtime  node --test tests/fa-particulars-proposal-unit.test.mjs", "result": "18 pass / 0 fail / 0 skipped - matches the #933 report" },
+    { "what": "packages/runtime  node --test tests/p871-invite-preview-db.test.mjs  (PGHOST=127.0.0.1 PGPORT=55745 PGDATABASE=clara_l05)", "result": "9 pass / 0 fail / 0 skipped - the eight route cells plus the pool wrapper" },
+    { "what": "packages/db  node --test --test-concurrency=1 <the 107 --import gate modules from package.json> tests/invite-preview-public.test.mjs tests/fa-particulars-proposal.test.mjs", "result": "17 pass / 0 fail / 0 skipped (12 for #871 + 5 for #933) - matches both reports" },
+    { "what": "apps/web  node scripts/run-tests.mjs (whole unit suite)", "result": "5021 tests, 142 suites, 5019 pass / 0 fail / 2 skipped (the #871 report recorded 5020 / 5018 / 2 - one cell's difference, no red anywhere)" },
+    { "what": "node scripts/check-frozen-workflows.mjs", "result": "OK - 312 frozen file(s) verified, 55 'use workflow' modules, 3 retired entries, no manifest diff" },
+    { "what": "node packages/runtime/scripts/check-parts-parity.mjs", "result": "parts-parity: OK - no new part kind" },
+    { "what": "git status --short in the worktree", "result": "clean; HEAD 0d119de80 on riders/w4-lane05" },
+    { "what": "live catalog read of clara.preview_invite(text).prosrc on clara_l05", "result": "its mask is left(inv.email,1) || '***@' || substr(inv.email, v_at+1) with the '***' fallback - byte-identical to 0309's copy today" }
+  ],
+  "already_satisfied_or_stopped_claims_checked": [
+    {
+      "claim": "#933 report: 'nothing of this ticket existed at cd2925391' (grep for ParticularsProposal / particulars.*proposal over packages/ and apps/)",
+      "checked": "git grep -nE 'ParticularsProposal|particulars.*proposal' cd2925391 -- packages apps returns nothing at all (the report claims one unrelated 0041 hit; the stricter result still supports the claim)",
+      "verdict": "TRUE - the ticket was live"
+    },
+    {
+      "claim": "#871 report: 'the service-role key holds no privilege on schema clara; grep -rn service_role packages/db/migrations returns nothing'",
+      "checked": "that grep now returns four hits, ALL of them inside 0309's own header, role roster and tail notice prose. No grant statement to service_role exists anywhere in the corpus.",
+      "verdict": "TRUE"
+    },
+    {
+      "claim": "#871 report: 'no successor contract owed - nothing frozen was touched'",
+      "checked": "freeze-lint OK at 312 files with no manifest diff, parts-parity OK, and nothing under packages/runtime/workflows appears in git diff cd2925391...HEAD --stat",
+      "verdict": "TRUE"
+    },
+    {
+      "claim": "#933 report AC2: 'each the_edit cell drives the real door and reads the posted body, so a form that submitted its own seed would be caught'",
+      "checked": "the three cells exist (components/registers/fa-proposal-prefill.test.tsx, components/firm/fixed-asset-proposal-prefill.test.tsx, components/work/work-question-proposal.test.tsx) and pass inside the whole-suite run; the answer-door spelling they pin (useful_life_months as the STRING '60', residual_cents as the NUMBER 0) matches FA_PARTICULARS_FIELDS' declared kinds text / money in packages/runtime/lib/fixed-asset-acquisition.ts:76-93",
+      "verdict": "TRUE"
+    },
+    {
+      "claim": "#871 report AC5: 'the browser never touches /api/invite-preview'",
+      "checked": "apps/web/e2e/members-invite-walk.spec.ts registers a page.on('request') collector and asserts it stays empty; the read happens in the server component app/(entry)/invite/[token]/page.tsx and the client component imports the courier with `import type` only",
+      "verdict": "TRUE by reading (the walk itself was not re-run on this reviewer's session - no free Playwright triple)"
+    },
+    {
+      "claim": "#933 report: 'no migration is needed, and that is measured rather than read off the file'",
+      "checked": "packages/db/tests/fa-particulars-proposal.test.mjs re-ran 5/5 on clara_l05 under the full gate chain, including p933.wire.object_only (an ARRAY source_ref is refused, the object form carrying the extra key is admitted) and p933.wire.verbatim (all nine keys survive the jsonb round trip). No migration file is in the #933 half of the diff.",
+      "verdict": "TRUE"
+    }
+  ],
+  "findings": [
+    {
+      "id": "SPEC-871-A",
+      "ticket": 871,
+      "severity": "minor",
+      "kind": "deliberate-divergence-from-the-brief",
+      "title": "The re-brief's \"rate-limited by the estate's existing entry rate wall\" is not what was built: 0309 mints its own wall and its own evidence table",
+      "evidence": "Owner's ruling 2026-09-23, Desired behavior: \"The read is rate-limited by the estate's existing entry rate wall\". 0309 does not call clara.claim_confirmation_attempt (0163) at all. It creates a NEW relation clara.invite_preview_attempts (0309 SS-B) and re-implements 0163's wall inside clara.preview_invite_by_token: two independent limbs, a 15-minute window, a ceiling of 5, advisory locks taken in numeric order, the '>= 4' offset guard and the [0,900] clamp. The divergence is argued at length in 0309's header (\"WHY ITS OWN EVIDENCE TABLE AND NOT clara.confirmation_attempts\"), in packages/db/README.md's 0309 section and in the lane report under AC4: reusing that table would either settle previews 'rejected' and burn a stranger's signup-confirmation budget from the same NAT, or settle them 'accepted', which 0163's counting predicate excludes, leaving the preview unwalled. I re-ran the wall cells - p871.wall.origin_limb, p871.wall.token_limb, p871.wall.evidence, p871rt.route.rate_wall - all green, both limbs independent, the sixth read 429 with Retry-After. AC4's own wording (\"rate-walled LIKE the auth-wall routes\") is satisfied exactly; it is the Desired-behavior sentence that is not.",
+      "required_fix": "No code change recommended. The orchestrator/owner should RATIFY the divergence before release: it adds a schema object the brief did not ask for and leaves a second append-only attempts table with no retention sweep (the lane's own follow-up 1). If the owner wants the literal brief, that reopens the ticket rather than patching this branch."
+    },
+    {
+      "id": "SPEC-871-B",
+      "ticket": 871,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "AC3's five-state equality holds in two of five states, and the signed-in preview is never driven for the same invite",
+      "evidence": "AC3: \"A cell proves the status the door reports equals the roster's and the signed-in preview's for the same invite in every one of the five states.\" clara.preview_invite_by_token returns a status only when the effective status is 'pending' or 'issuer_lapsed' (0309 SS-C: `if not found or inv.status not in ('pending','issuer_lapsed') then return {outcome:not_previewable}`). p871.door.five_states (packages/db/tests/invite-preview-public.test.mjs:200-270, re-run GREEN) therefore asserts verbatim equality for the two OPEN states and the single refusal for expired / revoked / accepted - so in three of five states the door reports no status to compare. That reconciles the same ruling's no-oracle sentence and the report states it plainly, but the AC as written is met only in part. Second half: the cell's independent source of truth is clara.firm_invites_visible alone - grep for 'preview_invite(' in that test file returns ONE hit, a signature string inside the ACL roster at line 524, so no cell calls clara.preview_invite for the same invite in any state. Agreement with the signed-in preview is inferred from 0309 SS-D.T7 (the shared CASE expression present in both bodies on the live catalog) plus 0269 (the signed-in door already shares it with the roster).",
+      "required_fix": "None for the code. The orchestrator should record AC3 as met in the form it was actually met: verbatim equality in the two previewable states, the single refusal in the other three, and equality with the signed-in preview by shared-expression pin rather than by a driven comparison."
+    },
+    {
+      "id": "SPEC-871-C",
+      "ticket": 871,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "\"share the derivation; do not fork it\" got a live drift guard for the STATUS and none for the MASK",
+      "evidence": "Re-brief, Key interfaces: \"it takes the token, returns the four fields, and applies the same masking and the same status derivation the signed-in preview uses (share the derivation; do not fork it).\" Both are in fact forked - copied character for character into 0309 SS-C - for the reason 0269 already measured (a shared SQL helper would need an EXECUTE grant to clara_authenticated, and PostgREST publishes every EXECUTE-granted function as an RPC door). Only one of the two copies is guarded: SS-D.T7 asserts, whitespace-normalised on the live catalog, that the status CASE expression is present in BOTH bodies and raises \"the two reads have FORKED\" otherwise. Nothing pins the MASK. I read clara.preview_invite(text).prosrc on clara_l05: its mask is identical to 0309's today, so there is no live defect - but a later recut of the signed-in mask alone would diverge silently, and the masked address is exactly the field this ticket says must never widen.",
+      "required_fix": "Worth a follow-up ticket (or one added clause in a later migration's tail): extend the T7-style live-catalog pin to the mask expression, in both directions, exactly as it already does for the status CASE."
+    },
+    {
+      "id": "SPEC-871-D",
+      "ticket": 871,
+      "severity": "note",
+      "kind": "requirement-unexercised-locally",
+      "title": "AC1's \"refuses EXECUTE to ... the service credential\" is never probed on this rig",
+      "evidence": "AC1: \"A cell proves the new door refuses EXECUTE to clara_authenticated, to the runtime role and to the service credential, and that only the new group role may call it.\" p871.grant.only_the_group (re-run GREEN) probes a seventeen-role roster with has_function_privilege and asserts all seventeen resolve, so the first two principals are genuinely driven and the probe is not vacuous. The Supabase platform roles (anon, authenticated, service_role, authenticator) do not exist on the lane cluster; the cell asserts they resolve to (none) and rests that third principal on the exact ACL text, 'clara_fn_owner=X/clara_fn_owner,clara_invite_preview=X/clara_fn_owner'. 0309 SS-D.T2 runs the same four names behind a to_regrole guard, which is inert here and live on hosted - so those probes have never been seen to FIRE. The report says so under \"Anything unverified\".",
+      "required_fix": "None. The hosted apply is the first exercise of that arm; the integrator should read 0309's tail notice on hosted rather than treat AC1 as fully driven."
+    },
+    {
+      "id": "SPEC-871-E",
+      "ticket": 871,
+      "severity": "note",
+      "kind": "requirement-deferred-to-the-integrator",
+      "title": "AC6's \"applies from scratch\" is argued from the corpus, not from a chain",
+      "evidence": "AC6: \"The migration applies from scratch and on a populated database; the operator provisioning step for the credential is written in the release runbook the way the auth wall's was.\" The populated half is done (clara_l05, ledger 289 -> 290, clean apply) and the runbook step is written in full in the report under 'Release runbook step (#871)', with a shipped ceremony file packages/db/deploy/invite-preview-login-ceremony.sql on read-logins-ceremony.sql's shape. The from-scratch half was not run: RIG.md forbids a second from-scratch chain on a lane cluster. What is proven instead is p871.grant.from_scratch - exactly one migration file mints the two roles, it is numbered 0309, and scripts/migrate.mjs sorts by 'a.num - b.num', so 0154's `count(*) where rolname like 'clara%' <> 14` census cannot see them. 0309's SS-0(b) and SS-D.T4 pin 18 before and 20 after. The file has ONE branch (SS-0(a) refuses if the function, the table or either role already exists), so it is not bimodal and the wave-3 addendum's redo hazard does not arise.",
+      "required_fix": "None from the lane. The integrator owns the true 0001 -> 0309 replay. The role-census twins are all trued in the same commit: deploy/roles-bootstrap.sql (grp + logins + header census 18 -> 20), tests/rig-cluster-reset.mjs CHAIN_MINTED_ROLES, tests/role-census-reset.test.mjs's pinned 6 / 20 / 14, and packages/db/README.md's #867 section."
+    },
+    {
+      "id": "SPEC-871-F",
+      "ticket": 871,
+      "severity": "note",
+      "kind": "unasked-behaviour",
+      "title": "The signed-IN preview's render path was refactored, and the route publishes a fourth status the brief's contract does not name",
+      "evidence": "Nothing in the re-brief asks for a change to the post-sign-in interstitial (its Out of scope covers clara.preview_invite and the roster read; the component is named neither way). 6cdc0d580 extracts the firm / role / masked-address <dl> out of the signed-in block into a shared InvitePreviewFacts and re-points the existing block at it (apps/web/components/invite-accept-form.tsx). The stated reason is good - one mask, one role vocabulary, one set of labels - and the namespaces are unchanged (Invite.preview and Members.roles, verified at lines 124-125 and 486-490). Two residues worth recording: the signed-OUT block renders no tPreview(\"roleNote\") line while the signed-in one does, and packages/runtime/src/invitePreviewRoutes.ts answers a FOURTH status the brief's three-outcome contract does not mention - 400 {outcome:\"invalid_token\"} for a missing, blank or non-string token in the body. Neither is an existence oracle (both depend on no invite), and the pre-existing #625 walk plus the five new render cells pin the signed-in face.",
+      "required_fix": "None. Recorded so the integrator knows a pre-existing surface moved inside a ticket that did not ask for it."
+    },
+    {
+      "id": "SPEC-933-A",
+      "ticket": 933,
+      "severity": "note",
+      "kind": "requirement-deferred",
+      "title": "AC4 (the World e2e leg) is not built - correctly routed to the claraWork_v6 cut, but the successor contract does not list it as a deliverable of that cut",
+      "evidence": "AC4: \"A World e2e leg covers the park-with-proposal and confirm path.\" Nothing under packages/runtime/workflows changed and freeze-lint is OK at 312 files. Lane rule (a) names what this wave builds - \"the derivation core, the three answer entrances' pre-fill and the database side are built now\" - and does not include the leg, so the deferral is within the lane's own contract, and the report's reasoning is sound: a leg run today exercises claraWork_v5, which opens the question with #639's bare stanza, so it could only assert the ABSENCE of a proposal. The gap is in the hand-off: the eight-section successor contract for claraWork_v6 covers imports, the zod schema, the new step and its two SQL statements, the door call with argument order, refusal mapping, part kind and prompt stanza - but names no e2e leg and no cell for the join, so AC4 can be lost when the cut is transcribed.",
+      "required_fix": "The orchestrator should carry AC4 explicitly into the claraWork_v6 cut's own work order (a World leg covering park-with-proposal then confirm), because the successor contract as written would let that cut land without it."
+    },
+    {
+      "id": "SPEC-933-B",
+      "ticket": 933,
+      "severity": "note",
+      "kind": "requirement-partial",
+      "title": "AC1 ships the typed block and its derivation; no successor carries it, so the join is unverified by construction",
+      "evidence": "AC1 (as corrected 2026-09-19): \"The next claraWork successor extends the dependent-particulars question with a typed proposal block and its reason; the frozen v4 body is untouched.\" The block, faParticularsProposalSchema and proposalSourceRef ship in packages/runtime/lib/fa-particulars-proposal.ts (18/18 re-run GREEN) and the frozen bodies are untouched (freeze-lint OK at 312 files, parts-parity OK). What no cell can reach is deriveFaParticularsProposal's output actually landing on clara.open_work_question's p_source_ref, because the cut does not exist. The db battery drives the TRANSPORT with a hand-built block instead - p933.wire.verbatim pins all nine keys through the jsonb round trip and p933.wire.object_only proves an array source_ref is refused while the object form carrying the extra key is admitted, both re-run GREEN - and the report names the join as unverified in as many words.",
+      "required_fix": "None now; same carry-over as SPEC-933-A."
+    },
+    {
+      "id": "SPEC-933-C",
+      "ticket": 933,
+      "severity": "note",
+      "kind": "requirement-satisfied-in-substance",
+      "title": "AC2's \"through the existing OBO particulars door\" is literally true of one entrance of three",
+      "evidence": "AC2: \"The three answer entrances ... pre-fill from the proposal and show the reason; submitting applies the confirmed values through the existing OBO particulars door under the answering person's authority.\" Only the conversation entrance reaches an OBO door, and indirectly: the form calls clara.answer_work_question and the RUN later applies the answer through clara.complete_fixed_asset_particulars_for with p_obo. The asset page dialog (components/registers/fa-row-actions.tsx, completeIntent) and the Needs-you inline form (components/firm/fixed-asset-incomplete-affordance.tsx) call clara.complete_fixed_asset_particulars directly under the signed-in person's own session - no p_obo, and no OBO door involved. That is behaviour that already shipped and the ticket did not ask to move it, and the AC's intent (the applied values are the person's confirmed ones under their own authority) is met on all three: the three the_edit cells prove the edited value and not the seed reaches the door.",
+      "required_fix": "None. Recorded so nobody later reads AC2 as a claim that all three entrances went through an OBO door."
+    },
+    {
+      "id": "SPEC-933-D",
+      "ticket": 933,
+      "severity": "note",
+      "kind": "unasked-behaviour",
+      "title": "Cancelling or closing the particulars form now discards what the person typed; it did not before",
+      "evidence": "Nothing in #933 asks for a change to the cancel path. 53c397830 adds setParticulars(EMPTY_PARTICULARS) to BOTH exits: fixed-asset-incomplete-affordance.tsx's cancel() (previously only setOpen(false) and decision.renew()) and fa-row-actions.tsx's CompleteParticularsDialog onClosed (previously only decision.renew()). Before this commit a person who opened the form, typed a useful life, closed it and re-opened it found their values still there; now they do not. The reason is coherent - the seed is read on open and re-seeded on each open, so a stale proposal must not survive a close, and #978 already made the close the decision boundary for the op key - but it is a behaviour change the ticket did not ask for, and no cell in the diff pins either the old or the new behaviour directly.",
+      "required_fix": "None required. Worth one line in the wave digest, since it changes a pre-existing interaction on two surfaces."
+    },
+    {
+      "id": "SPEC-933-E",
+      "ticket": 933,
+      "severity": "note",
+      "kind": "implementation-looser-than-the-contract",
+      "title": "The register-side proposal read matches a pending question on asset_id alone, never on kind",
+      "evidence": "apps/web/lib/registers/fa-particulars-proposal.ts, loadAssetParticularsProposal: it scans up to 50 of the client's pending clara.agent_interruptions rows and accepts the first whose `ref.asset_id === assetId`, without checking `ref.kind === \"fixed_asset\"` - even though the module's own header, the runtime's proposalSourceRef and #639's stanza all carry that key, and the db cell p933.read.by_asset measures the narrower `source_ref->>'asset_id'` filter as lawful. Today nothing else parks a question carrying an asset_id, so there is no live defect, and readFaParticularsProposal's v:1 escape plus its per-field bounds are what actually stop a foreign block being rendered. It is simply a looser match than the contract the same file writes.",
+      "required_fix": "A one-line tightening (`if (ref.kind !== \"fixed_asset\") continue;`) whenever this module is next touched; the lane's own follow-up 3 already proposes moving this filter server-side, which would subsume it."
+    }
+  ],
+  "summary": "SPEC axis, lane 05 (#933 then #871), fixed point cd2925391. Eleven findings: no blockers, three minors, eight notes. Every green claim I checked reproduced - 18/18 runtime derivation cells, 9/9 runtime route cells, 17/17 db cells across the two batteries on clara_l05 under the full gate chain, the whole apps/web unit suite at 5019 pass / 0 fail / 2 skipped, freeze-lint OK at 312 frozen files, parts-parity OK, worktree clean. #871 meets all six acceptance criteria in substance and is unusually well evidenced, but three things want the orchestrator's eye before release: the deliberate refusal to reuse the estate's existing entry rate wall (a new table and a new wall on 0163's shape were built instead, argued from a measurement, satisfying AC4's own wording but not the Desired-behavior sentence - it needs ratification); AC3's five-state equality holding verbatim in only the two previewable states, with the signed-in preview never driven for the same invite; and the masked-address expression being copied out of clara.preview_invite with no drift guard while the status CASE got one. #933 is DONE for the scope lane rule (a) admits - derivation core, three entrances, database side, all driven - with AC4's World leg and AC1's join deferred to the claraWork_v6 cut; the successor contract is written in full but names no e2e leg, so AC4 must be carried into that cut's work order or it will be lost. Two unasked behaviour changes are recorded rather than flagged as defects: cancelling the particulars form now discards a typed draft on two surfaces, and #871 refactored the already-shipped signed-in preview block into a shared component."
+}

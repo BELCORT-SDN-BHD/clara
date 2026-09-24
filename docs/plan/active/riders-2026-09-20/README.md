@@ -79,6 +79,42 @@ comment and close on every ticket.
 
 Then a short sweep wave for whatever wave 4's own review finds, until no ticket outside the #597 mainline is open.
 
+### Wave 4 as integrated
+
+Wave 4 landed on `integration/riders-w4` at final head `fb1dae78a`. Twenty-one migrations: `0295` to
+`0311` in lane order, then the overflow block `0315` to `0318` once the duplicate-overflow-number
+collision below was resolved. Lane 04's third fix round kept `0317`; lane 06's fix-round file, which
+had taken the same number, was renumbered to `0318`. The pre-step and the seven lanes merged in the
+order 01, 02, 03, 05, 06, 07, 04, with lane 04 last on its third recheck's ACCEPT and lane 07 merged
+twice, the second time for its closed-wave drill fixes.
+
+### Rules added in wave 4
+
+1. **The orchestrator assigns overflow migration numbers on request; a fix worker never picks one.**
+   Two fix rounds each took "the next free number in the overflow block" and both landed on `0317`,
+   the same failure wave 3 met one level down at `0280`/`0281`.
+2. **Pin what is live, and name the rig a pin was measured on.** Every merge collision this wave
+   traces to a lane measuring a pin on a rig that lacked a sibling lane's migration. The lane reports
+   that named the rig made the integration fast; the ones that did not cost a chain run each.
+3. **A lane can be green and still be wrong about a body another lane owns.** When two lanes touch
+   one body, the later file recuts from the earlier file's post-image, and no cell on either branch
+   alone catches it; the merger reads the two files against each other.
+4. **A disclosed residual is only safe when nothing measures it.** `_obo_plan_core`'s wall was
+   disclosed and left standing; the other lane's own parity cells then failed on it. Grep the other
+   lane's cells before trusting a disclosure to hold.
+5. **A renumber reaches inside installed bodies.** `0318` carries its own number in markers that sit
+   in its pasted text, so renaming the file moved three installed bodies and the one test that pins
+   them. Grep the installed text, not only the file's prose.
+6. **Never pin a digest over text-ordered row content as a literal (collation).** `0295`'s
+   `content_sha256` literal moved between `C.UTF-8` rigs and `en_US.UTF-8` servers (CI, hosted
+   Supabase) because its canonical ordering carried no collation. Pin function bodies, or a
+   `collate "C"` structural digest, instead; the hosted preflight recomputes the digest from the
+   file's own helper body rather than comparing it to a stored literal.
+7. **A lane's recheck scope includes the web pins corpus whenever a migration file changed, even a
+   comment.** Lane 01's second fix round rewrote a design-rationale comment above a migration and
+   re-applied it, moving the file's content hash. The lane's own recheck battery never reached the
+   web pins test, so the stale pin only surfaced at the integration gate.
+
 ## Wave 3 lanes (planned 2026-09-20 from the scan of the integrated wave-2 head)
 
 42 tickets, reserved migration numbers `0273` to `0291`. Grouped so that no function body is written in one lane and written or likely pinned in another (the wave-2 lesson: a prestate pins neighbour bodies too).

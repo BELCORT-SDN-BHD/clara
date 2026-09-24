@@ -1,0 +1,63 @@
+{
+  "axis": "standards",
+  "lane": "wave4-lane02",
+  "fixed_point": "cd2925391",
+  "diff_command": "git diff cd2925391...HEAD",
+  "commit_log_command": "git log cd2925391..HEAD --oneline",
+  "commits_reviewed": [
+    "b3e6ff43d feat(web): #931 the advance chooser becomes the first line of a confirmed allocation list",
+    "c2b227187 feat(runtime): #931 the claim route carries the confirmed allocation list to the door",
+    "a29f8be20 test(db): #931 the allocation list's own walls, and the single-advance shape held unchanged",
+    "89bffb2a1 feat(db): #931 the derived journal carries ONE credit leg per advance account",
+    "ee159783f feat(db): #931 the per-allocation cap refusal names the advance, its outstanding and the shortfall",
+    "84cf37952 feat(db): #931 a staff expense claim discharges several advances through a confirmed allocation list",
+    "3adafcd1d test(web): #930 declare staff_advance_summary a named shared RPC verb",
+    "bd533dd57 docs(web): #930 README note on the advance chooser and the shared summary verb",
+    "2bc755546 test(web): #930 e2e walk drives the advance chooser through the fixture",
+    "9b60e6803 feat(web): #930 staff-expense-claim advance chooser replaces the typed id"
+  ],
+  "sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "packages/db/migrations/0301_staff_expense_claim_allocations.sql (house migration law: header, prestate pins, tail assertions, redo marker)",
+    "packages/db/README.md, apps/web/README.md (module READMEs the diff touches)"
+  ],
+  "verification_performed": [
+    "Re-ran packages/db/tests/staff-expense-claim-allocations.test.mjs with its own preintegration gate against the live lane database (127.0.0.1:55742/clara_l02): 9/9 pass, confirming the report's claim.",
+    "Diffed each #931 db commit individually (84cf37952, ee159783f, 89bffb2a1, a29f8be20) to establish which commits carried production-code changes versus test-only changes, and matched each against the report's own slice table."
+  ],
+  "findings": [
+    {
+      "ticket": 931,
+      "severity": "major",
+      "kind": "test-quality (TDD process, WORK-ORDER.md rule 4)",
+      "title": "Three validation walls (exact-sum, duplicate-advance, not-this-claimant) and the door/birth-trigger/read logic were written with only ONE driving test, then left untested for several commits before their test cells landed with zero accompanying code change",
+      "evidence": "Commit 84cf37952 (`feat(db): #931 a staff expense claim discharges several advances...`) adds packages/db/migrations/0301_staff_expense_claim_allocations.sql at 1410 of its eventual 1479 lines (95%) in one commit -- including `_assert_claim_basis`'s three NEW branches (the exact-sum check at 0301.sql:618-627, the distinct-advance check at 0301.sql:601-607, and the not-this-claimant ownership check at 0301.sql:787-797), the door's allocation insert, and the birth trigger's per-allocation loop -- against exactly ONE new test (`p931.two`, which exercises none of those three branches: it uses two advances on one account, both belonging to the same claimant, with an exact sum). The corresponding test cells (`p931.sum`, `p931.twice`, `p931.claimant`, plus the replay/canonicalisation cells `p931.single` and `p931.split.conflict`) do not land until commit a29f8be20 (`test(db): #931 the allocation list's own walls...`), which is a TEST-ONLY commit (140 lines, zero production-code lines) arriving after two intervening commits (ee159783f, 89bffb2a1) that touch unrelated parts of the same walls. Between 84cf37952 and a29f8be20 the exact-sum, distinct and not-this-claimant refusal code was live on the branch with no JS test and no migration tail assertion exercising the refusal paths (the migration's own tail T.1-T.6 only probes catalog shape and one VALID single-advance claim -- see 0301.sql:1398-1432 -- never a malformed one), i.e. speculative code for tests not yet written, which WORK-ORDER.md rule 4 states directly: 'No speculative code for tests you have not written' and 'One slice at a time: one test -> see it red for the right reason -> the minimal code that turns it green.' The ticket's own report (wave4-lane02-ticket931.md, 'The vacuity control') is candid that slice D added 'no new code -- the walls were written in slice A as one migration,' and compensates after the fact with a deliberate-break-and-restore vacuity control -- which proves the assertions are load-bearing, but is a different guarantee from red-before-green ordering and does not retroactively satisfy it. By contrast, slices B (ee159783f, the shortfall_cents field) and C (89bffb2a1, the per-account credit-leg grouping) in the SAME migration file DO show genuine one-test-then-minimal-code increments, so the team clearly had the option to slice the validator's walls the same way and did not for this subset.",
+      "failure_scenario": "This is a process finding, not a live defect: I re-ran the 9 cells in staff-expense-claim-allocations.test.mjs against the lane database and all 9 pass. The risk this rule guards against is exactly what the wave's own house law names elsewhere as the cost of horizontal slicing -- untested branches (here, three refusal paths spanning several hundred SQL lines) sitting in a migration for multiple commits before anything drives them red, during which a defect in any of the three walls (e.g. a field-path typo in the not-this-claimant refusal, or an off-by-one in the distinct-advance duplicate probe) would have gone unnoticed until the batched test commit, rather than being caught at the moment it was introduced.",
+      "required_fix": "None required post hoc since the walls are now covered and proved load-bearing by the vacuity control; flagged so the integrator can decide whether to ask for tighter slicing on future single-migration-file tickets in this wave, and so the pattern is not read as the house norm from this ticket's report alone."
+    },
+    {
+      "ticket": 930,
+      "severity": "minor",
+      "kind": "smell: Duplicated Code (Fowler ch.3, baseline judgement call)",
+      "title": "The \"still outstanding\" advance predicate is duplicated verbatim across two components instead of being extracted",
+      "evidence": "apps/web/components/registers/staff-advances-register.tsx:76: `const outstandingAdvances = data.summary.advances.filter((a) => a.outstanding_cents > 0 && !a.voided);` and apps/web/components/accounting/staff-expense-claim-form.tsx:264-266 (added by #930): `return advancesRead.data.advances.filter((a) => a.account_code === code && a.outstanding_cents > 0 && !a.voided);` -- the `outstanding_cents > 0 && !a.voided` clause is copy-pasted rather than factored into one shared predicate (e.g. an `isOutstandingAdvance(a)` helper in lib/registers/staff-advances-doors.ts) that both call sites would import. The form's own comment (staff-expense-claim-form.tsx:255-258) explicitly calls out that this is meant to be \"the EXACT predicate\" the register uses, which is exactly the situation Fowler's Duplicated Code smell names: the same logic shape asserted by comment to be identical in two places, with nothing enforcing that identity if one side changes.",
+      "failure_scenario": "If a future ticket changes what \"still outstanding\" means (e.g. adds a third condition, or changes voided handling), a person can update staff-advances-register.tsx and, relying on the comment rather than a shared symbol, forget the second site in staff-expense-claim-form.tsx -- the two surfaces would then silently disagree about which advances are selectable, which is precisely the drift both #930's and #931's own commentary say they are trying to avoid.",
+      "required_fix": "Extract the predicate into a small shared function in lib/registers/staff-advances-doors.ts (or a sibling module) and call it from both components; not required before merge, offered as a judgement call per the smell baseline, not a hard violation."
+    }
+  ],
+  "no_finding_areas_checked": [
+    "Migration house law (0301): header present, prestate pins measured on the lane database and re-verified independently against 0221's post-images, tail assertions covering RLS/ACL/FK-grain/backfill-exactness/non-regression, REDO marker and redo-safety (create ... if not exists / create or replace / on conflict do nothing), gate-chain entry appended in migration order, rig-meta cohort added as its OWN cohort with a stated reason (avoids corrupting the 0221 cohort's all-or-nothing semantics) -- all present and correctly shaped.",
+    "New relation clara.staff_expense_claim_allocations: FORCE RLS confirmed by tail T.1, three-column tenant-carrying FKs on both the claim and advance references (0221's own 'every foreign key carries the tenant' rule) confirmed by tail T.1c, zero application-role DML confirmed by tail T.1d.",
+    "SECURITY DEFINER / owner / search_path preserved on all eight recut bodies (tail T.2), PUBLIC EXECUTE revoked, clara_runtime/clara_authenticated ACLs unchanged from 0221 (tail T.2d-T.2f).",
+    "No applied migration was edited; 0301 is new at its reserved number; the standard-chart rows of 0295 are consumed by existing fixtures, not re-inserted.",
+    "Frozen workflow closure: packages/runtime/lib/staff-expense-claim-basis.ts and workflows/ were not touched; check-frozen-workflows.mjs and check-parts-parity.mjs were run per the report and are OK; the widened chat contract is correctly deferred to a named successor-contract section rather than edited in place.",
+    "Shared files: CONTEXT.md's new 'Allocation list' term follows the house 'term / _Avoid_' shape and sits at the correct sorted position between 'Advance application' and 'Claimant handle'; apps/web/e2e/e2e-fixture-ownership.test.ts's SHARED_RPC_VERBS declaration is additive and documents the gating condition for both mocks.",
+    "packages/runtime/src/workRoutes.ts's toDbClaim widening is small, additive, and refuses a list on the wrong settlement before it reaches the database.",
+    "components/registers/staff-advance-allocations-editor.tsx's generalisation to StaffAdvanceAllocationsEditor<T> is additive (new props are all optional, the register's own call is unchanged in type and behaviour) and driven by a real second caller rather than speculative."
+  ],
+  "summary": "One major finding (a TDD-process deviation on #931's first db migration commit, where three validation walls and the surrounding door/trigger/read logic were written well ahead of any test that exercised them, then proved after the fact by a vacuity control rather than red-before-green) and one minor smell (duplicated 'still outstanding advance' predicate across two web components, #930). The migration's house law (prestate pins, tail assertions, redo safety, cohort/gate-chain wiring) and the shared-file discipline (CONTEXT.md, e2e-fixture-ownership.test.ts, the frozen-workflow boundary) are all followed correctly. No hard violations of a documented standard were found outside the TDD-process item."
+}

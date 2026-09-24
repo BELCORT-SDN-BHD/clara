@@ -1,0 +1,75 @@
+{
+  "axis": "standards",
+  "lane": "wave4-lane01",
+  "fixed_point": "cd2925391",
+  "diff_command": "git diff cd2925391...HEAD",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\635",
+  "branch": "riders/w4-lane01",
+  "tickets_reviewed": [944, 945, 946, 947, 948, 949],
+  "sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md (incl. wave-2/wave-3 addenda)",
+    "docs/plan/active/riders-2026-09-20/RIG.md (incl. wave-2/wave-3 addenda)",
+    ".claude/skills/code-review/SKILL.md (smell baseline)",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "packages/db/README.md (#945/#946/#947/#948/#949 sections)",
+    "packages/runtime/README.md",
+    "gh issue view 944/945/946/947/948/949 --comments",
+    "the six per-ticket reports (wave4-lane01-ticket944..949.md)",
+    "live queries against 127.0.0.1:55741/clara_l01 (pg_proc/pg_class/pg_policies/coa_templates)",
+    "independent re-runs: tenancy-rent-plan.test.mjs (48/48), agreement-contract-acquisition.test.mjs (35/36, then 36/36 isolated), operation-census.test.mjs (10/10), pnpm typecheck (exit 0), CI=true GITHUB_ACTIONS=true pnpm lint (exit 0), check-frozen-workflows.mjs, check-frozen-evaluators.mjs (implicit via workflow check), check-parts-parity.mjs, check-document-region-field-paths.mjs, check-wiki-dynamic-sql.mjs"
+  ],
+  "findings": [
+    {
+      "id": "L01-STD-1",
+      "ticket": 948,
+      "severity": "major",
+      "kind": "hard-violation",
+      "title": "Test isolation: 'S8 · the gate WRITES NOTHING' asserts a database-wide, unscoped count(*) from clara.audit_log, and it demonstrably fails under realistic concurrent rig usage",
+      "evidence": "packages/db/tests/agreement-contract-acquisition.test.mjs:1385-1414 ('S8 · the gate WRITES NOTHING: two reads of a blocked agreement leave the estate byte-identical') snapshots `(select count(*) from clara.journal_entries where client_id=$1)`, `(select count(*) from clara.domain_events where client_id=$1)` -- both correctly scoped to the test's own client -- alongside `(select count(*) from clara.audit_log)` with NO scoping at all (no client_id, no firm_id, no id/at boundary), then asserts deepEqual(before, after) across two calls to clara._agreement_posting_verdict. Re-ran the full gate chain for this file exactly as the ticket report instructs (`node --test --test-concurrency=1 $GATES tests/agreement-contract-acquisition.test.mjs` against 127.0.0.1:55741/clara_l01): got 35 pass / 1 FAIL, with this exact cell failing (`AssertionError: expected {a:94806}, actual {a:94811}` -- 5 unexplained audit_log rows appeared between the two reads), directly contradicting ticket948.md's own claimed gate result ('tests/agreement-contract-acquisition.test.mjs, full gate chain | 36/36 pass, 0 fail'). Re-ran the same single test in isolation (--test-name-pattern) immediately afterward and it passed, which is consistent with the failure being caused by writes from ANOTHER actor on this shared, non-disposable lane database (other agents were listed as concurrently active in this same session: fix-w4-prestep, recheck-w4-prestep, review-spec-w4-prestep, review-std-w4-prestep) rather than a defect in clara._agreement_posting_verdict itself (independently confirmed STABLE: `select provolatile from pg_proc where oid='clara._agreement_posting_verdict(uuid)'::regprocedure` = 's'). Regardless of root cause, an unscoped whole-database count violates the wave-3 addendum's own law in RIG.md/WORK-ORDER.md ('No test may depend on ... rows left in the database by another test file') -- here the exposure is even wider, to ANY writer on the shared cluster, not just another test file -- and this is not a hypothetical: it is the one cell in this diff observed to fail on a direct re-run. The same anti-pattern pre-exists once elsewhere in the repo (packages/db/tests/trade-invoice-duplicate-probe.test.mjs:320, untouched by this diff), so this lane inherited rather than invented the idiom, but it copied it into new code rather than fixing or avoiding it.",
+      "required_fix": "Scope the audit_log check the same way the other two counts in the same query already are -- e.g. capture `select max(id) from clara.audit_log` (or `max(at)`) before the two verdict() calls and assert no row with `id > v_before_max_id`, or scope by the enrolled client's firm_id. This makes the assertion resilient to any concurrent writer on the shared rig, matching the isolation the journal_entries/domain_events halves of the same cell already have."
+    },
+    {
+      "id": "L01-STD-2",
+      "ticket": 949,
+      "severity": "minor",
+      "kind": "rule-deviation",
+      "title": "WAVE-4 LANE RULE (b) ('one new row kind per ticket, appended at the end of its list') is exceeded by #949, with no acknowledgment in the report",
+      "evidence": "apps/web/lib/firm/needs-you.ts's REVIEW_QUEUE_ROW_KINDS diff (git diff cd2925391...HEAD) shows #949 appending TWO new entries -- `rent_payable_unsettled` (AC4) and `rent_escalation_pending` (AC6) -- both attributed to '#949 (0300, same lane)' in the same commit family. The binding lane rule for this shared, four-lanes-wide file states explicitly: 'make ADDITIVE edits only, one new row kind per ticket appended at the end of its list, no reformatting, no renaming of existing kinds.' Both additions ARE additive, at the end, with no reformatting or renaming (so the practical multi-lane merge-conflict risk the rule exists to control is not elevated), but the literal 'one new row kind per ticket' cap is exceeded and neither the code comment nor wave4-lane01-ticket949.md's own report (which otherwise names every rule it discharges, e.g. rule (c) and rule (d)) mentions or justifies the deviation from rule (b).",
+      "required_fix": "No code change needed (the edit is safely additive). Add one sentence to the ticket report (or a follow-up note) acknowledging that AC4 and AC6 are two independently-clearing derived rows that could not be collapsed into one row_kind, so the four lanes sharing needs-you.ts this wave are not surprised that #949 landed two entries against the 'one per ticket' convention."
+    },
+    {
+      "id": "L01-STD-3",
+      "ticket": 945,
+      "severity": "minor",
+      "kind": "report-accuracy",
+      "title": "wave4-lane01-ticket945.md's AC2 narrative misstates the evaluator's pinned search_path (says pg_catalog, actual and correctly-asserted value is clara)",
+      "evidence": "wave4-lane01-ticket945.md, AC2: 'Registered in the same migration that creates it (§D.1), under search_path = pg_catalog, pg_temp (0059's recorded reason: clara.verify_evaluator_freeze() reproduces the hash under that path).' Checked against the actual migration source (packages/db/migrations/0296_payroll_summary_typed_facts.sql:408-409: `create or replace function clara.evaluate_payroll_run_state_v1(...) ... set search_path = clara, pg_temp as $eval$`) and against the live database (`select proconfig from pg_proc where proname='evaluate_payroll_run_state_v1'` on 127.0.0.1:55741/clara_l01 returns `search_path=clara, pg_temp`). The migration's own tail assertion (0296:2296-2299) also checks for `proconfig @> array['search_path=clara, pg_temp']`, i.e. the code and its own gate agree with each other and with the live catalog -- only the report's prose names the wrong value. This is a pure documentation/evidence-accuracy slip (AGENTS.md rule 6, 'claims need evidence'), not a code defect: the same pattern (`clara, pg_temp`) is confirmed correct and consistent in 0299 and 0300 as well.",
+      "required_fix": "Correct the one sentence in wave4-lane01-ticket945.md's AC2 section to read 'search_path = clara, pg_temp'. No code change needed."
+    },
+    {
+      "id": "L01-STD-4",
+      "ticket": 947,
+      "severity": "note",
+      "kind": "smell-judgement-call",
+      "title": "Duplicated Code (baseline smell, Fowler ch.3): the FIFO 'account balance still unsettled' read is written out nearly line-for-line three times this wave (#657, #947, #949)",
+      "evidence": "Compared packages/db/migrations/0298_payroll_net_pay_settlement.sql's clara._payroll_net_pay_unsettled(uuid) against packages/db/migrations/0300_tenancy_terms_rent_plan.sql's clara._rent_payable_unsettled(uuid): both build a `credits` CTE (a cumulative SUM(credit_cents) OVER (ORDER BY posting_date, id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)), a `debits`/`debit_total` CTE, and the identical closing formula `greatest(0, amt - greatest(0, total_debits - (cum_credit - amt)))` for 'this run's/month's own FIFO share'. ticket949.md itself names this as deliberate: '0298's four bodies are the template, line for line.' WAVE-4 LANE RULE (c) asks lanes to reuse the CONCEPTUAL 'Settlement candidate row' shape from CONTEXT.md (derived, stores nothing, clears itself, offers candidates, never chooses) -- it does not require copying the SQL body itself, and a shared parameterized helper (e.g. one function taking the payable account code(s) and an exclusion flag) would remove the duplication. This is flagged as a judgement call, not a violation: the two instances differ enough (0298 is single-account/fixed-code; 0300 partitions per confirmed-plan payable account and joins contract_plan_confirmations) that extracting a shared body mid-wave would itself be new migration-shape work the WORK-ORDER's scope discipline (rule 5, 'do not widen a ticket') would forbid inside either ticket.",
+      "required_fix": "None required of this lane now. Worth a small follow-up ticket once a fourth instance of this shape appears (or when #657/#947/#949 are next touched), consolidating into one internal `clara._account_fifo_unsettled(...)` the three call sites delegate to."
+    }
+  ],
+  "positive_notes": [
+    "No applied migration was edited and neither docs/PRD.md nor docs/ARCHITECTURE.md was touched (git diff --stat confirms only 0296-0300 are new files; #944 correctly STOPPED rather than editing the two blueprint files the work order forbids a lane ticket from touching, with a real precedent cited (wave2-lane03-ticket782.md) for the same wall).",
+    "apps/web/lib/firm/needs-you.ts, frozen-workflows.json, frozen-evaluators.json and packages/db/package.json's gate chain are all edited additively, at the end of their respective lists/rosters, in migration order -- verified directly via git diff (no reformatting or renaming of any existing entry).",
+    "Owner/SECURITY DEFINER/ACL posture on recut bodies verified live against clara_l01: clara.list_review_queue and clara.create_accounting_plan are clara_authenticated-only, clara.persist_payroll_facts is clara_runtime-only, clara._authority_ref_refusal carries no application-role grant at all -- all owned by clara_fn_owner, matching every ticket report's claims.",
+    "The two new relations (clara.contract_terms, clara.contract_plan_confirmations) both carry relrowsecurity=true AND relforcerowsecurity=true with SELECT-only grants to clara_authenticated/clara_agent_ro (zero INSERT/UPDATE/DELETE to any application role) -- verified live, matching the house RLS law.",
+    "The chart consumption rule (WAVE-4 LANE RULE (a)) was verified directly: no migration among 0296-0300 contains an INSERT into clara.coa_template_accounts, and the CURRENT published my_sme_starter template (version 2, live on clara_l01) already carries 2040 Salaries Payable and 2050 Rent Payable exactly as the reports describe.",
+    "Independently re-ran a representative slice of the claimed gates rather than trusting the reports: tenancy-rent-plan.test.mjs 48/48, operation-census.test.mjs 10/10, pnpm typecheck exit 0, CI-mode pnpm lint exit 0, check-frozen-workflows.mjs/check-parts-parity.mjs/check-document-region-field-paths.mjs/check-wiki-dynamic-sql.mjs all OK -- all matched the six reports' claimed counts exactly.",
+    "Test quality is consistently integration-style and TDD-compliant: new web unit tests mock only fetch (a genuine system boundary to PostgREST), never an internal module; DB battery cells drive real SQL doors against a real database; expected values are hand-computed literals stated as an independent worked example in the test file's own header (e.g. payroll-summary-facts.test.mjs's two-employee example), never a value re-derived from the code under test. Git history shows migration SQL and its cells landing together per commit (vertical slices via CLARA_MIGRATION_REDO), not a horizontal battery of red tests followed by implementation.",
+    "Vacuity controls exist and are recorded with real transcripts for every registry-only claim and every multi-cell seam: #946 and #947 both show a MUTANT-INSTALLED / RESTORED transcript; #948 and #949 both show a before-registration-red / after-registration-green transcript for their Needs-you row kind tests.",
+    "#949's successor-contract section (WAVE-4 LANE RULE (d)) is written in full for all four tools named, each with tool name, a .strict() zod schema, the door call with argument order, a refusal-code mapping table, the part kind, and a verbatim prompt stanza -- matching the rule's own explicit checklist."
+  ],
+  "summary": "Five of six tickets (#945-#949) are DONE with unusually thorough, independently-checkable evidence; #944 correctly STOPPED at a hard work-order wall (no PRD/ARCHITECTURE edits from a lane ticket) rather than working around it. Direct re-verification against the live rig (pg_proc/pg_class/pg_policies, gate re-runs, typecheck/lint, frozen-workflow and field-path lints) confirmed the great majority of both tickets' and reports' claims byte-for-byte. One real defect survived to this diff: agreement-contract-acquisition.test.mjs's 'gate WRITES NOTHING' cell (#948) asserts an unscoped, whole-database audit_log count and was directly observed to fail (94806 -> 94811) when re-run as part of the full gate chain, contradicting the ticket's own claimed '36/36 pass'; it passes only in isolation. This is a real test-isolation defect (regardless of whether the extra rows came from another concurrent agent on the shared cluster or something more subtle), not a flake to wave away, and should be fixed by scoping the count the way its own neighbouring assertions already are. The remaining findings are a minor unacknowledged rule deviation (#949 landing two Needs-you row kinds against the lane's 'one per ticket' rule), a minor report-accuracy slip (#945's AC2 misnames the evaluator's search_path in prose only), and a judgement-call Duplicated Code note across the wave's three FIFO-settlement bodies. None of these blocks the work; the audit_log finding should be fixed before this is called clean.",
+  "reviewed_by": "wave4-lane01 standards axis reviewer (read-only)",
+  "reviewed_at": "2026-09-24"
+}

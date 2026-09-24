@@ -1,0 +1,67 @@
+{
+  "axis": "recheck",
+  "wave": 4,
+  "lane": "02",
+  "branch": "riders/w4-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "fixed_point": "cd2925391",
+  "head_at_recheck": "71dc448ed",
+  "diff_command": "git diff cd2925391...HEAD",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/wave4-lane02-fix.md",
+  "verdict": "accept",
+  "summary": "Re-ran every gate the fix report cites plus the shared-file tests it touches, on the lane rig (127.0.0.1:55742/clara_l02). All reported counts reproduce exactly. The blocker (A931-1) is fixed and reproduces green under the race cells; the three minors with code changes (SPEC-931-A, A931-3, STD-930-1, SPEC-930-C) are fixed and verified by dedicated cells that exist and pass. The major process finding (STD-931-1) is correctly left unfixed post hoc (its own required_fix says so) and its coverage-gap concern is resolved: p931.sum / p931.twice / p931.claimant / p931.cap / p931.cap.single / p931.race.ordinal each drive their own wall. One minor finding (SPEC-931-B / A931-2) stays genuinely open, pinned by a cell and explicitly escalated to the owner as a ruling, which is the correct disposition for a scope decision an implementer cannot make unilaterally. Six note-severity items are left open as documented follow-ups. Nothing above minor remains unresolved, and nothing broke.",
+  "reruns": [
+    { "what": "packages/db tests/staff-expense-claim-allocations.test.mjs, full gate chain, clara_l02", "result": "13 pass / 0 fail / 0 skipped", "matches_report": true },
+    { "what": "packages/db tests/staff-expense-claim.test.mjs (#638 battery), full gate chain", "result": "24 pass / 0 fail", "matches_report": true },
+    { "what": "packages/db tests/operation-census.test.mjs + tests/rig-isolation.test.mjs, full gate chain", "result": "32 pass / 0 fail / 1 skipped (T19 poison-role self-skip, no reset flag set)", "matches_report": true },
+    { "what": "pnpm db:migrate (drift probe) on clara_l02", "result": "0 new migration(s) applied / 290 total", "matches_report": true },
+    { "what": "apps/web lib/work/staff-expense-claim.test.ts", "result": "19 pass / 0 fail", "matches_report": true },
+    { "what": "apps/web lib/registers/staff-advances-doors.test.ts", "result": "10 pass / 0 fail", "matches_report": true },
+    { "what": "apps/web components/accounting/staff-expense-claim-form.test.tsx", "result": "15 pass / 0 fail", "matches_report": true },
+    { "what": "apps/web tests/firm-scope-db-pins.test.ts + e2e/e2e-fixture-ownership.test.ts (shared files, not separately cited in fix report)", "result": "66 pass / 0 fail / 0 skipped", "matches_report": "n/a, additional check" },
+    { "what": "apps/web node scripts/run-tests.mjs (whole unit suite)", "result": "4998 tests, 4996 pass / 0 fail / 2 skipped", "matches_report": true },
+    { "what": "pnpm typecheck (repo root)", "result": "packages/runtime Done, apps/web Done", "matches_report": true },
+    { "what": "CI=true GITHUB_ACTIONS=true pnpm lint (repo root)", "result": "exit 0", "matches_report": true },
+    { "what": "node scripts/check-frozen-workflows.mjs", "result": "OK, 312 frozen files, no manifest diff", "matches_report": true },
+    { "what": "node packages/runtime/scripts/check-parts-parity.mjs", "result": "OK", "matches_report": true },
+    { "what": "pnpm --filter @clara/web e2e staff-expense-claim-walk on 3510/3511/3512", "result": "14 passed, including t931", "matches_report": true },
+    { "what": "grep -rn advanceIdPlaceholder apps/ packages/", "result": "no matches", "matches_report": true },
+    { "what": "grep -rn isOutstandingAdvance apps/web/lib apps/web/components", "result": "single definition in lib/registers/staff-advances-doors.ts, imported by both staff-expense-claim-form.tsx and staff-advances-register.tsx; no duplicate predicate remains", "matches_report": true },
+    { "what": "git diff 84cf37952...HEAD -- CONTEXT.md and git show <fix commits> --stat -- CONTEXT.md", "result": "CONTEXT.md's only change is from the earlier b3e6ff43d commit (#931 feature slice); neither fix-round commit touches it, confirming the report's 'no change needed and none made' claim", "matches_report": true },
+    { "what": "packages/db/README.md grep for 81000 / samelabel / shortfall_cents", "result": "present at the cited passages, confirming the docs update the report claims", "matches_report": true },
+    { "what": "Read packages/db/tests/staff-expense-claim-allocations.test.mjs around p931.sum/p931.twice/p931.claimant", "result": "each is its own dedicated cell driving a distinct constraint (exact_sum, distinct, not_this_claimant) with its own assertions, confirming STD-931-1's coverage-gap concern is closed, not just claimed", "matches_report": true },
+    { "what": "git show 95335ed5b -- apps/web/lib/work/staff-expense-claim.ts", "result": "allocationsAreApportioned and the restructured claimAllocations branch match the fix report's description verbatim", "matches_report": true },
+    { "what": "git log cd2925391..HEAD and git show <both fix commits> --stat", "result": "exactly the two commits the fix report names, at the head it names, touching exactly the files it lists", "matches_report": true }
+  ],
+  "findings": [],
+  "still_open_by_design": [
+    {
+      "id": "SPEC-931-B / A931-2",
+      "severity": "minor",
+      "status": "open, correctly escalated",
+      "ticket": 931,
+      "note": "The ownership arm (samelabel matching across two enrolments) is pinned by p931.claimant.samelabel and p931.accounts, and its cost is measured: removing arm (b) reds both cells, making the ticket's own listed default unreachable. This is a product/scope ruling the implementer cannot make unilaterally. Not a defect; does not block accept."
+    },
+    {
+      "id": "SPEC-931-D",
+      "severity": "note",
+      "status": "open, correctly deferred",
+      "ticket": 931,
+      "note": "AC5's chatTurn_v22 successor contract stands as written in wave4-lane02-ticket931.md; the cut happens at end of wave 4 per WORK-ORDER.md addendum. Nothing in this round's diff touches a frozen workflow (freeze-lint 312 files, no manifest diff, verified above)."
+    },
+    {
+      "id": "SPEC-931-E",
+      "severity": "note",
+      "status": "open, owed to integrator",
+      "ticket": 931,
+      "note": "True from-scratch 0001 to 0301 chain on a disposable cluster is explicitly the integrator's job per RIG.md; lanes never run a second from-scratch chain on their own cluster."
+    },
+    {
+      "id": "A931-4, A931-5, A930-1, A931-6",
+      "severity": "note",
+      "status": "open, recorded as follow-ups",
+      "ticket": "930/931",
+      "note": "Listed in the fix report's 'Still owed to someone else' section as notes not in this round's brief; not silently dropped."
+    }
+  ]
+}

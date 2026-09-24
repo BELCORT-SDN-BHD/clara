@@ -1,0 +1,144 @@
+{
+  "axis": "spec",
+  "wave": 4,
+  "lane": 6,
+  "branch": "riders/w4-lane06",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\656",
+  "fixed_point": "cd2925391",
+  "diff": "git diff cd2925391...HEAD",
+  "commits": [
+    "e79054395 fix(db): #1031 Knowledge refuses a financial-year-end pair that cannot exist in the recorded month",
+    "f3a4147ab fix(db): #1032 the firm-setup TIN item is required-or-optional, not seeded-or-not",
+    "363dbbf8f fix(web): #1032 firm-setup renders TIN's required-or-optional marking",
+    "4f703f0d5 fix(db): #1038 withdraw create_client's human grant, route every caller through root+jwt",
+    "47d281c0f test(db): #1038 census proves no unwalled granted client minter remains",
+    "3275d5dcf docs(db): #1038 record create_client's grant withdrawal"
+  ],
+  "spec_sources": [
+    "gh issue view 1031 --repo BELCORT-SDN-BHD/clara (body is the only Agent Brief; zero comments)",
+    "gh issue view 1032 --repo BELCORT-SDN-BHD/clara --comments (owner ruling 2026-09-23, Option A, carries the newest Agent Brief)",
+    "gh issue view 1038 --repo BELCORT-SDN-BHD/clara (body is the Agent Brief; zero comments)"
+  ],
+  "verdict": "reject",
+  "summary": "Three tickets, one blocker and two shipped-red regressions. #1038 withdrew clara.create_client's human grant but only moved the packages/db fixtures: packages/runtime/tests/relay-fixtures.mjs's buildFirm still mints its client through the withdrawn grant and now fails 42501 (driven), and the AC1 census sweeps packages/db/tests only, so it cannot see it. #1031's pair rule reads the sibling year-end row without its applies_when, so an impossible pair can still be stored live (driven) and a possible one can be refused (driven); it also leaves knowledge-retrieval.test.mjs red. #1032 is faithful to the owner's Option A ruling but leaves firm-setup-polish.test.mjs red and proves only half of AC4's rendering clause.",
+  "findings": [
+    {
+      "id": "L06-SPEC-01",
+      "ticket": 1038,
+      "severity": "blocker",
+      "kind": "requirement-missing",
+      "title": "The runtime test fixtures were never moved off clara.create_client: relay-fixtures.mjs's buildFirm now fails 42501 on any database carrying 0316",
+      "spec_line": "#1038 AC1: \"No test fixture calls the direct door; a census over the fixtures proves it.\"  AC3: \"The whole database suite passes with the fixtures moved (every battery that mints a client).\"  Desired behavior: \"The shared fixtures mint their clients through a fixture helper that calls the walled entrance (or a fixture-only door that no human role can execute)\".",
+      "evidence": "0316_create_client_human_grant_withdrawn.sql:130 revokes EXECUTE from clara_authenticated. packages/runtime/tests/relay-fixtures.mjs:119 still does humanQuery(sub, \"select clara.create_client(p_name => $1, p_op_key => $2) as receipt\", ...), and relay-fixtures.mjs:414 calls it from buildFirm(), which 90 files under packages/runtime/tests reference. DRIVEN against the lane database (PGPORT=55746 clara_l06, which carries 0316): a scratchpad script importing relay-fixtures' own buildFirm printed 'buildFirm FAILED: code=42501 message=permission denied for function create_client'. Two further direct human-grant call sites: packages/runtime/tests/wave-b-wiki-projection-consumer.test.mjs:282 and :344. The AC1 census cell (p899.census.no_test_file_calls_create_client_directly, client-birth-wall.test.mjs:571-599) walks packages/db/tests only, so it passes while the runtime batteries are broken. The ticket report (reports/wave4-lane06-ticket1038.md) names twelve direct callers, all under packages/db, and never mentions packages/runtime.",
+      "required_fix": "Move packages/runtime/tests/relay-fixtures.mjs's createClient (and the two direct calls in wave-b-wiki-projection-consumer.test.mjs) onto the same root+jwt idiom rig-fixtures.mjs's createClientRaw uses, and widen the AC1 census sweep to cover packages/runtime/tests as well as packages/db/tests, so a call site outside packages/db can never hide from it again. Then run the runtime db batteries that call buildFirm."
+    },
+    {
+      "id": "L06-SPEC-02",
+      "ticket": 1031,
+      "severity": "major",
+      "kind": "requirement-implemented-wrongly",
+      "title": "The pair rule reads the sibling year-end row without its applies_when, so an impossible pair can still land live and a possible one can be refused",
+      "spec_line": "#1031 Desired behavior: \"Capturing either half of the year-end pair validates the pair: an impossible day for the recorded month is refused ... A pair that is possible is accepted exactly as today.\"  Key interfaces: \"the pair rule lives once and both keys consult it.\"",
+      "evidence": "0310_knowledge_fye_pair_wall.sql:178-184 (clara._knowledge_assert_fye_pair) selects the sibling with 'where r.state = live and r.scope_kind = client and r.client_id = p_client and r.knowledge_key = v_sibling_key' - no applies_when / applies_when_digest predicate and no ORDER BY, although uq_knowledge_live (0192:512) is partial over (scope, subject, key, APPLICABILITY), so one client can hold several live rows of one key at different applicabilities; apps/web/components/registers/knowledge-panel.tsx:27 names that state explicitly (\"contradictory - TWO live records of one key with different applicability\"). DRIVEN through clara.capture_knowledge as a bookkeeper on clara_l06: (a) FALSE ACCEPT - month=1 @ applies_when {}, month=2 @ {\"from_fy\":2025}, then day=31 @ {\"from_fy\":2025} was ACCEPTED and is live, leaving financial_year_end_month=2 and financial_year_end_day=31 at the same applicability, the exact pair clara.set_client_fy_end refuses; (b) FALSE REFUSAL - month=2 @ {}, month=1 @ {\"from_fy\":2025}, then day=31 @ {\"from_fy\":2025} (January 31, a real date) was REFUSED CLR37 with detail {\"month\":2,\"day\":31}, naming a month that belongs to a different applicability. fd.06-fd.10 all use the default applies_when {} and so never enter this branch.",
+      "required_fix": "Make the sibling read applicability-scoped - match on the same applies_when_digest the incoming capture computes (clara._knowledge_applies_when_digest), the way uq_knowledge_live and clara.get_knowledge_applicability already answer per applicability - and add a cell that captures a month under one applies_when and the day under another."
+    },
+    {
+      "id": "L06-SPEC-03",
+      "ticket": 1031,
+      "severity": "major",
+      "kind": "regression-shipped-red",
+      "title": "The 0310 recut of _knowledge_capture_core leaves knowledge-retrieval.test.mjs red on the branch",
+      "spec_line": "#1031 AC5: \"Ships as a new migration at the next free number; no applied migration is edited; every recut body is pinned by a sha measured on the rig.\" (Work order rule 8: the gates before you report.)",
+      "evidence": "RE-RUN on clara_l06 with the full gate chain: node --test --test-concurrency=1 $GATES tests/knowledge-retrieval.test.mjs -> 'not ok 31 - p658.census.no_recut', 'clara._knowledge_capture_core(...) is NOT at its measured pre-0230 body', actual 98bcbe3589c1813da4bbdb7f5486db0d4996e831050a86cd810e25d28554ce06, expected 2c8526b82d54ac0aa49c77c3be277be5ecd9cad73df0fec63908d67a0681b01b (the expected value is exactly 0310's own prestate pin for that body). The file was not in #1031's gate list (reports/wave4-lane06-ticket1031.md names knowledge-fye-day, knowledge-firm-defaults, knowledge-onboarding-promotion, operation-census, rig-isolation). It is named as a follow-up in #1038's report but was left unfixed on the branch.",
+      "required_fix": "Teach p658.census.no_recut to tolerate #1031's own named 0310 recut the same way it already tolerates #885's 0268 recut, and re-run the file with the gate chain."
+    },
+    {
+      "id": "L06-SPEC-04",
+      "ticket": 1032,
+      "severity": "major",
+      "kind": "regression-shipped-red",
+      "title": "Seeding tin unconditionally leaves firm-setup-polish.test.mjs red on the branch",
+      "spec_line": "#1032 AC5: \"The cells #891 pinned on the seeded-or-not shape are rewritten to the new shape and pass; the eligibility item's cells pass unchanged.\" (Work order rule 8.)",
+      "evidence": "RE-RUN on clara_l06 with the full gate chain: node --test --test-concurrency=1 $GATES tests/firm-setup-polish.test.mjs -> 'not ok 1 - p895.seed.noop', AssertionError '14 !== 13' at firm-setup-polish.test.mjs:163. Cause: 0311 SS C now seeds every row whose applicability is not inapplicable/undetermined, and tin never reads either any more, so a first reconciliation seeds 14 rows where the cell pins 13. #1032's own gate list (reports/wave4-lane06-ticket1032.md) covers firm-setup-applicability, firm-setup, firm-setup-user-notes and firm-setup-education-tips only; the sibling counts in firm-setup.test.mjs (p648.seed.reconcile 10->11, p648.seed.empty 13->14) were updated, this one was not.",
+      "required_fix": "Update p895.seed.noop's seeded-count literals to the post-0311 catalogue the same way p648.seed.reconcile/p648.seed.empty were updated, and re-run firm-setup-polish.test.mjs with the gate chain."
+    },
+    {
+      "id": "L06-SPEC-05",
+      "ticket": 1032,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "AC4's \"and its sentence\" is proved only for the REQUIRED tin; the optional branch's sentence is never rendered or asserted",
+      "spec_line": "#1032 AC4: \"The checklist renders the optional marking and its sentence, and the bounded group walk offers an optional pending item; rendered cells prove both\". Desired behavior: \"otherwise it is optional and marked as such, with the reason in one sentence.\"",
+      "evidence": "apps/web/components/firm-setup/firm-setup-checklist.test.tsx:1024 is named 'fs.web.18 an optional tin renders its Optional marking and note sentence' but asserts only /Optional/, the absence of /Not applicable/ and the walk's count and step list (lines 1047-1064); it never opens tin's form and never asserts TIN_NOTE. The checklist ROW does not render item.note at all - firm-setup-checklist.tsx:647 is the education-tip branch, and the accounting-fact row (lines 678-772) renders the question, the badges, the settled answer, answered_at and the controls, with the note reaching the screen only through FirmSetupItemForm (firm-setup-item-form.tsx:431) once the form is open. The note sentence is asserted only in fs.web.19, the REQUIRED branch.",
+      "required_fix": "In fs.web.18, open the optional tin's form and assert the accountant sentence there (as fs.web.19 does), or rename the cell so it no longer claims an assertion it does not make."
+    },
+    {
+      "id": "L06-SPEC-06",
+      "ticket": 1032,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "A firm whose setup plan is already committed never gets the TIN item, so the dead end the ticket exists to remove survives for those firms",
+      "spec_line": "#1032 Desired behavior: \"Every firm is seeded the TIN item.\"  Context: \"a sub-threshold firm that has registered for MyInvois voluntarily cannot record its TIN anywhere\" - read against the standing beta ruling that nothing is dark.",
+      "evidence": "0311 SS C recuts clara.seed_firm_setup_plan but backfills no existing plan; the door refuses outright when the plan is not open ('if p.state <> open then raise ... firm_setup_not_open'). The live catalogue carries no reopen door - select proname from pg_proc ... proname like '%firm_setup%' on clara_l06 returns _assert_firm_setup_answer, _firm_setup_applicability, _firm_setup_bump, _firm_setup_plan, answer_firm_setup_item, commit_firm_setup, defer_firm_setup_item, dismiss_firm_setup_tip, get_firm_setup, seed_firm_setup_plan - and the checklist guards every write control behind !committed. So a firm that committed its setup below the RM1M threshold before 0311 still has no tin row and no path to one. Neither the migration header nor reports/wave4-lane06-ticket1032.md mentions this population.",
+      "required_fix": "Either backfill the tin plan item for committed firm-setup plans in 0311 (or a follow-up migration), or state the limitation explicitly in the migration header and the ticket report and file the follow-up, so the beta 'nothing dark' gap is recorded rather than silently left."
+    },
+    {
+      "id": "L06-SPEC-07",
+      "ticket": 1031,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "The brief's third named impossible case - 29 February outside a leap year - is still accepted, and the residual is not disclosed",
+      "spec_line": "#1031 Current behavior: \"A day that is impossible for the month already recorded (31 for a 30-day month, 30 or 31 for February, 29 for February when the pair is not tied to a leap year) is accepted and stored.\"  Desired behavior: \"an impossible day for the recorded month is refused\".",
+      "evidence": "DRIVEN on clara_l06 through clara.capture_knowledge as a bookkeeper: month=2 then day=29 -> both 'captured', no refusal. The rule copied from clara.set_client_fy_end (verified live off pg_proc.prosrc: '... or (v_month = 2 and v_day > 29) or (v_month in (4,6,9,11) and v_day > 30)') admits 29 February, so refusing it in Knowledge alone would create the very disagreement #1031 closes, and the client-row door is out of this ticket's scope. The choice is defensible - but 0310's header and reports/wave4-lane06-ticket1031.md never name this case, so a reader is left believing all three enumerated cases are closed.",
+      "required_fix": "Name the 29-February case in 0310's header and the ticket report as a deliberate residual (with the reason: the client-row door admits it and is out of scope), and file a follow-up if the owner wants the pair tied to a year."
+    },
+    {
+      "id": "L06-SPEC-08",
+      "ticket": 1031,
+      "severity": "minor",
+      "kind": "behaviour-not-asked-for",
+      "title": "The onboarding promotion path now aborts wholesale on an impossible pair, where the brief asked for it to be unchanged",
+      "spec_line": "#1031 Key interfaces: \"The onboarding promotion path: unchanged in behaviour, covered by the existing equality cell.\"",
+      "evidence": "DRIVEN on clara_l06: a committed onboarding plan holding fye=2, fye_day=31 and entity_type=sdn_bhd, promoted through clara.promote_plan_answers_to_knowledge, now raises CLR37 fa_particulars_invalid and promotes NOTHING - select ... from clara.knowledge_records where client_id = ... and state='live' returns zero rows, so entity_type, which has nothing to do with the year end, is lost too. The door's own per-item skipped / withheld lists exist for exactly this kind of per-key problem and are bypassed, because the rule raises from inside the nested clara._knowledge_capture_core. The interview's own cross-field validator (packages/runtime/workflows/interview.v4.questions.ts:70-89, validateFyeDay judged against 'fye') makes such a plan unlikely, so this is narrow - but it is a behaviour change the brief forbade, and neither 0310's header nor the ticket report names it.",
+      "required_fix": "Either withhold just the offending key (the door's own withheld list) rather than aborting the promotion, or state and test the chosen all-or-nothing outcome in 0310's header and a cell."
+    },
+    {
+      "id": "L06-SPEC-09",
+      "ticket": 1038,
+      "severity": "minor",
+      "kind": "requirement-reinterpreted",
+      "title": "AC1's letter is not met: the shared fixture still calls the direct unwalled door, and the census exempts it by name",
+      "spec_line": "#1038 AC1: \"No test fixture calls the direct door; a census over the fixtures proves it.\"  Desired behavior: \"The shared fixtures mint their clients through a fixture helper that calls the walled entrance (or a fixture-only door that no human role can execute)\".",
+      "evidence": "rig-fixtures.mjs:84 (createClientRaw) still issues 'select clara.create_client(p_name => $1, p_op_key => $2)', reached as the postgres superuser with a hand-set jwt claim, and client-birth-wall.test.mjs:562-566 exempts packages/db/tests/rig-fixtures.mjs from the AC1 census by name. So fixture-minted clients still bypass the identity-collision wall #899 put on every product entrance, and the batteries do not exercise open_client_onboarding. This is within the brief's parenthetical once the grant is gone (create_client is then a door no human role can execute), but reports/wave4-lane06-ticket1038.md presents AC1 as met without saying that it is met by reinterpretation, and #899's own follow-up named the other route (\"migrating the 48+ test files ... onto open_client_onboarding\").",
+      "required_fix": "State plainly in the ticket report and in client-birth-wall.test.mjs's own header that AC1 is satisfied by the parenthetical (a door no human role can execute) and not by the literal clause, so the integrator and the owner can accept or reject that reading knowingly."
+    },
+    {
+      "id": "L06-SPEC-10",
+      "ticket": 1038,
+      "severity": "note",
+      "kind": "coverage-reduction",
+      "title": "create_client drops out of wb-g-opkeys.test.mjs's op-key law with no replacement",
+      "spec_line": "#1038 Out of scope: \"Any change to the walled entrances' own rules.\" (No AC covers the op-key census.)",
+      "evidence": "packages/db/tests/wave-b/wb-g-opkeys.test.mjs:209-214 - the create_client mutation fixture entry was removed because the file's derived writer inventory is grant-derived and create_client is no longer granted. G4/[R2-F8] (\"EVERY catalog writer invoking _reserve_op has a mutation fixture\") therefore no longer covers create_client, which still calls clara._reserve_op. A necessary consequence of the revoke, disclosed in the ticket report, but the verb's op-key idempotence is now untested by that law.",
+      "required_fix": "None required by the ticket. Worth a follow-up so a writer that keeps _reserve_op but loses its grant is still covered somewhere."
+    }
+  ],
+  "already_satisfied_claims_checked": [
+    "#1031 report: 'fd.06 ... failed before the fix for the right reason' - the report discloses that this was proved by a post-hoc vacuity control (breaking the live clara._knowledge_assert_fye_pair body and restoring it) rather than a literal red-before-green run. Re-run on the branch: knowledge-fye-day.test.mjs 10/10 pass. Accepted as disclosed.",
+    "#1032 report: 'p891.mpers.entity_type and p891.answer.survives are byte-for-byte unedited and PASS' - confirmed by git diff cd2925391...HEAD -- packages/db/tests/firm-setup-applicability.test.mjs (neither cell appears in the diff) and by re-running the file (5/5 pass).",
+    "#1038 report: 'the operator script never rode the clara_authenticated grant' - confirmed: packages/db/scripts/onboard-rpr.mjs:347 runs the call on a superuser connection with a jwt GUC, with no 'set role clara_authenticated'.",
+    "#1038 report AC3 ('the whole database suite passes') - NOT true on the branch: firm-setup-polish.test.mjs and knowledge-retrieval.test.mjs are red (L06-SPEC-03, L06-SPEC-04). A full pnpm test over packages/db was started during this review and had reached ~1,131 cells with no further failures when the review closed; it is reported as partial, not clean.",
+    "#1032 report: 'no stale copy of the old tin note remains' - confirmed by grep: the old sentence survives only in 0258 (an applied migration, correctly untouched), in 0311's own prestate check, and in prose."
+  ],
+  "re_run_evidence": [
+    "node --test --test-concurrency=1 $GATES tests/firm-setup-applicability.test.mjs tests/knowledge-fye-day.test.mjs tests/client-birth-wall.test.mjs -> 30 pass, 0 fail",
+    "node --test --test-concurrency=1 $GATES tests/firm-setup.test.mjs tests/firm-setup-user-notes.test.mjs tests/firm-setup-education-tips.test.mjs tests/activity-feed.test.mjs tests/knowledge-records.test.mjs tests/knowledge-firm-defaults.test.mjs tests/knowledge-onboarding-promotion.test.mjs tests/operation-census.test.mjs -> 137 pass, 0 fail",
+    "node --test --test-concurrency=1 $GATES tests/firm-setup-polish.test.mjs tests/knowledge-retrieval.test.mjs -> 31 tests, 29 pass, 2 FAIL (p895.seed.noop, p658.census.no_recut)",
+    "scratchpad probes driving clara.capture_knowledge, clara.promote_plan_answers_to_knowledge and packages/runtime/tests/relay-fixtures.mjs's buildFirm against 127.0.0.1:55746 clara_l06 (see the evidence fields above)"
+  ],
+  "not_verified": [
+    "apps/web e2e firm-setup-walk.spec.ts (the lane reports 5 pass on its own triple); the text literal it asserts matches apps/web/e2e/firm-setup-mock.mjs and 0311's backfill, checked by grep, but the browser walk was not re-run in this review.",
+    "pnpm typecheck and CI=true GITHUB_ACTIONS=true pnpm lint were not re-run (standards axis).",
+    "A from-scratch 0001->0316 chain (the integrator's job on a disposable cluster)."
+  ]
+}

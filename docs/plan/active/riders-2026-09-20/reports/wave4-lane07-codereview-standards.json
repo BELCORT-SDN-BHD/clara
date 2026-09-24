@@ -1,0 +1,62 @@
+{
+  "axis": "standards",
+  "lane": "wave4-lane07",
+  "fixed_point": "cd2925391",
+  "head_at_review": "49bfad4196367125e47ccd3a1bb034a84c7e985b",
+  "tickets": [1041, 1035, 1033, 877],
+  "sources_read": [
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md (incl. wave-2 and wave-3 addenda)",
+    "docs/plan/active/riders-2026-09-20/RIG.md (incl. wave-2/3 addenda)",
+    "AGENTS.md",
+    "CONTEXT.md (Rollback preflight / Runtime contract marker / Body roster / Stranded body / Operation receipt entries)",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    ".claude/skills/code-review/SKILL.md (smell baseline)",
+    "gh issue view 1041/1035/1033/877 --json title,body,comments",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane07-ticket1041.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane07-ticket1035.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane07-ticket1033.md",
+    "docs/plan/active/riders-2026-09-20/reports/wave4-lane07-ticket877.md",
+    "packages/db/tests/README.md, packages/runtime/README.md (diffs)",
+    "git log cd2925391..HEAD --stat --reverse (all 13 commits, full diffs read)"
+  ],
+  "verified_by_rerun": [
+    "packages/runtime: node --test tests/ready.test.mjs (lane env) -> 25/25 pass, 0 fail (matches #1033 report exactly)",
+    "packages/runtime: node --test tests/runtime-contracts.test.mjs -> 2/2 pass",
+    "packages/runtime: node --test --test-concurrency=1 tests/rollback-preflight.test.mjs (lane env) -> 42 tests / 20 pass / 0 fail / 22 skipped (matches #1035 report exactly)",
+    "packages/runtime: node --test tests/l9-build-info.test.mjs -> 17/17 pass",
+    "packages/runtime: node scripts/check-frozen-workflows.mjs -> OK, 312 frozen files, 55 use-workflow modules, 3 retired, no manifest diff",
+    "packages/runtime: node scripts/check-parts-parity.mjs -> OK",
+    "packages/db (lane env, gate chain via scripts/print-gate-chain.mjs): the 9 touched/added test files -> 31 tests / 26 pass / 0 fail / 5 skipped (matches #1041 report exactly)",
+    "packages/db: same 9 files + operation-census.test.mjs + rig-isolation.test.mjs, no reset flags -> 64 tests / 58 pass / 0 fail / 6 skipped, i.e. the reported 31/26/0/5 plus 33/32/0/1 exactly",
+    "pnpm typecheck (repo root) -> exit 0",
+    "CI=true GITHUB_ACTIONS=true pnpm lint (repo root) -> exit 0",
+    "git diff cd2925391...HEAD -- packages/db/migrations -> empty (no migration in this lane, as every ticket report claims)",
+    "git diff cd2925391...HEAD --stat -- apps/web -> empty (no apps/web touch, as every ticket report claims)",
+    "git diff cd2925391...HEAD -- .github/workflows/ci.yml -> empty, and the existing schedule/workflow_dispatch gating on db-slice-frontiers and closed-wave-drills (ci.yml:12-15,433,471) predates this lane -- corroborates #1041 AC5's 'already satisfied, no change made' claim",
+    "grep for RUNTIME_CONTRACTS 'evidence' literals: 'out?.refused === true' present at packages/runtime/lib/intake.mjs:217 and 'r?.status === \"parked\"' present at packages/runtime/lib/reconciler-fa.mjs:172 -- the markers are not promises, the vacuity control's premise holds",
+    "packages/db/tests/fa-authority-sign-compat.mjs:1 and migrations/0227_depreciation_history.sql on disk confirm #1041's correction of the ticket's own '#932's 0277' attribution to '#651's 0227'",
+    "all reviseParticulars(...) call sites (28 across packages/db/tests) already `await` it, so #1041's sync->async change to that fixture function is not a silent breakage"
+  ],
+  "verdict": "accept",
+  "summary": "All four tickets are runtime/CI/test-infrastructure only, correctly take no migration (confirmed empty diff on packages/db/migrations), and correctly leave apps/web untouched. Every numeric claim in the four per-ticket reports that could be re-run on this rig reproduced exactly on independent re-run (ready.test.mjs 25/25, rollback-preflight.test.mjs 42/20/0/22, the nine #1041 db test files 31/26/0/5, the combined operation-census+rig-isolation run, check-frozen-workflows, check-parts-parity, typecheck, and CI-mode lint), and the load-bearing vacuity controls each report describes (the marker-evidence strings actually present in lib/intake.mjs and lib/reconciler-fa.mjs; the #651/0227 vs '#932/0277' migration-attribution correction; every reviseParticulars call site already awaiting the now-async fixture) hold up against the source tree. Commit structure follows /tdd's vertical-slice discipline: each of the 13 commits pairs a described defect with its own fix and test(s) rather than separating a batch of red tests from implementation, commit messages are scoped to one ticket each and end with the house Co-Authored-By trailer, and #1041's five commits in particular are each a single, independently-measured defect (drill DB-name grammar, the x41 change_class frontier-compat, the two d-b1 censuses, the gate-chain/cell-floor mechanism, the 0041 drill's name-family fix). Docs are updated in the same commits per rule 9 (packages/db/tests/README.md, packages/runtime/README.md, and one minimal, correctly-positioned CONTEXT.md hunk for #1035's new 'Runtime contract marker' term, respecting the shared-file rule). Test quality is high: the #1035 cells are pure (an explicit frontier, a stub query) exactly where the module's own design says they should be, the #877 leg reads the admission outcome off the door's own durable `clara.op_receipts` idempotency receipt rather than the population-mismatched `sweep_run_items.outcome` column after first proving by direct measurement that the latter cannot carry an 'admitted' outcome at all, and the #1033 repro is a genuine bounded, deterministic reproduction of the named race (shown red for the right reason, then green, then re-run three times) rather than a widened timeout. No hard standards violation was found. Two low-severity, judgement-call findings are recorded below; neither blocks acceptance.",
+  "findings": [
+    {
+      "id": "F1",
+      "ticket": 1035,
+      "severity": "minor",
+      "kind": "smell-duplicated-code",
+      "title": "printFrontier()'s per-violation branch duplicates frontierRefusalLines()'s requirement===\"contract\" logic instead of reusing it",
+      "evidence": "packages/runtime/scripts/rollback-preflight.mjs's printFrontier() still has its own inline ternary — `v.requirement === \"contract\" ? '...requires the ${v.contract} door contract, which the target does NOT declare' : '...requires ${v.body}, which the target does NOT carry'` — right beside the new packages/runtime/lib/rollback-preflight.mjs export frontierRefusalLines(), which branches on the identical `v.requirement === \"contract\"` condition to build a related but differently-worded line. The commit that added frontierRefusalLines (36d0b3355) explicitly cites this file's own stated design law for doing so — 'a second inline copy of a rule drifts from the verdict that used it', the same sentence refusalFooterLines and taskIsStranded already justify — but did not apply that same consolidation to printFrontier's own violation loop, which is a second, un-consolidated place carrying the same branch.",
+      "required_fix": "Judgement call, not required for acceptance. Either factor a small shared 'describe one violation' helper both printFrontier and frontierRefusalLines call, or fold printFrontier's per-violation line into a (verbosity-flag) call to frontierRefusalLines, so the file's own anti-drift argument covers both output paths it currently applies to only one of."
+    },
+    {
+      "id": "F2",
+      "ticket": 1035,
+      "severity": "note",
+      "kind": "tdd-slice-size",
+      "title": "Commit 36d0b3355 groups a large batch of new cells with a substantial implementation rewrite in one commit",
+      "evidence": "git show 36d0b3355 --stat: 4 files, +491/-75, adding 9 new test() cells to packages/runtime/tests/rollback-preflight.test.mjs in the same commit that generalises FRONTIER_BODY_RULES -> FRONTIER_RULES, rewrites verdictOver's reason derivation, rewrites the whole CLI's target-resolution and refusal-printing logic, and edits two-build-cutover-e2e.mjs. WORK-ORDER.md rule 4 asks for 'one slice at a time... commit per green slice or per small group of slices'; this is a single commit covering what reads as several vertical slices (the rule-table shape, the CLI's --supported-contracts handling, the printed refusal text, the two-build drill wiring).",
+      "required_fix": "Not required for acceptance — this is not the horizontal-slicing anti-pattern the skill actually forbids (tests and implementation land together here, not as a separate all-red-tests-first commit), and the work order explicitly permits 'a small group of slices' per commit; the pieces in this commit are also difficult to green independently since the CLI and the test file both depend on the same table shape. Recorded as a judgement call on slice granularity, not a rework item."
+    }
+  ]
+}
