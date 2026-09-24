@@ -1629,7 +1629,7 @@ test("S8 · a stated escalation surfaces before its date, offering the revision 
   const sub = world.users.alice;
   // Effective 30 days from today, so "before its effective date" is the case under test.
   const soon = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
-  const { client, doc, planId } = await escalatingTenancy(sub, { effectiveFrom: soon });
+  const { doc, planId } = await escalatingTenancy(sub, { effectiveFrom: soon });
 
   const offer = await escalationOffer(sub, doc.documentId);
   assert.equal(offer.pending, true, `the escalation is pending: ${JSON.stringify(offer)}`);
