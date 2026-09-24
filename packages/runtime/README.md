@@ -1817,6 +1817,37 @@ because the fan-out cannot substitute an identity (`clara._work_door_ctx` hashes
 The blocked parent is logged by name and `clara.get_intake_batch` reports the same condition to the
 human as `cancel_blocked`.
 
+### #1030 — the source-correction re-derivation belt (0321)
+
+`lib/reconciler-work-source-correction.mjs` is one contained belt in `runReconcilerSweep`, after
+the accounting-work belt and before the trace prune, feature-detected per cycle on
+`clara.source_correction_rederivations(integer)` so an image that predates 0321 boots DORMANT.
+
+**What it does.** #885 retires every Work parked on a question about a document fact somebody
+corrects and admits nothing in its place, because deriving a basis from a corrected reading is an
+interpretation act that cannot be performed in SQL. This belt performs it: it reads the backlog of
+retirements still owed a successor, re-derives a basis through `lib/source-correction-rederive.mjs`
+(a pure function — figures off the document's LIVE facts, shape off the retired instruction),
+admits the successor through `clara.admit_journal_work` **for the person who made the correction**
+under the correction's own op key, and settles the correction through
+`clara.settle_source_corrected_rederivation`. Where the mapping is not obvious it DECLINES by name
+and records the decline, which leaves the estate exactly where #885 left it.
+
+**Why a belt and not the retired run**, measured rather than preferred: the retirement puts the
+parked task into `cancel_requested`, and the control listener then ABORTS that engine run as well
+as resuming its hook — so the retired run is not guaranteed to be resumed and a lane built on its
+resume would re-derive *sometimes*.
+
+**The crash window is safe by construction.** A crash between the admission and the settlement
+leaves a successor admitted and unclaimed; the next sweep reads the SAME correction, re-derives the
+same basis from the same live facts and re-admits under the SAME intent key, which
+`clara.admit_journal_work` answers as a REPLAY with the original work id. That is the whole reason
+the successor's intent key IS the correction's op key.
+
+Counters: `sourceCorrectionAdmitted`, `sourceCorrectionDeclined`, `sourceCorrectionFailed`,
+`sourceCorrectionDormant`, `sourceCorrectionOk`. A probe that THROWS reports `Ok: false` with
+`Dormant: false` — "absent" and "unreadable" must not say the same thing.
+
 **#1027 — LEG 4 CONVERGES BEFORE IT JUDGES.** The cross-firm poison leg used to make two
 single-shot observations (one sweep, one read, twice) of facts the World produces asynchronously,
 and it discarded its own settle failures. Both observations reddened CI at random, on `main` and on
