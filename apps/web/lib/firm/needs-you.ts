@@ -68,16 +68,42 @@
 //     hand-booked entry, or that entry reconciled through the ordinary matcher) — no dismissal
 //     act. It reuses the EXISTING shape unchanged: `id`/`filing_id` carry the run's own filing,
 //     `entry_id` the posted payroll entry itself. No new counts.* key and NO new json key.
-// The LIVE row_kind set is therefore THIRTEEN values, not the four the 0011 body
+//   - 0299_agreement_contract_acquisition.sql (#948, riders wave 4 lane 01) — adds
+//     row_kind='agreement_posting_blocked', the THIRTEENTH kind: ONE row per filed agreement
+//     contract that has been READ and whose acquisition did not post, INCLUDING a non-financing
+//     agreement, which will never post and says so rather than leaving a person to wonder.
+//     DERIVED from clara._agreement_posting_verdict; no counts.* key and no new json key.
+//   - 0300_tenancy_terms_rent_plan.sql (#949, riders wave 4 lane 01) — adds TWO kinds, the
+//     FOURTEENTH and the FIFTEENTH: 'rent_payable_unsettled' (a month of rent recognised on a
+//     confirmed rent plan whose payment has not appeared) and 'rent_escalation_pending' (a
+//     recorded escalation the plan has not taken yet, surfaced sixty days ahead of its date).
+//     TWO, against the wave rule's "one new row kind per ticket", and the deviation is recorded
+//     rather than quiet: the ticket's AC4 and AC6 name two DIFFERENT questions that clear at
+//     different moments by different acts, so one row_kind could only have carried them by
+//     making the row's own sentence conditional on which of two states produced it. Both edits
+//     are additive, at the end of the list, with nothing reformatted or renamed, so the
+//     multi-lane merge risk the rule exists to control is not raised. No counts.* key and no
+//     new json key from either.
+// The LIVE row_kind set is therefore FIFTEEN values, not the four the 0011 body
 // alone would suggest: draft, uncoded_filing, open_question, coding_task,
 // compliance_watch, lint_finding, fixed_asset_incomplete, staff_advance_incomplete,
 // work_question, depreciation_authority_pending, payroll_posting_blocked,
-// payroll_net_pay_unsettled — see REVIEW_QUEUE_ROW_KINDS below, the single source
+// payroll_net_pay_unsettled, agreement_posting_blocked, rent_payable_unsettled,
+// rent_escalation_pending — see REVIEW_QUEUE_ROW_KINDS below, the single source
 // components/firm/needs-you-row.tsx's label lookup is built from (never a hand-cast key path).
+//
+// THE ORDINALS COUNT THE LIVE ARRAY, and they say so because they got it wrong once: 0288
+// (ticket 1012) REMOVED seeding_proposal, so every kind after it moved down one, and the five
+// kinds riders wave 4 lane 01 added were numbered from the pre-0288 base — twelfth through
+// sixteenth for what are in fact the eleventh through the fifteenth entries, while this header
+// still said THIRTEEN. Re-derived here against the array itself (fix round, findings SPEC-18
+// and ADV-09). An ordinal in this file means "its position in REVIEW_QUEUE_ROW_KINDS", nothing
+// else, and the next addition counts the array rather than adding one to the last comment.
 // `counts` carries NINE integers (depreciation_authority_pending adds none — its lane is
 // `needs_you`, so ready/needs_review/needs_you folds it in without a dedicated tally; the
 // retired seeding_proposal added none either, so its removal moves no tally; #946's
-// payroll_posting_blocked and #947's payroll_net_pay_unsettled add none for the same reason as
+// payroll_posting_blocked, #947's payroll_net_pay_unsettled, #948's agreement_posting_blocked
+// and #949's two rent kinds add none for the same reason as
 // depreciation_authority_pending). The envelope ALSO
 // carries top-level `compliance`/`lint` detail objects (per-client SST/lint figures,
 // BYTE-UNCHANGED by 裁-17) that THIS BUILD DOES NOT RENDER — a named, scoped gap (not
@@ -186,7 +212,7 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   // authority's own id (the asset_id/advance_id idiom, not seeding_proposal's aggregation —
   // a client carries at most one proposed authority at a time).
   "depreciation_authority_pending",
-  // #946 (0297_payroll_summary_posting.sql, riders wave 4 lane 01): the TWELFTH kind. ONE row
+  // #946 (0297_payroll_summary_posting.sql, riders wave 4 lane 01): the ELEVENTH kind. ONE row
   // per filed payroll summary that has been READ and whose run did not post — the two readings
   // disagreed, the page did not add up, its month could not be established, an account it needs
   // is not in this client's chart, the period is closed, or that month is already posted.
@@ -199,7 +225,7 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   // folds it into counts.needs_you already), and no new json key, so the two db-side
   // FULL_ROW_KEYS rosters are byte-unchanged.
   "payroll_posting_blocked",
-  // #947 (0298_payroll_net_pay_settlement.sql, riders wave 4 lane 01): the THIRTEENTH kind. ONE
+  // #947 (0298_payroll_net_pay_settlement.sql, riders wave 4 lane 01): the TWELFTH kind. ONE
   // row per posted payroll run whose net pay has not yet left the bank — the Settlement candidate
   // row shape (CONTEXT.md), #657's own, applied to payroll: DERIVED from
   // clara._payroll_net_pay_unsettled's FIFO ledger read, stores nothing, and clears itself the
@@ -210,7 +236,7 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   // (no ambiguity to point at, unlike a duplicate refusal). No counts.* key is minted and no new
   // json key, so the two db-side FULL_ROW_KEYS rosters stay byte-unchanged.
   "payroll_net_pay_unsettled",
-  // #948 (0299_agreement_contract_acquisition.sql, riders wave 4 lane 01): the FOURTEENTH kind.
+  // #948 (0299_agreement_contract_acquisition.sql, riders wave 4 lane 01): the THIRTEENTH kind.
   // ONE row per filed agreement contract that has been READ and whose acquisition did not post —
   // the two readings disagreed, the printed figures do not add up, the signing date could not be
   // established, no fixed-asset account is enrolled (or several are), an account it needs is not
@@ -227,7 +253,7 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   // `needs_you` lane folds it into counts.needs_you already), and no new json key, so the two
   // db-side FULL_ROW_KEYS rosters are byte-unchanged.
   "agreement_posting_blocked",
-  // #949 (0300_tenancy_terms_rent_plan.sql, riders wave 4 lane 01): the FIFTEENTH kind. ONE row
+  // #949 (0300_tenancy_terms_rent_plan.sql, riders wave 4 lane 01): the FOURTEENTH kind. ONE row
   // per month of rent recognised on a confirmed tenancy rent plan whose payment has not appeared
   // on the bank yet -- the Settlement candidate row shape (CONTEXT.md), #657's own, third
   // instance after #947's payroll net pay: DERIVED from clara._rent_payable_unsettled's FIFO
@@ -240,7 +266,7 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   // No counts.* key is minted and no new json key, so the two db-side FULL_ROW_KEYS rosters stay
   // byte-unchanged.
   "rent_payable_unsettled",
-  // #949 (0300, same lane): the SIXTEENTH kind, and the second this ticket adds -- deliberately,
+  // #949 (0300, same lane): the FIFTEENTH kind, and the SECOND this ticket adds -- deliberately,
   // because it is a DIFFERENT question answered in a different place. ONE row per tenancy whose
   // recorded escalation the plan has not taken yet: DERIVED from clara._tenancy_escalation_state
   // (a live rent plan, a live escalation term, and a live revision that does not yet carry the
