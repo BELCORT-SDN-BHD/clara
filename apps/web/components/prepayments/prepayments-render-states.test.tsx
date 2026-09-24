@@ -582,7 +582,7 @@ test("prepayments.detail — L04-SPEC-04: every sentence on this register that t
       assert.doesNotMatch(text, /needs a new schedule/,
         "the sentence never returns to advising a plain reconfiguration");
       assert.match(text, /correcting it on record is what opens a replacement/,
-        "the corrected-term path #939 AC4 names is offered, because a door now performs it");
+        "the corrected-term path ticket 939 AC4 names is offered, because a door now performs it");
       assert.match(text, /raise the difference with the reviewer/i,
         "…and the other branch — a term that was right — still sends the person to the reviewer");
     });
