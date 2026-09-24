@@ -1654,3 +1654,336 @@ revoke all on function clara.confirm_tenancy_rent_plan(uuid,uuid,text,text,text,
 grant execute on function clara.confirm_tenancy_rent_plan(uuid,uuid,text,text,text,text) to clara_authenticated;
 
 reset role;
+
+set role clara_fn_owner;
+
+-- =====================================================================================
+-- §H  THE OPEN RENT PAYABLE AND THE BANK LINE THAT SETTLES IT (AC4, and AC3's second half).
+--
+--     THE SETTLEMENT CANDIDATE ROW, THIRD INSTANCE. CONTEXT.md's own definition, applied here
+--     unchanged: DERIVED from live facts every time it is read, storing nothing, clearing itself
+--     the moment the underlying facts stop producing it, offering candidates and never choosing.
+--     #657's pending bank line was the first instance and #947's unsettled payroll net pay the
+--     second (migration 0298); this file reuses 0298's four bodies as its template rather than
+--     inventing a second mechanism, which is WAVE-4 LANE RULE (c) in full.
+--
+--     "UNSETTLED" IS A LEDGER FACT, NOT A MARKER, and that is what makes AC4's "clears itself
+--     when the settlement posts, BY ANY ROUTE, with no dismissal record" true by construction.
+--     The read is a FIFO allocation over the rent plan's OWN payable account: every approved,
+--     non-reversed CREDIT on that account (a month of rent recognised, however it was booked)
+--     against every approved, non-reversed DEBIT on it (a payment, however it was booked --
+--     Clara's own door below, a person's hand-booked cheque, or that entry later reconciled
+--     through the ordinary bank matcher). Oldest month charged first, which is the ordinary
+--     open-item reading applied to one account's running balance.
+--
+--     WHICH ACCOUNT, AND WHY THE PLAN IS WHAT SAYS SO. `2050 Rent Payable` is the standard
+--     chart's own row and the draft's own default, but the owner's ruling lets the accountant
+--     choose another liability account when confirming. So the account is read off the
+--     CONFIRMATION -- the same row the plan cites as its authority -- and a client with no
+--     confirmed rent plan has no open rent payable in this lane at all, however many liabilities
+--     they carry. Where two rent plans of one client share one payable account the read is per
+--     ACCOUNT (a ledger balance has no idea which plan credited it) and each open month is
+--     attributed to the most recently confirmed plan on that account; two plans on one account is
+--     a bookkeeping choice a firm may make, and the FIFO is the honest reading of it.
+--
+--     THE MONTH is `date_trunc('month', posting_date)`, read off the entry itself, never off the
+--     plan's schedule: a month posted late is still that month's rent, and a plan whose schedule
+--     was revised does not restate what was already booked.
+--
+--     THE ACCEPT DOOR books Dr <payable> / Cr <bank COA> for the month's own unsettled cents,
+--     approves it directly (`via_wake_kind='interactive'`, a human's own accept act), writes the
+--     receipt, and then calls `clara._match_bank_line_core` DIRECTLY -- the ctx-threading idiom
+--     #655/#657 established and #947 restated -- so every lock, exclusivity guarantee and
+--     exception wall that already protects a bank line from being claimed twice protects this
+--     settlement too, unchanged. No `bank_matches`, `bank_match_line_members` or
+--     `bank_match_entry_members` row is written anywhere in this file's own code.
+--
+--     THE AMOUNT IS NEVER RE-TYPED. p_client/p_entry/p_line name WHICH candidate was accepted;
+--     the settled amount is read off the ledger at lock time and the bank line must carry exactly
+--     that amount (negative, money leaving) or the call refuses BY NAME -- so a stale candidate
+--     list cannot silently post the wrong figure.
+--
+--     A CHEQUE IS THE SAME CASE, and the brief says so: the payable stays open until the cheque
+--     appears on the statement, which is the only moment Clara can see. Nothing here treats a
+--     cheque specially; the owner may later flip the default to a written-date treatment, and
+--     that flip belongs to whatever records the written date, not to this read.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+create or replace function clara._rent_payable_unsettled(p_client uuid)
+  returns table(entry_id uuid, plan_id uuid, document_id uuid, filing_id uuid,
+                posting_date date, period_month date, payable_account_code text,
+                rent_cents bigint, unsettled_cents bigint)
+  language sql stable security definer set search_path = clara, pg_temp
+  as $rpu$
+  with plans as (
+    select distinct on (cf.payable_account_code)
+           p.id as plan_id, cf.document_id, cf.payable_account_code
+      from clara.contract_plan_confirmations cf
+      join clara.accounting_plans p
+        on p.authority_ref->>'kind' = 'contract_confirmation'
+       and nullif(p.authority_ref->>'id','')::uuid = cf.id
+     where cf.client_id = p_client and cf.kind = 'rent_plan' and p.status <> 'ended'
+     order by cf.payable_account_code, cf.confirmed_at desc
+  ),
+  credits as (
+    select pl.plan_id, pl.document_id, pl.payable_account_code,
+           je.id as entry_id, je.posting_date,
+           date_trunc('month', je.posting_date)::date as period_month,
+           jl.credit_cents as amt,
+           sum(jl.credit_cents) over (
+             partition by pl.payable_account_code
+             order by je.posting_date, je.id
+             rows between unbounded preceding and current row) as cum_credit
+      from plans pl
+      join clara.journal_lines jl
+        on jl.account_code = pl.payable_account_code and jl.credit_cents > 0
+      join clara.journal_entries je on je.id = jl.entry_id
+     where je.client_id = p_client and je.status = 'approved' and je.reversed_by is null
+  ),
+  debits as (
+    select pl.payable_account_code,
+           coalesce((select sum(jl.debit_cents)
+                       from clara.journal_lines jl
+                       join clara.journal_entries je on je.id = jl.entry_id
+                      where jl.account_code = pl.payable_account_code and jl.debit_cents > 0
+                        and je.client_id = p_client and je.status = 'approved'
+                        and je.reversed_by is null), 0) as total_debits
+      from plans pl
+  )
+  select c.entry_id, c.plan_id, c.document_id, f.id, c.posting_date, c.period_month,
+         c.payable_account_code, c.amt,
+         -- this month's share of the payment pool: whatever remains after every OLDER month has
+         -- taken its own FIFO share first (prior_credit = cum_credit - amt, this month excluded).
+         greatest(0, c.amt - greatest(0, d.total_debits - (c.cum_credit - c.amt)))
+    from credits c
+    join debits d on d.payable_account_code = c.payable_account_code
+    left join lateral (select f2.id from clara.document_filings f2
+                        where f2.document_id = c.document_id and f2.retired_at is null
+                        order by f2.filed_at desc limit 1) f on true;
+$rpu$;
+revoke all on function clara._rent_payable_unsettled(uuid) from public;
+
+comment on function clara._rent_payable_unsettled(uuid) is
+  '#949 AC4: per client, every month of rent recognised on a confirmed rent plan''s own payable account, with its FIFO-allocated remaining balance -- oldest month charged first against every approved, non-reversed debit on that account, however it was booked. A pure ledger fact: no settlement marker is read or required, so the row clears itself by any route. STABLE, ungranted; reached from clara.get_rent_settlement_candidates, clara._settle_rent_payable_core and the list_review_queue splice.';
+
+create or replace function clara._rent_settlement_bank_candidates(
+    p_client uuid, p_target_cents bigint, p_around date, p_window_days int default 10)
+  returns jsonb
+  language sql stable security definer set search_path = clara, pg_temp
+  as $rsbc$
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'line_id', l.id, 'statement_id', l.statement_id, 'bank_account_id', l.bank_account_id,
+      'bank_account_display', ba.bank_name_display || ' ' || ba.account_number,
+      'entry_date', l.entry_date, 'value_date', l.value_date, 'description', l.description,
+      'amount_cents', l.amount_cents,
+      'date_delta_days', (l.entry_date - p_around),
+      'class_hint', clara._bank_line_class_hint(l.description))
+      order by abs(l.entry_date - p_around), l.id), '[]'::jsonb)
+  from clara.bank_statement_lines l
+  join clara.bank_statements s on s.id = l.statement_id
+  join clara.bank_accounts ba on ba.id = l.bank_account_id
+  where l.client_id = p_client and s.status = 'live'
+    and l.amount_cents = -p_target_cents
+    and l.entry_date between (p_around - p_window_days) and (p_around + p_window_days)
+    and not exists (select 1 from clara.bank_match_line_members m
+        where m.line_id = l.id and m.group_status in ('pending', 'live'))
+    and not coalesce((select (e.status = 'open' or e.resolution_disposition = 'bank_corrective_line')
+        from clara.bank_line_exceptions e where e.line_id = l.id
+        order by (e.status = 'open') desc, e.created_at desc, e.id desc
+        limit 1), false);
+$rsbc$;
+revoke all on function clara._rent_settlement_bank_candidates(uuid,bigint,date,int) from public;
+
+comment on function clara._rent_settlement_bank_candidates(uuid,bigint,date,int) is
+  '#949 AC4: the deterministic match basis for one open month of rent -- live, unspent, unexcepted bank lines on this client whose signed amount is the EXACT negative of the target cents, within p_window_days of the month''s own posting date (default 10). Never a score, never a tolerance, never a ranking (#657''s own law, #947''s own body). STABLE, ungranted.';
+
+create or replace function clara.get_rent_settlement_candidates(p_client uuid)
+  returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp
+  as $grsc$
+declare c record;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  if not exists (select 1 from clara.clients cl where cl.id = p_client and cl.firm_id = c.firm) then
+    raise exception 'client not in your firm' using errcode='CLR11';
+  end if;
+  return coalesce((
+    select jsonb_agg(jsonb_build_object(
+        'entry_id', u.entry_id, 'plan_id', u.plan_id, 'document_id', u.document_id,
+        'filing_id', u.filing_id, 'posting_date', u.posting_date,
+        'period_month', u.period_month, 'payable_account_code', u.payable_account_code,
+        'rent_cents', u.rent_cents, 'unsettled_cents', u.unsettled_cents,
+        'candidates', clara._rent_settlement_bank_candidates(
+          p_client, u.unsettled_cents, u.posting_date))
+      order by u.posting_date, u.entry_id)
+    from clara._rent_payable_unsettled(p_client) u
+    where u.unsettled_cents > 0
+  ), '[]'::jsonb);
+end $grsc$;
+
+comment on function clara.get_rent_settlement_candidates(uuid) is
+  '#949 AC4: per client, each month of rent whose payable is still open, with its own candidate bank lines. Derived entirely from live state; stores nothing. bookkeeper+, clara_authenticated only.';
+
+revoke all on function clara.get_rent_settlement_candidates(uuid) from public;
+grant execute on function clara.get_rent_settlement_candidates(uuid) to clara_authenticated;
+
+create or replace function clara._settle_rent_payable_core(
+    p_ctx jsonb, p_client uuid, p_entry uuid, p_line uuid, p_op_key text)
+  returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp
+  as $srpc$
+declare
+  c record; v_dedupe jsonb; v_firm uuid; v_req bytea;
+  u record; ln record; st record; v_bank uuid; v_coa text;
+  v_entry uuid; v_receipt uuid; v_match jsonb; v_memo text;
+begin
+  select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
+  if c.actor is null or c.firm is null then
+    raise exception 'the rent settle core requires an actor and a firm in its context'
+      using errcode='CLR10',detail='{"reason":"core_ctx_missing"}';
+  end if;
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode='CLR10';
+  end if;
+  select cl.firm_id into v_firm from clara.clients cl where cl.id = p_client;
+  if v_firm is null or v_firm <> c.firm then
+    raise exception 'client is not in your firm' using errcode='CLR11';
+  end if;
+
+  v_req := clara._hash(jsonb_build_object('client', p_client, 'entry', p_entry, 'line', p_line));
+  v_dedupe := clara._reserve_op(c.firm, 'settle_rent_payable', p_op_key, v_req);
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  -- LOCKS, in the estate's own order: the pre-existing rent entry first, then the client rung;
+  -- the bank rows are locked LAST, one frame further in, by _match_bank_line_core itself.
+  perform 1 from clara.journal_entries je where je.id = p_entry for update;
+  perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
+
+  select * into u from clara._rent_payable_unsettled(p_client) x where x.entry_id = p_entry;
+  if u.entry_id is null then
+    raise exception 'journal entry % is not a month of rent on a confirmed rent plan''s payable account', p_entry
+      using errcode='CLR10',detail='{"reason":"not_an_open_rent_month"}';
+  end if;
+  if u.unsettled_cents is null or u.unsettled_cents <= 0 then
+    raise exception 'this month''s rent payable is already covered' using errcode='CLR10',
+      detail='{"reason":"already_settled"}';
+  end if;
+
+  select * into ln from clara.bank_statement_lines l where l.id = p_line;
+  if not found or ln.client_id <> p_client or ln.firm_id <> c.firm then
+    raise exception 'statement line % is not in this client', p_line using errcode='CLR11';
+  end if;
+  select * into st from clara.bank_statements s where s.id = ln.statement_id;
+  if not found or st.status <> 'live' then
+    raise exception 'statement line % belongs to a % statement; only a live statement admits a settlement', p_line, coalesce(st.status,'(missing)')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','wrong_period','line_id',p_line,
+          'statement_status',st.status)::text;
+  end if;
+  if ln.amount_cents <> -u.unsettled_cents then
+    raise exception 'statement line % (% cents) does not pay this month''s open rent (% cents)', p_line, ln.amount_cents, u.unsettled_cents
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','amount_mismatch','line_cents',ln.amount_cents,
+          'unsettled_cents',u.unsettled_cents)::text;
+  end if;
+  if exists (select 1 from clara.bank_match_line_members mm join clara.bank_matches bm on bm.id=mm.match_id
+             where mm.line_id = p_line and bm.status in ('pending','live')) then
+    raise exception 'statement line % already rides a pending or live match; unmatch it first', p_line
+      using errcode='CLR10',detail=jsonb_build_object('reason','already_matched','line_id',p_line)::text;
+  end if;
+  v_bank := st.bank_account_id;
+  select ba.coa_account_code into v_coa from clara.bank_accounts ba
+    where ba.id = v_bank and ba.firm_id = c.firm and ba.client_id = p_client and ba.active;
+  if v_coa is null then
+    raise exception 'this bank account has no active mapped GL account'
+      using errcode='CLR10',detail='{"reason":"bank_account_unmapped"}';
+  end if;
+
+  v_memo := 'Rent settlement ' || to_char(u.period_month, 'FMMonth YYYY');
+
+  insert into clara.journal_entries(client_id, status, posting_date, memo, origin,
+      maker_actor, last_human_editor, flags)
+    values (p_client, 'draft', ln.entry_date, v_memo, 'manual', c.actor, c.actor,
+      jsonb_build_object('rent_settlement', jsonb_build_object(
+        'rent_entry_id', p_entry, 'plan_id', u.plan_id, 'document_id', u.document_id,
+        'period_month', to_char(u.period_month,'YYYY-MM-DD'),
+        'payable_account_code', u.payable_account_code)))
+    returning id into v_entry;
+
+  insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents, credit_cents, description)
+    values (v_entry, 1, u.payable_account_code, u.unsettled_cents, 0, v_memo);
+  insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents, credit_cents, description)
+    values (v_entry, 2, v_coa, 0, u.unsettled_cents, v_memo);
+  perform clara._assert_balanced(v_entry);
+
+  update clara.journal_entries
+     set status = 'approved', checker_actor = c.actor, approved_at = now(), updated_at = now()
+   where id = v_entry;
+
+  -- entry_post_receipts_gate_verdicts_check demands a non-blank gate_verdicts->>'extraction_id'
+  -- on every via_wake_kind other than 'bank_agent' -- the estate's one shared proof that
+  -- SOMETHING grounds a receipt. A settlement has no extraction; the rent entry it settles is
+  -- the honest equivalent (what this act was ABOUT), carried again under its own name for a
+  -- reader who would otherwise have to know the reuse. #947's own idiom, restated.
+  v_receipt := gen_random_uuid();
+  insert into clara.entry_post_receipts(id, firm_id, client_id, entry_id, acting_actor,
+      on_behalf_of, via_wake_kind, model_snapshot, rationale, gate_verdicts, approval_arm,
+      maker_active_at_approval, op_key)
+    values (v_receipt, c.firm, p_client, v_entry, c.actor, null, 'interactive',
+      jsonb_build_object('provider','clara_db','model','tenancy_rent_settlement','version','v1'),
+      'Accepted a settlement candidate: statement line ' || p_line
+        || ' pays the rent payable recognised by entry ' || p_entry || '.',
+      jsonb_build_object('extraction_id', p_entry::text, 'rent_entry_id', p_entry,
+        'line_id', p_line, 'unsettled_cents', u.unsettled_cents,
+        'payable_account_code', u.payable_account_code),
+      'rent_settlement_interactive', true, p_op_key || ':post');
+
+  perform clara._append_event(c.firm, 'entry.posted', p_client, c.actor, null, 'interactive',
+    v_entry, null, null,
+    jsonb_build_object('post_receipt_id', v_receipt, 'approval_arm', 'rent_settlement_interactive'));
+
+  -- THROUGH AN EXISTING BANK-SIDE DOOR: the new entry now carries a leg on the bank's own GL
+  -- code, so it is an ordinary, lawful candidate for match_bank_line's own core -- called
+  -- directly (the ctx is threaded, the #655/#657/#947 idiom), never re-implemented.
+  v_match := clara._match_bank_line_core(
+    jsonb_build_object('actor', c.actor, 'firm', c.firm, 'is_agent', false),
+    p_client, jsonb_build_array(p_line),
+    jsonb_build_array(jsonb_build_object('entry_id', v_entry, 'matched_cents', -u.unsettled_cents)),
+    null, false, p_op_key || ':match');
+
+  perform clara._audit(c.firm, c.actor, null, null, 'settle_rent_payable', v_entry,
+    jsonb_build_object('client', p_client, 'rent_entry_id', p_entry, 'line_id', p_line,
+      'settlement_entry_id', v_entry, 'unsettled_cents', u.unsettled_cents,
+      'match_id', v_match->>'match_id'));
+
+  return clara._finish_op(c.firm, 'settle_rent_payable', p_op_key,
+    jsonb_build_object('entry_id', v_entry, 'match_id', v_match->>'match_id',
+      'unsettled_cents', u.unsettled_cents,
+      'period_month', to_char(u.period_month,'YYYY-MM-DD'),
+      'posting_date', to_char(ln.entry_date,'YYYY-MM-DD')));
+end $srpc$;
+
+revoke all on function clara._settle_rent_payable_core(jsonb,uuid,uuid,uuid,text) from public;
+
+comment on function clara._settle_rent_payable_core(jsonb,uuid,uuid,uuid,text) is
+  '#949: books Dr <the plan''s own payable> / Cr <bank COA> for one month''s open rent, approves it directly (via_wake_kind=interactive), then reuses clara._match_bank_line_core to bind it to the chosen bank line. Ungranted; reached from clara.settle_rent_payable alone.';
+
+create or replace function clara.settle_rent_payable(p_client uuid, p_entry uuid, p_line uuid, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp
+  as $srp$
+declare c record;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  return clara._settle_rent_payable_core(
+    jsonb_build_object('actor', c.actor, 'firm', c.firm, 'is_agent', false),
+    p_client, p_entry, p_line, p_op_key);
+end $srp$;
+
+comment on function clara.settle_rent_payable(uuid,uuid,uuid,text) is
+  '#949 AC4: accept one settlement candidate -- a month of rent''s own posted entry and the bank line that pays it. bookkeeper+, clara_authenticated only.';
+
+revoke all on function clara.settle_rent_payable(uuid,uuid,uuid,text) from public;
+grant execute on function clara.settle_rent_payable(uuid,uuid,uuid,text) to clara_authenticated;
+
+reset role;

@@ -1099,3 +1099,357 @@ test("S5 · the plan lane resolves a contract_confirmation, and refuses one that
     rootQuery("select clara._authority_ref_refusal('not_a_kind', gen_random_uuid(), gen_random_uuid(), gen_random_uuid())"));
   assert.ok(stillUnknown, "an unknown kind still RAISES, so the next lane that widens finds that line");
 });
+
+// ---------------------------------------------------------------------------
+// S6 — the open rent payable and the bank line that settles it (AC4, AC3's second half).
+//
+// The Settlement candidate row, third instance (CONTEXT.md; #657's pending bank line first,
+// #947's unsettled payroll net pay second). The read is a pure LEDGER fact over the plan's own
+// payable account, so it clears itself by ANY route and no cell below drives a dismissal,
+// because there is none to drive.
+//
+// HOW A MONTH OF RENT GETS ONTO THE LEDGER IN THESE CELLS. A confirmed plan posts its months
+// through the plan lane's own Work machinery (0193: a due event admits an accounting_work, which
+// a runtime run posts), and no database cell can turn that handle. What this file drives instead
+// is the LEDGER CLAIM these cells are actually about: a month of rent booked Dr rent expense /
+// Cr rent payable, through the ordinary journal doors, exactly as a plan occurrence leaves it.
+// The plan lane's own posting path is 0193's to prove and its battery proves it.
+// ---------------------------------------------------------------------------
+
+async function postRentMonth(sub, client, { postingDate, cents = RENT_CENTS, memo = "monthly rent" } = {}) {
+  const drafted = await draftEntry(human(sub), {
+    client,
+    resolution: await freshResolution(sub, client),
+    postingDate,
+    memo,
+    lines: [
+      { account_code: RENT_ACCOUNT, debit_cents: cents, credit_cents: 0, description: memo },
+      { account_code: PAYABLE_ACCOUNT, debit_cents: 0, credit_cents: cents, description: memo },
+    ],
+    opKey: opk949("rent-draft"),
+  });
+  const token = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [drafted.entry_id])).rows[0].revision_token;
+  await approveEntry(world.users.bob, { entry: drafted.entry_id, expectedRevision: token, opKey: opk949("rent-approve") });
+  return drafted.entry_id;
+}
+
+/** The OPEN months, which is what "unsettled" means at every seam that consumes this read: the
+ *  internal itself reports every month of rent with its remaining balance, and a month whose
+ *  balance is zero is a month that is paid. */
+const unsettledRows = async (client) =>
+  (
+    await rootQuery(
+      `select entry_id, plan_id, document_id, filing_id, posting_date::text as posting_date,
+              period_month::text as period_month, payable_account_code, rent_cents, unsettled_cents
+         from clara._rent_payable_unsettled($1::uuid)
+        where unsettled_cents > 0 order by posting_date, entry_id`,
+      [client],
+    )
+  ).rows;
+
+const rentCandidates = async (sub, client) => {
+  const r = await humanQuery(sub, namedCall("get_rent_settlement_candidates", [{ name: "p_client" }]), [client]);
+  return r.rows[0].result;
+};
+
+const settleRent = async (sub, { client, entry, line, opKey = null }) => {
+  const r = await humanQuery(
+    sub,
+    namedCall("settle_rent_payable", [{ name: "p_client" }, { name: "p_entry" }, { name: "p_line" }, { name: "p_op_key" }]),
+    [client, entry, line, opKey ?? opk949("settle")],
+  );
+  return r.rows[0].result;
+};
+
+/** A confirmed tenancy with a registered bank account, ready to post and settle rent against. */
+async function runningTenancy(sub) {
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+  const receipt = await confirmPlan(sub, { client, document: doc.documentId });
+  const bank = await freshBank(sub, client);
+  return { client, doc, bank, planId: receipt.plan_id, confirmationId: receipt.confirmation_id };
+}
+
+/** ONE live statement for this tenancy's bank account, carrying exactly the lines the cell asks
+ *  for. `keepPeriod: true` because these cells are ABOUT dates: the rent month is posted on the
+ *  5th of February and the settlement window is ten days either side, so the entry dates the
+ *  cell states must be the entry dates the estate stores. One statement per cell keeps the
+ *  statement lane's adjacent-month continuity binding out of a cell that is not about it. */
+async function bankStatement(sub, { client, bank, specs }) {
+  const st = await enterStatement(sub, {
+    client, bankAccount: bank, keepPeriod: true,
+    periodStart: "2026-02-01", periodEnd: "2026-02-28", opening: 500000,
+    specs, opKey: opk949("stmt"),
+  });
+  return st.lines;
+}
+
+const rentLine = (entryDate, cents = RENT_CENTS, description = "RENTAL PAYMENT SRI DAMANSARA") =>
+  ({ entryDate, description, amountCents: -cents });
+
+test("S6 · a posted month of rent is fully unsettled until something pays it, and the read is a pure ledger fact", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client } = await runningTenancy(sub);
+
+  assert.deepEqual(await unsettledRows(client), [], "a plan with no posted month owes nothing yet");
+
+  const entry = await postRentMonth(sub, client, { postingDate: "2026-02-05" });
+  const rows = await unsettledRows(client);
+  assert.equal(rows.length, 1, `one open month: ${JSON.stringify(rows)}`);
+  assert.equal(rows[0].entry_id, entry);
+  assert.equal(Number(rows[0].rent_cents), RENT_CENTS);
+  assert.equal(Number(rows[0].unsettled_cents), RENT_CENTS);
+  assert.equal(rows[0].period_month, "2026-02-01");
+  assert.equal(rows[0].payable_account_code, PAYABLE_ACCOUNT);
+  assert.ok(rows[0].document_id, "the row points back at the tenancy it belongs to");
+});
+
+test("S6 · a hand-booked debit reduces the OLDEST open month first, to the cent", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client } = await runningTenancy(sub);
+  await postRentMonth(sub, client, { postingDate: "2026-02-05", memo: "rent february" });
+  await postRentMonth(sub, client, { postingDate: "2026-03-05", memo: "rent march" });
+
+  // Half a month's rent paid by hand, against no particular month.
+  const drafted = await draftEntry(human(sub), {
+    client, resolution: await freshResolution(sub, client), postingDate: "2026-03-20",
+    memo: "part payment of rent",
+    lines: [
+      { account_code: PAYABLE_ACCOUNT, debit_cents: RENT_CENTS / 2, credit_cents: 0, description: "part" },
+      { account_code: BANKCOA, debit_cents: 0, credit_cents: RENT_CENTS / 2, description: "bank" },
+    ],
+    opKey: opk949("part-draft"),
+  });
+  const token = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [drafted.entry_id])).rows[0].revision_token;
+  await approveEntry(world.users.bob, { entry: drafted.entry_id, expectedRevision: token, opKey: opk949("part-approve") });
+
+  const rows = await unsettledRows(client);
+  assert.equal(rows.length, 2);
+  assert.equal(Number(rows[0].unsettled_cents), RENT_CENTS / 2, "February is charged first — oldest open item");
+  assert.equal(Number(rows[1].unsettled_cents), RENT_CENTS, "March is untouched until February is covered");
+});
+
+test("S6 · the candidate read offers an exact bank line inside the window, and never a wrong amount or a far date", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, bank } = await runningTenancy(sub);
+  const entry = await postRentMonth(sub, client, { postingDate: "2026-02-05" });
+  const paid = await bankStatement(sub, { client, bank, specs: [rentLine("2026-02-07")] });
+
+  const offered = await rentCandidates(sub, client);
+  assert.equal(offered.length, 1, `one open month: ${JSON.stringify(offered)}`);
+  assert.equal(offered[0].entry_id, entry);
+  assert.equal(Number(offered[0].unsettled_cents), RENT_CENTS);
+  assert.equal(offered[0].candidates.length, 1, "exactly the line that could be it");
+  assert.equal(offered[0].candidates[0].line_id, paid[0].id);
+  assert.equal(Number(offered[0].candidates[0].amount_cents), -RENT_CENTS, "money LEAVING the bank, to the cent");
+  assert.ok(Math.abs(Number(offered[0].candidates[0].date_delta_days)) <= 10);
+
+  // A line of the wrong amount is not a candidate.
+  const other = await runningTenancy(sub);
+  await postRentMonth(sub, other.client, { postingDate: "2026-02-05" });
+  await bankStatement(sub, { client: other.client, bank: other.bank, specs: [rentLine("2026-02-07", RENT_CENTS + 1)] });
+  const none = await rentCandidates(sub, other.client);
+  assert.deepEqual(none[0].candidates, [], "one cent out is not a match, and nothing is offered instead");
+});
+
+test("S6 · accepting the candidate books Dr rent payable / Cr bank and binds the line through the EXISTING bank-side door", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, bank } = await runningTenancy(sub);
+  const entry = await postRentMonth(sub, client, { postingDate: "2026-02-05" });
+  const paid = await bankStatement(sub, { client, bank, specs: [rentLine("2026-02-07")] });
+
+  const receipt = await settleRent(sub, { client, entry, line: paid[0].id });
+  assert.ok(receipt.entry_id, `a settlement entry: ${JSON.stringify(receipt)}`);
+  assert.ok(receipt.match_id, "…bound to the line through a real bank match");
+
+  const lines = (
+    await rootQuery(
+      "select account_code, debit_cents, credit_cents from clara.journal_lines where entry_id=$1 order by line_no",
+      [receipt.entry_id],
+    )
+  ).rows;
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0].account_code, PAYABLE_ACCOUNT);
+  assert.equal(Number(lines[0].debit_cents), RENT_CENTS, "the payable is cleared");
+  assert.equal(lines[1].account_code, BANKCOA);
+  assert.equal(Number(lines[1].credit_cents), RENT_CENTS, "…and the money leaves the bank, once");
+
+  const je = (
+    await rootQuery("select status, maker_actor, checker_actor, flags from clara.journal_entries where id=$1", [receipt.entry_id])
+  ).rows[0];
+  assert.equal(je.status, "approved");
+  assert.equal(je.maker_actor, je.checker_actor, "one human's own accept act");
+  assert.ok(je.flags.rent_settlement, "the settlement says what it is");
+
+  const rc = (
+    await rootQuery(
+      "select via_wake_kind, approval_arm, gate_verdicts, model_snapshot from clara.entry_post_receipts where entry_id=$1",
+      [receipt.entry_id],
+    )
+  ).rows[0];
+  assert.equal(rc.via_wake_kind, "interactive");
+  assert.equal(rc.approval_arm, "rent_settlement_interactive");
+  assert.equal(rc.gate_verdicts.rent_entry_id, entry);
+
+  // The match is the REUSED core's own rows, not a second mechanism.
+  const match = (
+    await rootQuery("select status from clara.bank_matches where id=$1", [receipt.match_id])
+  ).rows[0];
+  assert.equal(match.status, "live");
+  const lineMembers = (
+    await rootQuery("select line_id, amount_cents from clara.bank_match_line_members where match_id=$1", [receipt.match_id])
+  ).rows;
+  assert.equal(lineMembers.length, 1);
+  assert.equal(lineMembers[0].line_id, paid[0].id);
+  const entryMembers = (
+    await rootQuery("select entry_id, matched_cents from clara.bank_match_entry_members where match_id=$1", [receipt.match_id])
+  ).rows;
+  assert.equal(entryMembers.length, 1);
+  assert.equal(entryMembers[0].entry_id, receipt.entry_id, "the SETTLEMENT entry rides the match, never the rent entry");
+
+  assert.deepEqual(await unsettledRows(client), [], "and the open month is gone");
+});
+
+test("S6 · a month's rent plus its later bank payment leave exactly ONE rent expense and ONE bank movement (AC3)", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, bank } = await runningTenancy(sub);
+  const entry = await postRentMonth(sub, client, { postingDate: "2026-02-05" });
+  const paid = await bankStatement(sub, { client, bank, specs: [rentLine("2026-02-07")] });
+  await settleRent(sub, { client, entry, line: paid[0].id });
+
+  const totals = (
+    await rootQuery(
+      `select
+         (select coalesce(sum(jl.debit_cents),0) from clara.journal_lines jl
+            join clara.journal_entries je on je.id=jl.entry_id
+           where je.client_id=$1 and je.status='approved' and je.reversed_by is null
+             and jl.account_code=$2) as rent_expense_cents,
+         (select count(*)::int from clara.journal_lines jl
+            join clara.journal_entries je on je.id=jl.entry_id
+           where je.client_id=$1 and je.status='approved' and je.reversed_by is null
+             and jl.account_code=$2 and jl.debit_cents>0) as rent_expense_legs,
+         (select coalesce(sum(jl.credit_cents),0) from clara.journal_lines jl
+            join clara.journal_entries je on je.id=jl.entry_id
+           where je.client_id=$1 and je.status='approved' and je.reversed_by is null
+             and jl.account_code=$3) as bank_out_cents,
+         (select count(*)::int from clara.journal_lines jl
+            join clara.journal_entries je on je.id=jl.entry_id
+           where je.client_id=$1 and je.status='approved' and je.reversed_by is null
+             and jl.account_code=$3) as bank_legs,
+         (select coalesce(sum(jl.credit_cents),0) - coalesce(sum(jl.debit_cents),0)
+            from clara.journal_lines jl
+            join clara.journal_entries je on je.id=jl.entry_id
+           where je.client_id=$1 and je.status='approved' and je.reversed_by is null
+             and jl.account_code=$4) as payable_balance_cents`,
+      [client, RENT_ACCOUNT, BANKCOA, PAYABLE_ACCOUNT],
+    )
+  ).rows[0];
+
+  assert.equal(Number(totals.rent_expense_cents), RENT_CENTS, "the expense is recognised ONCE");
+  assert.equal(totals.rent_expense_legs, 1, "…on exactly one leg");
+  assert.equal(Number(totals.bank_out_cents), RENT_CENTS, "the money leaves ONCE");
+  assert.equal(totals.bank_legs, 1, "…on exactly one leg");
+  assert.equal(Number(totals.payable_balance_cents), 0, "and the payable is square");
+});
+
+test("S6 · the row clears itself by a hand-booked route too, and no dismissal record is written by any route", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client } = await runningTenancy(sub);
+  const entry = await postRentMonth(sub, client, { postingDate: "2026-02-05" });
+  assert.equal((await unsettledRows(client)).length, 1);
+
+  const before = (
+    await rootQuery(
+      `select (select count(*)::int from clara.journal_entries where client_id=$1) as entries,
+              (select count(*)::int from clara.bank_matches where client_id=$1) as matches`,
+      [client],
+    )
+  ).rows[0];
+
+  // Route (b): a person books the payment by hand, with no door of this lane involved at all.
+  const drafted = await draftEntry(human(sub), {
+    client, resolution: await freshResolution(sub, client), postingDate: "2026-02-09",
+    memo: "rent paid by cheque",
+    lines: [
+      { account_code: PAYABLE_ACCOUNT, debit_cents: RENT_CENTS, credit_cents: 0, description: "cheque 004512" },
+      { account_code: BANKCOA, debit_cents: 0, credit_cents: RENT_CENTS, description: "cheque 004512" },
+    ],
+    opKey: opk949("hand-draft"),
+  });
+  const token = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [drafted.entry_id])).rows[0].revision_token;
+  await approveEntry(world.users.bob, { entry: drafted.entry_id, expectedRevision: token, opKey: opk949("hand-approve") });
+
+  assert.deepEqual(await unsettledRows(client), [], "the row is already gone — nobody dismissed anything");
+  assert.equal(entry !== null, true);
+
+  const after = (
+    await rootQuery(
+      `select (select count(*)::int from clara.journal_entries where client_id=$1) as entries,
+              (select count(*)::int from clara.bank_matches where client_id=$1) as matches`,
+      [client],
+    )
+  ).rows[0];
+  assert.equal(after.entries, before.entries + 1, "exactly one new entry: the person's own");
+  assert.equal(after.matches, before.matches, "and no match, no marker, no dismissal row anywhere");
+});
+
+test("S6 · two bank lines matching one month are BOTH offered, and neither is chosen", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, bank } = await runningTenancy(sub);
+  await postRentMonth(sub, client, { postingDate: "2026-02-05" });
+  // TWO lines of the SAME amount, both inside the window -- the case a person must adjudicate.
+  const paid = await bankStatement(sub, {
+    client, bank,
+    specs: [rentLine("2026-02-07"), rentLine("2026-02-10", RENT_CENTS, "RENTAL PAYMENT DUPLICATE")],
+  });
+
+  const offered = await rentCandidates(sub, client);
+  assert.equal(offered.length, 1);
+  assert.equal(offered[0].candidates.length, 2, `both are offered: ${JSON.stringify(offered[0].candidates)}`);
+  assert.equal(Number((await unsettledRows(client))[0].unsettled_cents), RENT_CENTS, "…and nothing was settled");
+  const riding = (
+    await rootQuery(
+      "select count(*)::int as n from clara.bank_match_line_members where line_id = any($1::uuid[])",
+      [offered[0].candidates.map((x) => x.line_id)],
+    )
+  ).rows[0].n;
+  assert.equal(riding, 0, "neither line rides a match: choosing is the human's act");
+  assert.equal(paid.length, 2);
+});
+
+test("S6 · the accept door refuses a wrong amount and a month that is already settled, each by name", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, bank } = await runningTenancy(sub);
+  const entry = await postRentMonth(sub, client, { postingDate: "2026-02-05" });
+  const [wrong, right, again] = await bankStatement(sub, {
+    client, bank,
+    specs: [
+      rentLine("2026-02-07", RENT_CENTS - 100, "RENTAL SHORT"),
+      rentLine("2026-02-08"),
+      rentLine("2026-02-09", RENT_CENTS, "RENTAL AGAIN"),
+    ],
+  });
+
+  const mismatch = await caught(() => settleRent(sub, { client, entry, line: wrong.id }));
+  assert.ok(mismatch, "a line that does not pay the month is refused");
+  assert.equal(detailOf(mismatch).reason, "amount_mismatch");
+
+  await settleRent(sub, { client, entry, line: right.id });
+
+  const already = await caught(() => settleRent(sub, { client, entry, line: again.id }));
+  assert.ok(already, "a month that is already covered refuses a second settlement");
+  assert.equal(detailOf(already).reason, "already_settled");
+
+  const notRent = await caught(() =>
+    settleRent(sub, { client, entry: right.id, line: again.id }));
+  assert.ok(notRent, "an entry that is not an open rent month is refused too");
+  assert.equal(detailOf(notRent).reason, "not_an_open_rent_month");
+});
