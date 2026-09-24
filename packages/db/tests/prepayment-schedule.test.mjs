@@ -357,7 +357,8 @@ test("p653.schedule.authority_ref_unresolved — an authority_ref naming the REC
 test("p653.schedule.duplicate_race — two humans configuring the SAME recognition concurrently: the loser is answered the TYPED prepayment_schedule_exists, never a bare unique-violation naming an index", async (t) => {
   if (await assertPrepaymentCohortPresent(t)) return;
   // THE TYPED PRE-CHECK CANNOT SEE AN UNCOMMITTED WINNER, so the structural backstop
-  // (`uq_prepayment_schedules_source`) is what actually answers the loser. A bare 23505 reaches the
+  // (`uq_prepayment_schedules_source_live` since 0317; `uq_prepayment_schedules_source` before
+  // it — the index moved, the barrier did not) is what actually answers the loser. A bare 23505 reaches the
   // surface as `duplicate key value violates unique constraint "…"` — a sentence with no next act.
   // The BARRIER here is the unique index itself: B's insert queues on A's uncommitted row.
   const scene = await prepaymentScene("race", { cents: 90000, termMonthsBack: 4, termMonths: 3 });

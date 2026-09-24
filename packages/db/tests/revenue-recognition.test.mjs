@@ -898,11 +898,13 @@ cell("p941.supersede.running — a corrected service period never moves a schedu
       authorityRef: scene.authorityRef }),
     "a second schedule over a corrected receipt");
 
-  // …AND ENDING THIS ONE DOES NOT OPEN A REPLACEMENT. [L04-SPEC-04, fix round 2.] The register
-  // used to say "Configure a new one if the remaining periods are still to be recognised" on an
-  // ended schedule. `uq_revenue_recognition_schedules_source` (0308) is UNCONDITIONAL — no status
-  // predicate — so the refusal is the same after the plan has ended, and that sentence was an act
-  // nobody could perform. Driven: the plan is ended through its own door first.
+  // …AND ENDING THIS ONE DOES NOT OPEN A SECOND CONFIGURATION. [L04-SPEC-04.] The register used
+  // to say "Configure a new one if the remaining periods are still to be recognised" on an ended
+  // schedule, and that is still an act nobody can perform: 0317 qualified the uniqueness rule to
+  // one LIVE schedule per receipt, and this schedule is live whatever its PLAN's status —
+  // `clara.end_accounting_plan` stops a plan and supersedes nothing. The act that does exist is
+  // `clara.replace_revenue_recognition_schedule`, which needs a CORRECTED term and is driven in
+  // `p941.replace.posted`. Driven: the plan is ended through its own door first.
   const ended = await endAccountingPlan(scene.bob, {
     plan: made.plan_id,
     reason: "#941 battery: the stated term was wrong, so the firm stopped the schedule" });

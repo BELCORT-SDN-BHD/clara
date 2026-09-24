@@ -509,12 +509,14 @@ cell("p939.supersede.running — a stated term corrected AFTER its schedule has 
       expenseAccount: scene.target, authorityRef: scene.authorityRef }),
     "configuring a second schedule over a recognition whose term was corrected");
 
-  // ---- AND ENDING THE SCHEDULE DOES NOT OPEN THAT PATH EITHER. [L04-SPEC-04, fix round 2.]
+  // ---- AND ENDING THE SCHEDULE DOES NOT OPEN THAT PATH EITHER. [L04-SPEC-04.]
   // The register used to offer "end this schedule and configure a new one" as the remedy, in three
-  // separate sentences. `uq_prepayment_schedules_source` (0223) is UNCONDITIONAL — it carries no
-  // status predicate at all — so the refusal is the SAME once the plan has ended, and the advice
-  // was an act nobody could perform. Driven rather than reasoned about: the plan is ended through
-  // its own door, and only then is the replacement asked for.
+  // separate sentences, and it is still an act nobody can perform: 0317 qualified the uniqueness
+  // rule to one LIVE schedule per recognition, and the schedule here is live whatever its PLAN's
+  // status — `clara.end_accounting_plan` stops a plan and supersedes nothing. The act that does
+  // exist is `clara.replace_prepayment_schedule`, which needs a CORRECTED term and is driven in
+  // `p939.replace.*`. Driven rather than reasoned about: the plan is ended through its own door,
+  // and only then is the second CONFIGURATION asked for.
   const ended = await endAccountingPlan(scene.bob, {
     plan: created.plan_id,
     reason: "#939 battery: the stated term was wrong, so the firm stopped the schedule" });
