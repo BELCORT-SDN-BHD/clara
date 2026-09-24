@@ -1966,3 +1966,191 @@ test("S10 · no body this migration mints ever writes clara.document_service_per
     "this lane cannot weaken the person-stated service period, because no body of it names that table at all",
   );
 });
+
+// ---------------------------------------------------------------------------
+// S10 — the fix round's own walls, each DRIVEN through the real doors.
+// ---------------------------------------------------------------------------
+
+test("S10 · reversing ONE month of rent leaves an earlier unpaid month exactly where it was (ADV-02)", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client } = await runningTenancy(sub);
+  const feb = await postRentMonth(sub, client, { postingDate: "2026-02-05", memo: "February rent" });
+  const mar = await postRentMonth(sub, client, { postingDate: "2026-03-05", memo: "March rent" });
+
+  const before = await unsettledRows(client);
+  assert.deepEqual(before.map((r) => [r.entry_id, Number(r.unsettled_cents)]),
+    [[feb, RENT_CENTS], [mar, RENT_CENTS]], "both months are open before anything is reversed");
+
+  // THE ACT: reverse MARCH through the estate's own door. The mirror carries Dr <payable>, and
+  // a mirror is not a payment.
+  const rev = (await humanQuery(
+    sub,
+    namedCall("reverse_entry", [{ name: "p_entry" }, { name: "p_reason" }, { name: "p_op_key" }]),
+    [mar, "raised in error", opk949("rev")],
+  )).rows[0].result;
+  assert.equal(rev.status, "approved");
+
+  const after = await unsettledRows(client);
+  assert.deepEqual(after.map((r) => [r.entry_id, Number(r.unsettled_cents)]), [[feb, RENT_CENTS]],
+    "FEBRUARY IS STILL UNPAID: the reversed month leaves the read, and its mirror pays nothing");
+  const offered = await rentCandidates(sub, client);
+  assert.equal(offered.filter((r) => r.entry_id === feb).length, 1, "…and February is still offered");
+});
+
+test("S10 · two live rent plans may not share one payable account, and each tenancy keeps its own months (ADV-03)", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const first = await runningTenancy(sub);
+  const client = first.client;
+
+  // A SECOND tenancy for the SAME client, read and recorded the ordinary way.
+  const second = await readTenancy(sub, client, {});
+  await recordProposed(sub, client, second.documentId);
+
+  const refused = await caught(() => confirmPlan(sub, { client, document: second.documentId }));
+  assert.ok(refused, "the default payable is already another tenancy's — the door must refuse");
+  assert.equal(refused.code, "CLR10");
+  const d = detailOf(refused);
+  assert.equal(d.reason, "payable_account_in_use");
+  assert.equal(d.payable_account_code, PAYABLE_ACCOUNT);
+  assert.equal(d.document_id, first.doc.documentId, "…and it names the tenancy that already holds it");
+
+  // THE REMEDY IS THE ACCOUNTANT'S OWN CHOICE: its own liability account.
+  await upsertAccount(sub, { client, code: "2051", name: "Rent Payable — unit B", type: "liability", opKey: opk949("coa2") });
+  const ok = await confirmPlan(sub, { client, document: second.documentId, payableAccount: "2051" });
+  assert.ok(ok.plan_id, "a second tenancy on its OWN payable account is admitted");
+
+  // …and the two plans' months never mix: one row per live plan, each on its own account.
+  const a = await postRentMonth(sub, client, { postingDate: "2026-02-05", memo: "unit A February" });
+  const drafted = await draftEntry(human(sub), {
+    client, resolution: await freshResolution(sub, client), postingDate: "2026-02-05", memo: "unit B February",
+    lines: [
+      { account_code: RENT_ACCOUNT, debit_cents: RENT_CENTS, credit_cents: 0, description: "unit B" },
+      { account_code: "2051", debit_cents: 0, credit_cents: RENT_CENTS, description: "unit B" },
+    ],
+    opKey: opk949("unitb-draft"),
+  });
+  const tok = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [drafted.entry_id])).rows[0].revision_token;
+  await approveEntry(world.users.bob, { entry: drafted.entry_id, expectedRevision: tok, opKey: opk949("unitb-approve") });
+
+  const rows = await unsettledRows(client);
+  assert.equal(rows.length, 2, `one open month per tenancy: ${JSON.stringify(rows)}`);
+  const byEntry = Object.fromEntries(rows.map((r) => [r.entry_id, r]));
+  assert.equal(byEntry[a].document_id, first.doc.documentId, "unit A's month is attributed to unit A's agreement");
+  assert.equal(byEntry[a].payable_account_code, PAYABLE_ACCOUNT);
+  assert.equal(byEntry[drafted.entry_id].document_id, second.documentId, "unit B's month is attributed to unit B's agreement");
+  assert.equal(byEntry[drafted.entry_id].payable_account_code, "2051");
+});
+
+test("S10 · MPERS over TEN YEARS ASKS for the finance-vs-operating classification (ADV-05)", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+
+  // A THIRTY-YEAR ground lease, MPERS. The first cut drafted it silently as a rent expense.
+  const long = await tenancyFor(sub, { months: "360", framework: "MPERS" });
+  await recordProposed(sub, long.client, long.doc.documentId);
+  const t360 = await treatmentOf(long.client, long.doc.documentId);
+  assert.equal(t360.drafts, false, "a 30-year MPERS lease is not straight-lined without a person deciding");
+  assert.equal(t360.reason, "mpers_lease_classification");
+  assert.equal(t360.standard, "MPERS Section 20");
+  assert.match(t360.question, /FINANCE lease/, "the question names the classification the standard makes the accountant establish");
+  assert.match(t360.question, /ten years or more/, "…and says why it is being asked HERE and not on a two-year tenancy");
+  assert.match(t360.question, /economic life/);
+  assert.match(t360.basis, /CLASSIFIES a lease first/, "and the written basis says so too");
+
+  // …and the confirm door then DEMANDS the written judgement rather than disabling the act
+  // (standing owner ruling: a compliance gate prompts, it never disables).
+  const refused = await caught(() => confirmPlan(sub, { client: long.client, document: long.doc.documentId }));
+  assert.ok(refused);
+  assert.equal(detailOf(refused).reason, "professional_judgement_required");
+  const ok = await confirmPlan(sub, {
+    client: long.client, document: long.doc.documentId,
+    judgement: "Operating: the 30-year term is well short of the building's remaining economic life and the payments are far below its fair value.",
+  });
+  assert.ok(ok.plan_id, "with the judgement written down, the plan starts");
+
+  // AN ORDINARY TENANCY is unchanged: below ten years the operating reading is not in doubt,
+  // and asking for a written classification on every two-year shoplot would be noise, not care.
+  const short = await tenancyFor(sub, { months: "24", framework: "MPERS" });
+  await recordProposed(sub, short.client, short.doc.documentId);
+  const t12 = await treatmentOf(short.client, short.doc.documentId);
+  assert.equal(t12.drafts, true, "a two-year MPERS tenancy still drafts");
+  assert.equal(t12.reason, null);
+  assert.equal(t12.standard, "MPERS Section 20");
+});
+
+test("S10 · one coded deposit does not declare a second deposit coded (ADV-06)", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const first = await runningTenancy(sub);
+  const client = first.client;
+
+  // A SECOND tenancy, so the client carries TWO recorded deposits against one 1120 account.
+  const second = await readTenancy(sub, client, {});
+  await recordProposed(sub, client, second.documentId);
+
+  const offers0 = await depositCoding(sub, client);
+  assert.equal(offers0.length, 2, `two recorded deposits: ${JSON.stringify(offers0.map((o) => o.document_id))}`);
+  assert.deepEqual(offers0.map((o) => o.already_coded), [false, false], "neither is coded yet");
+
+  // Code ONE of them, by hand, the ordinary way.
+  const drafted = await draftEntry(human(sub), {
+    client, resolution: await freshResolution(sub, client), postingDate: "2026-01-06", memo: "deposit paid, unit A",
+    lines: [
+      { account_code: DEPOSITS_PAID, debit_cents: DEPOSIT_CENTS, credit_cents: 0, description: "deposit" },
+      { account_code: BANKCOA, debit_cents: 0, credit_cents: DEPOSIT_CENTS, description: "bank" },
+    ],
+    opKey: opk949("dep-draft"),
+  });
+  const tok = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [drafted.entry_id])).rows[0].revision_token;
+  await approveEntry(world.users.bob, { entry: drafted.entry_id, expectedRevision: tok, opKey: opk949("dep-approve") });
+
+  const offers1 = await depositCoding(sub, client);
+  assert.equal(offers1.length, 2);
+  assert.deepEqual(offers1.map((o) => o.already_coded), [true, false],
+    "the OLDEST deposit takes the balance; the second is still owed its own entry and still offered");
+  assert.equal(Number(offers1[0].coded_cents), DEPOSIT_CENTS);
+  assert.equal(Number(offers1[1].coded_cents), 0);
+  assert.equal(Number(offers1[1].deposits_account_balance_cents), DEPOSIT_CENTS,
+    "…and the row says what the ACCOUNT holds as well as what this deposit was allocated");
+  assert.equal(offers1[0].coded_basis, "account_balance_fifo");
+  assert.equal(Number(offers1[0].deposits_sharing_account), 2);
+});
+
+test("S10 · a HIGH-STAKES rent settlement is left a draft for a distinct checker (ADV-04)", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, bank } = await runningTenancy(sub);
+  const entry = await postRentMonth(sub, client, { postingDate: "2026-02-05" });
+  const lines = await bankStatement(sub, { client, bank, specs: [rentLine("2026-02-07")] });
+
+  const firm = await firmOf(client);
+  const restore = (await rootQuery("select high_stakes_amount_cents as v from clara.firms where id=$1", [firm])).rows[0].v;
+  // RM1,000: an ordinary firm floor, and commercial rent clears it every month.
+  await rootQuery("update clara.firms set high_stakes_amount_cents=100000 where id=$1", [firm]);
+  try {
+    const checkers = (await rootQuery("select clara.eligible_checker_count($1)::int as n", [firm])).rows[0].n;
+    assert.ok(checkers >= 2, "the premise: a second pair of eyes is available in this firm");
+
+    const out = await settleRent(sub, { client, entry, line: lines[0].id });
+    assert.equal(out.status, "awaiting_checker", "the door does not self-approve a high-stakes entry");
+    assert.equal(out.reason, "high_stakes_needs_checker");
+    assert.equal(out.match_id, null);
+    const e = (await rootQuery(
+      "select status, checker_actor, self_approval_attestation from clara.journal_entries where id=$1",
+      [out.entry_id])).rows[0];
+    assert.equal(e.status, "draft");
+    assert.equal(e.checker_actor, null);
+    assert.equal(e.self_approval_attestation, null);
+
+    const open = await unsettledRows(client);
+    assert.equal(open.length, 1, "the month stays open by the LEDGER until a checker approves — nothing is dark");
+
+    const tok = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [out.entry_id])).rows[0].revision_token;
+    await approveEntry(world.users.bob, { entry: out.entry_id, expectedRevision: tok, opKey: opk949("hs-check") });
+    assert.deepEqual(await unsettledRows(client), [], "a distinct checker finishes it through the ordinary door");
+  } finally {
+    await rootQuery("update clara.firms set high_stakes_amount_cents=$2 where id=$1", [firm, restore]);
+  }
+});

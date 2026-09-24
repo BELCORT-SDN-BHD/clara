@@ -263,8 +263,9 @@ comment on table clara.contract_terms is
   'clara.document_regions row(s) of THAT agreement it was read or derived from. Append-only and '
   'supersede-only: a correction opens a successor and the superseded row is never edited '
   '(clara._tf_contract_terms_append_only). Written ONLY by clara.record_contract_terms; read '
-  'through clara.get_contract_terms and, under firm-scoped RLS, directly by human and agent '
-  'surfaces. basis_kind says whether a value was READ from a region, DERIVED from regions by the '
+  'through clara.get_contract_terms and, under firm-scoped RLS, directly by the human surface (the '
+  'agent lane holds no grant on this table: it has doors). basis_kind says whether a value was '
+  'READ from a region, DERIVED from regions by the '
   'rule its basis sentence states, or STATED by a named person.';
 
 -- ONE LIVE TERM PER AGREEMENT AND KEY -- the supersede chain's own law, at the storage layer.
@@ -281,10 +282,17 @@ create policy p_contract_terms_owner on clara.contract_terms for all to clara_fn
 drop policy if exists p_contract_terms_human on clara.contract_terms;
 create policy p_contract_terms_human on clara.contract_terms for select to clara_authenticated
   using (firm_id = clara.jwt_firm());
+-- NO AGENT-LANE GRANT (fix round, finding SPEC-08). A first cut copied clara.document_regions'
+-- posture, which carries a firm-scoped clara_agent_ro SELECT -- and that breached the estate's
+-- own wall: rig-runtime-visibility.test.mjs's "the agent lane has ZERO access to every new table"
+-- sweep admits an agent table grant ONLY where the lane has no door to route the read through
+-- (0192 §H's knowledge_records is the type case), and every exception on that list is positively
+-- verified. This lane has doors: clara.get_contract_terms and clara.get_tenancy_rent_plan_draft.
+-- The standing owner ruling is that access control is never loosened, so the grant and its
+-- policy go; the DROP is unconditional so a redo of an earlier cut of this file removes them.
 drop policy if exists p_contract_terms_agent on clara.contract_terms;
-create policy p_contract_terms_agent on clara.contract_terms for select to clara_agent_ro
-  using (firm_id = clara.wake_firm());
-grant select on clara.contract_terms to clara_authenticated, clara_agent_ro;
+grant select on clara.contract_terms to clara_authenticated;
+revoke all on clara.contract_terms from clara_agent_ro;
 
 -- THE APPEND-ONLY BELT, clara._tf_accrual_adjustment_append_only's shape (0222): DELETE never,
 -- and exactly ONE admitted UPDATE -- stamping the supersession, once, null -> not null. Every
@@ -791,6 +799,22 @@ set role clara_fn_owner;
 --     reads it to ASK A QUESTION, never to post one: the whole point of the branch below is that
 --     the framework decides whether Clara may draft, not what she may post.
 --
+--     AND IT IS A DECLARED MEMBER OF THE KNOWLEDGE COHORT (fix round, finding SPEC-07). #654's
+--     own census -- knowledge-firm-defaults.test.mjs, "no function outside the knowledge cohort
+--     reads clara.knowledge_records, and a knowledge record still cannot authorise a plan" --
+--     names every reader with its reason and then MEASURES the claim on the live body. This one
+--     was added without naming it there, and the census went red. It is declared now, with the
+--     three properties the census checks and one more this file owes:
+--       · it is STABLE and performs no DML against clara.knowledge_records (the census measures
+--         both, with a positive control against 0192's real revision writer);
+--       · it is UNGRANTED -- reachable by no application role at all (tail T.3);
+--       · and the thing the census exists to stop does NOT happen here: a knowledge record never
+--         becomes a plan's authority. The plan this lane creates cites
+--         clara.contract_plan_confirmations -- a named person's own act -- and
+--         clara.create_accounting_plan still refuses a knowledge_record reference outright, which
+--         is the census's own second half and is left untouched.
+--     The framework key decides whether Clara DRAFTS or ASKS. It authorises nothing.
+--
 --     PRECEDENCE, and why it is re-derived here rather than taken from
 --     clara.get_knowledge_applicability: that read is a human-context door (it calls
 --     clara._human_ctx and raises CLR11), and this body is an internal reached from a definer
@@ -843,7 +867,9 @@ begin
   if v_firm is null then
     return jsonb_build_object('framework_code', null, 'in_force', 'none', 'record_id', null);
   end if;
-  v_today := (now() at time zone 'Asia/Kuala_Lumpur')::date;
+  -- THE HOUSE LEGAL DATE, FROM ITS ONE OWNER (fix round, finding SPEC-10). x42's own roster
+  -- instruction: a body that SPELLS the conversion is a second owner of the legal business date.
+  v_today := clara._book_today();
 
   for v_scope in select unnest(array['client','firm']) loop
     select array_agg(distinct r.value->>'framework_code'),
@@ -889,8 +915,19 @@ begin
   -- THE WRITTEN ACCOUNTING BASIS. It names BOTH standards on every answer, because a person
   -- reading "Clara drafted a rent expense" needs to see the rule that let her and the rule that
   -- would have stopped her.
-  v_basis := 'MPERS Section 20: a lessee expenses operating-lease payments on a straight-line '
-    || 'basis over the lease term, so with LEVEL rent the straight line is the monthly rent. '
+  v_basis := 'MPERS Section 20: a lessee CLASSIFIES a lease first -- a lease that transfers '
+    || 'substantially all the risks and rewards of ownership (the term covers the major part of '
+    || 'the asset''s economic life, or the minimum lease payments amount to substantially all of '
+    || 'its fair value) is a FINANCE lease, carried as an asset and a liability with interest, '
+    || 'not a rent expense -- and expenses an OPERATING lease on a straight-line basis over the '
+    || 'lease term, so with LEVEL rent the straight line is the monthly rent. This lane asks for '
+    || 'that classification on an MPERS lease running over TEN YEARS and takes the operating '
+    || 'reading below it: premises have an economic life measured in decades, so a tenancy of a '
+    || 'few years can convey neither the major part of that life nor substantially all of their '
+    || 'fair value and the operating reading is not in doubt, while a lease running a decade or '
+    || 'more is where the classification becomes a live judgement that a tenancy page cannot '
+    || 'settle. The ten-year line is this lane''s own bound on WHEN to ask, not a threshold MPERS '
+    || 'states -- MPERS states indicators, not a number. '
     || 'MFRS 16: a lessee recognises a right-of-use asset and a lease liability for a lease over '
     || '12 months, and only a short-term lease (12 months or less) or a low-value asset may be '
     || 'expensed straight-line -- the low-value exemption cannot arise for premises, so it is '
@@ -950,6 +987,40 @@ begin
       || 'from. MPERS Section 20 expenses an operating lease straight-line; MFRS 16 recognises a '
       || 'right-of-use asset and a lease liability for a lease over 12 months. Decide the '
       || 'treatment and confirm it.', v_code);
+  elsif v_code = 'MPERS' and (v_months is null or v_months > 120) then
+    -- MPERS ASKS TOO (fix round, finding ADV-05). The first cut drafted for EVERY MPERS lease,
+    -- however long, which quietly assumed the OPERATING classification that MPERS Section 20
+    -- makes the accountant establish: a 30-year ground lease was straight-lined as rent expense
+    -- with no question raised and no judgement recorded (DRIVEN in the review, term restated to
+    -- 360 months through clara.record_contract_terms). The owner's own principle -- Clara asks
+    -- for a professional judgement -- was honoured on the MFRS side and skipped here. The
+    -- indicators the standard names (economic life, fair value, transfer of ownership, a bargain
+    -- purchase option, a specialised asset) are not readable off a tenancy page, which is exactly
+    -- the case the ruling sends to a person.
+    --
+    -- WHY TEN YEARS AND NOT TWELVE MONTHS. MFRS 16's twelve-month line is the STANDARD'S own
+    -- short-term exemption; MPERS Section 20 has no such line, only indicators, so a number here
+    -- is this lane's judgement about when to ASK rather than a rule it is applying. Twelve months
+    -- was the first cut of this fix and it was wrong in the other direction: it would have asked
+    -- for a written classification on every two-year shoplot tenancy in the country, which is the
+    -- noise the ruling's own "Clara asks for a professional judgement" is not about. Premises
+    -- have an economic life measured in decades; a lease running a decade or more is where
+    -- "the major part of the economic life" and "substantially all of the fair value" stop being
+    -- obviously false. The owner may move this line, and the number lives in ONE place.
+    v_reason := 'mpers_lease_classification'; v_standard := 'MPERS Section 20';
+    v_question := format(
+      'These accounts are prepared on MPERS and this lease runs %s months -- ten years or more. '
+      || 'MPERS Section 20 has '
+      || 'the lessee CLASSIFY the lease first: one that transfers substantially all the risks and '
+      || 'rewards of ownership -- a term covering the major part of the premises'' economic life, '
+      || 'or minimum lease payments amounting to substantially all of their fair value -- is a '
+      || 'FINANCE lease, recognised as an asset and a liability with interest and depreciation, '
+      || 'not a rent expense. Only an OPERATING lease is expensed straight-line. Nothing on this '
+      || 'page says which it is. Clara has drafted nothing: the rent she read is %s a month, from '
+      || '%s to %s. Decide the classification and confirm it.',
+      coalesce(v_months::text,'an unmeasurable number of'),
+      to_char(v_rent/100.0,'FM999G999G990D00'),
+      to_char(v_start,'YYYY-MM-DD'), to_char(v_end,'YYYY-MM-DD'));
   elsif v_code = 'MPERS' then
     v_drafts := true; v_standard := 'MPERS Section 20';
   elsif v_months is not null and v_months <= 12 then
@@ -981,7 +1052,7 @@ end $tlt$;
 revoke all on function clara._tenancy_lease_treatment(uuid,uuid) from public;
 
 comment on function clara._tenancy_lease_treatment(uuid,uuid) is
-  '#949 (owner ruling 2026-09-20): the lessee accounting branch. MPERS Section 20 with level rent DRAFTS a monthly rent expense; MFRS 16 DRAFTS only for a short-term lease of 12 months or less and otherwise ASKS (right-of-use asset + lease liability); a stated escalation ASKS under both, because straight-line means the total averaged over the term. Every answer carries the written accounting basis naming both standards, the term and the rent it read, and -- where it asks -- the question the accountant answers. It measures nothing: no discount rate, no present value, no schedule. Ungranted.';
+  '#949 (owner ruling 2026-09-20): the lessee accounting branch. MPERS Section 20 with level rent DRAFTS a monthly rent expense for a lease of ten years or less and otherwise ASKS for the finance-vs-operating classification the standard makes the accountant establish (fix-round finding ADV-05); MFRS 16 DRAFTS only for a short-term lease of 12 months or less and otherwise ASKS (right-of-use asset + lease liability); a stated escalation ASKS under both, because straight-line means the total averaged over the term. Every answer carries the written accounting basis naming both standards, the term and the rent it read, and -- where it asks -- the question the accountant answers. It measures nothing: no discount rate, no present value, no schedule. Ungranted.';
 
 reset role;
 
@@ -1099,10 +1170,11 @@ create policy p_contract_plan_confirmations_owner on clara.contract_plan_confirm
 drop policy if exists p_contract_plan_confirmations_human on clara.contract_plan_confirmations;
 create policy p_contract_plan_confirmations_human on clara.contract_plan_confirmations
   for select to clara_authenticated using (firm_id = clara.jwt_firm());
+-- NO AGENT-LANE GRANT (fix round, finding SPEC-08) -- see clara.contract_terms above for the
+-- wall and the reason. DRIVEN: the sweep failed on this table by name before this change.
 drop policy if exists p_contract_plan_confirmations_agent on clara.contract_plan_confirmations;
-create policy p_contract_plan_confirmations_agent on clara.contract_plan_confirmations
-  for select to clara_agent_ro using (firm_id = clara.wake_firm());
-grant select on clara.contract_plan_confirmations to clara_authenticated, clara_agent_ro;
+grant select on clara.contract_plan_confirmations to clara_authenticated;
+revoke all on clara.contract_plan_confirmations from clara_agent_ro;
 
 create or replace function clara._tf_contract_plan_confirmation_immutable() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $tfcpci$
@@ -1505,6 +1577,11 @@ $p949_plan_kind$;
 --                                          the lane took come out of one body.
 --       rent_plan_already_confirmed     -- this tenancy already runs a plan, named by id. Ending
 --                                          that plan is the plan lane's own act, not this door's.
+--       payable_account_in_use          -- ANOTHER tenancy's live rent plan already uses the
+--                                          payable account named. The open-rent read is a FIFO
+--                                          over that account's own balance, so two live plans on
+--                                          one account would share a single payment pool and each
+--                                          other's months (fix-round finding ADV-03).
 --
 --     REDO-SAFE: `create or replace function`.
 -- =====================================================================================
@@ -1557,6 +1634,29 @@ begin
       using errcode='CLR10',
         detail=jsonb_build_object('reason','rent_plan_already_confirmed',
           'plan_id', v_existing.plan_id, 'plan_status', v_existing.status,
+          'confirmation_id', v_existing.confirmation_id)::text;
+  end if;
+
+  -- ONE LIVE RENT PLAN PER PAYABLE ACCOUNT (fix round, finding ADV-03). The open-rent read is a
+  -- FIFO over the payable ACCOUNT's own balance, because 2050 has no subledger -- so two live
+  -- tenancies pointed at one account share a single payment pool and each other's months. The
+  -- first cut refused only a second plan on the SAME DOCUMENT, which let exactly that in. The
+  -- remedy is the accountant's own choice the owner's ruling already gives them: point the second
+  -- tenancy at its own liability account. Named refusal, carrying the tenancy that holds it.
+  select cf.document_id, cf.id as confirmation_id, p.id as plan_id into v_existing
+    from clara.contract_plan_confirmations cf
+    join clara.accounting_plans p
+      on p.authority_ref->>'kind' = 'contract_confirmation'
+     and nullif(p.authority_ref->>'id','')::uuid = cf.id
+   where cf.client_id = p_client and cf.kind = 'rent_plan' and p.status <> 'ended'
+     and cf.payable_account_code = coalesce(nullif(btrim(coalesce(p_payable_account,'')),''), '2050')
+   order by cf.confirmed_at desc limit 1;
+  if v_existing.plan_id is not null then
+    raise exception 'account % already carries another tenancy''s live rent plan; a second plan on one payable account would share its payments month for month -- give this tenancy its own liability account', coalesce(nullif(btrim(coalesce(p_payable_account,'')),''), '2050')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','payable_account_in_use',
+          'payable_account_code', coalesce(nullif(btrim(coalesce(p_payable_account,'')),''), '2050'),
+          'plan_id', v_existing.plan_id, 'document_id', v_existing.document_id,
           'confirmation_id', v_existing.confirmation_id)::text;
   end if;
 
@@ -1652,7 +1752,7 @@ begin
 end $ctrp$;
 
 comment on function clara.confirm_tenancy_rent_plan(uuid,uuid,text,text,text,text) is
-  '#949 AC2/AC3: a named person confirms the tenancy''s rent plan. The confirmation is recorded FIRST (clara.contract_plan_confirmations, carrying the agreement as its source document and the lessee-treatment branch as it stood), and the plan is created SECOND through clara.create_accounting_plan citing that act as its explicit instruction. It refuses a bank credit by name, a missing chart account by code, and -- where the lessee branch asked -- a confirmation with no written professional judgement, quoting the branch''s own question. bookkeeper+, clara_authenticated only.';
+  '#949 AC2/AC3: a named person confirms the tenancy''s rent plan. The confirmation is recorded FIRST (clara.contract_plan_confirmations, carrying the agreement as its source document and the lessee-treatment branch as it stood), and the plan is created SECOND through clara.create_accounting_plan citing that act as its explicit instruction. It refuses a bank credit by name, a payable account another tenancy''s live rent plan already uses, a missing chart account by code, and -- where the lessee branch asked -- a confirmation with no written professional judgement, quoting the branch''s own question. bookkeeper+, clara_authenticated only.';
 
 revoke all on function clara.confirm_tenancy_rent_plan(uuid,uuid,text,text,text,text) from public;
 grant execute on function clara.confirm_tenancy_rent_plan(uuid,uuid,text,text,text,text) to clara_authenticated;
@@ -1720,40 +1820,70 @@ create or replace function clara._rent_payable_unsettled(p_client uuid)
                 rent_cents bigint, unsettled_cents bigint)
   language sql stable security definer set search_path = clara, pg_temp
   as $rpu$
+  -- ONE ROW PER LIVE RENT PLAN (fix round, finding ADV-03). The first cut kept
+  -- `distinct on (cf.payable_account_code)`, which COLLAPSED two tenancies sharing one payable
+  -- account into the most recently confirmed one: both tenancies' rent months were then presented
+  -- under one document and their two payment streams netted against each other. §G's confirm door
+  -- now refuses a payable account another live rent plan already uses, so the collapse cannot be
+  -- created any more; this read no longer depends on that being true.
   with plans as (
-    select distinct on (cf.payable_account_code)
-           p.id as plan_id, cf.document_id, cf.payable_account_code
+    select p.id as plan_id, cf.id as confirmation_id, cf.document_id, cf.payable_account_code,
+           cf.term_start, cf.term_end, cf.confirmed_at
       from clara.contract_plan_confirmations cf
       join clara.accounting_plans p
         on p.authority_ref->>'kind' = 'contract_confirmation'
        and nullif(p.authority_ref->>'id','')::uuid = cf.id
      where cf.client_id = p_client and cf.kind = 'rent_plan' and p.status <> 'ended'
-     order by cf.payable_account_code, cf.confirmed_at desc
   ),
-  credits as (
-    select pl.plan_id, pl.document_id, pl.payable_account_code,
-           je.id as entry_id, je.posting_date,
+  -- EACH RENT CREDIT BELONGS TO ONE PLAN, not to every plan on the account. Where two live plans
+  -- still share an account (a pre-fix confirmation), the credit goes to the plan whose own term
+  -- window contains the posting date, and only then to the most recently confirmed -- so the
+  -- attribution is a fact about the tenancy's dates rather than about which plan was newest.
+  rent_lines as (
+    select distinct on (jl.entry_id, jl.line_no)
+           pl.plan_id, pl.document_id, pl.payable_account_code,
+           je.id as entry_id, jl.line_no, je.posting_date,
            date_trunc('month', je.posting_date)::date as period_month,
-           jl.credit_cents as amt,
-           sum(jl.credit_cents) over (
-             partition by pl.payable_account_code
-             order by je.posting_date, je.id
-             rows between unbounded preceding and current row) as cum_credit
+           jl.credit_cents as amt
       from plans pl
       join clara.journal_lines jl
         on jl.account_code = pl.payable_account_code and jl.credit_cents > 0
       join clara.journal_entries je on je.id = jl.entry_id
-     where je.client_id = p_client and je.status = 'approved' and je.reversed_by is null
+     -- A REVERSAL MIRROR IS NOT A MONTH OF RENT (fix round, finding ADV-02's twin on the credit
+     -- side): reversing a rent SETTLEMENT mirrors Cr <payable>, which the first cut counted as a
+     -- fresh month of rent recognised.
+     where je.client_id = p_client and je.status = 'approved'
+       and je.reversed_by is null and je.reversal_of is null
+     order by jl.entry_id, jl.line_no,
+       (je.posting_date >= pl.term_start
+         and je.posting_date <= coalesce(pl.term_end, 'infinity'::date)) desc,
+       pl.confirmed_at desc, pl.plan_id
+  ),
+  credits as (
+    select r.plan_id, r.document_id, r.payable_account_code, r.entry_id, r.line_no,
+           r.posting_date, r.period_month, r.amt,
+           sum(r.amt) over (
+             partition by r.payable_account_code
+             order by r.posting_date, r.entry_id, r.line_no
+             rows between unbounded preceding and current row) as cum_credit
+      from rent_lines r
   ),
   debits as (
-    select pl.payable_account_code,
+    -- A REVERSAL MIRROR IS NOT A PAYMENT (fix round, finding ADV-02 -- DRIVEN: reversing March's
+    -- rent left an approved, non-reversed DEBIT on the payable, which was FIFO-allocated against
+    -- FEBRUARY's credit and made a genuinely unpaid month disappear from this read, from Needs
+    -- you and from the settlement door). Reversing a rent SETTLEMENT mirrors Cr <payable>, never
+    -- a debit, so this line drops nothing that belongs in the pool -- and that reversal correctly
+    -- re-opens the month, because the settlement's own debit leaves the pool with it.
+    select pa.payable_account_code,
            coalesce((select sum(jl.debit_cents)
                        from clara.journal_lines jl
                        join clara.journal_entries je on je.id = jl.entry_id
-                      where jl.account_code = pl.payable_account_code and jl.debit_cents > 0
+                      where jl.account_code = pa.payable_account_code and jl.debit_cents > 0
                         and je.client_id = p_client and je.status = 'approved'
-                        and je.reversed_by is null), 0) as total_debits
-      from plans pl
+                        and je.reversed_by is null
+                        and je.reversal_of is null), 0) as total_debits
+      from (select distinct payable_account_code from plans) pa
   )
   select c.entry_id, c.plan_id, c.document_id, f.id, c.posting_date, c.period_month,
          c.payable_account_code, c.amt,
@@ -1769,7 +1899,7 @@ $rpu$;
 revoke all on function clara._rent_payable_unsettled(uuid) from public;
 
 comment on function clara._rent_payable_unsettled(uuid) is
-  '#949 AC4: per client, every month of rent recognised on a confirmed rent plan''s own payable account, with its FIFO-allocated remaining balance -- oldest month charged first against every approved, non-reversed debit on that account, however it was booked. A pure ledger fact: no settlement marker is read or required, so the row clears itself by any route. STABLE, ungranted; reached from clara.get_rent_settlement_candidates, clara._settle_rent_payable_core and the list_review_queue splice.';
+  '#949 AC4: per client, every month of rent recognised on a confirmed rent plan''s own payable account, with its FIFO-allocated remaining balance -- oldest month charged first against every approved, non-reversed, non-mirror debit on that account, however it was booked. One row per live plan, never one per account: a credit is attributed to the plan whose own term window contains it (fix-round findings ADV-02 and ADV-03). A pure ledger fact: no settlement marker is read or required, so the row clears itself by any route. STABLE, ungranted; reached from clara.get_rent_settlement_candidates, clara._settle_rent_payable_core and the list_review_queue splice.';
 
 create or replace function clara._rent_settlement_bank_candidates(
     p_client uuid, p_target_cents bigint, p_around date, p_window_days int default 10)
@@ -1818,8 +1948,16 @@ begin
         'filing_id', u.filing_id, 'posting_date', u.posting_date,
         'period_month', u.period_month, 'payable_account_code', u.payable_account_code,
         'rent_cents', u.rent_cents, 'unsettled_cents', u.unsettled_cents,
+        -- THIRTY-FIVE DAYS, AND THE ROW SAYS SO (fix round, finding ADV-11). Rent recognised on
+        -- the 5th and paid on the 25th is an ordinary Malaysian tenancy and was 20 days outside
+        -- the payroll lane's ten-day window -- so the read showed "the payment has not appeared"
+        -- with an empty list for a line clara.settle_rent_payable would have taken (that door
+        -- applies no date window at all). A month either side covers the ordinary case without
+        -- starting to offer unrelated payments of a round number, and the window travels ON the
+        -- row so a person is never told less than was searched.
+        'candidate_window_days', 35,
         'candidates', clara._rent_settlement_bank_candidates(
-          p_client, u.unsettled_cents, u.posting_date))
+          p_client, u.unsettled_cents, u.posting_date, 35))
       order by u.posting_date, u.entry_id)
     from clara._rent_payable_unsettled(p_client) u
     where u.unsettled_cents > 0
@@ -1827,7 +1965,7 @@ begin
 end $grsc$;
 
 comment on function clara.get_rent_settlement_candidates(uuid) is
-  '#949 AC4: per client, each month of rent whose payable is still open, with its own candidate bank lines. Derived entirely from live state; stores nothing. bookkeeper+, clara_authenticated only.';
+  '#949 AC4: per client, each month of rent whose payable is still open, with its own candidate bank lines -- searched 35 days either side of the month''s own posting date, and the window travels on the row (fix-round finding ADV-11). Derived entirely from live state; stores nothing. bookkeeper+, clara_authenticated only.';
 
 revoke all on function clara.get_rent_settlement_candidates(uuid) from public;
 grant execute on function clara.get_rent_settlement_candidates(uuid) to clara_authenticated;
@@ -1841,6 +1979,7 @@ declare
   c record; v_dedupe jsonb; v_firm uuid; v_req bytea;
   u record; ln record; st record; v_bank uuid; v_coa text;
   v_entry uuid; v_receipt uuid; v_match jsonb; v_memo text;
+  v_open_draft uuid; v_locked uuid;
 begin
   select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
   if c.actor is null or c.firm is null then
@@ -1859,9 +1998,25 @@ begin
   v_dedupe := clara._reserve_op(c.firm, 'settle_rent_payable', p_op_key, v_req);
   if v_dedupe is not null then return v_dedupe; end if;
 
-  -- LOCKS, in the estate's own order: the pre-existing rent entry first, then the client rung;
-  -- the bank rows are locked LAST, one frame further in, by _match_bank_line_core itself.
-  perform 1 from clara.journal_entries je where je.id = p_entry for update;
+  -- RESOLVE BEFORE YOU LOCK (fix round, finding ADV-10). A FOR UPDATE on a caller-supplied id
+  -- taken before the row is proved to be this client's is a weak existence/activity oracle
+  -- across the tenant wall: the call BLOCKS for an id another firm's open transaction holds and
+  -- returns instantly for an id that does not exist. 0021's no-existence-oracle rule. So the
+  -- row is resolved INSIDE this client and this firm first, and the lock is taken only on a row
+  -- that survived that.
+  --
+  -- AND THE REFUSAL STAYS ONE REFUSAL. Deliberately NOT a raise here: an id that is not this
+  -- client's entry, an id of another firm's entry and an id that is no entry at all must all
+  -- come out of the SAME door below (not_an_open_rent_month), because three different answers
+  -- to three different wrong ids is the oracle in another form. The door's named contract is
+  -- unchanged; only the lock moved.
+  select je.id into v_locked from clara.journal_entries je
+   where je.id = p_entry and je.client_id = p_client and je.firm_id = c.firm;
+  if v_locked is not null then
+    -- LOCKS, in the estate's own order: the pre-existing rent entry first, then the client rung;
+    -- the bank rows are locked LAST, one frame further in, by _match_bank_line_core itself.
+    perform 1 from clara.journal_entries je where je.id = v_locked for update;
+  end if;
   perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
 
   select * into u from clara._rent_payable_unsettled(p_client) x where x.entry_id = p_entry;
@@ -1904,6 +2059,20 @@ begin
       using errcode='CLR10',detail='{"reason":"bank_account_unmapped"}';
   end if;
 
+  -- ONE SETTLEMENT DRAFT AT A TIME (fix round, beside ADV-04). The high-stakes arm below leaves
+  -- a DRAFT behind for a distinct checker; a second accept of the same month would mint a second
+  -- one and both could post.
+  select je2.id into v_open_draft from clara.journal_entries je2
+   where je2.client_id = p_client and je2.status = 'draft'
+     and (je2.flags->'rent_settlement'->>'rent_entry_id') = p_entry::text
+   order by je2.created_at, je2.id limit 1;
+  if v_open_draft is not null then
+    raise exception 'a settlement for this month''s rent is already drafted and waiting for a checker'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','settlement_awaiting_checker',
+          'rent_entry_id', p_entry, 'settlement_entry_id', v_open_draft)::text;
+  end if;
+
   v_memo := 'Rent settlement ' || to_char(u.period_month, 'FMMonth YYYY');
 
   insert into clara.journal_entries(client_id, status, posting_date, memo, origin,
@@ -1920,6 +2089,34 @@ begin
   insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents, credit_cents, description)
     values (v_entry, 2, v_coa, 0, u.unsettled_cents, v_memo);
   perform clara._assert_balanced(v_entry);
+
+  perform clara._append_event(c.firm, 'entry.drafted', p_client, c.actor, null, 'interactive',
+    v_entry, null, null, '{}'::jsonb);
+
+  -- THE HIGH-STAKES WALL (fix round, finding ADV-04), AT PARITY WITH THE ORDINARY DOOR, and for
+  -- the SAME reason #947's twin carries it: clara._approve_entry_core refuses a maker's own
+  -- approval of a high-stakes entry when the firm carries a second eligible checker, and demands
+  -- a written attestation when it does not. Commercial rent at RM12,000 a month clears an
+  -- ordinary firm's high-stakes floor, so without this wall one bookkeeper could post and approve
+  -- it through /bank while the same entry booked by hand is refused. The estate's own answer to
+  -- an in-body approval meeting a high-stakes entry is clara.reverse_entry's: LEAVE IT A DRAFT.
+  -- Nothing is dark -- the entry exists, balanced, on the bank's own GL code, so a checker
+  -- approves it through clara.approve_entry and binds it through the ordinary bank matcher; until
+  -- then the month stays open BY THE LEDGER and keeps its Needs-you row.
+  if clara.is_high_stakes(v_entry) then
+    perform clara._audit(c.firm, c.actor, null, null, 'settle_rent_payable', v_entry,
+      jsonb_build_object('client', p_client, 'rent_entry_id', p_entry, 'line_id', p_line,
+        'settlement_entry_id', v_entry, 'unsettled_cents', u.unsettled_cents,
+        'status', 'awaiting_checker', 'reason', 'high_stakes_needs_checker'));
+    return clara._finish_op(c.firm, 'settle_rent_payable', p_op_key,
+      jsonb_build_object('entry_id', v_entry, 'match_id', null,
+        'unsettled_cents', u.unsettled_cents,
+        'period_month', to_char(u.period_month,'YYYY-MM-DD'),
+        'posting_date', to_char(ln.entry_date,'YYYY-MM-DD'),
+        'status', 'awaiting_checker', 'reason', 'high_stakes_needs_checker',
+        'eligible_checker_count', clara.eligible_checker_count(c.firm),
+        'line_id', p_line));
+  end if;
 
   update clara.journal_entries
      set status = 'approved', checker_actor = c.actor, approved_at = now(), updated_at = now()
@@ -1965,13 +2162,14 @@ begin
     jsonb_build_object('entry_id', v_entry, 'match_id', v_match->>'match_id',
       'unsettled_cents', u.unsettled_cents,
       'period_month', to_char(u.period_month,'YYYY-MM-DD'),
-      'posting_date', to_char(ln.entry_date,'YYYY-MM-DD')));
+      'posting_date', to_char(ln.entry_date,'YYYY-MM-DD'),
+      'status', 'settled'));
 end $srpc$;
 
 revoke all on function clara._settle_rent_payable_core(jsonb,uuid,uuid,uuid,text) from public;
 
 comment on function clara._settle_rent_payable_core(jsonb,uuid,uuid,uuid,text) is
-  '#949: books Dr <the plan''s own payable> / Cr <bank COA> for one month''s open rent, approves it directly (via_wake_kind=interactive), then reuses clara._match_bank_line_core to bind it to the chosen bank line. Ungranted; reached from clara.settle_rent_payable alone.';
+  '#949: books Dr <the plan''s own payable> / Cr <bank COA> for one month''s open rent, approves it directly (via_wake_kind=interactive), then reuses clara._match_bank_line_core to bind it to the chosen bank line. A HIGH-STAKES settlement is left a DRAFT instead (status=awaiting_checker, no receipt and no match), the clara.reverse_entry posture, so the ordinary approve door''s distinct-checker and self-attestation arms decide it -- fix-round finding ADV-04. Ungranted; reached from clara.settle_rent_payable alone.';
 
 create or replace function clara.settle_rent_payable(p_client uuid, p_entry uuid, p_line uuid, p_op_key text)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp
@@ -1985,7 +2183,7 @@ begin
 end $srp$;
 
 comment on function clara.settle_rent_payable(uuid,uuid,uuid,text) is
-  '#949 AC4: accept one settlement candidate -- a month of rent''s own posted entry and the bank line that pays it. bookkeeper+, clara_authenticated only.';
+  '#949 AC4: accept one settlement candidate -- a month of rent''s own posted entry and the bank line that pays it. Returns status=settled, or status=awaiting_checker when the settlement entry is high-stakes: the entry is drafted and a distinct checker approves it through the ordinary door. bookkeeper+, clara_authenticated only.';
 
 revoke all on function clara.settle_rent_payable(uuid,uuid,uuid,text) from public;
 grant execute on function clara.settle_rent_payable(uuid,uuid,uuid,text) to clara_authenticated;
@@ -2043,9 +2241,19 @@ begin
         'proposed_account_code', '1120',
         'proposed_account_name', d.account_name,
         'proposed_account_in_chart', d.account_name is not null,
-        'already_coded', d.coded_cents >= d.deposit_cents,
-        'coded_cents', d.coded_cents,
-        'candidates', case when d.coded_cents >= d.deposit_cents then '[]'::jsonb
+        'already_coded', d.allocated_cents >= d.deposit_cents,
+        'coded_cents', d.allocated_cents,
+        -- THE OFFER SAYS WHAT IT ALLOCATED, AND FROM WHAT (fix round, finding ADV-06). 1120
+        -- Deposits Paid carries no subledger, so the only ledger fact available is the ACCOUNT's
+        -- balance. The first cut compared that whole balance against EACH deposit on its own, so
+        -- one coded deposit -- or an unrelated utility deposit booked to 1120 -- declared every
+        -- other deposit already coded and withdrew the offer silently (DRIVEN in the review).
+        -- The balance is now allocated oldest-deposit-first across the client's own recorded
+        -- deposits, and both figures travel on the row so nobody has to guess which is which.
+        'deposits_account_balance_cents', d.account_balance_cents,
+        'coded_basis', 'account_balance_fifo',
+        'deposits_sharing_account', d.deposit_count,
+        'candidates', case when d.allocated_cents >= d.deposit_cents then '[]'::jsonb
           else clara._rent_settlement_bank_candidates(
                  p_client, d.deposit_cents,
                  coalesce(d.term_start, d.recorded_at::date), 60) end)
@@ -2058,12 +2266,23 @@ begin
                  and s.superseded_at is null) as term_start,
              (select a.name from clara.coa_accounts a
                where a.client_id = p_client and a.account_code = '1120' and a.is_active) as account_name,
-             coalesce((select sum(jl.debit_cents) - coalesce(sum(jl.credit_cents),0)
-                         from clara.journal_lines jl
-                         join clara.journal_entries je on je.id = jl.entry_id
-                        where jl.account_code = '1120' and je.client_id = p_client
-                          and je.status = 'approved' and je.reversed_by is null), 0) as coded_cents
+             b.account_balance_cents,
+             count(*) over () as deposit_count,
+             -- THIS deposit's own FIFO share of the account balance: whatever is left after every
+             -- OLDER recorded deposit has taken its share first.
+             greatest(0, least(ct.amount_cents,
+               b.account_balance_cents
+                 - (sum(ct.amount_cents) over (order by ct.recorded_at, ct.id
+                      rows between unbounded preceding and current row) - ct.amount_cents)
+             )) as allocated_cents
         from clara.contract_terms ct
+        cross join lateral (
+          select coalesce((select sum(jl.debit_cents) - coalesce(sum(jl.credit_cents),0)
+                             from clara.journal_lines jl
+                             join clara.journal_entries je on je.id = jl.entry_id
+                            where jl.account_code = '1120' and je.client_id = p_client
+                              and je.status = 'approved' and je.reversed_by is null
+                              and je.reversal_of is null), 0) as account_balance_cents) b
        where ct.client_id = p_client and ct.term_key = 'deposit' and ct.superseded_at is null
          and ct.amount_cents > 0
     ) d
@@ -2071,7 +2290,7 @@ begin
 end $gtdc$;
 
 comment on function clara.get_tenancy_deposit_coding(uuid) is
-  '#949 AC5: per client, every recorded tenancy deposit with the bank lines that could be it and 1120 Deposits Paid as the proposed coding -- an OFFER, never a posting: this lane has no write door for a deposit at all, because signing does not say the money moved. Derived entirely from live state, so it clears itself the moment the deposit is coded by any route. bookkeeper+, clara_authenticated only.';
+  '#949 AC5: per client, every recorded tenancy deposit with the bank lines that could be it and 1120 Deposits Paid as the proposed coding -- an OFFER, never a posting: this lane has no write door for a deposit at all, because signing does not say the money moved. 1120 carries no subledger, so the account balance is allocated oldest-deposit-first across the client''s own recorded deposits and BOTH figures travel on the row (fix-round finding ADV-06). Derived entirely from live state, so it clears itself the moment the deposit is coded by any route. bookkeeper+, clara_authenticated only.';
 
 revoke all on function clara.get_tenancy_deposit_coding(uuid) from public;
 grant execute on function clara.get_tenancy_deposit_coding(uuid) to clara_authenticated;
@@ -2152,7 +2371,8 @@ begin
       'effective_from', to_char(v_from,'YYYY-MM-DD'));
   end if;
 
-  v_today := (now() at time zone 'Asia/Kuala_Lumpur')::date;
+  -- THE HOUSE LEGAL DATE, FROM ITS ONE OWNER (fix round, finding SPEC-10).
+  v_today := clara._book_today();
   v_days := v_from - v_today;
   if v_from is not null and v_days > v_lead then
     return jsonb_build_object('pending', false, 'reason', 'not_due_yet',
@@ -2514,8 +2734,9 @@ declare
   v_owner text; v_vol text; v_secdef boolean; v_n int; v_sig text; v_src text;
   v_proacl aclitem[]; v_proowner oid; v_rls boolean; v_force boolean; v_j jsonb;
 begin
-  -- T.1 THE TWO NEW RELATIONS: forced RLS, owned by clara_fn_owner, their three policies each,
-  --     their append-only belts and the live-uniqueness index the supersede chain rests on.
+  -- T.1 THE TWO NEW RELATIONS: forced RLS, owned by clara_fn_owner, their TWO policies each
+  --     (owner and human -- the agent lane holds no grant and no policy, fix-round finding
+  --     SPEC-08), their append-only belts and the live-uniqueness index the chain rests on.
   for v_sig in select unnest(array['contract_terms','contract_plan_confirmations']) loop
     select c.relrowsecurity, c.relforcerowsecurity, c.relowner::regrole::text
       into v_rls, v_force, v_owner
@@ -2526,8 +2747,21 @@ begin
     end if;
     select count(*)::int into v_n from pg_policies p
      where p.schemaname = 'clara' and p.tablename = v_sig;
-    if v_n <> 3 then
-      raise exception '#949 tail T.1: clara.% carries % policy(ies), expected 3 (owner, human, agent)', v_sig, v_n
+    if v_n <> 2 then
+      raise exception '#949 tail T.1: clara.% carries % policy(ies), expected 2 (owner, human)', v_sig, v_n
+        using errcode='CLR10';
+    end if;
+    -- THE AGENT WALL, GRANT-LEVEL (fix round, finding SPEC-08). rig-runtime-visibility.test.mjs
+    -- sweeps every new table for exactly this; asserted in-migration too so a future recut of
+    -- this file cannot restore the grant without colliding here first.
+    if has_table_privilege('clara_agent_ro', 'clara.' || v_sig, 'SELECT') then
+      raise exception '#949 tail T.1: clara_agent_ro can SELECT clara.% -- the agent lane has ZERO access to a new table unless it has no door, and this lane has doors', v_sig
+        using errcode='CLR10';
+    end if;
+    if exists (select 1 from pg_policies p
+                where p.schemaname = 'clara' and p.tablename = v_sig
+                  and p.policyname like '%@_agent' escape '@') then
+      raise exception '#949 tail T.1: clara.% still carries an agent policy with no grant behind it', v_sig
         using errcode='CLR10';
     end if;
     select count(*)::int into v_n from pg_trigger t
@@ -2709,6 +2943,55 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '#949 tail OK: clara.contract_terms and clara.contract_plan_confirmations are forced-RLS, clara_fn_owner-owned, three policies and two belts each, with the live-uniqueness index the supersede chain rests on; the ten granted doors are clara_authenticated-only with no PUBLIC and no machine lane, and the twelve internals are reachable by no application role; clara.list_review_queue projects rent_payable_unsettled and rent_escalation_pending exactly once each beside all thirteen kinds it already carried; clara._authority_ref_refusal and clara.create_accounting_plan admit contract_confirmation while keeping every wall #977 and #640 put there; the three chart rows this lane consumes are still the current published platform template''s under the names it spells, and no body of this lane names the template table or the prepayment service period at all; and a fixture-free probe drove the closed term vocabulary, the bank test, the framework read and the lessee branch -- which refuses an unrecorded tenancy by name and still states MPERS Section 20 and MFRS 16 in its written basis.';
+  -- T.8 (fix round) THE FIVE WALLS THIS ROUND ADDED, re-read off the CATALOG so a later recut
+  --     that drops one collides here.
+  --       ADV-02  a reversal mirror is neither a month of rent nor a payment
+  --       ADV-03  one row per LIVE PLAN, and the confirm door refuses a shared payable account
+  --       ADV-04  the settlement core probes clara.is_high_stakes before it approves
+  --       ADV-05  the MPERS arm asks the finance-vs-operating classification
+  --       SPEC-10 the legal business date comes from clara._book_today(), nowhere else
+  select regexp_replace(regexp_replace(p.prosrc,'--[^\n]*','','g'),'\s+',' ','g') into v_src
+    from pg_proc p where p.oid='clara._rent_payable_unsettled(uuid)'::regprocedure;
+  v_n := (length(v_src) - length(replace(v_src, 'je.reversal_of is null', '')))
+         / length('je.reversal_of is null');
+  if v_n <> 2 then
+    raise exception '#949 tail T.8: the rent read excludes a reversal mirror on % side(s), expected 2 (credits and debits) -- ADV-02''s wall is gone', v_n
+      using errcode='CLR10';
+  end if;
+  if position('distinct on (cf.payable_account_code)' in v_src) <> 0 then
+    raise exception '#949 tail T.8: the rent read is keyed on the payable ACCOUNT again -- two tenancies sharing one account would collapse into the newest (ADV-03)'
+      using errcode='CLR10';
+  end if;
+  select regexp_replace(regexp_replace(p.prosrc,'--[^\n]*','','g'),'\s+',' ','g') into v_src
+    from pg_proc p where p.oid='clara.confirm_tenancy_rent_plan(uuid,uuid,text,text,text,text)'::regprocedure;
+  if position('payable_account_in_use' in v_src) = 0 then
+    raise exception '#949 tail T.8: the confirm door no longer refuses a payable account another live rent plan uses (ADV-03)'
+      using errcode='CLR10';
+  end if;
+  select regexp_replace(regexp_replace(p.prosrc,'--[^\n]*','','g'),'\s+',' ','g') into v_src
+    from pg_proc p where p.oid='clara._settle_rent_payable_core(jsonb,uuid,uuid,uuid,text)'::regprocedure;
+  if position('clara.is_high_stakes(v_entry)' in v_src) = 0
+     or position('high_stakes_needs_checker' in v_src) = 0
+     or position('settlement_awaiting_checker' in v_src) = 0 then
+    raise exception '#949 tail T.8: the rent settlement core no longer probes clara.is_high_stakes before approving, or no longer refuses a second draft (ADV-04)'
+      using errcode='CLR10';
+  end if;
+  select regexp_replace(regexp_replace(p.prosrc,'--[^\n]*','','g'),'\s+',' ','g') into v_src
+    from pg_proc p where p.oid='clara._tenancy_lease_treatment(uuid,uuid)'::regprocedure;
+  if position('mpers_lease_classification' in v_src) = 0 then
+    raise exception '#949 tail T.8: the MPERS arm no longer asks for the finance-vs-operating classification (ADV-05)'
+      using errcode='CLR10';
+  end if;
+  for v_sig in select unnest(array['clara._client_reporting_framework(uuid)',
+                                   'clara._tenancy_escalation_state(uuid)']) loop
+    select regexp_replace(regexp_replace(p.prosrc,'--[^\n]*','','g'),'\s+',' ','g') into v_src
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if position('clara._book_today()' in v_src) = 0 or v_src ilike '%Asia/Kuala_Lumpur%' then
+      raise exception '#949 tail T.8: % still owns a copy of the house legal date instead of calling clara._book_today() (SPEC-10)', v_sig
+        using errcode='CLR10';
+    end if;
+  end loop;
+
+  raise notice '#949 tail OK: clara.contract_terms and clara.contract_plan_confirmations are forced-RLS, clara_fn_owner-owned, two policies and two belts each with no agent-lane grant at all, with the live-uniqueness index the supersede chain rests on; the ten granted doors are clara_authenticated-only with no PUBLIC and no machine lane, and the twelve internals are reachable by no application role; clara.list_review_queue projects rent_payable_unsettled and rent_escalation_pending exactly once each beside all thirteen kinds it already carried; clara._authority_ref_refusal and clara.create_accounting_plan admit contract_confirmation while keeping every wall #977 and #640 put there; the three chart rows this lane consumes are still the current published platform template''s under the names it spells, and no body of this lane names the template table or the prepayment service period at all; a fixture-free probe drove the closed term vocabulary, the bank test, the framework read and the lessee branch -- which refuses an unrecorded tenancy by name and still states MPERS Section 20 and MFRS 16 in its written basis; and the five fix-round walls are live (no reversal mirror in either half of the rent FIFO, one row per live plan, a refused shared payable account, a high-stakes settlement left a draft, an MPERS classification question, and the legal date owned only by clara._book_today()).';
 end
 $p949_tail$;
