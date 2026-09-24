@@ -757,3 +757,118 @@ test("S6 · declining leaves the row untouched: reading the queue twice without 
   assert.ok(a && b);
   assert.deepEqual(a, b, "no act, no state change -- the row reads identically both times, and there is no dismissal call to make");
 });
+
+// ---------------------------------------------------------------------------
+// S7 — the fix round's own two walls, each DRIVEN through the real doors.
+// ---------------------------------------------------------------------------
+
+test("S7 · reversing ONE run leaves every other run's balance exactly where it was (ADV-01)", async (t) => {
+  if (unready(t)) return;
+  const client = await freshClient(world.users.alice);
+  await seedPayrollChart(world.users.alice, client);
+  const may = await postPayrollRun(world.users.alice, client, { answers: { "payroll.run.period": value("2026-05") } });
+  const august = await postPayrollRun(world.users.alice, client, { answers: { "payroll.run.period": value("2026-08") } });
+
+  const unsettled = async () => {
+    const rows = (await rootQuery(
+      "select entry_id, unsettled_cents from clara._payroll_net_pay_unsettled($1)", [client])).rows;
+    return Object.fromEntries(rows.map((r) => [r.entry_id, Number(r.unsettled_cents)]));
+  };
+  const before = await unsettled();
+  assert.equal(before[may.entryId], NET_PAY_CENTS, "May is wholly unpaid before anything is reversed");
+  assert.equal(before[august.entryId], NET_PAY_CENTS, "…and so is August");
+
+  // THE ACT: reverse AUGUST through the estate's own door. clara.reverse_entry builds the mirror
+  // with the legs SWAPPED and does not copy flags, so an approved, non-reversed 2040 DEBIT is
+  // left behind that belongs to no payment at all.
+  const rev = (await humanQuery(
+    world.users.alice,
+    namedCall("reverse_entry", [{ name: "p_entry" }, { name: "p_reason" }, { name: "p_op_key" }]),
+    [august.entryId, "read the wrong month", opk947("rev")],
+  )).rows[0].result;
+  assert.equal(rev.status, "approved", "the reversal itself posts (an ordinary-stakes mirror)");
+
+  const after = await unsettled();
+  assert.equal(after[august.entryId], undefined, "the reversed run drops out of the read entirely");
+  assert.equal(after[may.entryId], NET_PAY_CENTS,
+    "MAY IS STILL UNPAID: a reversal mirror is not a payment, and charging it against another run would settle a debt nobody paid");
+
+  const offered = await candidatesOf(world.users.alice, client);
+  assert.equal(offered.filter((r) => r.entry_id === may.entryId).length, 1,
+    "…and May is still offered for settlement");
+});
+
+test("S7 · a HIGH-STAKES settlement is left a draft for a distinct checker, not self-approved (ADV-04)", async (t) => {
+  if (unready(t)) return;
+  const client = await freshClient(world.users.alice);
+  await seedPayrollChart(world.users.alice, client);
+  const run = await postPayrollRun(world.users.alice, client);
+  const bank = await freshBank(world.users.alice, client);
+  const stmt = await enterStatement(world.users.alice, {
+    client: client, bankAccount: bank, keepPeriod: true,
+    periodStart: "2026-08-25", periodEnd: "2026-09-05", opening: 900000,
+    specs: [{ entryDate: "2026-09-01", description: "PAYROLL", amountCents: -NET_PAY_CENTS }],
+  });
+
+  const firm = await firmOf(client);
+  const restore = (await rootQuery("select high_stakes_amount_cents as v from clara.firms where id=$1", [firm])).rows[0].v;
+  // An ORDINARY firm setting: RM1,000. Ten staff clears it, and so does commercial rent.
+  await rootQuery("update clara.firms set high_stakes_amount_cents=100000 where id=$1", [firm]);
+  try {
+    const checkers = (await rootQuery("select clara.eligible_checker_count($1)::int as n", [firm])).rows[0].n;
+    assert.ok(checkers >= 2, "the premise: this firm really does have a second pair of eyes available");
+
+    // THE CONTRAST, DRIVEN FIRST so the claim is not an argument: the SAME entry booked by hand
+    // and approved by its own maker is refused by the ordinary door.
+    const byHand = await draftEntry(human(world.users.alice), {
+      client: client, resolution: await freshResolution(world.users.alice, client),
+      postingDate: "2026-09-01", memo: "by hand",
+      lines: [
+        { account_code: "2040", debit_cents: NET_PAY_CENTS, credit_cents: 0, description: "dr" },
+        { account_code: BANKCOA, debit_cents: 0, credit_cents: NET_PAY_CENTS, description: "cr" },
+      ],
+      opKey: opk947("hs-draft"),
+    });
+    const tok = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [byHand.entry_id])).rows[0].revision_token;
+    const refused = await caught(() => approveEntry(world.users.alice, { entry: byHand.entry_id, expectedRevision: tok, opKey: opk947("hs-self") }));
+    assert.ok(refused, "the ordinary door refuses a maker's own approval of a high-stakes entry");
+    assert.equal(refused.code, "CLR05");
+    assert.equal(JSON.parse(refused.detail ?? "{}").reason, "distinct_checker");
+
+    // AND NOW THE SETTLEMENT DOOR, at parity.
+    const out = await settle(world.users.alice, { client: client, entry: run.entryId, line: stmt.lines[0].id });
+    assert.equal(out.status, "awaiting_checker", "the settlement does NOT self-approve a high-stakes entry");
+    assert.equal(out.reason, "high_stakes_needs_checker");
+    assert.equal(out.match_id, null, "and nothing is matched: an unapproved entry is not a match candidate");
+    const e = (await rootQuery(
+      "select status, checker_actor, self_approval_attestation from clara.journal_entries where id=$1",
+      [out.entry_id])).rows[0];
+    assert.equal(e.status, "draft", "the entry is left a DRAFT — clara.reverse_entry's own posture");
+    assert.equal(e.checker_actor, null, "nobody checked it");
+    assert.equal(e.self_approval_attestation, null, "and no attestation was invented on a person's behalf");
+    const receipts = (await rootQuery(
+      "select count(*)::int as n from clara.entry_post_receipts where entry_id=$1", [out.entry_id])).rows[0].n;
+    assert.equal(receipts, 0, "no post receipt for an entry that was never posted");
+
+    // NOTHING IS DARK: the run stays open by the ledger, so the work is still visible…
+    const still = (await rootQuery(
+      "select unsettled_cents from clara._payroll_net_pay_unsettled($1) where entry_id=$2",
+      [client, run.entryId])).rows[0];
+    assert.equal(Number(still.unsettled_cents), NET_PAY_CENTS, "the run is still unsettled until a checker approves");
+
+    // …and a SECOND accept is refused by name rather than minting a second draft.
+    const dup = await caught(() => settle(world.users.alice, { client: client, entry: run.entryId, line: stmt.lines[0].id, opKey: opk947("hs-again") }));
+    assert.ok(dup, "a second accept while one is awaiting its checker is refused");
+    assert.equal(JSON.parse(dup.detail ?? "{}").reason, "settlement_awaiting_checker");
+
+    // …and the ordinary door FINISHES it: a DISTINCT checker approves the draft the door left.
+    const tok2 = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [out.entry_id])).rows[0].revision_token;
+    await approveEntry(world.users.bob, { entry: out.entry_id, expectedRevision: tok2, opKey: opk947("hs-check") });
+    const settled = (await rootQuery(
+      "select count(*)::int as n from clara._payroll_net_pay_unsettled($1) where entry_id=$2 and unsettled_cents > 0",
+      [client, run.entryId])).rows[0].n;
+    assert.equal(settled, 0, "once a distinct checker approves, the run is settled — the act completes through existing doors");
+  } finally {
+    await rootQuery("update clara.firms set high_stakes_amount_cents=$2 where id=$1", [firm, restore]);
+  }
+});

@@ -212,10 +212,23 @@ create or replace function clara._payroll_net_pay_unsettled(p_client uuid)
     -- Excludes anything flagged payroll_obligation (0194/#643's own recurring-obligation lane,
     -- which can share this account by a firm's own bookkeeping choice, see the file header): such
     -- a debit clears a DIFFERENT liability instance, never a payroll run's own net pay.
+    --
+    -- AND EXCLUDES A REVERSAL MIRROR (fix round, finding ADV-01 -- DRIVEN, not reasoned:
+    -- clara.reverse_entry builds the mirror with the legs SWAPPED and does NOT copy flags, so
+    -- reversing a posted payroll run leaves an approved, non-reversed 2040 DEBIT behind that
+    -- belongs to no payment at all. Without this line that debit was FIFO-allocated against
+    -- OTHER runs' credits and silently marked a DIFFERENT, genuinely unpaid run settled: it
+    -- vanished from this read, from Needs you and from the settlement door. The reversed run's
+    -- OWN credit is already excluded (je.reversed_by is not null on the original), so the mirror
+    -- is the only leg left to drop. Safe in the other direction too: reversing a SETTLEMENT
+    -- entry mirrors Cr 2040, never a debit, so nothing that belongs in this pool is dropped by
+    -- this line -- and that reversal correctly RE-OPENS the run, because the settlement's own
+    -- debit leaves the pool with it.
     select coalesce(sum(jl.debit_cents), 0) as total_debits
     from clara.journal_entries je
     join clara.journal_lines jl on jl.entry_id = je.id
     where je.client_id = p_client and je.status = 'approved' and je.reversed_by is null
+      and je.reversal_of is null
       and je.flags->'payroll_obligation' is null
       and jl.account_code = '2040' and jl.debit_cents > 0
   )
@@ -228,7 +241,7 @@ create or replace function clara._payroll_net_pay_unsettled(p_client uuid)
 $payroll_net_pay_unsettled$;
 
 comment on function clara._payroll_net_pay_unsettled(uuid) is
-  '#947: per client, every posted payroll run (flags->payroll_run, approved, not reversed) with its own FIFO-allocated remaining 2040 balance -- oldest run charged first against every approved, non-reversed 2040 debit this client''s books carry, however that debit was booked. A pure ledger fact: no settlement marker is read or required. STABLE, ungranted, reached from clara.get_payroll_settlement_candidates, clara._settle_payroll_net_pay_core and the list_review_queue splice below.';
+  '#947: per client, every posted payroll run (flags->payroll_run, approved, not reversed) with its own FIFO-allocated remaining 2040 balance -- oldest run charged first against every approved, non-reversed, non-mirror 2040 debit this client''s books carry, however that debit was booked (a reversal mirror is NOT a payment: fix-round finding ADV-01). A pure ledger fact: no settlement marker is read or required. STABLE, ungranted, reached from clara.get_payroll_settlement_candidates, clara._settle_payroll_net_pay_core and the list_review_queue splice below.';
 
 revoke all on function clara._payroll_net_pay_unsettled(uuid) from public;
 
@@ -341,6 +354,7 @@ declare
   c record; v_dedupe jsonb; v_firm uuid; v_req bytea;
   e record; ln record; st record; v_bank uuid; v_coa text;
   v_unsettled bigint; v_entry uuid; v_receipt uuid; v_match jsonb; v_memo text;
+  v_open_draft uuid;
 begin
   select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
   if c.actor is null or c.firm is null then
@@ -359,8 +373,20 @@ begin
   v_dedupe := clara._reserve_op(c.firm, 'settle_payroll_net_pay', p_op_key, v_req);
   if v_dedupe is not null then return v_dedupe; end if;
 
+  -- TENANT WALL BEFORE THE LOCK (fix round, finding ADV-10). A FOR UPDATE taken on a
+  -- caller-supplied id before the firm is checked is a weak existence/activity oracle across the
+  -- tenant wall: the call BLOCKS for an id another firm's open transaction holds and refuses
+  -- instantly for an id that does not exist. 0021's no-existence-oracle rule is the reason the
+  -- plain resolve-and-refuse runs first now; the lock is then taken on a row already proved to
+  -- belong to this firm.
+  select * into e from clara.journal_entries je where je.id = p_entry;
+  if not found or e.client_id <> p_client or e.firm_id <> c.firm then
+    raise exception 'journal entry % is not in this client', p_entry using errcode='CLR11';
+  end if;
+
   -- LOCKS: the pre-existing payroll entry first, then the client rung -- the bank rows are locked
-  -- LAST, one frame further in, by _match_bank_line_core itself (below).
+  -- LAST, one frame further in, by _match_bank_line_core itself (below). The re-read after the
+  -- lock is the authoritative one; the pre-lock read above only settles WHOSE row this is.
   perform 1 from clara.journal_entries je where je.id = p_entry for update;
   perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
 
@@ -414,6 +440,20 @@ begin
       using errcode='CLR10',detail='{"reason":"bank_account_unmapped"}';
   end if;
 
+  -- ONE SETTLEMENT DRAFT AT A TIME (fix round, beside ADV-04). The high-stakes arm below leaves
+  -- a DRAFT behind for a distinct checker; a second accept of the same run would mint a second
+  -- one and both could post. Named refusal, so the surface can say what is already waiting.
+  select je2.id into v_open_draft from clara.journal_entries je2
+   where je2.client_id = p_client and je2.status = 'draft'
+     and (je2.flags->'payroll_settlement'->>'payroll_entry_id') = p_entry::text
+   order by je2.created_at, je2.id limit 1;
+  if v_open_draft is not null then
+    raise exception 'a settlement for payroll run % is already drafted and waiting for a checker', p_entry
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','settlement_awaiting_checker',
+          'payroll_entry_id', p_entry, 'settlement_entry_id', v_open_draft)::text;
+  end if;
+
   v_memo := 'Payroll net pay settlement '
     || to_char((e.flags->'payroll_run'->>'period_month')::date, 'FMMonth YYYY');
 
@@ -430,6 +470,39 @@ begin
   insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents, credit_cents, description)
     values (v_entry, 2, v_coa, 0, v_unsettled, v_memo);
   perform clara._assert_balanced(v_entry);
+
+  perform clara._append_event(c.firm, 'entry.drafted', p_client, c.actor, null, 'interactive',
+    v_entry, null, null, '{}'::jsonb);
+
+  -- THE HIGH-STAKES WALL (fix round, finding ADV-04), AT PARITY WITH THE ORDINARY DOOR.
+  -- clara._approve_entry_core refuses a maker's own approval of a HIGH-STAKES entry when the firm
+  -- carries a second eligible checker (CLR05 'distinct_checker'), and demands a written
+  -- attestation when it does not. This door books AND approves in one act, so without this wall
+  -- one bookkeeper alone could post and approve an unlimited settlement through /bank while the
+  -- SAME entry booked by hand is refused -- DRIVEN in the review, on a firm with two eligible
+  -- checkers and an ordinary high_stakes_amount_cents floor.
+  --
+  -- The estate's OWN answer to "an in-body approval meets a high-stakes entry" is
+  -- clara.reverse_entry's (0042): LEAVE IT A DRAFT and let the ordinary approve door finish it.
+  -- That door carries all three arms (agent attestation, distinct checker, solo self-attestation)
+  -- and this one would otherwise have to re-type them -- and re-typing a governance ladder is how
+  -- two of them drift apart. NOTHING IS DARK (standing owner ruling): the entry exists, balanced,
+  -- already on the bank's own GL code, so a checker approves it through clara.approve_entry and
+  -- binds it through the ordinary bank matcher; until they do, the run stays unsettled BY THE
+  -- LEDGER and keeps its Needs-you row. The envelope says so by name rather than pretending the
+  -- settlement landed.
+  if clara.is_high_stakes(v_entry) then
+    perform clara._audit(c.firm, c.actor, null, null, 'settle_payroll_net_pay', v_entry,
+      jsonb_build_object('client', p_client, 'payroll_entry_id', p_entry, 'line_id', p_line,
+        'settlement_entry_id', v_entry, 'unsettled_cents', v_unsettled,
+        'status', 'awaiting_checker', 'reason', 'high_stakes_needs_checker'));
+    return clara._finish_op(c.firm, 'settle_payroll_net_pay', p_op_key,
+      jsonb_build_object('entry_id', v_entry, 'match_id', null,
+        'unsettled_cents', v_unsettled, 'posting_date', to_char(ln.entry_date,'YYYY-MM-DD'),
+        'status', 'awaiting_checker', 'reason', 'high_stakes_needs_checker',
+        'eligible_checker_count', clara.eligible_checker_count(c.firm),
+        'line_id', p_line));
+  end if;
 
   update clara.journal_entries
      set status = 'approved', checker_actor = c.actor, approved_at = now(), updated_at = now()
@@ -473,13 +546,14 @@ begin
 
   return clara._finish_op(c.firm, 'settle_payroll_net_pay', p_op_key,
     jsonb_build_object('entry_id', v_entry, 'match_id', v_match->>'match_id',
-      'unsettled_cents', v_unsettled, 'posting_date', to_char(ln.entry_date,'YYYY-MM-DD')));
+      'unsettled_cents', v_unsettled, 'posting_date', to_char(ln.entry_date,'YYYY-MM-DD'),
+      'status', 'settled'));
 end $settle_payroll_net_pay_core$;
 
 revoke all on function clara._settle_payroll_net_pay_core(jsonb,uuid,uuid,uuid,text) from public;
 
 comment on function clara._settle_payroll_net_pay_core(jsonb,uuid,uuid,uuid,text) is
-  '#947: books Dr 2040 / Cr <bank COA> for a payroll run''s own unsettled net pay, approves it directly (via_wake_kind=interactive), then reuses clara._match_bank_line_core to bind it to the chosen bank line. Ungranted; reached from clara.settle_payroll_net_pay alone.';
+  '#947: books Dr 2040 / Cr <bank COA> for a payroll run''s own unsettled net pay, approves it directly (via_wake_kind=interactive), then reuses clara._match_bank_line_core to bind it to the chosen bank line. A HIGH-STAKES settlement is left a DRAFT instead (status=awaiting_checker, no receipt and no match), the clara.reverse_entry posture, so the ordinary approve door''s distinct-checker and self-attestation arms decide it -- fix-round finding ADV-04. Ungranted; reached from clara.settle_payroll_net_pay alone.';
 
 create or replace function clara.settle_payroll_net_pay(p_client uuid, p_entry uuid, p_line uuid, p_op_key text)
   returns jsonb
@@ -494,7 +568,7 @@ begin
 end $settle_payroll_net_pay$;
 
 comment on function clara.settle_payroll_net_pay(uuid,uuid,uuid,text) is
-  '#947 AC2: accept one settlement candidate -- a payroll run''s posted entry and the bank line that pays its net pay. bookkeeper+, clara_authenticated only.';
+  '#947 AC2: accept one settlement candidate -- a payroll run''s posted entry and the bank line that pays its net pay. Returns status=settled, or status=awaiting_checker when the settlement entry is high-stakes: the entry is drafted and a distinct checker approves it through the ordinary door. bookkeeper+, clara_authenticated only.';
 
 revoke all on function clara.settle_payroll_net_pay(uuid,uuid,uuid,text) from public;
 grant execute on function clara.settle_payroll_net_pay(uuid,uuid,uuid,text) to clara_authenticated;
@@ -733,6 +807,29 @@ begin
     raise notice '#947 tail T.5: % journal_lines row(s) touch account 2040 outside the three named lanes -- expected once route (b)/(c) is in normal use', v_n;
   end if;
 
-  raise notice '#947 tail OK: clara._payroll_net_pay_unsettled / clara._payroll_settlement_bank_candidates / clara._settle_payroll_net_pay_core are ungranted and reachable by no application role; clara.get_payroll_settlement_candidates and clara.settle_payroll_net_pay are clara_authenticated-only; clara.list_review_queue projects payroll_net_pay_unsettled exactly once, still carries #946''s payroll_posting_blocked, keeps its owner and ACL; and account 2040 is still touched only by the payroll family.';
+  -- T.6 (fix round) THE TWO WALLS THIS ROUND ADDED, re-read off the CATALOG so a later recut
+  -- that drops either one collides here. ADV-01: the debit pool must exclude a reversal mirror.
+  -- ADV-04: the settlement core must probe clara.is_high_stakes before it approves anything.
+  select regexp_replace(regexp_replace(p.prosrc,'--[^\n]*','','g'),'\s+',' ','g') into v_def
+    from pg_proc p where p.oid='clara._payroll_net_pay_unsettled(uuid)'::regprocedure;
+  v_n := (length(v_def) - length(replace(v_def, 'je.reversal_of is null', '')))
+         / length('je.reversal_of is null');
+  if v_n <> 1 then
+    raise exception '#947 tail T.6: the FIFO debit pool excludes a reversal mirror % time(s), expected 1 -- ADV-01''s wall is gone and reversing one run would settle another', v_n
+      using errcode='CLR10';
+  end if;
+  select regexp_replace(regexp_replace(p.prosrc,'--[^\n]*','','g'),'\s+',' ','g') into v_def
+    from pg_proc p where p.oid='clara._settle_payroll_net_pay_core(jsonb,uuid,uuid,uuid,text)'::regprocedure;
+  if position('clara.is_high_stakes(v_entry)' in v_def) = 0
+     or position('high_stakes_needs_checker' in v_def) = 0 then
+    raise exception '#947 tail T.6: the settlement core no longer probes clara.is_high_stakes before approving -- ADV-04''s maker-checker parity is gone'
+      using errcode='CLR10';
+  end if;
+  if position('settlement_awaiting_checker' in v_def) = 0 then
+    raise exception '#947 tail T.6: the settlement core no longer refuses a second draft for the same run'
+      using errcode='CLR10';
+  end if;
+
+  raise notice '#947 tail OK: clara._payroll_net_pay_unsettled / clara._payroll_settlement_bank_candidates / clara._settle_payroll_net_pay_core are ungranted and reachable by no application role; clara.get_payroll_settlement_candidates and clara.settle_payroll_net_pay are clara_authenticated-only; clara.list_review_queue projects payroll_net_pay_unsettled exactly once, still carries #946''s payroll_posting_blocked, keeps its owner and ACL; the FIFO debit pool excludes reversal mirrors (ADV-01) and the settlement core probes clara.is_high_stakes before approving (ADV-04); and account 2040 is still touched only by the payroll family.';
 end
 $p947_tail$;
