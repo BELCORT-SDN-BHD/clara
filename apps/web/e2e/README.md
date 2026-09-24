@@ -129,7 +129,7 @@ Three rules the budgets do not replace:
 
 ## Coverage map
 
-The checked-in suite currently contains 51 specs. The table below describes 27 of them; the remaining 24 have no row yet and are named under [Specs with no coverage-map row](#specs-with-no-coverage-map-row) beneath it — so neither number here contradicts what a reader can count in the table or on disk. Writing the missing descriptions is deliberately outside [#1019](https://github.com/BELCORT-SDN-BHD/clara/issues/1019), whose Out of scope is "rewriting or auditing the individual per-spec description text in the coverage-map table"; it is carried as that ticket's follow-up.
+The checked-in suite currently contains 53 specs. The table below describes 28 of them; the remaining 25 have no row yet and are named under [Specs with no coverage-map row](#specs-with-no-coverage-map-row) beneath it — so neither number here contradicts what a reader can count in the table or on disk. Writing the missing descriptions is deliberately outside [#1019](https://github.com/BELCORT-SDN-BHD/clara/issues/1019), whose Out of scope is "rewriting or auditing the individual per-spec description text in the coverage-map table"; it is carried as that ticket's follow-up.
 
 | Spec | What it exercises |
 |---|---|
@@ -162,11 +162,13 @@ The checked-in suite currently contains 51 specs. The table below describes 27 o
 
 | `work-list-walk.spec.ts` | #641's B3 durable Work list on BOTH `/work` and `/clients/:id/work`: rows carrying their derived state WORD (including "Retrying", which is `attempts > 1` rather than a status), the client and the origin of a chat-started Work; status facets and free text written to the URL and cleared from it; the two Empty states told apart (filtered no-results keeping its filters and offering Clear filters, versus a client with no durable Work reading as first use); a live permission loss clearing the rows with no affordance that could only refuse; keyset Pagination writing `?cursor=` with Back returning to the first page and no total ever claimed; a filtered deep link whose Back out of the detail restores the identical query; the built-in "Needs you" saved view still a link marked `aria-current`; the client surface pinning its own client with no client picker; keyboard Enter into a row's durable address; the 320 px filter Sheet naming how many filters are applied; narrow list-to-detail and Back; 200 % zoom; reduced motion; the Work detail's current question proved to PRECEDE the Results/Sources/Activity tab strip with `compareDocumentPosition`; and an axe scan of `/work` at 320 px. The pagination control is asserted as `role="button"` because shadcn base-nova's `PaginationLink` renders its real `<a href>` through Base UI's Button with `nativeButton={false}` — measured, not preferred |
 
+| `tenancy-rent-plan-walk.spec.ts` | #949's tenancy leg on the Documents detail's FACTS view: each contract term rendered with what the page printed and WHERE it was read from — the rent citing one region, the term's last day declaring itself a DERIVATION and naming both regions it needed — the MPERS Section 20 branch with the MFRS 16 sentence beside it, the drafted plan's schedule and its two legs (debit rent expense, credit rent payable, never the bank), a Confirm that reaches `confirm_tenancy_rent_plan` with this client, this document, a null judgement and a fresh op_key, an axe scan of the settled face, and a second leg where a payable that is really a bank account is refused: the database's own sentence and CLR10 render in the PANEL'S OWN feedback box rather than the one next to it |
+
 These files use `.spec.ts` because the package's Node test manifest accepts `*.test.*` files. Do not add Playwright specs to [`test/manifest.txt`](../test/manifest.txt).
 
 ### Specs with no coverage-map row
 
-These 24 checked-in specs are real and run; only their description above is missing. [`spec-discovery.test.ts`](spec-discovery.test.ts) holds this list against the directory itself, so a spec can be neither added nor removed without landing in exactly one of the two — the table above or the list below.
+These 25 checked-in specs are real and run; only their description above is missing. [`spec-discovery.test.ts`](spec-discovery.test.ts) holds this list against the directory itself, so a spec can be neither added nor removed without landing in exactly one of the two — the table above or the list below.
 
 - `accrual-walk.spec.ts`
 - `adjustments-retired-walk.spec.ts`
@@ -185,6 +187,7 @@ These 24 checked-in specs are real and run; only their description above is miss
 - `members-invite-walk.spec.ts`
 - `opening-ledger-source-walk.spec.ts`
 - `operator-support-walk.spec.ts`
+- `payroll-settlement-walk.spec.ts`
 - `periodic-adjustment-walk.spec.ts`
 - `plans-walk.spec.ts`
 - `prepayments-walk.spec.ts`

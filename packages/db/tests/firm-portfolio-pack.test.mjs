@@ -758,12 +758,25 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
   // then the right answer rather than a false red.
   const reviewQueueRecut = await migrationApplied("^0260_");
   const seedingRetired = await migrationApplied("^0288_");
+  // RIDERS WAVE 4, LANE 01 (fix round, finding SPEC-05). FOUR consecutive files of one lane
+  // splice this body again, each additively and each with its own postcheck proving every kind
+  // already there survives at its exact pre-splice marker count: #946's 0297
+  // (payroll_posting_blocked), #947's 0298 (payroll_net_pay_unsettled), #948's 0299
+  // (agreement_posting_blocked) and #949's 0300 (rent_payable_unsettled and
+  // rent_escalation_pending). The behavioural proofs live in payroll-summary-posting,
+  // payroll-settlement, agreement-contract-acquisition and tenancy-rent-plan, not here; this
+  // cell's claim is still only "0231 recuts nothing". Gated on the LAST of the four by its own
+  // STEM, never by a number: the four are consecutive in one ordered chain, so no intermediate
+  // state is one a database rests in — the same reasoning 0266/0267 carry above.
+  const wave4QueueSplices = await migrationApplied("tenancy_terms_rent_plan$");
   const activityRecut = await migrationApplied("^0264_");
   const workListWidened = await migrationApplied("^0267_");
   const workListSig = workListWidened ? "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int,timestamptz,timestamptz)" : "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int)";
   const PINS = {
     "clara.list_review_queue(jsonb,jsonb,int)":
-      seedingRetired
+      wave4QueueSplices
+        ? "886df58021fbaed512000dc2a7f0a64fcabe2b93448a84ece5169b163fa47e0c"
+        : seedingRetired
         ? "f4a34c72e567bf825d4376d043ea23cc3d8bcd2d4f0caaee3a5d052bf8a25d69"
         : reviewQueueRecut
           ? "1641f99f4d295400bd39bd7b2cee3ac4cac2c34e7478078014e7305d99d9b570"
@@ -787,7 +800,8 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
       + `from pg_proc where oid = '${sig}'::regprocedure`);
     assert.equal(r.rows[0].sha, sha,
       `${sig} DRIFTED — 0231 recuts nothing, and only #974's (0260), #840/#861's (0262/0264), `
-      + "#880/#905's (0266/0267) and ticket 1012's (0288) own named recuts are tolerated");
+      + "#880/#905's (0266/0267), ticket 1012's (0288) and riders wave 4 lane 01's "
+      + "(0297/0298/0299/0300) own named recuts are tolerated");
   }
   const secdef = await rootQuery(
     "select (select prosecdef from pg_proc where oid = 'clara.list_review_queue(jsonb,jsonb,int)'::regprocedure) as q, "

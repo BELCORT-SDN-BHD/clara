@@ -62,6 +62,7 @@ components/bank/matching-outcome.test.tsx
 components/bank/matching-refusal.test.tsx
 components/bank/matching-residual.test.tsx
 components/bank/matching-section.test.tsx
+components/bank/payroll-settlements-section.test.tsx
 components/bank/reconciliation-section.test.tsx
 components/brand-identity.test.tsx
 components/clara/ClaraThreadView.onboarding.test.tsx
@@ -137,6 +138,7 @@ components/documents/intake-batch-card.test.tsx
 components/documents/intake-batch-keyboard.test.tsx
 components/documents/intake-receipts.test.tsx
 components/documents/lint-finding-detail.test.tsx
+components/documents/tenancy-rent-plan-section.test.tsx
 components/documents/upload-panel.test.tsx
 components/e2e/money-input-harness-route.test.tsx
 components/entry/checkout-faces-a11y.test.tsx
@@ -336,10 +338,14 @@ lib/bank/match-opkey.test.ts
 lib/bank/match-reads.test.ts
 lib/bank/matching-context-types.test.ts
 lib/bank/money.test.ts
+lib/bank/payroll-settlement-doors.test.ts
+lib/bank/payroll-settlement-reads.test.ts
 lib/bank/reads.test.ts
 lib/bank/recon-doors.test.ts
 lib/bank/recon-reads.test.ts
 lib/bank/reload-on-change.test.ts
+lib/bank/rent-settlement-doors.test.ts
+lib/bank/rent-settlement-reads.test.ts
 lib/bank/table-reads.test.ts
 lib/business-date.test.ts
 lib/checkout/checkout-flash.test.ts
@@ -388,6 +394,7 @@ lib/documents/reads.test.ts
 lib/documents/receipts.test.ts
 lib/documents/region-geometry.test.ts
 lib/documents/runtime-wire.test.ts
+lib/documents/tenancy-wire.test.ts
 lib/documents/useUploadQueue.test.ts
 lib/documents/work-links.test.ts
 lib/doors.test.ts
@@ -403,8 +410,12 @@ lib/firm/commercial-reads.test.ts
 lib/firm/home-facts.test.ts
 lib/firm/invite-preview.test.ts
 lib/firm/navigation-label.test.ts
+lib/firm/needs-you-agreement-posting.test.ts
 lib/firm/needs-you-gaps.test.ts
 lib/firm/needs-you-links.test.ts
+lib/firm/needs-you-payroll-posting.test.ts
+lib/firm/needs-you-payroll-settlement.test.ts
+lib/firm/needs-you-tenancy-rent.test.ts
 lib/firm/needs-you.test.ts
 lib/firm/portfolio-focus-return.test.ts
 lib/firm/portfolio-url-state.test.ts

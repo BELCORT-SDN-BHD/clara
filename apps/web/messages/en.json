@@ -239,7 +239,12 @@
       "staff_advance_incomplete": "Staff advance — particulars incomplete",
       "work_question": "Clara is waiting on an answer",
       "depreciation_authority_pending": "Depreciation authority awaiting signature",
-      "unknown": "Unrecognized item ({kind})"
+      "unknown": "Unrecognized item ({kind})",
+      "payroll_posting_blocked": "Payroll run not posted",
+      "payroll_net_pay_unsettled": "Payroll payment not found yet",
+      "agreement_posting_blocked": "Agreement not posted",
+      "rent_payable_unsettled": "Rent payment not found yet",
+      "rent_escalation_pending": "Rent escalation awaiting confirmation"
     },
     "openClient": "Open client",
     "openTab": {
@@ -251,7 +256,12 @@
       "lint_finding": "Open the journals tab",
       "fixed_asset_incomplete": "Open the registers tab",
       "staff_advance_incomplete": "Open the registers tab",
-      "depreciation_authority_pending": "Open the fixed assets register"
+      "depreciation_authority_pending": "Open the fixed assets register",
+      "payroll_posting_blocked": "Open the documents tab",
+      "payroll_net_pay_unsettled": "Open the bank tab",
+      "agreement_posting_blocked": "Open the documents tab",
+      "rent_payable_unsettled": "Open the bank tab",
+      "rent_escalation_pending": "Open the documents tab"
     },
     "askClara": "Ask Clara about this",
     "askPrefill": "About this {kind} in my Needs-you inbox — what should I look at first?",
@@ -2731,7 +2741,29 @@
       "invoiceVendorName": "Supplier name",
       "invoiceInvoiceId": "Invoice number",
       "invoiceInvoiceDate": "Invoice date",
-      "invoiceDeposit": "Deposit"
+      "invoiceDeposit": "Deposit",
+      "payrollPeriod": "Payroll period",
+      "payrollGrossPay": "Gross pay (payroll run)",
+      "payrollEpfEmployee": "Employee EPF (payroll run)",
+      "payrollEpfEmployer": "Employer EPF (payroll run)",
+      "payrollSocsoEmployee": "Employee SOCSO (payroll run)",
+      "payrollSocsoEmployer": "Employer SOCSO (payroll run)",
+      "payrollEisEmployee": "Employee EIS (payroll run)",
+      "payrollEisEmployer": "Employer EIS (payroll run)",
+      "payrollPcb": "PCB withheld (payroll run)",
+      "payrollHrdfLevy": "HRDF levy (payroll run)",
+      "payrollNetPay": "Net pay (payroll run)",
+      "agreementKind": "What the agreement calls itself",
+      "agreementFinancier": "Financier / owner",
+      "agreementDate": "Agreement date",
+      "agreementAsset": "What was acquired",
+      "agreementCashPrice": "Cash price",
+      "agreementDeposit": "Deposit or trade-in",
+      "agreementAmountFinanced": "Amount financed",
+      "agreementTotalCharges": "Total charges",
+      "agreementTotalPayable": "Total payable",
+      "agreementTermMonths": "Term (months)",
+      "agreementInstalment": "Instalment"
     },
     "entriesHeading": "Journal entries filed to this client",
     "entriesEmpty": "No journal entries filed to this client cite this document yet.",
@@ -2999,7 +3031,43 @@
     "orphanDismissConfirm": "Dismiss question",
     "orphanDismissReasonLabel": "Dismissal reason",
     "liveClaim": "A posted entry of {client} currently stands on this document.",
-    "noLiveClaim": "No posted entry currently stands on this document."
+    "noLiveClaim": "No posted entry currently stands on this document.",
+    "tenancy": {
+      "heading": "Tenancy terms and rent plan",
+      "body": "What this tenancy states, where on the page each figure was read, and the recurring rent plan it would run once somebody confirms it. Nothing here posts by itself.",
+      "termsEmpty": "No term has been recorded for this tenancy yet.",
+      "printedAs": "as printed: {raw}",
+      "citedRegions": "{count, plural, one {# region on the page} other {# regions on the page}}",
+      "standardUnknown": "The standard has not been settled for this tenancy.",
+      "planHeading": "The rent plan Clara drafts",
+      "planSchedule": "{amount} a month, from {from} to {to} ({occurrences} months).",
+      "legDebit": "Debit {code} {amount}",
+      "legCredit": "Credit {code} {amount}",
+      "judgementLabel": "Your professional judgement",
+      "judgementPlaceholder": "State the treatment you are taking and why.",
+      "judgementRequired": "The standard asks a question here, so a written judgement is required before this plan can start.",
+      "confirmPlan": "Confirm the rent plan",
+      "confirmed": "A person has confirmed this plan; it is {status}.",
+      "busy": "Working\u2026",
+      "term": {
+        "monthly_rent": "Monthly rent",
+        "deposit": "Deposit",
+        "term_start": "Term begins",
+        "term_end": "Term ends",
+        "escalation": "Rent escalation"
+      },
+      "basisKind": {
+        "document_region": "Read from the page",
+        "derived_from_regions": "Derived from what the page prints",
+        "person_stated": "Stated by a person"
+      },
+      "refusal": {
+        "account_not_in_chart": "Account {account} is not in this client\u2019s chart, or is inactive.",
+        "plan_credits_bank_account": "Account {account} is one of this client\u2019s bank accounts. A rent plan never credits the bank \u2014 the statement line that pays the rent would be counted twice.",
+        "not_a_tenancy": "This agreement is not a tenancy."
+      }
+    },
+    "factNotPrinted": "Not printed on the page"
   },
   "ClientBank": {
     "heading": "Bank",
@@ -3292,6 +3360,39 @@
       "promotionsAttribution": "Proposed by the agent — awaiting your decision.",
       "confirm": "Confirm promotion",
       "emptyProposals": "No agency-collection proposals are waiting. Clara raises one when a receipt looks like money collected on someone else's behalf."
+    },
+    "payrollSettlements": {
+      "heading": "Payroll settlements",
+      "body": "A posted payroll run's net pay, and the bank line that pays it \u2014 find it, then accept.",
+      "empty": "No payroll run is waiting on its bank payment.",
+      "runHeading": "{period} \u2014 net pay",
+      "noCandidates": "No matching bank line yet.",
+      "colDate": "Date",
+      "colDescription": "Description",
+      "colAmount": "Amount",
+      "colAccept": "Accept",
+      "accept": "Accept",
+      "acceptAria": "Accept {description} as this run's settlement"
+    },
+    "rentSettlements": {
+      "heading": "Tenancy rent and deposits",
+      "body": "Each month of rent recognised on a confirmed tenancy plan whose payment has not appeared on the bank yet, with the lines that could be it. Accepting one books the payment against the rent payable and binds the line; nothing is chosen for you.",
+      "empty": "No open month of rent, and no deposit waiting to be coded.",
+      "monthHeading": "Rent for {period}",
+      "noCandidates": "No bank line matches this month exactly.",
+      "noCandidatesInWindow": "No bank line matches this month exactly within {days} days of the posting date.",
+      "awaitingChecker": "That settlement is a high-stakes entry, so it has been drafted and is waiting for a second person to approve it on the journals tab. The month stays open until they do.",
+      "colDate": "Date",
+      "colDescription": "Description",
+      "colAmount": "Amount",
+      "colAccept": "Accept",
+      "accept": "Accept",
+      "acceptAria": "Accept {description} as this month\u2019s rent payment",
+      "depositHeading": "Deposit",
+      "depositBody": "Signing a tenancy does not say the deposit moved, so nothing is posted here. When a payment matching the recorded deposit appears, this is the account it belongs in \u2014 code the line on the Matching list below.",
+      "depositCoding": "Proposed coding: {code} {name}",
+      "depositAccountMissing": "This client\u2019s chart does not hold {code}, so no coding is proposed.",
+      "depositNoCandidates": "No bank line matches the recorded deposit yet."
     }
   },
   "ClientClose": {

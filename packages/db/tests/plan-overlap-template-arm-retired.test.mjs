@@ -56,8 +56,18 @@ const FN_ACL = "{clara_fn_owner=X/clara_fn_owner}";
  *  half of 0283's own prestate. This file's own outside-in re-proof that the migration's text
  *  produced exactly these bodies, never transcribed from the migration's own header. */
 const RECUT = [
+  // RE-BASED by #949 (0300_tenancy_terms_rent_plan.sql, riders wave 4 lane 01). That file splices
+  // ONE additive line into this body's authority-kind wall (a third admitted `authority_ref` kind,
+  // `contract_confirmation`, beside `accounting_work` and `chat_task`), which moves the sha this
+  // file pins — and this pin's own failure message anticipated exactly that ("or another ticket
+  // recut it"). What the pin is FOR is unaffected and is re-checked below against the LIVE body,
+  // structurally rather than by transcription: the client rung 203005004 still sits above any
+  // clara.accounting_plans row lock, and the advisory is still passed this door's own plan id.
+  // 0300's own §G.2 postcheck re-reads every wall #640 and #977 put here after its splice.
+  // Pre-#949 value, for a reader tracing 0283's own fresh apply:
+  // 99f6078775c07440122cde4f180c2f2f11aea7fcd5f0504cb6ffe6c8776cb424.
   { fn: "clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)",
-    sha: "99f6078775c07440122cde4f180c2f2f11aea7fcd5f0504cb6ffe6c8776cb424" },
+    sha: "f9b19cf61ba2c1728b4c4ccc5d02e997b9a882779db4925cd1d267e92a669e63" },
   { fn: "clara.revise_accounting_plan(uuid,text,text,int,text,date,date,jsonb,text,text)",
     sha: "8a6e69efac967592592bf3e8d08683145e5b43456a63fe673788337349382886" },
   { fn: "clara._accrual_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,int,text,date,date,jsonb)",

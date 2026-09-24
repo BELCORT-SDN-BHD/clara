@@ -761,6 +761,83 @@ form that no lane applies; anything a caller can extend without a new named rule
 The facts an accountant provides for a payroll or statutory obligation: what it is, for which period, how much, which expense and liability accounts it moves, any staff-advance or settlement account it touches, how much of it was settled through that settlement account when the accountant states a figure, and the source those figures came from. The product records them and checks the relationships between them — a stated settlement amount must be exactly what the posted payment leg carries; it computes none of them.
 _Avoid_: A contribution rate or threshold; an employee-level calculation; a settlement allocation nobody stated.
 
+**Payroll run fact state**:
+What Clara established from reading a payroll summary: per run-level question — the month, and the
+totals for gross pay, employee and employer EPF, SOCSO and EIS, PCB and any HRDF levy, and net pay —
+whether the figure is ESTABLISHED (both readings of the page agree on what it prints, and where the
+page also prints employee rows their column sum agrees with it), DISAGREED (the two readings differ,
+the printed total contradicts the row sum, a row fails its own gross-minus-deductions identity, or
+the rendering is not a figure at all) or MISSING (the page does not print it), and why. Every
+arithmetic result in it is the database evaluator's, computed from quoted renderings; the model
+quotes and never sums. A figure the page does not print is reported as not printed — it is stored as
+a fact carrying no rendering and no amount, so a person can see that the page was silent rather than
+read a blank as a zero.
+_Avoid_: A contribution rate or threshold applied by the product; a total the model added up; a
+blank filled with zero; an employee-level figure kept after the read (the per-employee quotes exist
+only so the evaluator can sum and cross-check them, and are discarded in the same transaction).
+
+**Payroll posting gate**:
+The closed list of conditions a payroll summary has to satisfy before its entry is posted with
+nobody watching: both readings of the page agree, every arithmetic check passes, the payslip's own
+month is established, the fiscal year that month falls in is open, every account the entry needs
+resolves in this client's own chart, and no payroll entry for that client and month is already
+posted — through this lane or through the accountant-supplied obligation lane. The conditions are
+asked in a fixed order and the FIRST one that fails is the reason a person is told; the rest are
+still evaluated and travel with it. A run that fails any of them posts NOTHING and appears under
+Needs you naming what failed, which row did not balance, which account is missing or which entry it
+would duplicate. The verdict is derived, never stored, so it clears itself the moment the condition
+clears.
+_Avoid_: Posting a partial entry; filling an unprinted line with zero; smoothing an imbalance into
+the rounding account; a stored refusal a person has to dismiss; a model deciding any of it.
+
+**Financing agreement**:
+An agreement that creates an asset and a liability on the day it is signed — a hire purchase or a
+finance lease, and nothing else. Which one a document is, is read off the words the page uses for
+ITSELF, against a closed list of renderings in both English and Malay; a rendering nothing on that
+list matches is OTHER, and a page that does not say so readably is NOT ESTABLISHED. Those two are
+different answers: one says the page told us something this lane does not act on, the other says
+the page did not tell us. A tenancy, an operating lease and a supply contract are read in full and
+create no entry at signing, because nothing came onto the books that day.
+_Avoid_: A category the model chose; inferring the kind from the figures or from the account it
+would post to; treating "we could not read it" as "it is not a financing agreement"; posting
+anything at all for a tenancy.
+
+**Agreement terms fact state**:
+What Clara established from reading an agreement: per question — what the agreement calls itself,
+the financier, the signing date, what was acquired, the cash price, the deposit or trade-in, the
+amount financed, the total charges, the total payable, the term and the instalment — whether the
+answer is ESTABLISHED (both readings of the page agree on what it prints, and where the page also
+prints a repayment schedule its column sums agree with the printed totals), DISAGREED (the two
+readings differ, a printed total contradicts its column, an instalment fails its own
+principal-plus-interest identity, or the rendering is not a figure at all) or MISSING (the page
+does not print it), and why — together with the two named checks the state carries: deposit plus
+amount financed equals the cash price, and the printed schedule's instalments reconcile to the
+amount financed plus the charges. Every arithmetic result in it is the database evaluator's,
+computed from quoted renderings, and so is the classification; the model quotes and never sums,
+subtracts or judges. A term the page does not print is reported as not printed — stored as a fact
+carrying no rendering and no amount, so a person can see that the page was silent rather than read
+a blank as a zero. The printed repayment schedule is kept, because it is what the agreement says
+and what a later finance-charge allocation must read.
+_Avoid_: An amount financed worked out by subtracting a deposit from a cash price; a total the
+model added up; a blank filled with zero; a deposit inferred because two printed figures differ.
+
+**Agreement posting gate**:
+The closed list of conditions a hire purchase or finance lease has to satisfy before its
+acquisition is posted with nobody watching: both readings of the page agree, every arithmetic check
+passes, the page says readably what kind of agreement it is and it is a financing one, the signing
+date is established, the fiscal year that date falls in is open, the cash price and the amount
+financed are both printed, the two named checks hold, the client has enrolled exactly one
+fixed-asset account, every account the entry needs resolves in this client's own chart, and no
+acquisition for that agreement is already posted. The conditions are asked in a fixed order and the
+FIRST one that fails is the reason a person is told; the rest are still evaluated and travel with
+it, and a condition that was never reached says so rather than passing. An agreement that fails any
+of them posts NOTHING and appears under Needs you naming what failed, which account is missing,
+which accounts it could not choose between or which entry it would duplicate. The verdict is
+derived, never stored, so it clears itself the moment the condition clears.
+_Avoid_: Posting a partial entry; choosing a fixed-asset account from the words the page uses to
+describe what was acquired; filling an unprinted term with zero; smoothing an imbalance into the
+rounding account; a stored refusal a person has to dismiss; a model deciding any of it.
+
 **Fixed asset acquisition**:
 The moment a client takes an asset onto its books: one approved journal entry whose debit lands on
 an enrolled fixed-asset cost account, and — in the SAME transaction, on whichever lane posted it —
@@ -923,9 +1000,50 @@ time it is read, it never becomes an object with its own lifecycle, and it clear
 moment the underlying facts stop producing it — nobody dismisses it, nobody closes it, and
 nothing has to be cleaned up when the decision is made elsewhere. It offers candidates and never
 chooses: an ambiguous case stays pending with the same one question, and choosing is the human's
-act. #657's pending bank line is its first instance.
+act. #657's pending bank line is its first instance; #947 (a posted payroll run's unsettled net
+pay, offered against candidate bank lines) is the second and #949 (a month of rent whose payable
+is still open on a confirmed tenancy plan) the third, each reusing the same shape rather than
+minting a sibling concept.
 _Avoid_: A stored Work, question or task; a new `accounting_work.purpose`; a notification; a row
 that survives the fact that produced it; a suggestion the product acts on by itself.
+
+**Contract terms record**:
+What one agreement STATES, recorded per client and per agreement, one live row per term, with the
+region of the page each figure was read from. It is append-only and supersede-only: a correction
+opens a successor and the superseded reading stays readable beside it. Every row says how it came
+to be what it is — READ from a region, DERIVED from regions by a stated rule, or STATED by a named
+person — so nothing on a screen can pass a derivation off as a reading. #949's tenancy terms (the
+monthly rent, the deposit, the term's first and last day, any escalation) are its first instance.
+_Avoid_: A client fact (one live row per client and key, so two tenancies would collide, and it
+carries no region); a knowledge record (its subject is the client or the firm, never one
+agreement); an editable row; a figure with no stated provenance.
+
+**Lessee treatment branch**:
+The decision about whether Clara may draft a monthly rent expense for a lease at all, taken from
+the client's own reporting framework and the term the agreement states, and never from a default.
+MPERS Section 20 has the lessee CLASSIFY the lease first — one that transfers substantially all
+the risks and rewards of ownership is a finance lease, carried as an asset and a liability, and
+only an operating lease is expensed straight-line over the term — so level rent on an ordinary
+tenancy is the ordinary case and a lease running a decade or more ASKS for that classification;
+MFRS 16 recognises a right-of-use asset and a lease liability for a lease over twelve months, so
+only a short-term lease may be expensed straight-line; and a stated escalation makes the
+straight-line expense differ from the month's cash rent under either. Where the branch ASKS,
+Clara states the term, the rent and the escalation she read, names what the standard asks, and
+drafts nothing — a person may still confirm, against a written professional judgement that is
+recorded with the act.
+_Avoid_: A default framework; auto-posting a treatment that may not comply; averaging a stepped
+rent without a person's decision; assuming a classification the standard makes an accountant
+establish; a measurement (a discount rate, a right-of-use asset, a lease liability schedule) this
+lane cannot read.
+
+**Plan confirmation**:
+The recorded act of a named person starting or revising a recurring plan, carrying the document
+they were looking at, the figures and accounts they confirmed, and the treatment branch as it
+stood at that moment. It is what the plan lane's explicit instruction names, and it is admitted
+for the same reason a Work row is: it cannot exist without naming who asked. It is never amended
+— a changed mind is a revision, with its own confirmation.
+_Avoid_: A document standing in for an instruction; a Work minted to serve as a receipt; a chat
+turn nobody typed; an editable confirmation.
 
 **Match basis**:
 The DETERMINISTIC evidence for pairing one bank statement line with one already-approved

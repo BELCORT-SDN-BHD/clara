@@ -106,6 +106,43 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   // The tab is typed against `RegisterTab` rather than spelled inline, so renaming a workbench
   // view is a TYPECHECK failure here instead of a link that silently falls back to aging.
   depreciation_authority_pending: `/registers?tab=${FIXED_ASSETS_TAB}`,
+  // #946 (0297) — the documents tab, SHARED with the three kinds above it and deliberately so.
+  // A blocked payroll run is about ONE document that was read and did not post: the page whose
+  // two readings disagreed, or the payslip to re-file once the missing account exists. Its
+  // verbs are not on the journals workbench, because there is no entry yet — that absence is
+  // the row. (`?tab=` is not used here: the documents tab has no view that selects a single
+  // document from the URL, so naming one would be a link to a view that does not exist.)
+  payroll_posting_blocked: "/documents",
+  // #947 (0298) — the bank tab, bare (not `?tab=matching`). `PayrollSettlementsSection` mounts
+  // inside the Matching view, which is where the act this row names — find the bank line, accept
+  // it — actually lives, but `ACCOUNTING_ITEMS`'s own `bank` entry (lib/navigation/tree.ts)
+  // names no `tab`, so `?tab=matching` is not a view `CLIENT_ROUTES` itself emits today
+  // (this file's own test proves every query-carrying suffix against that set, the same way
+  // `depreciation_authority_pending`'s `?tab=fixedAssets` is proven — adding the matching
+  // symmetric entry for bank is scoped OUT of this ticket, recorded as a follow-up rather than
+  // widening a shared navigation registry four other lanes touch this wave). A bare `/bank`
+  // lands one tab away (the default is `accounts`) rather than zero, which is still the honest
+  // answer today.
+  payroll_net_pay_unsettled: "/bank",
+  // #948 (0299) — the documents tab, SHARED with `payroll_posting_blocked` and the three kinds
+  // above it, and deliberately so. A blocked acquisition is about ONE document that was read and
+  // did not post: the page whose two readings disagreed, or the agreement to re-file once the
+  // missing account exists. Its verbs are not on the journals workbench, because there is no
+  // entry yet — that absence is the row. (`?tab=` is not used here, for the same reason
+  // `payroll_posting_blocked` does not: the documents tab has no view that selects a single
+  // document from the URL, so naming one would be a link to a view that does not exist.)
+  agreement_posting_blocked: "/documents",
+  // #949 (0300) -- the bank tab, bare, for exactly the reason #947's own note above gives: the
+  // act this row names (find the bank line that paid the month's rent, accept it) lives in the
+  // Matching view, but `ACCOUNTING_ITEMS`'s own `bank` entry names no `tab`, so `?tab=matching`
+  // is not a view `CLIENT_ROUTES` emits today. A bare `/bank` lands one tab away rather than
+  // zero, which is still the honest answer.
+  rent_payable_unsettled: "/bank",
+  // #949 (0300) -- the DOCUMENTS tab, and a different tab from its sibling above on purpose. The
+  // escalation row's act is on the contract page: read what the tenancy states, decide the
+  // treatment the standard asks about, and confirm the revision. Sending it to the bank would
+  // send a person to a surface where the decision is not.
+  rent_escalation_pending: "/documents",
 });
 
 /**

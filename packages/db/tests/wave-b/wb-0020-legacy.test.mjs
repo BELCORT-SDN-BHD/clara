@@ -374,6 +374,101 @@ const RESTORE_0038 = {
 ]
 ]
 };
+// =========================================================================
+// AMENDMENT W4 (riders wave 4, lane 01 — migrations 0296_payroll_summary_typed_facts.sql
+// (#945) and 0299_agreement_contract_acquisition.sql (#948)). BOTH members of §6's closed set —
+// claim_document_processing_task and _enqueue_invoice_facts_core — gain a layer that is now the
+// OUTERMOST of all, and it is TWO ratified edits made by two consecutive files of one lane,
+// reversed together for the reason 0266/0267 are gated together elsewhere in this repo: they are
+// consecutive in one ordered chain, so the post-0296 / pre-0299 body is not a state any database
+// rests in.
+//
+// THE ROUTER'S FOUR PAIRS ARE MACHINE-DERIVED, the discipline every prior machine-derived layer
+// here records: a line diff of the LIVE body against 0123_f_a7_gamma_egress.sql's own source
+// (the last file to write this body before 0296), with the #606/0177 hunk excluded because
+// applyRestore0177 already reverses it, and the reconstruction asserted BYTE-EQUAL to 0123's
+// body before the pairs were transcribed. They reverse: the two new document_kind routing arms
+// (payroll_summary and agreement_contract, each minting its OWN lane rather than reusing
+// llm_witness), the engine-kind map's two new canonical rows (payroll_text_facts and
+// agreement_text_facts), the two new enqueue-time typed-consent gates (the witness gate's own
+// shape, the same purpose, their own named refusal codes), and the attempt-cap emit's lane-true
+// type map. NONE of them adds a call edge into the LEGACY consent relation, which is §6's own
+// structural claim about this body.
+//
+// WHAT CHANGED, AND WHY IT IS A CONTRACT AMENDMENT RATHER THAN A TEST EDIT. §6's own failure
+// text states the rule: "A legitimate change here needs a contract amendment, not a test edit."
+// The lane widened this body's EGRESSING-LANE ROSTER twice — once for payroll_facts (#945) and
+// once for contract_facts (#948) — at the same four sites F-A1 PR-1 widened it for llm_witness,
+// and for the same reason F-A1 gives: a lane that sends a client's document bytes to a model
+// must join the kill switch, must be capped over its OWN lane's attempts, must emit a LANE-TRUE
+// terminal event, and must hold its own concurrency window rather than being folded into the
+// shared ocr/invoice_facts/statement_facts count. NEITHER edit adds a call edge into the
+// typed-consent surface (§6's own structural claim about this body): both new lanes check their
+// typed (consent, activation) pair at ENQUEUE, exactly as statement_facts and llm_witness do,
+// and the legacy per-client branch below is untouched. THE PIN IS NOT RETUNED: the four pairs
+// below reverse exactly the ratified insertions and the remainder is re-hashed against the
+// UNCHANGED 19-migration prestate, so this cell still proves both that the ratified edits are
+// present in their exact shape AND that nothing else in this body moved.
+//
+// The pairs are transcribed from the two migrations' own splice literals (0299 §E3(4a)-(4d))
+// and from 0296's own recut of the same four sites, and they restore the EXACT pre-#945 text
+// the F-A1 PR-1 pairs below were derived against — which is what makes the whole chain compose.
+// 0296 also moved the concurrency COUNT's predicate from the literal lane='llm_witness' to
+// lane=t.lane (so each rostered lane counts its own), so pair (4) carries that back too.
+// Reversed FIRST, per the standing "reverse outermost-first" discipline.
+const RESTORE_W4 = {
+"router": [
+[
+"    elsif d.document_kind='payroll_summary' then\n      -- #945 / parent #926 (owner ruling 2026-09-18, option G): \"a payroll summary and a\n      -- contract go down the same lane as any other accounting document, read and posted, not\n      -- merely stored\". Until this arm existed a payroll_summary fell straight through to the\n      -- skipped_kind dead end below -- the capability registry's own `stored_only` verdict was\n      -- literally derived from that fall-through. ITS OWN LANE, not llm_witness: that lane's\n      -- claim is BY LANE ALONE (the bank-statement comment eight lines above records the same\n      -- reasoning), so a payroll pair parked there would be read with invoice prompts and\n      -- resolved by clara._invoice_fact_state as an invoice corroboration. v_engine MUST\n      -- string-equal PAYROLL_ENGINE_SNAPSHOT.engineId in the payrollFacts.v1 services module;\n      -- the workflow compares the task's stamp against its own snapshot BEFORE any egress and\n      -- waits on a mismatch rather than sending bytes under a receipt naming a model it did not\n      -- call, so a drifted literal STALLS the lane instead of mis-stamping it.\n      v_lane:='payroll_facts'; v_engine:='llm-openai:gpt-5.6-terra:payroll-witness-v1';\n    elsif d.document_kind='agreement_contract' then\n      -- #948 / parent #926 (owner ruling 2026-09-18, option G): a contract goes down the same\n      -- lane as any other accounting document, read and posted, not merely stored. Until this\n      -- arm existed an agreement_contract fell straight through to the skipped_kind dead end\n      -- below -- the capability registry's own `stored_only` verdict was literally derived from\n      -- that fall-through. ITS OWN LANE, not llm_witness and not payroll_facts: a facts lane is\n      -- claimed BY LANE ALONE, so a contract pair parked on either would be read with that\n      -- family's prompts. v_engine MUST string-equal AGREEMENT_ENGINE_SNAPSHOT.engineId in the\n      -- agreementFacts.v1 services module; the workflow compares the task's stamp against its\n      -- own snapshot BEFORE any egress and waits on a mismatch rather than sending bytes under a\n      -- receipt naming a model it did not call, so a drifted literal STALLS the lane instead of\n      -- mis-stamping it.\n      v_lane:='contract_facts'; v_engine:='llm-openai:gpt-5.6-terra:agreement-witness-v1';\n",
+"",
+],
+[
+"    v_engine_kind := case when v_lane='contract_facts'\n                       then 'agreement_text_facts'  -- #948: the agreement pair's CANONICAL row,\n                       -- the llm_witness/payroll precedent exactly -- a done text row proves a\n                       -- done pair (one atomic writer transaction), so a re-fire is suppressed\n                       -- the moment the pair lands.\n                       when v_lane='payroll_facts'\n                       then 'payroll_text_facts'  -- #945: the payroll pair's CANONICAL row,\n                       -- the llm_witness precedent exactly -- a done text row proves a done\n                       -- pair (one atomic writer transaction), so a re-fire is suppressed the\n                       -- moment the pair lands.\n                       when v_lane in ('statement_facts','statement_parse')",
+"    v_engine_kind := case when v_lane in ('statement_facts','statement_parse')",
+],
+[
+"  elsif v_lane='payroll_facts' then\n    -- #945: THE SAME enqueue-time typed-consent gate the witness lanes hold, keyed on the SAME\n    -- purpose ('witness_extraction') and with its OWN named refusal codes rather than a reuse of\n    -- another family's literals -- a refusal a person reads must say which read was refused.\n    --\n    -- WHY THE EXISTING PURPOSE AND NOT A NEW ONE. 'witness_extraction' is the typed consent that\n    -- authorizes sending a client's document BYTES to a model in order to READ them; that is\n    -- exactly and only what this lane does. Minting a payroll-specific purpose would need its own\n    -- CHECK widening, its own consent-capture surface and its own activation act, and until all\n    -- three existed the lane would be dark for every firm -- which the standing \"nothing dark\"\n    -- ruling refuses. The purpose IS a live gate here, not a bypass: a client with no live\n    -- witness_extraction activation gets a terminal refusal, exactly as an invoice would.\n    -- FOLLOW-UP, recorded rather than silently decided: a payroll summary carries employee-level\n    -- personal data an invoice does not, so whether this class deserves its own consent moment is\n    -- a product question for the owner, filed by #945's report and not answered here.\n    select array_agg(distinct f.client_id) into v_stmt_clients\n      from clara.document_filings f\n      where f.document_id=p_document and f.retired_at is null;\n    if coalesce(array_length(v_stmt_clients,1),0)>1 then\n      v_gate:='payroll_multi_client';\n    elsif coalesce(array_length(v_stmt_clients,1),0)=0 then\n      -- Zero active filings: no client exists who could have authorized this read. Fail closed.\n      v_gate:='payroll_consent_inactive';\n    else\n      v_stmt_client:=v_stmt_clients[1];\n      if not exists(select 1 from clara.client_egress_purpose_activations a\n          join clara.client_egress_purpose_consents c\n            on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id\n              and c.purpose=a.purpose\n          where a.firm_id=d.firm_id and a.client_id=v_stmt_client\n            and a.purpose='witness_extraction'\n            and a.deactivated_at is null and c.revoked_at is null) then\n        v_gate:='payroll_consent_inactive';\n      end if;\n    end if;\n    if v_gate is not null then\n      update clara.document_processing_tasks\n        set status='failed', error_code=v_gate, finished_at=now()\n        where document_id=p_document and lane=v_lane and status='queued';\n      get diagnostics v_flip = row_count;\n      if v_flip = 0 then\n        select id into v_task from clara.document_processing_tasks\n          where document_id=p_document and lane=v_lane\n            and status='failed' and error_code=v_gate\n          order by version_n desc limit 1;\n        if v_task is not null then\n          return jsonb_build_object('task_id',v_task,'document_id',p_document,\n            'status','failed','reason',v_gate);\n        end if;\n        select coalesce(max(version_n),0)+1 into v_version\n          from clara.document_processing_tasks\n          where document_id=p_document and lane=v_lane;\n        insert into clara.document_processing_tasks(firm_id,document_id,engine_id,\n            engine_config,version_n,lane,status,error_code,finished_at)\n          values(d.firm_id,p_document,v_engine,'{}'::jsonb,\n            v_version,v_lane,'failed',v_gate,now())\n          returning id into v_task;\n      else\n        select id into v_task from clara.document_processing_tasks\n          where document_id=p_document and lane=v_lane\n            and status='failed' and error_code=v_gate\n          order by version_n desc limit 1;\n      end if;\n      perform clara._append_event(d.firm_id,'document.payroll_facts_failed',\n        null,null,null,null,\n        null,p_document,null,jsonb_build_object('task_id',v_task,'reason',v_gate));\n      return jsonb_build_object('task_id',v_task,'document_id',p_document,\n        'status','failed','reason',v_gate);\n    end if;\n  elsif v_lane='contract_facts' then\n    -- #948: THE SAME enqueue-time typed-consent gate the witness and payroll lanes hold, keyed\n    -- on the SAME purpose ('witness_extraction') and with its OWN named refusal codes rather\n    -- than a reuse of another family's literals -- a refusal a person reads must say which read\n    -- was refused.\n    --\n    -- WHY THE EXISTING PURPOSE AND NOT A NEW ONE. 'witness_extraction' is the typed consent that\n    -- authorizes sending a client's document BYTES to a model in order to READ them; that is\n    -- exactly and only what this lane does. Minting a contract-specific purpose would need its\n    -- own CHECK widening, its own consent-capture surface and its own activation act, and until\n    -- all three existed the lane would be dark for every firm -- which the standing \"nothing\n    -- dark\" ruling refuses. The purpose IS a live gate here, not a bypass: a client with no live\n    -- witness_extraction activation gets a terminal refusal, exactly as an invoice would.\n    select array_agg(distinct f.client_id) into v_stmt_clients\n      from clara.document_filings f\n      where f.document_id=p_document and f.retired_at is null;\n    if coalesce(array_length(v_stmt_clients,1),0)>1 then\n      v_gate:='agreement_multi_client';\n    elsif coalesce(array_length(v_stmt_clients,1),0)=0 then\n      -- Zero active filings: no client exists who could have authorized this read. Fail closed.\n      v_gate:='agreement_consent_inactive';\n    else\n      v_stmt_client:=v_stmt_clients[1];\n      if not exists(select 1 from clara.client_egress_purpose_activations a\n          join clara.client_egress_purpose_consents c\n            on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id\n              and c.purpose=a.purpose\n          where a.firm_id=d.firm_id and a.client_id=v_stmt_client\n            and a.purpose='witness_extraction'\n            and a.deactivated_at is null and c.revoked_at is null) then\n        v_gate:='agreement_consent_inactive';\n      end if;\n    end if;\n    if v_gate is not null then\n      update clara.document_processing_tasks\n        set status='failed', error_code=v_gate, finished_at=now()\n        where document_id=p_document and lane=v_lane and status='queued';\n      get diagnostics v_flip = row_count;\n      if v_flip = 0 then\n        select id into v_task from clara.document_processing_tasks\n          where document_id=p_document and lane=v_lane\n            and status='failed' and error_code=v_gate\n          order by version_n desc limit 1;\n        if v_task is not null then\n          return jsonb_build_object('task_id',v_task,'document_id',p_document,\n            'status','failed','reason',v_gate);\n        end if;\n        select coalesce(max(version_n),0)+1 into v_version\n          from clara.document_processing_tasks\n          where document_id=p_document and lane=v_lane;\n        insert into clara.document_processing_tasks(firm_id,document_id,engine_id,\n            engine_config,version_n,lane,status,error_code,finished_at)\n          values(d.firm_id,p_document,v_engine,'{}'::jsonb,\n            v_version,v_lane,'failed',v_gate,now())\n          returning id into v_task;\n      else\n        select id into v_task from clara.document_processing_tasks\n          where document_id=p_document and lane=v_lane\n            and status='failed' and error_code=v_gate\n          order by version_n desc limit 1;\n      end if;\n      perform clara._append_event(d.firm_id,'document.agreement_facts_failed',\n        null,null,null,null,\n        null,p_document,null,jsonb_build_object('task_id',v_task,'reason',v_gate));\n      return jsonb_build_object('task_id',v_task,'document_id',p_document,\n        'status','failed','reason',v_gate);\n    end if;\n",
+"",
+],
+[
+"    if v_lane in ('statement_facts','statement_parse','payroll_facts','contract_facts') then\n      -- #945: the payroll lane joins this emit for the reason the statement lane did -- without\n      -- it the payroll feed never learns its document died at the cap. The TYPE follows the lane:\n      -- a payroll cap must never reach the autodraft consumer as a phantom invoice failure.\n      perform clara._append_event(d.firm_id,\n        case when v_lane='contract_facts' then 'document.agreement_facts_failed'\n             when v_lane='payroll_facts' then 'document.payroll_facts_failed'\n             else 'document.statement_facts_failed' end,",
+"    if v_lane in ('statement_facts','statement_parse') then\n      perform clara._append_event(d.firm_id, 'document.statement_facts_failed',",
+]
+],
+"claim": [
+[
+"  -- #945: payroll_facts is an EGRESSING lane (it sends document bytes to a model), so it\n  -- joins the kill switch. It runs NO per-client LEGACY consent check here, for the reason\n  -- statement_facts and llm_witness do not: its typed (consent, activation) pair is checked at\n  -- ENQUEUE, and reading the purpose-blind legacy table here would let a generic consent\n  -- authorize a payroll-specific read.\n  if t.lane in ('ocr','invoice_facts','statement_facts','llm_witness','payroll_facts','contract_facts')\n     and not coalesce(p_egress_approved,false) then",
+"  if t.lane in ('ocr','invoice_facts','statement_facts','llm_witness')\n     and not coalesce(p_egress_approved,false) then",
+],
+[
+"  if t.lane in ('invoice_facts','statement_facts','llm_witness','payroll_facts','contract_facts') then",
+"  if t.lane in ('invoice_facts','statement_facts','llm_witness') then",
+],
+[
+"             when t.lane='payroll_facts' then 'document.payroll_facts_failed'\n             when t.lane='contract_facts' then 'document.agreement_facts_failed'\n",
+"",
+],
+[
+"  -- #945: payroll_facts takes the SAME per-lane window, counted over its OWN lane. The limit\n  -- COLUMN is shared (llm_witness_concurrency) because both are model-read lanes with the same\n  -- cost shape and a firm that tunes one means both; the COUNT is per lane, which is the half\n  -- that matters -- folding the two into one count would let a payroll backlog starve invoices.\n  if t.lane in ('llm_witness','payroll_facts','contract_facts') then\n    select coalesce(l.llm_witness_concurrency,2) into v_cap from clara.firms f\n      left join clara.firm_document_limits l on l.firm_id=f.id where f.id=t.firm_id;\n    select count(*)::int into v_running from clara.document_processing_tasks\n      where firm_id=t.firm_id and lane=t.lane and status='running';",
+"  if t.lane='llm_witness' then\n    select coalesce(l.llm_witness_concurrency,2) into v_cap from clara.firms f\n      left join clara.firm_document_limits l on l.firm_id=f.id where f.id=t.firm_id;\n    select count(*)::int into v_running from clara.document_processing_tasks\n      where firm_id=t.firm_id and lane='llm_witness' and status='running';",
+]
+]
+};
+function applyRestoreW4(member, src) {
+  for (const [frm, to] of RESTORE_W4[member]) {
+    // DORMANCY vs DRIFT, the applyRestoreFA2Engine shape: a database at a frontier BELOW 0296
+    // carries neither lane and has nothing to reverse, which is a pre-wave-4 database and not a
+    // broken one. Anything else (the pair present twice) is drift and fails loudly.
+    const n = src.split(frm).length - 1;
+    if (n === 0) continue;
+    if (n !== 1) {
+      throw new Error(`W4 restore(${member}): the lane-roster pair appears ${n} times -- the live body drifted from the ratified wave-4 shape: ${frm.slice(0, 100)}`);
+    }
+    src = src.replace(frm, to);
+  }
+  return src;
+}
+
 function applyRestore0038(member, src) {
   for (const [frm, to] of RESTORE_0038[member]) {
     if (src.split(frm).length !== 2) {
@@ -419,7 +514,7 @@ const BYTE_IDENTICAL = {
     acl: ["clara_fn_owner=X/clara_fn_owner", "clara_runtime=X/clara_fn_owner"],
     // F-A1 is the OUTERMOST (newest) layer: reverse it FIRST, on the raw live body, so the
     // 0038 pairs below then find the EXACT pre-F-A1 text they were derived against.
-    restore: (src) => applyRestore0038("claim", applyRestoreFA1("claim", src))
+    restore: (src) => applyRestore0038("claim", applyRestoreFA1("claim", applyRestoreW4("claim", src)))
       .replace(
         "  t record; d record; v_cap int; v_running int; v_attempts int;\n  v_clients int; v_consented int; v_hold_reason text; v_secret text;\n",
         "  t record; d record; v_cap int; v_running int; v_attempts int;\n  v_clients int; v_consented int; v_hold_reason text;\n",
@@ -433,12 +528,13 @@ const BYTE_IDENTICAL = {
         "    'sha256',d.sha256,'mime_type',d.mime_type,'byte_size',d.byte_size);\n",
       ),
     restoreMust: [
-      // Widened to admit EITHER the 0038-only three-lane form (checked after F-A1's own
-      // reversal has already run but before 0038's) OR the F-A1 four-lane form the live
-      // body actually carries today — an unqualified three-lane literal no longer occurs
-      // verbatim once llm_witness joins the list.
-      /lane in \('ocr','invoice_facts','statement_facts'(,'llm_witness')?\)/,
-      /if t\.lane in \('invoice_facts','statement_facts'(,'llm_witness')?\) then/,
+      // Widened to admit the 0038-only three-lane form (checked after F-A1's own reversal has
+      // already run but before 0038's), the F-A1 four-lane form, or — since riders wave 4
+      // (AMENDMENT W4 above) — the SIX-lane form the live body actually carries, payroll_facts
+      // and contract_facts included. An unqualified three-lane literal stopped occurring
+      // verbatim the moment llm_witness joined the list, and each later lane is the same shape.
+      /lane in \('ocr','invoice_facts','statement_facts'(,'llm_witness'(,'payroll_facts'(,'contract_facts')?)?)?\)/,
+      /if t\.lane in \('invoice_facts','statement_facts'(,'llm_witness'(,'payroll_facts'(,'contract_facts')?)?)?\) then/,
       /v_secret:=gen_random_uuid\(\)::text;/,
       /claim_secret_digest=sha256\(convert_to\(v_secret,'UTF8'\)\)/,
       /'claim_secret',v_secret\);/,
@@ -505,7 +601,7 @@ const BYTE_IDENTICAL = {
     restore: (src) => applyRestore0038("router", applyRestoreFA1("router",
       applyRestoreFA1PR3("router", applyRestoreFA2Engine("router",
         applyRestoreFA2Activation("router", applyRestoreF_A7_Gamma("router",
-          applyRestore0177("router", src)))))))
+          applyRestore0177("router", applyRestoreW4("router", src))))))))
       .replace(
         "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text; v_task_status text;\n",
         "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text;\n",

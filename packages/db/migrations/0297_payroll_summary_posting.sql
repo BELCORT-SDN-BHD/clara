@@ -1,0 +1,1516 @@
+-- 0297_payroll_summary_posting -- #946 (riders wave 4, lane 01): A PAYROLL SUMMARY THAT HAS BEEN
+-- READ AND WHOSE ARITHMETIC HOLDS POSTS ITSELF, THE WAY A VALIDATED INVOICE DOES.
+-- =====================================================================================
+-- Spec of record: issue #946's Agent Brief (the body). Its single comment (belcorttao,
+-- 2026-09-19) is an AI triage coordination note, not an owner ruling, and nothing on this ticket
+-- is dated 2026-09-20 -- so the body stands and the comment's three instructions are followed as
+-- guidance (all three are honoured below and each is named where it lands). Parent #926's owner
+-- ruling (2026-09-18, option G): "a payroll summary and a contract go down the same lane as any
+-- other accounting document, read and posted, not merely stored." #945 (migration 0296) shipped
+-- the READING half; this file is the DRAFTING AND POSTING half.
+--
+-- AC1 IS ALREADY SATISFIED ON THIS BASE, AND THIS FILE DELIBERATELY ADDS NO CHART ROW.
+-- `0295_wave4_chart_rows.sql` -- the wave-4 pre-step that landed the four standard-chart rows
+-- #941/#942/#946/#949 share, ONCE, before those lanes were cut -- already minted
+-- `2040 Salaries Payable` (liability, no class, no statutory tag) as part of `my_sme_starter`
+-- version 2, quoting #946's own AC1 and body as its reason. The triage comment's third
+-- instruction ("merge the chart migration ... use one migration for both appends rather than two
+-- migrations racing the same template-count assertions") is therefore already carried out, by a
+-- file that is not this one. THIS FILE CONSUMES THE ROW BY CODE AND NAME AND INSERTS NOTHING.
+--
+-- ...AND THE OTHER TEN ACCOUNTS ARE 0150'S, RESOLVED BY CODE (the triage comment's second
+-- instruction, honoured): 6000 Salaries and Wages and 6010/6020/6030/6040 (employer
+-- EPF/SOCSO/EIS/HRDF) under `employment_costs`, 2100/2110/2120/2130/2140 (EPF/SOCSO/EIS/PCB/HRDF
+-- payable) under `statutory_payables`, all seeded by `0150_coa_template_pr_a.sql`. Nothing here
+-- appends any of them again.
+--
+-- THE ACCOUNTING, CHECKED AGAINST THE STANDARD BEFORE IT WAS WRITTEN (AGENTS.md rule 6 and the
+-- standing "accounting treatments are checked against the standard" ruling). A Malaysian monthly
+-- payroll run books:
+--     Dr  Salaries and Wages                       the GROSS
+--     Dr  EPF / SOCSO / EIS employer contributions the EMPLOYER's own cost
+--     Dr  HRDF levy                                the EMPLOYER's own cost
+--         Cr  EPF payable      employee portion + employer portion
+--         Cr  SOCSO payable    employee portion + employer portion
+--         Cr  EIS payable      employee portion + employer portion
+--         Cr  PCB payable      employee portion only (PCB has no employer side)
+--         Cr  HRDF levy payable
+--         Cr  SALARIES PAYABLE the NET
+-- The employee's own EPF, SOCSO, EIS and PCB are DEDUCTIONS FROM GROSS, never a second expense:
+-- they are already inside the gross debit, and expensing them again would overstate staff cost
+-- and double-count the liability. That is why the entry balances without them: gross minus those
+-- four equals net, which is the same identity 0296's evaluator checks on every quoted row.
+--
+-- TWO OWNER DECISIONS THE BRIEF CARRIES, KEPT VERBATIM IN BEHAVIOUR:
+--   * "the net-pay leg always goes to salaries payable and never straight to the bank, because a
+--     payslip is not a payment voucher and does not say the money left" -- this file has NO bank
+--     arm, and 2040 is the only account the net can reach.
+--   * "salaries payable is an ordinary liability account and deliberately not a control account,
+--     since this lane carries no employee-level detail to reconcile against" -- 0295 minted the
+--     row with `account_class` NULL, and the subledger/open-item belts therefore never ask this
+--     entry for a counterparty. #945 STRIPS every per-employee quote at the persist boundary, so
+--     there is no grain a control account could be reconciled against even in principle.
+--
+-- ===================== WHY THE DATABASE POSTS THIS, AND NOT AN AGENT =====================
+-- The ticket's title says "under the invoice lane's own gate", and the body says the run posts
+-- "the way a validated invoice does". What is REUSED is the invoice lane's GATE DISCIPLINE, not
+-- its body, and the difference is stated here so nobody reads this file as a shortcut.
+--
+--   * The invoice lane's unattended post is `clara._agent_post_entry_core` driven by
+--     `clara.wake_post_entry` from autoDraft_v10: a rung vector evaluated over a CLOSED roster,
+--     a first-failure refusal that COMMITS (so the reason is durable) and writes no receipt, and
+--     exactly one `clara.entry_post_receipts` row on a successful post. THIS FILE COPIES ALL
+--     THREE of those properties, in §E.
+--   * What it does NOT reuse is that core's rungs, because they are invoice-shaped by
+--     construction and would refuse a payroll summary on grounds that have no meaning here: B2
+--     and B3 require `clara._invoice_fact_state` corroboration bound to `invoice.total` (a
+--     payroll pair banks its state under `payroll_text_facts` and has no `invoice.total` region
+--     at all); B1/B14/B15 reason about coding kinds, AR/AP control legs and counterparty
+--     identity, none of which a payroll run has. Routing a payroll pair through it would not be
+--     strictness -- it would be a gate that always answers "no" for reasons unrelated to payroll.
+--   * And an AGENT is not needed at all, which is the real reason this is a database body: an
+--     invoice needs a model because CODING it is a judgement (which expense account, which
+--     counterparty, which direction). A payroll run's coding is FIXED -- the statutory chart
+--     decides every account, and 0296's frozen evaluator has already done every sum. There is
+--     nothing left to decide, so putting a model in the loop would add a guess to a lane whose
+--     whole promise is that it never guesses.
+--
+-- The receipt this file writes says exactly that: `model_snapshot` names the deterministic
+-- producer (provider `clara_db`), never a model, and `gate_verdicts` carries the READING's own
+-- engine id so an auditor can still reach the model call that produced the facts.
+--
+-- ===================== DEPLOY ORDER: DATABASE ALONE. NO RUNTIME STEP. =====================
+-- This file adds NO new task lane, NO new workflow family and NO new runtime call. The posting
+-- happens inside `clara.persist_payroll_facts` -- the door the (frozen) payrollFacts_v1 worker
+-- already settles through -- so the lane that reads a payslip is the lane that posts it, and the
+-- frozen workflow body is not touched. `node scripts/check-frozen-workflows.mjs` shows no
+-- manifest diff from this file.
+--
+-- WRITE-QUIESCE (D1). This file `create or replace`s exactly ONE live body,
+-- `clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)`, and SPLICES exactly one more,
+-- `clara.list_review_queue(jsonb,jsonb,integer)`. PostgreSQL runs an in-flight PL/pgSQL call to
+-- completion on the body it STARTED with, so a payroll persist spanning this migration settles
+-- the read WITHOUT posting -- which is the same state a persist under a failed gate leaves, and
+-- which the derived Needs-you row of §H reports honestly. Nothing is half-posted in that window:
+-- the post is one statement sequence inside the persist's own transaction. `list_review_queue`
+-- is a reader. No table is rewritten and no lock is held on a large relation.
+--
+--   §A  prestate -- the pinned pre-images, measured on this lane database now
+--   §B  clara._payroll_period_month(text)        -- the month parser, closed and locale-free
+--   §C  clara._payroll_entry_plan(uuid, jsonb)   -- THE DRAFTING BODY (AC2)
+--   §D  clara._payroll_posting_verdict(uuid)     -- THE UNATTENDED GATE (AC3, AC4, AC5)
+--   §E  clara.entry_post_receipts widening       -- the receipt says which lane posted
+--   §F  clara._post_payroll_run(uuid)            -- the post itself, and its receipt
+--   §G  clara.persist_payroll_facts recut        -- the lane posts what it reads (AC3)
+--   §H  clara.list_review_queue splice           -- row_kind='payroll_posting_blocked' (AC3)
+--   §Z  tail
+-- =====================================================================================
+
+set local statement_timeout = '5min';   -- runner rule: statement_timeout is the first executable statement
+set local lock_timeout = '5s';
+
+-- =====================================================================================
+-- §A  PRESTATE. Every claim this file makes about what it is building on, MEASURED on the lane
+--     rig (127.0.0.1:55741 / clara_l01) on 2026-09-24, never transcribed from another file.
+--
+--     BIMODAL BY CONSTRUCTION (#957 redo). The two bodies this file RECUTS are pinned to TWO
+--     acceptable shapes each: the PRE-IMAGE sha (a first apply) or a body already carrying this
+--     file's own marker (a redo). Anything else is drift and is refused by name. The wave-3
+--     addendum's warning is honoured in the ticket report: the FIRST-APPLY branch is proven
+--     separately, inside a rolled-back transaction that restores the pre-images and runs this
+--     prestate verbatim, because CLARA_MIGRATION_REDO can only ever exercise the redo branch.
+-- =====================================================================================
+do $w946_pre$
+declare v_sha text; v_code text; v_def text; v_n int; v_raw_n int; r record;
+begin
+  -- 1 · THE READING HALF MUST BE LIVE. #946 consumes #945's banked fact state; without it there
+  --     is nothing to draft from and every cell below would be vacuous.
+  if to_regprocedure('clara.evaluate_payroll_run_state_v1(jsonb,jsonb)') is null
+     or to_regprocedure('clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)') is null then
+    raise exception '#946 prestate: the payroll READING lane (0296) is absent -- 0296 must apply first'
+      using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.evaluate_payroll_run_state_v1(jsonb,jsonb)'::regprocedure;
+  if v_sha is distinct from '0b11727c230ff03ec94b758a95e7a2035c5af09d323a6f6da284cdd9d91fc8cd' then
+    raise exception '#946 prestate: clara.evaluate_payroll_run_state_v1 has MOVED (sha %) -- this file drafts from its output shape and a changed formula is a _v2, never an edit', v_sha
+      using errcode = 'CLR10';
+  end if;
+
+  -- 2 · THE PERSIST DOOR, BIMODAL: its 0296 pre-image, or a body already carrying this file's
+  --     own call (a redo).
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex'), p.prosrc into v_sha, v_code from pg_proc p
+   where p.oid = 'clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)'::regprocedure;
+  if position('_post_payroll_run' in v_code) = 0
+     and v_sha is distinct from '85a708a386743ccdf0e3f6763de4a9fe14f793ffdca0e275c637c0cb23d6d83e' then
+    raise exception '#946 prestate: clara.persist_payroll_facts is neither at its pinned 0296 pre-image (measured %) nor already carrying this file''s post call -- re-derive this recut against the LIVE body before applying', v_sha
+      using errcode = 'CLR10';
+  end if;
+
+  -- 3 · THE QUEUE, BIMODAL, same shape. The splice in §H reads the INSTALLED definition, so the
+  --     pin exists to prove the anchors this file was authored against are the live ones.
+  if to_regprocedure('clara.list_review_queue(jsonb,jsonb,integer)') is null then
+    raise exception '#946 prestate: clara.list_review_queue is GONE' using errcode = 'CLR10';
+  end if;
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex'), p.prosrc into v_sha, v_code from pg_proc p
+   where p.oid = 'clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure;
+  if position('payroll_posting_blocked' in v_code) = 0
+     and v_sha is distinct from 'f4a34c72e567bf825d4376d043ea23cc3d8bcd2d4f0caaee3a5d052bf8a25d69' then
+    raise exception '#946 prestate: clara.list_review_queue has DRIFTED from its pinned pre-image (measured %) and does not already carry this file''s row kind -- re-derive the splice against the LIVE body', v_sha
+      using errcode = 'CLR10';
+  end if;
+
+  -- 4 · THE NEIGHBOURS THIS FILE RELIES ON AND MUST NOT MOVE (house practice: a prestate pins the
+  --     bodies it recuts AND the ones it leans on, so a later lane that recuts one collides here
+  --     rather than silently changing what this lane posts).
+  for r in select * from (values
+      ('clara._document_posting_entry(uuid,uuid)',
+       '8ba5e67f7bc92a809e5fbea04b635331c764a48263c1fef4e06f8efe67ebcfd0'),
+      ('clara._validate_entry_lines(uuid,jsonb)',
+       '37b03159a535770d6d7053aa826270703fcafa86f3864e9e344fe5bb886d3c71'),
+      ('clara._is_codeable_kind(text)',
+       '0c0780e3dc7d52affc84f2ded39b28fe8a1af7f5024a6ac813fa932210d40b28')
+      ) as t(sig, want) loop
+    select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+     where p.oid = r.sig::regprocedure;
+    if v_sha is distinct from r.want then
+      raise exception '#946 prestate: % has MOVED (measured %, expected %) -- this file leans on it unchanged', r.sig, v_sha, r.want
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+
+  -- 5 · THE SALARIES-PAYABLE ROW IS ALREADY ON THE PUBLISHED STANDARD CHART (AC1, satisfied by
+  --     0295). STRUCTURAL, not a count: this file inserts no chart row, so what it needs to be
+  --     true is that the row it consumes EXISTS, as an ordinary liability with no class.
+  if not exists (
+    select 1 from clara.coa_template_accounts a
+     join clara.coa_templates t on t.id = a.template_id
+    where t.template_key = 'my_sme_starter' and t.scope = 'platform' and t.state = 'published'
+      and a.account_code = '2040' and a.name = 'Salaries Payable'
+      and a.account_type = 'liability' and a.account_class is null) then
+    raise exception '#946 prestate: `2040 Salaries Payable` is not on the published my_sme_starter chart as an ordinary liability with no class -- 0295 must apply first (this file appends NO chart row)'
+      using errcode = 'CLR10';
+  end if;
+
+  -- 6 · A PAYROLL SUMMARY IS A CODEABLE KIND. The whole of AC6 rests on it: the filing's own
+  --     `uncoded_filing` row exists BECAUSE the kind is codeable, and it clears when this file's
+  --     entry appears on the filing. If the kind were ever ruled un-codeable, AC6 would be
+  --     vacuous rather than satisfied, and that must fail loudly here.
+  if clara._is_codeable_kind('payroll_summary') is not true then
+    raise exception '#946 prestate: payroll_summary is not a codeable kind -- the uncoded_filing lane this ticket clears does not exist for it'
+      using errcode = 'CLR10';
+  end if;
+
+  -- 7 · THE RECEIPT WALL IS LIVE AND STILL SHAPED AS THIS FILE EXPECTS. An agent-approved entry
+  --     owes EXACTLY ONE receipt (clara._tf_assert_agent_post_receipt); §E writes the
+  --     document-shaped one, and §G widens the lane vocabulary it is allowed to name.
+  if not exists (select 1 from pg_trigger
+                  where tgrelid = 'clara.journal_entries'::regclass
+                    and tgname = 't_je_agent_post_receipt') then
+    raise exception '#946 prestate: t_je_agent_post_receipt is absent -- the post receipt this file writes has no wall to satisfy'
+      using errcode = 'CLR10';
+  end if;
+  select pg_get_constraintdef(oid) into v_def from pg_constraint
+   where conrelid = 'clara.entry_post_receipts'::regclass
+     and conname = 'entry_post_receipts_via_wake_kind_check';
+  if v_def is null then
+    raise exception '#946 prestate: entry_post_receipts_via_wake_kind_check is absent' using errcode = 'CLR10';
+  end if;
+  if position('payroll_facts' in v_def) = 0
+     and v_def is distinct from 'CHECK ((via_wake_kind = ANY (ARRAY[''autodraft''::text, ''interactive''::text, ''bank_agent''::text])))' then
+    raise exception '#946 prestate: entry_post_receipts_via_wake_kind_check is neither at its pinned pre-image nor already widened by this file (live: %)', v_def
+      using errcode = 'CLR10';
+  end if;
+
+  raise notice '#946 prestate: OK -- 0296''s evaluator is at its pinned sha, persist_payroll_facts and list_review_queue are each at a pinned pre-image (or already carry this file''s own marker), the three leaned-on neighbours are unmoved, `2040 Salaries Payable` is already on the published standard chart (0295), payroll_summary is codeable, and the agent-post receipt wall is live.';
+end
+$w946_pre$;
+
+-- =====================================================================================
+-- §B  THE MONTH PARSER -- clara._payroll_period_month(text) returns date.
+--
+--     "The entry is dated at the end of the payslip's own month, not the day it was uploaded. A
+--     month Clara cannot establish is asked, never assumed." (the brief). This body is the
+--     "establish" half: it turns the VERBATIM rendering the page printed into the first day of a
+--     month, or returns NULL -- which §D turns into a named refusal and §H turns into a Needs-you
+--     row. It never guesses.
+--
+--     WHY IT PARSES AT ALL, rather than demanding ISO. #945's frozen prompt asks the model to
+--     quote the period AS PRINTED ("'August 2026', '08/2026', '2026-08' -- whatever the page
+--     says"), which is the never-infer-never-compute rule applied to a date. Something has to
+--     read that rendering, and it must be this side of the boundary: a model that normalised the
+--     month would be computing.
+--
+--     THE ADMITTED RENDERINGS ARE A CLOSED SET, and every one of them is UNAMBIGUOUS:
+--       2026-08, 2026/08          year first, because the 4-digit group is first
+--       08/2026, 08-2026          month first, because the 4-digit group is last
+--       2026-08-31                a full ISO date inside the month -> that month
+--       August 2026, Aug 2026     an English month name with a year, either order
+--       2026 August
+--     DELIBERATELY REFUSED: any all-numeric triple (31/08/2026 vs 08/31/2026 cannot be told
+--     apart, and a payroll month read the wrong way round is a whole period in the wrong place),
+--     a bare year, a bare month name, a quarter, and a range. Each of those returns NULL and the
+--     run is ASKED rather than posted.
+--
+--     LOCALE-FREE BY CONSTRUCTION: the twelve month names are this body's own array, never
+--     `to_date(..., 'Month YYYY')`, whose behaviour would otherwise depend on the session.
+--     That is also what makes the function honestly IMMUTABLE.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._payroll_period_month(p_raw text) returns date
+  language plpgsql immutable set search_path = pg_catalog, pg_temp as $ppm$
+declare
+  v_s text; v_a text; v_b text; v_y int; v_m int; v_name text;
+  v_months text[] := array['january','february','march','april','may','june',
+                           'july','august','september','october','november','december'];
+  v_i int;
+begin
+  v_s := btrim(coalesce(p_raw, ''));
+  if v_s = '' then return null; end if;
+  -- One space between tokens, so 'August   2026' and 'August 2026' are one rendering.
+  v_s := regexp_replace(v_s, '\s+', ' ', 'g');
+
+  -- A full ISO date inside the month. Checked FIRST: it is the only numeric shape with three
+  -- groups this body admits, and admitting it before the two-group shapes keeps those regexes
+  -- anchored and simple.
+  if v_s ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then
+    begin
+      return date_trunc('month', v_s::date)::date;
+    exception when others then
+      return null;   -- '2026-02-31' is a rendering, not a date
+    end;
+  end if;
+
+  -- Two numeric groups. Which is the year is decided by DIGIT COUNT, never by position alone.
+  if v_s ~ '^[0-9]{4}[-/ ][0-9]{1,2}$' then
+    v_y := (regexp_replace(v_s, '^([0-9]{4}).*$', '\1'))::int;
+    v_m := (regexp_replace(v_s, '^[0-9]{4}[-/ ]0*([0-9]{1,2})$', '\1'))::int;
+  elsif v_s ~ '^[0-9]{1,2}[-/ ][0-9]{4}$' then
+    v_m := (regexp_replace(v_s, '^0*([0-9]{1,2})[-/ ][0-9]{4}$', '\1'))::int;
+    v_y := (regexp_replace(v_s, '^[0-9]{1,2}[-/ ]([0-9]{4})$', '\1'))::int;
+  -- A month NAME with a year, in either order. Punctuation between them is tolerated because a
+  -- page prints 'August, 2026' as readily as 'August 2026'.
+  elsif v_s ~* '^[A-Za-z]{3,9}[ ,/-]+[0-9]{4}$' then
+    v_a := lower(regexp_replace(v_s, '^([A-Za-z]{3,9})[ ,/-]+[0-9]{4}$', '\1'));
+    v_y := (regexp_replace(v_s, '^[A-Za-z]{3,9}[ ,/-]+([0-9]{4})$', '\1'))::int;
+    v_name := v_a;
+  elsif v_s ~* '^[0-9]{4}[ ,/-]+[A-Za-z]{3,9}$' then
+    v_y := (regexp_replace(v_s, '^([0-9]{4})[ ,/-]+[A-Za-z]{3,9}$', '\1'))::int;
+    v_b := lower(regexp_replace(v_s, '^[0-9]{4}[ ,/-]+([A-Za-z]{3,9})$', '\1'));
+    v_name := v_b;
+  else
+    return null;
+  end if;
+
+  if v_name is not null then
+    v_m := null;
+    for v_i in 1 .. 12 loop
+      -- A three-letter prefix is the only abbreviation admitted, and it must be a prefix of the
+      -- month it names: 'jun'/'june' resolve, 'ju' and 'junio' do not.
+      if v_name = v_months[v_i] or (length(v_name) = 3 and v_name = left(v_months[v_i], 3)) then
+        v_m := v_i;
+      end if;
+    end loop;
+    if v_m is null then return null; end if;
+  end if;
+
+  if v_m is null or v_m < 1 or v_m > 12 then return null; end if;
+  if v_y is null or v_y < 1900 or v_y > 2999 then return null; end if;
+  return make_date(v_y, v_m, 1);
+end $ppm$;
+
+revoke all on function clara._payroll_period_month(text) from public;
+
+comment on function clara._payroll_period_month(text) is
+  '#946: the payslip month, established from the rendering the page printed. A closed set of unambiguous renderings (ISO year-month either separator, month-year, a full ISO date inside the month, and an English month name with a year in either order); everything else -- in particular any all-numeric triple, which cannot be told apart from its own reversal -- returns NULL so the run is ASKED rather than posted on a guess. Locale-free: the twelve month names are this body''s own array, which is also what makes it honestly IMMUTABLE. Ungranted: reached only from clara._payroll_entry_plan.';
+
+reset role;
+
+-- =====================================================================================
+-- §C  THE DRAFTING BODY (AC2) -- clara._payroll_entry_plan(uuid, jsonb) returns jsonb.
+--
+--     An ESTABLISHED payroll fact state in; the entry the brief describes out. It takes the
+--     state rather than a document deliberately: the state is 0296's own output and the plan is
+--     a pure function of it plus this client's chart, so the arithmetic can be driven and proved
+--     without a document, a filing or a task in the way.
+--
+--     WHAT "ESTABLISHED" MEANS HERE, AND WHY IT IS THE EVALUATOR'S WORD, NOT THIS FILE'S. 0296's
+--     evaluator classifies every one of the eleven run-level questions as `established` (both
+--     channels agree on a readable figure the page printed, and every cross-check it could run
+--     passed), `not_printed` (the page does not print it), or anything else (they disagree, a
+--     printed total contradicts the row sum, a row does not balance, a rendering is not a
+--     figure). THIS BODY DRAFTS FROM `established` ALONE.
+--
+--     In particular it does NOT reach for `computed_cents` -- the row sum the evaluator offers
+--     when the page prints employee rows but no totals row. That is a deliberate narrowing and
+--     it is recorded as such: the evaluator's own verdict for such a run is `not_printed`, and a
+--     posting body that re-judged its verdict from outside its frozen closure would be doing
+--     exactly what the freeze exists to prevent. Such a run does not post; it appears under
+--     Needs you naming `run_totals_not_printed`, and whether the owner wants a row sum admitted
+--     as a posting basis is a product question this ticket does not answer for them.
+--
+--     AN UNPRINTED LINE PRODUCES NO LEG. `not_printed` contributes nothing at all -- no zero
+--     leg, no zero-cent line -- because a line the page does not print is not a figure of zero,
+--     and an entry carrying a 0.00 HRDF leg would assert a levy the document never mentioned.
+--     Where a payable has two sides (EPF, SOCSO, EIS) and only one is printed, the credit is the
+--     printed side alone and the leg''s `basis` names only the fact it actually came from.
+--
+--     THE EMPLOYEE PORTIONS ARE NEVER DEBITED. They reduce the net-pay credit (they are already
+--     inside the gross debit) and ride the payable credits. This is asserted arithmetically
+--     rather than by inspection: the plan balances ONLY because
+--     gross - (epf_ee + socso_ee + eis_ee + pcb) = net, which is 0296''s own row identity at run
+--     level. An implementation that expensed them twice could not balance.
+--
+--     EXACT BALANCE, NEVER ROUNDED. clara._validate_entry_lines tolerates a residual of up to 5
+--     cents and books it to the rounding account. This body refuses instead: a payroll entry
+--     whose debits and credits differ AT ALL is a payroll run whose arithmetic did not hold, and
+--     smoothing it into the rounding account would hide exactly the defect the gate exists to
+--     catch.
+--
+--     ACCOUNTS ARE RESOLVED BY CODE IN THIS CLIENT''S OWN CHART, and each leg carries the NAME it
+--     resolved to. By code, because clara.coa_accounts is keyed (client_id, account_code) and a
+--     firm may rename its own accounts; the resolved name travels with the leg so a reader can
+--     see WHICH account in this client''s chart the code found. A code the client does not hold
+--     (or holds inactive) is a NAMED refusal carrying the code -- never a silent substitution
+--     and never an account this lane creates.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._payroll_entry_plan(p_client uuid, p_state jsonb)
+  returns jsonb language plpgsql stable
+  set search_path = clara, pg_temp as $pep$
+declare
+  -- THE LEG ROSTER, in the brief's own order: the gross, each employer contribution the document
+  -- prints, then every statutory payable, then the net. `a` is the account code, `side` the
+  -- direction, `f1`/`f2` the run-level questions whose printed figures make the amount.
+  v_spec jsonb := jsonb_build_array(
+    jsonb_build_object('a','6000','side','debit', 'f1','payroll.run.gross_pay',      'f2',null,'d','Gross pay'),
+    jsonb_build_object('a','6010','side','debit', 'f1','payroll.run.epf_employer',   'f2',null,'d','EPF contribution (employer)'),
+    jsonb_build_object('a','6020','side','debit', 'f1','payroll.run.socso_employer', 'f2',null,'d','SOCSO contribution (employer)'),
+    jsonb_build_object('a','6030','side','debit', 'f1','payroll.run.eis_employer',   'f2',null,'d','EIS contribution (employer)'),
+    jsonb_build_object('a','6040','side','debit', 'f1','payroll.run.hrdf_levy',      'f2',null,'d','HRDF levy'),
+    jsonb_build_object('a','2100','side','credit','f1','payroll.run.epf_employee',   'f2','payroll.run.epf_employer',  'd','EPF payable (employee + employer)'),
+    jsonb_build_object('a','2110','side','credit','f1','payroll.run.socso_employee', 'f2','payroll.run.socso_employer','d','SOCSO payable (employee + employer)'),
+    jsonb_build_object('a','2120','side','credit','f1','payroll.run.eis_employee',   'f2','payroll.run.eis_employer',  'd','EIS payable (employee + employer)'),
+    jsonb_build_object('a','2130','side','credit','f1','payroll.run.pcb',            'f2',null,'d','PCB payable'),
+    jsonb_build_object('a','2140','side','credit','f1','payroll.run.hrdf_levy',      'f2',null,'d','HRDF levy payable'),
+    jsonb_build_object('a','2040','side','credit','f1','payroll.run.net_pay',        'f2',null,'d','Net pay'));
+  r record;
+  v_legs jsonb := '[]'::jsonb; v_refusals jsonb := '[]'::jsonb;
+  v_unprinted text[] := '{}'; v_missing text[] := '{}'; v_basis text;
+  v_c1 bigint; v_c2 bigint; v_cents bigint; v_name text;
+  v_dr bigint := 0; v_cr bigint := 0;
+  v_period_raw text; v_period_state text; v_month date; v_posting date;
+  v_f text;
+begin
+  if p_state is null or p_state->>'state_version' is distinct from 'v1' then
+    return jsonb_build_object('plan_version','v1','ready',false,'legs','[]'::jsonb,
+      'debit_cents',0,'credit_cents',0,'unprinted','[]'::jsonb,'missing_accounts','[]'::jsonb,
+      'refusals', jsonb_build_array(jsonb_build_object('reason','state_unreadable',
+        'detail', jsonb_build_object('state_version', p_state->>'state_version'))));
+  end if;
+
+  -- 1 · THE MONTH. Established from the rendering the page printed, never from today's date and
+  --     never from the upload.
+  v_period_state := p_state->'facts'->'payroll.run.period'->>'state';
+  v_period_raw := p_state->'facts'->'payroll.run.period'->>'printed_raw';
+  if v_period_state = 'established' then
+    v_month := clara._payroll_period_month(v_period_raw);
+  end if;
+  if v_month is null then
+    v_refusals := v_refusals || jsonb_build_object('reason','period_not_established',
+      'detail', jsonb_build_object('period_state', v_period_state, 'period_raw', v_period_raw));
+  else
+    -- THE LAST DAY OF THE PAYSLIP'S OWN MONTH.
+    v_posting := (v_month + interval '1 month - 1 day')::date;
+  end if;
+
+  -- 2 · THE TWO QUESTIONS WITHOUT WHICH THERE IS NO ENTRY. A run whose gross or whose net the
+  --     page does not print (the summary-only page with no totals row, above) has nothing this
+  --     body can honestly post.
+  foreach v_f in array array['payroll.run.gross_pay','payroll.run.net_pay'] loop
+    if (p_state->'facts'->v_f->>'state') is distinct from 'established' then
+      v_refusals := v_refusals || jsonb_build_object('reason','run_totals_not_printed',
+        'detail', jsonb_build_object('field', v_f,
+          'field_state', p_state->'facts'->v_f->>'state',
+          'field_reason', p_state->'facts'->v_f->>'reason'));
+    end if;
+  end loop;
+
+  -- 3 · THE LEGS.
+  for r in select (t.x->>'a') acc, (t.x->>'side') side, (t.x->>'f1') f1, (t.x->>'f2') f2,
+                  (t.x->>'d') d, t.ord
+             from jsonb_array_elements(v_spec) with ordinality as t(x, ord)
+            order by t.ord loop
+    v_c1 := case when (p_state->'facts'->r.f1->>'state') = 'established'
+                 then nullif(p_state->'facts'->r.f1->>'printed_cents','')::bigint end;
+    v_c2 := case when r.f2 is not null and (p_state->'facts'->r.f2->>'state') = 'established'
+                 then nullif(p_state->'facts'->r.f2->>'printed_cents','')::bigint end;
+    v_cents := coalesce(v_c1,0) + coalesce(v_c2,0);
+    v_basis := concat_ws('+', case when v_c1 is not null then r.f1 end,
+                              case when v_c2 is not null then r.f2 end);
+
+    -- WHAT THE PAGE WAS SILENT ABOUT, recorded by QUESTION rather than by leg and DISTINCT: the
+    -- levy is read by two legs (its expense and its payable) and the two paired payables read two
+    -- questions each, so a per-leg list would both repeat itself and lose the employer side of a
+    -- pair whose employee side printed. A question the page printed as 0.00 belongs here too --
+    -- the plan drew no figure from it either way.
+    if v_c1 is null or v_c1 = 0 then
+      if not (r.f1 = any(v_unprinted)) then v_unprinted := v_unprinted || r.f1; end if;
+    end if;
+    if r.f2 is not null and (v_c2 is null or v_c2 = 0) then
+      if not (r.f2 = any(v_unprinted)) then v_unprinted := v_unprinted || r.f2; end if;
+    end if;
+
+    if v_cents = 0 then
+      -- AN UNPRINTED LINE PRODUCES NO LEG, and neither does a printed zero: 0.00 is a reading,
+      -- and a zero-cent line would assert a movement the document prices at nothing.
+      continue;
+    end if;
+
+    select a.name into v_name from clara.coa_accounts a
+     where a.client_id = p_client and a.account_code = r.acc and a.is_active;
+    if v_name is null then
+      if not (r.acc = any(v_missing)) then
+        v_missing := v_missing || r.acc;
+        v_refusals := v_refusals || jsonb_build_object('reason','account_missing',
+          'detail', jsonb_build_object('account_code', r.acc, 'for', r.d, 'basis', v_basis));
+      end if;
+      continue;
+    end if;
+
+    v_legs := v_legs || jsonb_build_object(
+      'account_code', r.acc, 'account_name', v_name, 'side', r.side,
+      'cents', v_cents, 'basis', v_basis, 'description', r.d);
+    if r.side = 'debit' then v_dr := v_dr + v_cents; else v_cr := v_cr + v_cents; end if;
+  end loop;
+
+  -- 4 · EXACT BALANCE. Checked only when nothing above already refused, so a missing account
+  --     reports itself as a missing account rather than as an imbalance it caused.
+  if jsonb_array_length(v_refusals) = 0 and v_dr <> v_cr then
+    v_refusals := v_refusals || jsonb_build_object('reason','entry_unbalanced',
+      'detail', jsonb_build_object('debit_cents', v_dr, 'credit_cents', v_cr,
+        'difference_cents', v_dr - v_cr));
+  end if;
+
+  return jsonb_build_object(
+    'plan_version','v1',
+    'period_raw', to_jsonb(v_period_raw),
+    'period_month', to_jsonb(v_month),
+    'posting_date', to_jsonb(v_posting),
+    'legs', v_legs,
+    'debit_cents', v_dr,
+    'credit_cents', v_cr,
+    'unprinted', to_jsonb(v_unprinted),
+    'missing_accounts', to_jsonb(v_missing),
+    'refusals', v_refusals,
+    'ready', jsonb_array_length(v_refusals) = 0);
+end $pep$;
+
+revoke all on function clara._payroll_entry_plan(uuid, jsonb) from public;
+
+comment on function clara._payroll_entry_plan(uuid, jsonb) is
+  '#946: THE DRAFTING BODY. An established payroll fact state (0296''s evaluator output) plus this client''s own chart in; the payroll entry out -- the gross debited to salaries and wages, each employer contribution the document prints debited to its own employment-cost account, every statutory deduction (employee and employer portions together) credited to its own payable, and the net credited to salaries payable. It drafts from `established` facts ALONE, gives an unprinted line no leg at all, resolves every account by code in the client''s chart and carries the name it resolved, and requires EXACT balance rather than the rounding tolerance clara._validate_entry_lines allows. Every failure is a named refusal in `refusals`; it writes nothing. Ungranted: reached from clara._payroll_posting_verdict.';
+
+reset role;
+
+-- =====================================================================================
+-- §D  THE UNATTENDED GATE (AC3) -- clara._payroll_posting_verdict(uuid) returns jsonb.
+--
+--     "It posts unattended only when every condition holds: both reading channels agree, every
+--     arithmetic check passes, every account resolves in this client's own chart, the payslip's
+--     own month is established, and no payroll entry for that client and month is already
+--     posted. When any condition fails the run does not post; it appears under Needs you naming
+--     the condition that failed" (the brief).
+--
+--     THE SHAPE IS THE INVOICE LANE'S, AND THAT IS DELIBERATE (see the header). Three properties
+--     are copied from clara._agent_post_entry_core rather than re-invented:
+--       (1) A CLOSED RUNG ROSTER, walked in order, with EVERY rung carrying an explicit verdict.
+--           The roster is the array below and nothing else; a rung whose key were missing from
+--           the vector would be a gate that fails OPEN, which is the D26 defect the invoice lane
+--           found the hard way and which its own comment records.
+--       (2) THE FIRST FAILING RUNG IS THE REASON. A person is told the condition that stopped
+--           the post, not a list -- but the whole vector travels beside it so a reviewer can see
+--           everything that was evaluated.
+--       (3) THE GATE WRITES NOTHING. It is STABLE: no receipt, no marker, no refusal row. A
+--           blocked run is visible because §H DERIVES its Needs-you row from this same body, so
+--           the row clears itself the moment the block does -- no dismissal mechanism, nothing
+--           stored, nothing to reconcile.
+--
+--     ONE BODY, TWO READERS. §E (the post) and §H (the queue) both call this, so the sentence a
+--     person reads under Needs you and the decision the lane acted on cannot drift apart. That
+--     is the whole reason the gate is a function rather than a branch inside the poster.
+--
+--     WHICH READING IT JUDGES: the NEWEST payroll pair banked for the document
+--     (`engine_kind='payroll_text_facts'`, highest `version_n`). A re-extraction mints a new
+--     version, and the live reading is the one the lane is asked about.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._payroll_posting_verdict(p_document uuid)
+  returns jsonb language plpgsql stable
+  set search_path = clara, pg_temp as $ppv$
+declare
+  -- THE CLOSED ROSTER, in the order a person should be told about a failure. `filed` and
+  -- `facts_read` come first because without them the rest is unanswerable; the middle five are
+  -- the brief's own conditions; `entry_balances` is a belt that cannot fail once the arithmetic
+  -- rung passed, and is evaluated anyway because a gate that assumes its own invariants is a
+  -- gate that stops checking them.
+  v_rungs text[] := array['filed','facts_read','channels_agree','arithmetic_holds',
+                          'period_established','period_open','run_totals_printed',
+                          'accounts_resolve','entry_balances','no_duplicate_entry'];
+  v_tokens jsonb := jsonb_build_object(
+    'filed','not_filed', 'facts_read','payroll_not_read',
+    'channels_agree','channels_disagree', 'arithmetic_holds','arithmetic_failed',
+    'period_established','period_not_established', 'period_open','period_closed',
+    'run_totals_printed','run_totals_not_printed',
+    'accounts_resolve','account_missing', 'entry_balances','entry_unbalanced',
+    'no_duplicate_entry','duplicate_entry');
+  v_vector jsonb := '{}'::jsonb;
+  v_detail jsonb := '{}'::jsonb;
+  v_first text; v_rung text;
+  f record;
+  v_filing uuid; v_client uuid; v_firm uuid; v_sha text;
+  v_extraction uuid; v_state jsonb; v_plan jsonb := null;
+  v_disagree text[] := '{}'; v_arith text[] := '{}';
+  v_contested jsonb; v_unbal jsonb; v_unchk jsonb;
+  v_dup_entry uuid; v_dup_scope text;
+  v_sentence text; v_month_label text;
+begin
+  -- 1 · FILED. The entry this lane posts is a DOCUMENT entry bound to the document's live
+  --     filing, so a document with no live filing has nothing to bind to.
+  select f2.id, f2.client_id, f2.firm_id into v_filing, v_client, v_firm
+    from clara.document_filings f2
+   where f2.document_id = p_document and f2.retired_at is null
+   order by f2.filed_at desc limit 1;
+  v_vector := v_vector || jsonb_build_object('filed', case when v_filing is null then 'not_filed' else 'pass' end);
+
+  -- 2 · FACTS READ. The newest payroll pair banked for this document.
+  if v_filing is not null then
+    select e.id, e.envelope->'payroll_state' into v_extraction, v_state
+      from clara.document_extractions e
+     where e.document_id = p_document and e.engine_kind = 'payroll_text_facts' and e.status = 'done'
+     order by e.version_n desc, e.extracted_at desc limit 1;
+  end if;
+  v_vector := v_vector || jsonb_build_object('facts_read',
+    case when v_state is null then 'payroll_not_read' else 'pass' end);
+
+  if v_state is not null then
+    -- 3 · CHANNELS AGREE. A question the two readings answer differently, or a quoted employee
+    --     row they read differently -- either one means there is no single reading to post.
+    v_contested := coalesce(v_state->'rows'->'contested','[]'::jsonb);
+    for f in select k, v from jsonb_each(coalesce(v_state->'facts','{}'::jsonb)) as t(k, v) order by k loop
+      if (f.v->>'state') in ('channels_disagree','rows_contested') then
+        v_disagree := v_disagree || f.k;
+      elsif (f.v->>'state') in ('totals_mismatch','rows_unbalanced','unreadable','unanswered') then
+        v_arith := v_arith || f.k;
+      end if;
+    end loop;
+    if coalesce(array_length(v_disagree,1),0) > 0 or jsonb_array_length(v_contested) > 0 then
+      v_vector := v_vector || jsonb_build_object('channels_agree','channels_disagree');
+      v_detail := v_detail || jsonb_build_object('fields', to_jsonb(v_disagree),
+        'contested_rows', v_contested);
+    else
+      v_vector := v_vector || jsonb_build_object('channels_agree','pass');
+    end if;
+
+    -- 4 · ARITHMETIC HOLDS. A row whose own gross-minus-deductions identity fails, a row the
+    --     evaluator could not check at all, a printed total the row sum contradicts, or a
+    --     rendering that is not a figure.
+    v_unbal := coalesce(v_state->'rows'->'unbalanced','[]'::jsonb);
+    v_unchk := coalesce(v_state->'rows'->'unchecked','[]'::jsonb);
+    if coalesce(array_length(v_arith,1),0) > 0
+       or jsonb_array_length(v_unbal) > 0 or jsonb_array_length(v_unchk) > 0 then
+      v_vector := v_vector || jsonb_build_object('arithmetic_holds','arithmetic_failed');
+      v_detail := v_detail || jsonb_build_object('fields', to_jsonb(v_arith),
+        'unbalanced_rows', v_unbal, 'unchecked_rows', v_unchk);
+    else
+      v_vector := v_vector || jsonb_build_object('arithmetic_holds','pass');
+    end if;
+
+    -- 5-8 · THE DRAFTING BODY ANSWERS THE REST. The month, the run totals, the chart and the
+    --       balance are exactly what §C already decides, so they are read off its refusals
+    --       rather than re-decided here -- one body per question, never two.
+    v_plan := clara._payroll_entry_plan(v_client, v_state);
+    foreach v_rung in array array['period_established','run_totals_printed','accounts_resolve','entry_balances'] loop
+      if exists (select 1 from jsonb_array_elements(v_plan->'refusals') x
+                  where x->>'reason' = v_tokens->>v_rung) then
+        v_vector := v_vector || jsonb_build_object(v_rung, v_tokens->>v_rung);
+      else
+        v_vector := v_vector || jsonb_build_object(v_rung, 'pass');
+      end if;
+    end loop;
+    v_detail := v_detail || jsonb_build_object(
+      'missing_accounts', coalesce(v_plan->'missing_accounts','[]'::jsonb),
+      'plan_refusals', coalesce(v_plan->'refusals','[]'::jsonb));
+
+    -- 9 · THE PERIOD IS STILL OPEN. `clara._tf_period_wall` refuses an approved touch whose
+    --     posting date falls inside a fiscal year in `closing` or `closed`, and it is right to:
+    --     a closed year is closed. The gate asks the SAME question up front rather than letting
+    --     the wall raise at the post, for one reason that matters to a person: §H derives the
+    --     Needs-you row from this verdict, so a condition the gate did not evaluate would make
+    --     that row say "ready" about a run the estate will refuse. A rung that only the wall
+    --     knows about is a row that lies.
+    if v_plan->>'posting_date' is null then
+      v_vector := v_vector || jsonb_build_object('period_open','not_evaluated');
+    elsif exists (select 1 from clara.fiscal_years fy
+                   where fy.client_id = v_client
+                     and (v_plan->>'posting_date')::date between fy.starts_on and fy.ends_on
+                     and fy.status in ('closing','closed')) then
+      v_vector := v_vector || jsonb_build_object('period_open','period_closed');
+      v_detail := v_detail || jsonb_build_object('closed_fiscal_year',
+        (select jsonb_build_object('label', fy.label, 'status', fy.status,
+                  'starts_on', fy.starts_on, 'ends_on', fy.ends_on)
+           from clara.fiscal_years fy
+          where fy.client_id = v_client
+            and (v_plan->>'posting_date')::date between fy.starts_on and fy.ends_on
+            and fy.status in ('closing','closed')
+          order by fy.starts_on desc limit 1));
+    else
+      v_vector := v_vector || jsonb_build_object('period_open','pass');
+    end if;
+
+    -- 10 · NO PAYROLL ENTRY FOR THIS CLIENT AND MONTH IS ALREADY POSTED (AC4). FOUR SCOPES, in
+    --      the order a person would want to hear them, and the FIRST match is the one reported
+    --      because it is the most specific thing that can be said:
+    --
+    --      same_document        -- this very document already backs a posted entry. The estate's
+    --                              own `clara._document_posting_entry`, asked here so the answer
+    --                              is a NAMED refusal rather than the source-binding wall's raise
+    --                              at the write.
+    --      same_filing          -- this filing already carries a live draft or approved entry.
+    --                              Somebody (or something) got there first; this lane never
+    --                              overwrites another writer's work, and the one-open-draft
+    --                              unique index would refuse the insert anyway.
+    --      same_month_payroll_run -- ANOTHER document's payroll run already covers this month.
+    --                              This is the re-upload case: a second copy of August, or a
+    --                              corrected payslip somebody filed again. Read off this lane's
+    --                              own `flags->'payroll_run'` marker on the ledger itself.
+    --      payroll_obligation   -- the month was already booked through the OTHER payroll lane:
+    --                              `0194_periodic_adjustments.sql` (#643) posts a statutory
+    --                              payroll obligation from accountant-supplied particulars and
+    --                              stamps `flags->'payroll_obligation'` with the period it covers
+    --                              (0225:1830). Without this scope, a client whose September
+    --                              obligation was booked that way would get a second, conflicting
+    --                              entry the moment a September payslip was read -- which is
+    --                              exactly what #946's triage note asked this guard to prevent.
+    --
+    --      THE REFUSAL POINTS AT THE ENTRY, with its date and its memo, so a person can tell a
+    --      CORRECTION from a RE-UPLOAD without opening the ledger. A reversed entry is not a
+    --      duplicate: `reversed_by is null` throughout, so a reversal re-opens the month.
+    v_dup_entry := clara._document_posting_entry(v_client, p_document);
+    if v_dup_entry is not null then
+      v_dup_scope := 'same_document';
+    end if;
+    if v_dup_entry is null then
+      select j.id into v_dup_entry from clara.journal_entries j
+       where j.filing_id = v_filing
+         and (j.status = 'draft' or (j.status = 'approved' and j.reversed_by is null))
+       order by j.created_at limit 1;
+      if v_dup_entry is not null then v_dup_scope := 'same_filing'; end if;
+    end if;
+    if v_dup_entry is null and (v_plan->>'period_month') is not null then
+      select j.id into v_dup_entry from clara.journal_entries j
+       where j.client_id = v_client and j.status = 'approved' and j.reversed_by is null
+         and j.document_id is distinct from p_document
+         and j.flags->'payroll_run'->>'period_month' = v_plan->>'period_month'
+       order by j.created_at limit 1;
+      if v_dup_entry is not null then v_dup_scope := 'same_month_payroll_run'; end if;
+    end if;
+    if v_dup_entry is null and (v_plan->>'period_month') is not null then
+      select j.id into v_dup_entry from clara.journal_entries j
+       where j.client_id = v_client and j.status = 'approved' and j.reversed_by is null
+         and j.flags ? 'payroll_obligation'
+         and (j.flags->'payroll_obligation'->>'period_start') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         and (j.flags->'payroll_obligation'->>'period_end') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         -- The obligation's own period OVERLAPS the payslip's month.
+         and (j.flags->'payroll_obligation'->>'period_start')::date
+               <= ((v_plan->>'period_month')::date + interval '1 month - 1 day')::date
+         and (j.flags->'payroll_obligation'->>'period_end')::date >= (v_plan->>'period_month')::date
+       order by j.created_at limit 1;
+      if v_dup_entry is not null then v_dup_scope := 'payroll_obligation'; end if;
+    end if;
+
+    if v_dup_entry is null then
+      v_vector := v_vector || jsonb_build_object('no_duplicate_entry','pass');
+    else
+      v_vector := v_vector || jsonb_build_object('no_duplicate_entry','duplicate_entry');
+      v_detail := v_detail || jsonb_build_object('duplicate',
+        (select jsonb_build_object('scope', v_dup_scope, 'entry_id', j.id,
+                  'status', j.status, 'posting_date', to_char(j.posting_date,'YYYY-MM-DD'),
+                  'memo', j.memo)
+           from clara.journal_entries j where j.id = v_dup_entry));
+    end if;
+  else
+    -- Nothing was read, so nothing downstream of it was evaluated. Every rung still carries an
+    -- explicit verdict: `not_evaluated` is a verdict, an absent key is a hole.
+    foreach v_rung in array array['channels_agree','arithmetic_holds','period_established',
+                                  'period_open','run_totals_printed','accounts_resolve',
+                                  'entry_balances','no_duplicate_entry'] loop
+      v_vector := v_vector || jsonb_build_object(v_rung, 'not_evaluated');
+    end loop;
+  end if;
+
+  -- THE FIRST FAILING RUNG IS THE REASON. Walked over the CLOSED roster, so a rung whose key the
+  -- vector somehow lacks reads as a failure rather than as a pass.
+  v_first := null;
+  foreach v_rung in array v_rungs loop
+    if v_first is null and coalesce(v_vector->>v_rung,'') <> 'pass' then v_first := v_rung; end if;
+  end loop;
+
+  select d.sha256 into v_sha from clara.documents d where d.id = p_document;
+
+  -- THE SENTENCE A PERSON READS, BUILT HERE AND NOWHERE ELSE. §H's Needs-you row renders it
+  -- verbatim, so the words on screen and the decision the lane took come out of ONE body. A
+  -- sentence built in the queue instead would be a second opinion about the same facts, and the
+  -- two would drift the first time a rung changed.
+  v_month_label := case when (v_plan->>'period_month') is not null
+                        then to_char((v_plan->>'period_month')::date, 'FMMonth YYYY') end;
+  v_sentence := case coalesce(v_first, 'ready')
+    when 'ready' then
+      format('Payroll run %s is ready to post but no entry exists yet -- re-file the payslip to post it.',
+        coalesce(v_month_label, 'for this payslip'))
+    when 'not_filed' then 'This payroll summary is not filed under a client, so it has nothing to post against.'
+    when 'facts_read' then 'This payroll summary has not been read yet.'
+    when 'channels_agree' then
+      format('Payroll run %s was not posted: the two readings of this payslip disagree (%s). Check the page and re-file it.',
+        coalesce(v_month_label, '(month not established)'),
+        coalesce(nullif(array_to_string(v_disagree, ', '), ''), 'a quoted employee row'))
+    when 'arithmetic_holds' then
+      format('Payroll run %s was not posted: the page does not add up (%s). Nothing is posted on a page that contradicts itself.',
+        coalesce(v_month_label, '(month not established)'),
+        concat_ws('; ',
+          nullif(array_to_string(v_arith, ', '), ''),
+          case when jsonb_array_length(coalesce(v_unbal,'[]'::jsonb)) > 0
+               then 'rows that do not balance: ' || replace(trim(both '[]' from v_unbal::text), ',', ', ') end,
+          case when jsonb_array_length(coalesce(v_unchk,'[]'::jsonb)) > 0
+               then 'rows that could not be checked: ' || replace(trim(both '[]' from v_unchk::text), ',', ', ') end))
+    when 'period_established' then
+      format('A payroll summary was read but its month could not be established from what the page prints (%s), so nothing was posted. Tell Clara which month this run covers, or re-file a payslip that names it.',
+        coalesce(quote_literal(v_plan->>'period_raw'), 'the page prints no period'))
+    when 'period_open' then
+      format('Payroll run %s was not posted: the fiscal year covering %s is %s.',
+        coalesce(v_month_label, 'for this payslip'), v_plan->>'posting_date',
+        coalesce(v_detail->'closed_fiscal_year'->>'status', 'not open'))
+    when 'run_totals_printed' then
+      format('A payroll summary for %s was read but prints no run totals to post from (gross pay and net pay are both required), so nothing was posted.',
+        coalesce(v_month_label, 'an unestablished month'))
+    when 'accounts_resolve' then
+      format('Payroll run %s was not posted: this client''s chart of accounts has no %s. Add the account(s) and re-file the payslip.',
+        coalesce(v_month_label, 'for this payslip'),
+        coalesce(nullif(replace(trim(both '[]' from coalesce(v_plan->'missing_accounts','[]'::jsonb)::text), '"', ''), ''), 'account it needs'))
+    when 'entry_balances' then
+      format('Payroll run %s was not posted: the entry it would make does not balance (%s debit, %s credit).',
+        coalesce(v_month_label, 'for this payslip'), v_plan->>'debit_cents', v_plan->>'credit_cents')
+    when 'no_duplicate_entry' then
+      format('Payroll run %s is already posted (%s, %s). This payslip was not posted again -- open that entry to decide whether this is a correction or a re-upload.',
+        coalesce(v_month_label, 'for this payslip'),
+        coalesce(v_detail->'duplicate'->>'memo', 'an existing entry'),
+        coalesce(v_detail->'duplicate'->>'posting_date', 'no date'))
+    else format('Payroll run %s was not posted (%s).', coalesce(v_month_label,'for this payslip'),
+                coalesce(v_tokens->>v_first, v_first))
+  end;
+
+  return jsonb_build_object(
+    'sentence', v_sentence,
+    'period_label', to_jsonb(v_month_label),
+    'verdict', case when v_first is null then 'ready' else 'blocked' end,
+    'rung', to_jsonb(v_first),
+    'reason', to_jsonb(case when v_first is null then null else v_tokens->>v_first end),
+    'rung_vector', v_vector,
+    'detail', v_detail,
+    'document_id', p_document,
+    'client_id', to_jsonb(v_client),
+    'firm_id', to_jsonb(v_firm),
+    'filing_id', to_jsonb(v_filing),
+    'source_doc_sha256', to_jsonb(v_sha),
+    'extraction_id', to_jsonb(v_extraction),
+    'existing_entry_id', to_jsonb(v_dup_entry),
+    'period_month', coalesce(v_plan->'period_month','null'::jsonb),
+    'posting_date', coalesce(v_plan->'posting_date','null'::jsonb),
+    'plan', coalesce(v_plan,'null'::jsonb));
+end $ppv$;
+
+revoke all on function clara._payroll_posting_verdict(uuid) from public;
+
+comment on function clara._payroll_posting_verdict(uuid) is
+  '#946: THE UNATTENDED GATE for a payroll summary -- the closed rung roster the brief names, walked in order, every rung carrying an explicit verdict and the FIRST failure being the reason a person is told. It WRITES NOTHING (STABLE): clara._post_payroll_run acts on it and clara.list_review_queue DERIVES its payroll_posting_blocked row from it, so the decision the lane took and the sentence a person reads are the same body and cannot drift. Judges the NEWEST payroll pair banked for the document. Ungranted: reached from those two callers alone.';
+
+reset role;
+
+-- =====================================================================================
+-- §E  THE RECEIPT SAYS WHICH LANE POSTED -- clara.entry_post_receipts.via_wake_kind gains
+--     `payroll_facts`.
+--
+--     `clara._tf_assert_agent_post_receipt` requires EXACTLY ONE receipt for every
+--     agent-approved entry, in either `clara.entry_post_receipts` (the document lane) or
+--     `clara.operation_receipts` (the accounting-operation lane). A payroll run is a DOCUMENT
+--     post, so it writes the document-shaped one -- and that table's `via_wake_kind` vocabulary
+--     was closed to the three WAKE kinds that could reach it before this lane existed.
+--
+--     WIDENED RATHER THAN BORROWED. Writing `autodraft` on a payroll receipt would be the
+--     cheaper edit and it would be a lie: no autodraft wake credential exists for this post, no
+--     model was woken, and an auditor reading the receipts by lane would find payroll runs filed
+--     under the invoice lane's name. The vocabulary gains the lane that actually posted.
+--
+--     The column keeps its name because the table's own reader contract does; `payroll_facts` is
+--     the lane name the task, the event twin and the capability registry already use, so the
+--     receipt agrees with every other record of the same act.
+--
+--     REDO-SAFE: drop-if-exists then add, which is the estate's constraint-swap idiom.
+-- =====================================================================================
+alter table clara.entry_post_receipts
+  drop constraint if exists entry_post_receipts_via_wake_kind_check;
+alter table clara.entry_post_receipts
+  add constraint entry_post_receipts_via_wake_kind_check
+  check (via_wake_kind = any (array['autodraft'::text, 'interactive'::text, 'bank_agent'::text,
+                                    'payroll_facts'::text]));
+
+-- =====================================================================================
+-- §F  THE POST -- clara._post_payroll_run(uuid) returns jsonb.
+--
+--     Asks §D, and acts. Ready: one draft entry, its legs, the approval, the receipt, the event.
+--     Blocked: NOTHING AT ALL is written, and the verdict comes back so the caller can record it
+--     in its own settle receipt. There is no third outcome.
+--
+--     WHY IT RETURNS INSTEAD OF RAISING. This body runs INSIDE the payroll worker's own persist
+--     transaction (§G). A raise would abort the READ as well as the post -- the worker would
+--     retry, read again, and be refused again, and the facts a person needs in order to fix the
+--     block would never land. The invoice lane made the same call for the same reason: its
+--     Tier-B refusal deliberately commits, "so the reason is durable".
+--
+--     THE ENTRY IS A DOCUMENT ENTRY, BOUND TO THE FILING. `origin='document'`, with
+--     `document_id`, `source_doc_sha256` and `filing_id` all set -- which is what makes AC6 true
+--     WITHOUT a dismissal mechanism: `clara.list_review_queue`'s `filing_rows` CTE already
+--     excludes a filing that carries a live draft or approved entry, so the `uncoded_filing` row
+--     disappears the moment this entry exists and comes back if it is ever reversed.
+--
+--     THE ACTOR IS THE ESTATE'S OWN AGENT IDENTITY (`clara.agent_user_id()`), as maker and as
+--     checker. `clara.journal_entries.maker_actor` is NOT NULL and references a real user, so an
+--     unattended post has to name someone; naming the agent identity is what makes
+--     `clara._tf_assert_agent_post_receipt` fire (it resolves `users.is_agent`) and therefore
+--     what makes the receipt STRUCTURAL rather than a convention. `last_human_editor` stays NULL
+--     because no human touched it.
+--
+--     THE MARKER `flags->'payroll_run'` IS WRITTEN AT THE DRAFT INSERT AND NOWHERE ELSE, because
+--     `clara._tf_entry_immutable`'s draft->approved allowset does not include `flags` and its
+--     approved->approved allowset is the reversal pair alone. It carries the month, so the
+--     duplicate guard can ask "is there already a payroll entry for this client and month" of
+--     the ledger itself rather than of a side table nobody else maintains. This is the same
+--     footing 0194's `payroll_obligation` marker sits on (0225:1830).
+--
+--     TIER C -- CONVERSION ON NAMED PAIRS ONLY, copied from the invoice lane. The gate is meant
+--     to have answered everything, and these are the estate walls that could still speak: the
+--     one-open-draft-per-filing unique, the source-binding wall, and the closed-period wall
+--     (which §D's `period_open` rung already asks about, so this arm is the race, not the case).
+--     An unlisted error PROPAGATES: a payroll post must never turn an unknown defect into a
+--     quiet "not posted".
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._post_payroll_run(p_document uuid)
+  returns jsonb language plpgsql security definer
+  set search_path = clara, pg_temp as $ppr$
+declare
+  v jsonb; v_entry uuid; v_receipt uuid; v_lines jsonb; v_flags jsonb; v_memo text;
+  v_client uuid; v_firm uuid; v_filing uuid; v_sha text; v_month date; v_posting date;
+  v_extraction uuid; v_engine text; v_code text; v_detail text; v_reason text; v_pair boolean;
+begin
+  v := clara._payroll_posting_verdict(p_document);
+  if v->>'verdict' <> 'ready' then
+    return jsonb_build_object('posted', false, 'entry_id', null,
+      'reason', v->'reason', 'rung', v->'rung', 'rung_vector', v->'rung_vector');
+  end if;
+
+  v_client := (v->>'client_id')::uuid;
+  v_firm := (v->>'firm_id')::uuid;
+  v_filing := (v->>'filing_id')::uuid;
+  v_sha := v->>'source_doc_sha256';
+  v_extraction := (v->>'extraction_id')::uuid;
+  v_month := (v->>'period_month')::date;
+  v_posting := (v->>'posting_date')::date;
+  select t.engine_id into v_engine from clara.document_processing_tasks t
+   where t.document_id = p_document and t.lane = 'payroll_facts' and t.status = 'done'
+   order by t.version_n desc limit 1;
+
+  -- THE LEGS, in the plan's own order, in the estate's own line shape.
+  select jsonb_agg(jsonb_build_object(
+           'account_code', l->>'account_code',
+           'debit_cents',  case when l->>'side' = 'debit'  then (l->>'cents')::bigint else 0 end,
+           'credit_cents', case when l->>'side' = 'credit' then (l->>'cents')::bigint else 0 end,
+           'description',  l->>'description') order by ord)
+    into v_lines
+    from jsonb_array_elements(v->'plan'->'legs') with ordinality as t(l, ord);
+  -- The estate's own canonicaliser: it re-checks that every code resolves to an ACTIVE account
+  -- of this client and that the entry balances. Its rounding arm cannot fire here -- §C already
+  -- refused anything that did not balance to the cent -- and that is the point of asking it: two
+  -- independent bodies now agree the entry is postable before a row is written.
+  v_lines := clara._validate_entry_lines(v_client, v_lines);
+
+  v_memo := 'Payroll run ' || to_char(v_month, 'FMMonth YYYY');
+  v_flags := jsonb_build_object('payroll_run', jsonb_build_object(
+    'period_month', to_char(v_month, 'YYYY-MM-DD'),
+    'document_id', p_document,
+    'extraction_id', v_extraction,
+    'state_version', coalesce(v->'plan'->>'plan_version','v1')));
+
+  begin
+    insert into clara.journal_entries(client_id, status, posting_date, memo, origin,
+        document_id, source_doc_sha256, filing_id, maker_actor, last_human_editor, flags)
+      values (v_client, 'draft', v_posting, v_memo, 'document',
+        p_document, v_sha, v_filing, clara.agent_user_id(), null, v_flags)
+      returning id into v_entry;
+
+    insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents, credit_cents,
+        description)
+      select v_entry, x.idx, x.elem->>'account_code',
+        (x.elem->>'debit_cents')::bigint, (x.elem->>'credit_cents')::bigint,
+        x.elem->>'description'
+      from jsonb_array_elements(v_lines) with ordinality as x(elem, idx);
+    perform clara._assert_balanced(v_entry);
+
+    update clara.journal_entries
+       set status = 'approved', checker_actor = clara.agent_user_id(), approved_at = now(),
+           updated_at = now()
+     where id = v_entry;
+
+    -- THE RECEIPT. `model_snapshot` names the DETERMINISTIC producer, not a model, because no
+    -- model took part in this post: 0296's frozen evaluator did every sum at read time and this
+    -- file's plan resolved every account from the chart. `gate_verdicts` carries the reading's
+    -- own extraction (the column the table's CHECK requires) and the engine id of the call that
+    -- produced it, so the model that READ the page is still reachable from the receipt.
+    insert into clara.entry_post_receipts(id, firm_id, client_id, entry_id, acting_actor,
+        on_behalf_of, via_wake_kind, model_snapshot, rationale, gate_verdicts, approval_arm,
+        maker_active_at_approval, op_key)
+      values (gen_random_uuid(), v_firm, v_client, v_entry, clara.agent_user_id(),
+        null, 'payroll_facts',
+        jsonb_build_object('provider','clara_db','model','payroll_entry_plan','version','v1'),
+        'Payroll run ' || to_char(v_month, 'FMMonth YYYY')
+          || ' posted unattended from a payroll summary whose two readings agreed, whose arithmetic held and whose accounts all resolved in this client''s chart.',
+        jsonb_build_object('extraction_id', v_extraction, 'engine_id', v_engine,
+          'rung_vector', v->'rung_vector', 'plan', v->'plan'),
+        'payroll_unattended',
+        -- NULL rather than false-by-inference: this lane has no on_behalf_of, so there is no
+        -- maker whose membership could be active or lapsed (the invoice lane's own law 68).
+        null, 'payroll-post:' || p_document::text)
+      returning id into v_receipt;
+
+    perform clara._append_event(v_firm, 'entry.posted', v_client, clara.agent_user_id(), null,
+      null, v_entry, p_document, null,
+      jsonb_build_object('post_receipt_id', v_receipt, 'approval_arm', 'payroll_unattended',
+        'period_month', to_char(v_month,'YYYY-MM-DD'), 'rung_vector', v->'rung_vector'));
+
+    perform clara._audit(v_firm, null, null, null, 'post_payroll_run', null,
+      jsonb_build_object('document', p_document, 'entry', v_entry, 'receipt', v_receipt,
+        'period_month', to_char(v_month,'YYYY-MM-DD'),
+        'debit_cents', v->'plan'->'debit_cents'));
+
+    return jsonb_build_object('posted', true, 'entry_id', v_entry, 'post_receipt_id', v_receipt,
+      'posting_date', to_char(v_posting,'YYYY-MM-DD'),
+      'period_month', to_char(v_month,'YYYY-MM-DD'),
+      'reason', null, 'rung', null, 'rung_vector', v->'rung_vector');
+
+  exception when others then
+    get stacked diagnostics v_code = returned_sqlstate, v_detail = pg_exception_detail;
+    begin
+      v_reason := nullif(v_detail,'')::jsonb->>'reason';
+    exception when others then
+      v_reason := null;
+    end;
+    -- The CLOSED conversion set. Anything else propagates, and must: a payroll post that turned
+    -- an unknown defect into a quiet "not posted" would be exactly the silent failure this lane
+    -- exists to remove.
+    if v_code = '23505' then
+      -- uq_journal_entries_one_open_draft_filing: somebody else's open draft is already on this
+      -- filing. A person decides which of the two is the run; this lane never overwrites.
+      v_pair := true; v_reason := 'filing_already_drafted';
+    elsif v_code = 'CLR19' then
+      -- The closed-period wall. §D's `period_open` rung asks the same question first, so
+      -- reaching here means the year closed between the verdict and the write.
+      v_pair := true; v_reason := 'period_closed';
+    else
+      v_pair := (v_code, coalesce(v_reason,'')) in (
+        ('CLR13','source_already_posted'),
+        ('CLR21','double_coded'));
+      if v_pair then v_reason := 'duplicate_entry'; end if;
+    end if;
+    if not v_pair then raise; end if;
+    return jsonb_build_object('posted', false, 'entry_id', null,
+      'reason', coalesce(v_reason, 'duplicate_entry'), 'rung', 'post_wall',
+      'rung_vector', v->'rung_vector', 'clr', v_code);
+  end;
+end $ppr$;
+
+revoke all on function clara._post_payroll_run(uuid) from public;
+
+comment on function clara._post_payroll_run(uuid) is
+  '#946: the UNATTENDED post for a payroll summary. Asks clara._payroll_posting_verdict and acts: ready means one document-bound, filing-bound approved entry with its legs, its clara.entry_post_receipts row (via_wake_kind `payroll_facts`, approval_arm `payroll_unattended`) and an entry.posted event; blocked means NOTHING is written and the verdict is returned so the caller can record it. It RETURNS rather than raises, because it runs inside the payroll read''s own transaction and a raise would lose the facts a person needs in order to clear the block. Ungranted: reached from clara.persist_payroll_facts alone.';
+
+reset role;
+
+-- =====================================================================================
+-- §G  THE LANE POSTS WHAT IT READS -- clara.persist_payroll_facts calls the post (AC3).
+--
+--     SPLICED, NEVER RE-TYPED (the 0017:1553 / 0093 / 0260 idiom). This reads the INSTALLED
+--     definition off the catalog, asserts each anchor occurs EXACTLY ONCE, replaces only at
+--     those anchors and executes the result. Everything 0296 wrote that this file does not name
+--     is preserved BY CONSTRUCTION rather than by a careful human copy, and the tail re-reads the
+--     committed catalog to prove the untouched regions survived.
+--
+--     WHY HERE AND NOT IN A RUNTIME STEP. `payrollFacts_v1` is a FROZEN workflow family (#945),
+--     and the work order forbids editing a frozen body. A new posting step would need a new
+--     family, a new task lane and a reconciler arm -- for an act with no model in it. The persist
+--     door is already the ONE writer of payroll facts and already runs at exactly the moment the
+--     state it posts from comes into existence, so the post belongs in the same transaction: a
+--     payroll run is never read-but-unposted for a window nobody can see.
+--
+--     WHAT THE CALLER GETS. The settle receipt gains a `posting` object -- `posted`, the
+--     `entry_id`, and on a refusal the `reason`, the `rung` and the whole vector -- so the worker
+--     (and a person reading the task) can see what the read led to without a second query.
+--
+--     REPLAY IS UNAFFECTED. The idempotent-replay arm returns before this point, so re-settling a
+--     done task neither re-posts nor re-refuses: the entry that exists is the one this call made.
+-- =====================================================================================
+do $w946_persist$
+declare
+  v_sig text := 'clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)';
+  v_def text; v_next text; v_anchor text; v_repl text;
+  v_n int; v_pre_owner text; v_pre_acl text; v_post_owner text; v_post_acl text;
+  v_pre_sha text; v_post_sha text;
+begin
+  select pg_get_functiondef(p.oid), p.proowner::regrole::text, p.proacl::text,
+         encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')
+    into v_def, v_pre_owner, v_pre_acl, v_pre_sha
+    from pg_proc p where p.oid = v_sig::regprocedure;
+
+  if position('_post_payroll_run' in v_def) > 0 then
+    raise notice '#946 §G: clara.persist_payroll_facts already calls the post -- splice already applied, nothing to do (redo)';
+  else
+    -- SPLICE (1): the declaration this splice needs.
+    --
+    -- EVERY anchor and replacement below is ONE dollar-quoted literal, never a `||` chain with
+    -- chr(10). That is not a style choice: apps/web/test/sqlFunctionCensus.ts proves what a
+    -- migration's dynamic `execute` installs by RECONSTRUCTING the statement from its parts, and
+    -- it cannot evaluate chr(). A replacement it cannot reconstruct makes the whole splice an
+    -- unresolved execute, and the census fails closed (measured -- the first cut of this file did
+    -- exactly that and reddened do-action-floors.test.ts and three of its neighbours).
+    v_anchor := $p946a$  v_cited_id uuid; v_cited_locator jsonb; v_locator jsonb;$p946a$;
+    v_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#946 §G splice (1): the declare anchor appears % time(s), expected 1', v_n
+        using errcode = 'CLR10';
+    end if;
+    v_repl := $p946b$  v_cited_id uuid; v_cited_locator jsonb; v_locator jsonb;
+  v_posting jsonb;   -- #946: what the post made of this read$p946b$;
+    v_next := replace(v_def, v_anchor, v_repl);
+
+    -- SPLICE (2): the post, and the settle receipt that reports it.
+    v_anchor := $p946c$  return jsonb_build_object('task_id',p_task,'document_id',t.document_id,
+    'engine_id',t.engine_id,'version_n',t.version_n,
+    'text_extraction_id',v_text_id,'vision_extraction_id',v_vision_id,
+    'status','done','replayed',false);$p946c$;
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#946 §G splice (2): the final-return anchor appears % time(s), expected 1', v_n
+        using errcode = 'CLR10';
+    end if;
+    v_repl := $p946d$  -- 12. #946 · THE POST. The facts are banked and the state is judged, so the run posts
+  --     itself here -- inside this transaction, under its own gate, with no human and no
+  --     model in the loop. A blocked run writes NOTHING and reports why; the derived
+  --     Needs-you row (clara.list_review_queue, row_kind=payroll_posting_blocked) is what
+  --     puts that reason in front of a person, and it clears itself when the block does.
+  v_posting := clara._post_payroll_run(t.document_id);
+
+  return jsonb_build_object('task_id',p_task,'document_id',t.document_id,
+    'engine_id',t.engine_id,'version_n',t.version_n,
+    'text_extraction_id',v_text_id,'vision_extraction_id',v_vision_id,
+    'status','done','replayed',false,'posting',v_posting);$p946d$;
+    v_next := replace(v_next, v_anchor, v_repl);
+
+    if v_next = v_def then
+      raise exception '#946 §G splice: no byte moved -- refusing a no-op apply' using errcode = 'CLR10';
+    end if;
+    execute v_next;
+
+    select p.proowner::regrole::text, p.proacl::text,
+           encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')
+      into v_post_owner, v_post_acl, v_post_sha
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_post_owner is distinct from v_pre_owner or v_post_acl is distinct from v_pre_acl then
+      raise exception '#946 §G postcheck: persist_payroll_facts changed owner (% -> %) or ACL (% -> %)',
+        v_pre_owner, v_post_owner, v_pre_acl, v_post_acl using errcode = 'CLR10';
+    end if;
+    if v_post_sha = v_pre_sha then
+      raise exception '#946 §G postcheck: prosrc sha256 did not change -- the splice was a no-op'
+        using errcode = 'CLR10';
+    end if;
+    raise notice '#946 §G: clara.persist_payroll_facts spliced -- the payroll lane now posts what it reads. owner (%) and ACL byte-unchanged. prosrc sha256: % -> %.', v_post_owner, v_pre_sha, v_post_sha;
+  end if;
+
+  -- BOTH BRANCHES: the 0296 regions this file must not have disturbed are re-read from the
+  -- COMMITTED catalog, so a redo proves them too.
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  if position('clara.evaluate_payroll_run_state_v1(v_text_env, v_vision_env)' in v_def) = 0
+     or position('''payroll'', jsonb_build_object(''channel'',''text'',''answers'', v_text_env->''payroll''->''answers'')' in v_def) = 0
+     or position('document.payroll_facts_completed' in v_def) = 0
+     or position('_post_payroll_run' in v_def) = 0 then
+    raise exception '#946 §G postcheck: the recut body lost one of 0296''s own regions (the evaluator call, the per-employee STRIP, or the completed event) or did not gain the post'
+      using errcode = 'CLR10';
+  end if;
+end
+$w946_persist$;
+
+-- =====================================================================================
+-- §H  NEEDS YOU -- clara.list_review_queue gains row_kind='payroll_posting_blocked' (AC3).
+--
+--     "When any condition fails the run does not post; it appears under Needs you naming the
+--     condition that failed, which row did not balance, which account is missing, or which
+--     existing entry it would duplicate." (the brief). This is that appearance.
+--
+--     THE ROW IS DERIVED, STORES NOTHING AND CLEARS ITSELF. There is no refusal table, no
+--     attempt record and no dismissal act: the CTE asks §D the same question the poster asked,
+--     about the estate as it is NOW. Add the missing account and the sentence changes on the
+--     next read; post the run and the row is gone; retire the filing and it is gone. This is the
+--     Settlement candidate row's own discipline (CONTEXT.md), applied to a posting block --
+--     derived, stores nothing, clears itself, offers the reason and never chooses.
+--
+--     WHICH RUNS IT SHOWS: a payroll summary that is FILED, has been READ (a payroll pair is
+--     banked for it) and whose filing carries NO live entry. Read off the ledger, that is
+--     exactly "was read, and did not post" -- which is why a posted run has no row (its filing
+--     has an entry), a blocked run does (it has none), and a run whose block was cleared but
+--     which nobody re-filed STILL does, saying it is ready. A rung that only the poster knew
+--     about would leave that last state invisible, which is the whole reason §D carries the
+--     sentence rather than the queue building one.
+--
+--     THE ROW COEXISTS WITH `uncoded_filing`, AND THAT IS THE BRIEF'S OWN MODEL. AC6 says the
+--     filed payroll summary "stops appearing as uncoded once its entry exists" -- so before the
+--     entry exists it IS an uncoded filing, and this row sits beside it saying WHY. Narrowing
+--     `filing_rows` to hide it would change what an existing kind means for every firm already
+--     reading that queue, which this wave's shared-file rule forbids and which the brief does
+--     not ask for.
+--
+--     SECTION `needs_you`, LANE `needs_you`, like open_question / work_question /
+--     depreciation_authority_pending: a person must act (add an account, check a page, decide
+--     between a correction and a re-upload) before this month can be booked at all. NO new
+--     counts.* key is minted -- the `lane='needs_you'` filter folds it into counts.needs_you
+--     already, exactly as #974's row kind does.
+--
+--     `id` IS THE FILING'S id, and `entry_id` names the entry a DUPLICATE refusal points at, so
+--     a person can open it from the row. Both ride columns the shared vector already has; this
+--     splice adds NO json key and therefore no row-builder gate (the #629 shape, not the
+--     asset_id/advance_id one).
+--
+--     SPLICED, NEVER RE-TYPED, and additive: the postcheck re-reads the committed body and
+--     asserts every pre-existing row kind survives at its exact pre-splice marker count.
+-- =====================================================================================
+do $w946_lrq$
+declare
+  v_sig text := 'clara.list_review_queue(jsonb,jsonb,integer)';
+  v_def text; v_next text; v_code text; v_anchor text; v_repl text;
+  v_n int; v_raw_n int; v_pre_cols int; v_post_cols int; r record;
+  v_pre_owner text; v_pre_acl text; v_post_owner text; v_post_acl text;
+  v_pre_sha text; v_post_sha text;
+begin
+  select pg_get_functiondef(p.oid), p.proowner::regrole::text, p.proacl::text,
+         encode(sha256(pg_get_functiondef(p.oid)::bytea),'hex')
+    into v_def, v_pre_owner, v_pre_acl, v_pre_sha
+    from pg_proc p where p.oid = v_sig::regprocedure;
+  v_code := regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+
+  if position('payroll_posting_blocked' in v_code) <> 0 then
+    raise notice '#946 §H: the queue already projects payroll_posting_blocked -- splice already applied, nothing to do (redo)';
+  else
+    -- The shared column vector's own trailing column, counted BEFORE so the postcheck can assert
+    -- this file added exactly one more occurrence rather than a remembered number (0288 removed a
+    -- CTE, so a literal count copied from 0260 would be wrong here).
+    v_pre_cols := (length(v_code) - length(replace(v_code, 'null::int open_proposal_count', '')))
+                  / length('null::int open_proposal_count');
+
+    v_anchor :=
+      '  ), all_rows as (' || chr(10) ||
+      '    select * from draft_rows union all select * from filing_rows' || chr(10) ||
+      '    union all select * from question_rows union all select * from task_rows' || chr(10) ||
+      '    union all select * from compliance_rows union all select * from lint_rows' || chr(10) ||
+      '    union all select * from fa_rows union all select * from adv_rows' || chr(10) ||
+      '    union all select * from work_question_rows' || chr(10) ||
+      '    union all select * from authority_rows' || chr(10) ||
+      '  ), keyed as (';
+    v_n := (length(v_code) - length(replace(v_code, v_anchor, ''))) / length(v_anchor);
+    v_raw_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 or v_raw_n <> v_n then
+      raise exception '#946 §H prestate: the all_rows union block appears % time(s) IN CODE / % in RAW text (expected 1/1) -- re-derive this splice against the LIVE body', v_n, v_raw_n
+        using errcode = 'CLR10';
+    end if;
+
+    v_repl := $payroll$  ), payroll_rows as (
+    -- #946 (0297): A PAYROLL SUMMARY THAT WAS READ AND DID NOT POST. DERIVED, stores nothing,
+    -- clears itself: clara._payroll_posting_verdict is asked about the estate as it is NOW, and
+    -- the sentence shown is that body's own, so the words a person reads and the decision the
+    -- lane took can never drift apart. Section `needs_you`, lane `needs_you` -- a person must
+    -- act (add an account, check a page, decide correction-versus-re-upload) before this month
+    -- can be booked. `id` is the filing's id; `entry_id` names the entry a duplicate refusal
+    -- points at, so the row opens onto it. The active-client guard mirrors the other kinds
+    -- (0017 R1-F5).
+    select 1 section_rank,'payroll_posting_blocked'::text row_kind,'needs_you'::text section,
+      pf.client_id,null::uuid counterparty_id,pf.id filing_id,
+      nullif(pv.v->>'existing_entry_id','')::uuid entry_id,
+      null::uuid question_id,null::uuid task_id,pf.document_id,'needs_you'::text lane,
+      false auto,false rule_backed,false high_stakes,pf.filed_at aged_since,
+      nullif(pv.v->'plan'->>'debit_cents','')::bigint amount_cents,
+      nullif(pv.v->'plan'->>'period_month','') period,
+      pv.v->>'sentence' question_text,
+      pf.filed_at created_at,pf.id,''::text vendor_group,
+      null::text coding_kind,null::uuid watch_id,null::text tier,null::uuid finding_id,
+      null::text client_name,null::uuid[] batch_ids,null::int open_proposal_count
+    from clara.document_filings pf
+    join clara.clients active_payroll_client on active_payroll_client.id=pf.client_id and active_payroll_client.status='active'
+    join clara.documents pd on pd.id=pf.document_id and pd.document_kind='payroll_summary'
+    cross join lateral (select clara._payroll_posting_verdict(pf.document_id) v) pv
+    where pf.firm_id=c.firm and pf.retired_at is null
+      and (v_client is null or pf.client_id=v_client)
+      and exists(select 1 from clara.document_extractions pe
+                  where pe.document_id=pf.document_id and pe.engine_kind='payroll_text_facts'
+                    and pe.status='done')
+      and not exists(select 1 from clara.journal_entries pj where pj.filing_id=pf.id
+        and (pj.status='draft' or (pj.status='approved' and pj.reversed_by is null)))
+  ), all_rows as (
+    select * from draft_rows union all select * from filing_rows
+    union all select * from question_rows union all select * from task_rows
+    union all select * from compliance_rows union all select * from lint_rows
+    union all select * from fa_rows union all select * from adv_rows
+    union all select * from work_question_rows
+    union all select * from authority_rows
+    union all select * from payroll_rows
+  ), keyed as ($payroll$;
+    v_next := replace(v_def, v_anchor, v_repl);
+    if position('union all select * from payroll_rows' in v_next) = 0 then
+      raise exception '#946 §H splice: the all_rows anchor did not rewrite' using errcode = 'CLR10';
+    end if;
+    if v_next = v_def then
+      raise exception '#946 §H splice: no byte moved -- refusing a no-op apply' using errcode = 'CLR10';
+    end if;
+
+    execute v_next;
+
+    select p.proowner::regrole::text, p.proacl::text,
+           encode(sha256(pg_get_functiondef(p.oid)::bytea),'hex')
+      into v_post_owner, v_post_acl, v_post_sha
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_post_owner is distinct from v_pre_owner or v_post_acl is distinct from v_pre_acl then
+      raise exception '#946 §H postcheck: list_review_queue changed owner (% -> %) or ACL (% -> %)',
+        v_pre_owner, v_post_owner, v_pre_acl, v_post_acl using errcode = 'CLR10';
+    end if;
+    if v_post_sha = v_pre_sha then
+      raise exception '#946 §H postcheck: prosrc sha256 did not change -- the splice was a no-op'
+        using errcode = 'CLR10';
+    end if;
+
+    v_code := regexp_replace(regexp_replace(
+      (select pg_get_functiondef(p.oid) from pg_proc p where p.oid = v_sig::regprocedure),
+      '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+    v_post_cols := (length(v_code) - length(replace(v_code, 'null::int open_proposal_count', '')))
+                   / length('null::int open_proposal_count');
+    if v_post_cols <> v_pre_cols + 1 then
+      raise exception '#946 §H postcheck: the shared column vector appears % time(s), expected % (one more than before the splice)', v_post_cols, v_pre_cols + 1
+        using errcode = 'CLR10';
+    end if;
+    raise notice '#946 §H: clara.list_review_queue spliced -- one payroll_rows CTE (needs_you/needs_you, active-client-guarded, derived from clara._payroll_posting_verdict) and one union arm; owner (%) and ACL byte-unchanged. prosrc sha256: % -> %.', v_post_owner, v_pre_sha, v_post_sha;
+  end if;
+
+  -- BOTH BRANCHES: every pre-existing row kind survives at EXACTLY one projection site, and the
+  -- new one is present exactly once. Re-read from the COMMITTED catalog so a redo proves it too.
+  v_code := regexp_replace(regexp_replace(
+    (select pg_get_functiondef(p.oid) from pg_proc p where p.oid = v_sig::regprocedure),
+    '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+  for r in select * from (values
+      ($$'draft'::text row_kind$$, 1),
+      ($$'uncoded_filing'::text row_kind$$, 1),
+      ($$'open_question'::text row_kind$$, 1),
+      ($$'coding_task'::text row_kind$$, 1),
+      ($$'compliance_watch'::text row_kind$$, 1),
+      ($$'lint_finding'::text row_kind$$, 1),
+      ($$'fixed_asset_incomplete'::text row_kind$$, 1),
+      ($$'staff_advance_incomplete'::text row_kind$$, 1),
+      ($$'work_question'::text row_kind$$, 1),
+      ($$'depreciation_authority_pending'::text row_kind$$, 1),
+      ($$'payroll_posting_blocked'::text row_kind$$, 1),
+      ('_is_codeable_kind', 1),
+      ('_autodraft_attempt_budget', 1),
+      ('_payroll_posting_verdict', 1)
+      ) as t(marker, want) loop
+    v_n := (length(v_code) - length(replace(v_code, r.marker, ''))) / length(r.marker);
+    if v_n <> r.want then
+      raise exception '#946 §H postcheck: marker "%" appears % time(s), expected % -- the splice was not additive', r.marker, v_n, r.want
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+end
+$w946_lrq$;
+
+-- =====================================================================================
+-- §Z  TAIL. Everything this file claims to have done, re-derived from the live catalog.
+--
+--     NO NEW GRANTED OBJECT, SO NO rig-meta COHORT (0260's own posture, and its reason). Every
+--     function this file adds is an INTERNAL, reached from bodies that are already granted:
+--     clara.persist_payroll_facts (clara_runtime, 0296) calls the poster, and
+--     clara.list_review_queue (clara_authenticated, viewer-floored) calls the verdict. rig-meta's
+--     cohorts audit GRANT correctness on newly introduced CALLABLE objects, and there is none
+--     here -- the sweep's "expected = false" over these four names IS the assertion, and §Z's
+--     own grant check below is the second belt. #946 adds NO human door: the decision is
+--     machine-made and the only surface is the Needs-you row a person reads.
+-- =====================================================================================
+do $w946_tail$
+declare
+  v_def text; v_code text; v_n int; v_state jsonb; v_plan jsonb; r record;
+begin
+  -- 1 · THE FOUR NEW BODIES EXIST, ARE OWNED BY clara_fn_owner, PIN THEIR search_path, AND ARE
+  --     REACHABLE BY NO APPLICATION ROLE AT ALL.
+  for r in select * from (values
+      ('clara._payroll_period_month(text)'),
+      ('clara._payroll_entry_plan(uuid,jsonb)'),
+      ('clara._payroll_posting_verdict(uuid)'),
+      ('clara._post_payroll_run(uuid)')
+      ) as t(sig) loop
+    if to_regprocedure(r.sig) is null then
+      raise exception '#946 tail: % is absent', r.sig using errcode = 'CLR10';
+    end if;
+    if (select p.proowner::regrole::text from pg_proc p where p.oid = r.sig::regprocedure)
+       is distinct from 'clara_fn_owner' then
+      raise exception '#946 tail: % is not owned by clara_fn_owner', r.sig using errcode = 'CLR10';
+    end if;
+    if (select coalesce(array_to_string(p.proconfig, ','), '') from pg_proc p
+         where p.oid = r.sig::regprocedure) not like '%search_path=%' then
+      raise exception '#946 tail: % does not pin its search_path', r.sig using errcode = 'CLR10';
+    end if;
+    -- NOT a proacl-is-null test: `revoke all ... from public` leaves the owner's own entry
+    -- behind, so a non-null ACL here is the NORMAL shape of an ungranted body. What matters is
+    -- that no APPLICATION role can execute it, which is asked of each role by name.
+    if exists (select 1 from aclexplode((select p.proacl from pg_proc p where p.oid = r.sig::regprocedure)) a
+                where a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+      raise exception '#946 tail: % is EXECUTE-reachable by PUBLIC', r.sig using errcode = 'CLR10';
+    end if;
+    for v_code in select rolname from unnest(array['clara_runtime','clara_authenticated','clara_anon']) rolname loop
+      if to_regrole(v_code) is not null
+         and has_function_privilege(v_code, r.sig::regprocedure, 'EXECUTE') then
+        raise exception '#946 tail: % is EXECUTE-reachable by % -- these are internals', r.sig, v_code
+          using errcode = 'CLR10';
+      end if;
+    end loop;
+  end loop;
+
+  -- 2 · THE PERSIST DOOR STILL BELONGS TO clara_runtime AND NOW POSTS WHAT IT READS.
+  if not has_function_privilege('clara_runtime',
+       'clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)'::regprocedure, 'EXECUTE') then
+    raise exception '#946 tail: the recut persist door lost its clara_runtime grant' using errcode = 'CLR10';
+  end if;
+  -- `prosrc`, never the definition-wrapper read: this tail ASSERTS, it does not patch, and the
+  -- wiki dynamic-SQL lint classifies any block that reads a body through that wrapper AND
+  -- carries the word EXECUTE (here, the privilege name above) as a change-of-record patch. The
+  -- body text is what these assertions need, and prosrc is exactly that.
+  select p.prosrc into v_def from pg_proc p
+   where p.oid = 'clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)'::regprocedure;
+  if position('clara._post_payroll_run(t.document_id)' in v_def) = 0 then
+    raise exception '#946 tail: the persist door does not call the post' using errcode = 'CLR10';
+  end if;
+
+  -- 3 · THE QUEUE PROJECTS THE NEW KIND EXACTLY ONCE AND KEPT ITS GRANT.
+  if not has_function_privilege('clara_authenticated',
+       'clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure, 'EXECUTE') then
+    raise exception '#946 tail: list_review_queue lost its clara_authenticated grant' using errcode = 'CLR10';
+  end if;
+  select p.prosrc into v_def from pg_proc p
+   where p.oid = 'clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure;
+  v_code := regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+  v_n := (length(v_code) - length(replace(v_code, '''payroll_posting_blocked''::text row_kind', '')))
+         / length('''payroll_posting_blocked''::text row_kind');
+  if v_n <> 1 then
+    raise exception '#946 tail: the queue projects payroll_posting_blocked % time(s), expected 1', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  -- 4 · THE RECEIPT VOCABULARY GAINED ONE LANE AND LOST NONE.
+  select pg_get_constraintdef(oid) into v_def from pg_constraint
+   where conrelid = 'clara.entry_post_receipts'::regclass
+     and conname = 'entry_post_receipts_via_wake_kind_check';
+  if position('payroll_facts' in v_def) = 0 or position('autodraft' in v_def) = 0
+     or position('interactive' in v_def) = 0 or position('bank_agent' in v_def) = 0 then
+    raise exception '#946 tail: the receipt lane vocabulary is not {autodraft, interactive, bank_agent, payroll_facts} (live: %)', v_def
+      using errcode = 'CLR10';
+  end if;
+
+  -- 5 · THIS FILE APPENDED NO CHART ROW. `2040 Salaries Payable` is 0295's, and there is exactly
+  --     one of it on the published standard chart -- the same structural claim the prestate made,
+  --     re-read after every statement in this file has run.
+  select count(*)::int into v_n from clara.coa_template_accounts a
+    join clara.coa_templates t on t.id = a.template_id
+   where t.template_key = 'my_sme_starter' and t.scope = 'platform' and t.state = 'published'
+     and a.account_code = '2040';
+  if v_n <> 1 then
+    raise exception '#946 tail: the published standard chart carries % rows at code 2040, expected exactly 1 (0295''s) -- this file appends no chart row', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  -- 6 · A BEHAVIOURAL PROBE, fixture-free: the month parser, the drafting body and 0296's
+  --     evaluator, driven together on a state the evaluator itself produced, against a client id
+  --     that holds no chart at all. It proves the installed bodies ANSWER (rather than merely
+  --     existing), that the month is read off the page's own rendering, and that a chart which
+  --     resolves nothing is a NAMED refusal rather than a silent substitution. No row is written
+  --     anywhere: _payroll_entry_plan is STABLE and the client id is a random uuid.
+  v_state := clara.evaluate_payroll_run_state_v1(
+    jsonb_build_object('payroll', jsonb_build_object('channel','text','rows','[]'::jsonb,
+      'answers', jsonb_build_object(
+        'payroll.run.period',       jsonb_build_object('state','value','raw','August 2026'),
+        'payroll.run.gross_pay',    jsonb_build_object('state','value','raw','1,000.00'),
+        'payroll.run.epf_employee', jsonb_build_object('state','value','raw','110.00'),
+        'payroll.run.epf_employer', jsonb_build_object('state','not_printed'),
+        'payroll.run.socso_employee', jsonb_build_object('state','not_printed'),
+        'payroll.run.socso_employer', jsonb_build_object('state','not_printed'),
+        'payroll.run.eis_employee', jsonb_build_object('state','not_printed'),
+        'payroll.run.eis_employer', jsonb_build_object('state','not_printed'),
+        'payroll.run.pcb',          jsonb_build_object('state','not_printed'),
+        'payroll.run.hrdf_levy',    jsonb_build_object('state','not_printed'),
+        'payroll.run.net_pay',      jsonb_build_object('state','value','raw','890.00')))),
+    jsonb_build_object('payroll', jsonb_build_object('channel','vision','rows','[]'::jsonb,
+      'answers', jsonb_build_object(
+        'payroll.run.period',       jsonb_build_object('state','value','raw','August 2026'),
+        'payroll.run.gross_pay',    jsonb_build_object('state','value','raw','1,000.00'),
+        'payroll.run.epf_employee', jsonb_build_object('state','value','raw','110.00'),
+        'payroll.run.epf_employer', jsonb_build_object('state','not_printed'),
+        'payroll.run.socso_employee', jsonb_build_object('state','not_printed'),
+        'payroll.run.socso_employer', jsonb_build_object('state','not_printed'),
+        'payroll.run.eis_employee', jsonb_build_object('state','not_printed'),
+        'payroll.run.eis_employer', jsonb_build_object('state','not_printed'),
+        'payroll.run.pcb',          jsonb_build_object('state','not_printed'),
+        'payroll.run.hrdf_levy',    jsonb_build_object('state','not_printed'),
+        'payroll.run.net_pay',      jsonb_build_object('state','value','raw','890.00')))));
+  v_plan := clara._payroll_entry_plan(gen_random_uuid(), v_state);
+  if (v_plan->>'posting_date') is distinct from '2026-08-31' then
+    raise exception '#946 tail probe: "August 2026" did not establish the month (posting_date %) -- the parser is not live',
+      v_plan->>'posting_date' using errcode = 'CLR10';
+  end if;
+  if (v_plan->>'ready')::boolean is not false
+     or not exists (select 1 from jsonb_array_elements(v_plan->'refusals') x
+                     where x->>'reason' = 'account_missing') then
+    raise exception '#946 tail probe: a client with no chart at all did not produce a NAMED account_missing refusal (%)', v_plan
+      using errcode = 'CLR10';
+  end if;
+  if position('6000' in coalesce(v_plan->'missing_accounts','[]'::jsonb)::text) = 0 then
+    raise exception '#946 tail probe: the refusal does not name the account code a person must add (%)',
+      v_plan->'missing_accounts' using errcode = 'CLR10';
+  end if;
+  if jsonb_array_length(coalesce(v_plan->'legs','[]'::jsonb)) <> 0 then
+    raise exception '#946 tail probe: legs were drafted against accounts that do not exist' using errcode = 'CLR10';
+  end if;
+
+  raise notice '#946 tail: OK -- the four new bodies are live, owned by clara_fn_owner, search_path-pinned and EXECUTE-reachable by NO application role; clara.persist_payroll_facts keeps its clara_runtime grant and now calls clara._post_payroll_run; clara.list_review_queue keeps its clara_authenticated grant and projects payroll_posting_blocked exactly once; clara.entry_post_receipts admits the payroll_facts lane beside the three it already admitted; the published standard chart still carries exactly ONE row at code 2040 (0295''s -- this file appends none); and a fixture-free probe drove the evaluator, the month parser and the drafting body together, establishing August 2026 from the page''s own rendering and refusing a chartless client BY NAME with the account code it lacks.';
+end
+$w946_tail$;

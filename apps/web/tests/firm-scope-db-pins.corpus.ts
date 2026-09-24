@@ -307,4 +307,50 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "45235f2dab6652a3faa15abff761ea953993ecf4636fcbfcab8ad2a6637505b3",
     },
   ],
+  // #946 [0297] (riders wave 4, lane 01) — the payroll posting lane: the SAME
+  // 0146/0168/0180/0260/0288 splice family for the review queue, plus one recut of the payroll
+  // persist door. Appended at the sorted position.
+  [
+    "0297_payroll_summary_posting.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut a CLOSED literal roster of exactly TWO named FUNCTIONS, each read at its own literal regprocedure spelled in this file — clara.persist_payroll_facts(uuid,jsonb,jsonb,integer), which gains one declaration and one call to clara._post_payroll_run before its existing final return (two boundary-anchored substitutions, each asserted to occur EXACTLY once, each anchor and replacement a single dollar-quoted literal so the statement is reconstructible), and clara.list_review_queue(jsonb,jsonb,integer), which gains one payroll_rows CTE and one union arm in the 0146/0260 idiom. Both return jsonb, so neither can emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) is reachable, by construction rather than by inspection of a rendered string. Each splice detects its own marker in the INSTALLED body and no-ops on a redo, and both postchecks re-read the COMMITTED catalog in either branch: the persist recut for the three 0296 regions it must not have disturbed, the queue recut for every one of the eleven row-kind markers at its exact count. Every other object this migration creates is static DDL the lexer inspects directly — four `create or replace function` statements at literal signatures (the month parser, the drafting body, the posting gate and the poster) and one CHECK swap on clara.entry_post_receipts — and the file appends NO chart row at all, which its own prestate and tail both re-derive.",
+      sha256: "25ba80f517b201290fd0f3676bdffdc5c60a0def4a068511e9b2fc4f06bf28af",
+    },
+  ],
+  // #947 [0298] (riders wave 4, lane 01) — the payroll net-pay settlement lane: the SAME
+  // 0146/0168/0180/0260/0288/0297 splice family for the review queue alone (this file recuts no
+  // other body). Appended at the sorted position.
+  [
+    "0298_payroll_net_pay_settlement.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE FUNCTION — clara.list_review_queue(jsonb,jsonb,integer), read at its own literal regprocedure spelled in this file and re-installed with one payroll_settlement_rows CTE and one union arm, in the 0146/0260/0297 idiom (two boundary-anchored substitutions: the all_rows union tail gains the new arm, and the new CTE is inserted immediately before the (now-rewritten) all_rows opener; each anchor asserted to occur EXACTLY once). It returns jsonb, so it cannot emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) is reachable, by construction rather than by inspection of a rendered string. The splice detects its own marker in the INSTALLED body and no-ops on a redo, and its postcheck re-reads the COMMITTED catalog in either branch for every pre-existing row-kind marker (including #946's own payroll_posting_blocked) at its exact count plus one. Every other object this migration creates is static DDL the lexer inspects directly — five `create or replace function` statements at literal signatures (the ledger read, the match-basis read, the two granted doors and the settlement core) — and the file mints no table, no new chart row and no new event type.",
+      sha256: "0adbc49aed0a521b747804305ea5b445213afd03517174c126ff5ca3dc065595",
+    },
+  ],
+  // #948 [0299] (riders wave 4, lane 01) — the agreement-contract reading and acquisition lane:
+  // the SAME 0146/0168/0180/0260/0288/0297/0298 splice family for the review queue, plus the five
+  // router-side recuts the new lane needs and one recut of its own persist door. Appended at the
+  // sorted position.
+  [
+    "0299_agreement_contract_acquisition.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut a CLOSED literal roster of exactly SEVEN named FUNCTIONS, each read at its own literal regprocedure spelled in this file \u2014 clara._enqueue_invoice_facts_core(uuid) (one routing arm, one engine-kind arm, one consent gate and one lane-true cap emit), clara.enqueue_invoice_facts(uuid) (the invoice-twin exclusion), clara._tf_processing_task_update() (two lane-scoped verdict arms), clara.claim_document_processing_task(uuid,text,boolean) (kill switch, attempt cap, cap emit, concurrency window), clara.release_held_document_tasks(integer) (both lane lists), clara.persist_agreement_facts(uuid,jsonb,jsonb,integer) (one declaration and one call to clara._post_agreement_acquisition before its existing final return) and clara.list_review_queue(jsonb,jsonb,integer) (one agreement_rows CTE and one union arm, in the 0146/0260/0297/0298 idiom). Every anchor is asserted to occur EXACTLY once before replacing, and every anchor and replacement is a single dollar-quoted literal so each statement is reconstructible \u2014 no concatenation chain and no chr(). Six of the seven return jsonb and the seventh is a trigger function, so none can emit a view definition of any kind, and the file contains no `create view` of any spelling at all \u2014 static or spliced \u2014 so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) is reachable, by construction rather than by inspection of a rendered string. Each splice detects its own marker in the INSTALLED body and no-ops on a redo, and every postcheck re-reads the COMMITTED catalog in either branch: the router recut for each family's routing arm at its measured count, the persist recut for the three sect-F regions it must not have disturbed, the queue recut for every one of the thirteen pre-existing row-kind markers at its exact count plus one. Every other object this migration creates is static DDL the lexer inspects directly \u2014 eight `create or replace function` statements at literal signatures (the grammar, the answer vocabulary, the evaluator, the date parser, the drafting body, the posting gate, the poster and the two lane doors), five CHECK swaps on clara.document_processing_tasks / clara.document_extractions and one on clara.entry_post_receipts, two event-type inserts and one UPDATE of clara.document_capabilities \u2014 and the file appends NO chart row at all, which its own tail re-derives.",
+      sha256: "c8caeb96849ef4d6ce56fb47d7f856e1fbf3eb9031f3846eb2834c72c8d3b43b",
+    },
+  ],
+  // #949 [0300] (riders wave 4, lane 01) — the tenancy contract-terms and recurring rent-plan
+  // lane: the SAME 0146/0168/0180/0260/0288/0297/0298/0299 splice family for the review queue,
+  // plus the two authority-lane recuts a third `authority_ref` kind needs. Appended at the sorted
+  // position.
+  [
+    "0300_tenancy_terms_rent_plan.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut a CLOSED literal roster of exactly THREE named FUNCTIONS, each read at its own literal regprocedure spelled in this file — clara._authority_ref_refusal(text,uuid,uuid,uuid) (one new arm, inserted immediately above the unknown-kind raise 0250 itself left as the landing point for a lane that widens the admitted kinds), clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text) (one authority-kind wall, widened by name from two admitted kinds to three) and clara.list_review_queue(jsonb,jsonb,integer) (two rent CTEs and two union arms, in the 0146/0260/0297/0298/0299 idiom). Every anchor is asserted to occur EXACTLY once before replacing, and every anchor and replacement is a single dollar-quoted literal so each statement is reconstructible — no concatenation chain, and the one chr(10) is inside an ANCHOR the block only searches for, never inside a replacement it installs. All three return text or jsonb, so none can emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) is reachable, by construction rather than by inspection of a rendered string. Each splice detects its own marker in the INSTALLED body and no-ops on a redo, and every postcheck re-reads the COMMITTED catalog in either branch: the refusal recut for both arms #977 shipped, the plan-door recut for every wall #640 and #977 put there, and the queue recut for the shared column vector at exactly two more occurrences than before plus all thirteen pre-existing row-kind markers. Every other object this migration creates is static DDL the lexer inspects directly — two `create table if not exists` statements with their indexes, policies and append-only triggers, and twenty-two `create or replace function` statements at literal signatures (the record's two doors and its two projections, the proposal and its region read, the framework read and the lessee branch, the bank test, the draft and its granted read, the plan resolver, the confirm door, the four settlement bodies, the deposit offer, the escalation state and its two doors, and the two trigger functions) — and the file appends NO chart row at all and names clara.coa_template_accounts nowhere, which its own tail re-derives structurally.",
+      sha256: "3ecaf6f09ee6ac0ad646114100b1ab990daf0354b7515df42853943fa9da9eb4",
+    },
+  ],
 ]);

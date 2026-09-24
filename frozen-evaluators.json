@@ -1,6 +1,12 @@
 {
   "version": 1,
   "evaluators": {
+    "clara.evaluate_agreement_contract_state_v1": {
+      "sha256": "bbddec2f7028bcf8d07d0cd1942495a29a327b28f125a81a09a8b0536f509543",
+      "migration": "packages/db/migrations/0299_agreement_contract_acquisition.sql",
+      "deployed": false,
+      "note": "#948, the agreement contract's deterministic evaluator: two channel envelopes in, one fact state out — which KIND of agreement the page calls itself (a closed ordered keyword roster over the printed rendering, so the model quotes and never classifies), each scheduled instalment's own principal-plus-interest identity, the three schedule column sums cross-checked against the printed totals, deposit plus amount financed against the cash price, the instalments reconciled to financed plus charges, and the text-vs-vision comparison. It is named clara.evaluate_* DELIBERATELY: this lint discovers only that spelling, so an underscore-named entrypoint would be catalog-frozen at apply and invisible to review, which is the half-freeze this manifest exists to close. Its clara.evaluator_versions closure is ONE member and that is structural, not stylistic — the body reads no table and calls no other clara function (asserted live by packages/db/tests/agreement-contract-acquisition.test.mjs's closure cell, both structurally and by a call-shape scan of prosrc), so the rendering-to-cents normalization is written inline rather than reaching for clara._normalize_invoice_cents or for 0296's own copy. UNDEPLOYED at birth: 0060's _tf_evaluator_deploy_once makes the flip a one-way ceremony act. The entry is hand-inserted rather than --update re-baselined so this change blesses ONE body and re-hashes nobody else's (0111's own recorded reason, 0296's own use)."
+    },
     "clara.evaluate_fs_pack_agent_v1": {
       "sha256": "d94696991276094afc02bd202ec1c0aa6c97479cdd5565c35042e5c3f9490ae5",
       "migration": "packages/db/migrations/0111_f_a5_reporting_agency_pr1.sql",
@@ -18,6 +24,12 @@
       "migration": "packages/db/migrations/0059_wave_e_delta_metrics_behavior.sql",
       "deployed": true,
       "note": "Wave E lane delta, the typed metric evaluator. DEPLOYED -- see the fs_pack note. The DB half (clara.verify_evaluator_freeze, run by migrate.mjs between every migration body and its commit) compares only rows flagged deployed, and both delta closures now are; this manifest must agree with that, because a deployed-vs-undeployed disagreement is exactly the gap an append-only lock cannot see across."
+    },
+    "clara.evaluate_payroll_run_state_v1": {
+      "sha256": "0efbe1fb33afedb68bbd142feecab5ac20cff07938225eb62da58557e98507eb",
+      "migration": "packages/db/migrations/0296_payroll_summary_typed_facts.sql",
+      "deployed": false,
+      "note": "#945, the payroll run's deterministic evaluator: two channel envelopes in, one fact state out — the column sums over the quoted employee rows, each row's own gross-minus-deductions identity, the cross-check against a printed totals row where one exists, and the text-vs-vision comparison. It is named clara.evaluate_* DELIBERATELY: this lint discovers only that spelling, so an underscore-named entrypoint would be catalog-frozen at apply and invisible to review, which is the half-freeze this manifest exists to close. Its clara.evaluator_versions closure is ONE member and that is structural, not stylistic — the body reads no table and calls no other clara function (asserted live by packages/db/tests/payroll-summary-facts.test.mjs's closure cell, both structurally and by a call-shape scan of prosrc), so the rendering-to-cents normalization is written inline rather than reaching for clara._normalize_invoice_cents, which would have dragged the whole F-A1 witness freeze in with it. UNDEPLOYED at birth: 0060's _tf_evaluator_deploy_once makes the flip a one-way ceremony act, and #945 ships the READING half only — no posting verb consults this state yet. The entry is hand-inserted rather than --update re-baselined so this change blesses ONE body and re-hashes nobody else's (0111's own recorded reason)."
     },
     "clara.evaluate_metric_v2": {
       "sha256": "ba2caa43c5eb5eaa3cbaa364fb4f7e69121e0c47aab6f59c89f0843e35c41dcc",

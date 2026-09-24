@@ -11,7 +11,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   KNOWN_FACT_PATHS,
+  isAgreementFactPath,
   isKnownFactPath,
+  isPayrollFactPath,
   layoutPageOf,
   partitionRegions,
   prettyEnvelope,
@@ -134,12 +136,53 @@ test("prettyEnvelope's fallback is not vacuous — it reports parsed:true for re
   assert.notEqual(prettyEnvelope("{}").parsed, prettyEnvelope("{").parsed);
 });
 
-test("the known-fact-path set is the invoice lane's closed set, and the predicate answers BOTH ways", () => {
+test("the known-fact-path set is the three lanes' closed sets, and each predicate answers BOTH ways", () => {
   assert.deepEqual([...KNOWN_FACT_PATHS].sort(), [
+    // #948 — the agreement lane's eleven questions (migration 0299's
+    // `clara._agreement_answers_ok` vocabulary). Nothing below the run level is here either, and
+    // for a structural reason: `uq_document_regions_extraction_field_path` admits ONE region per
+    // field path per extraction, so a scheduled instalment could not carry one. The printed
+    // schedule lives in the banked envelope; these eleven ARE the typed facts.
+    "contract.agreement.agreement_date", "contract.agreement.amount_financed",
+    "contract.agreement.asset_description", "contract.agreement.cash_price",
+    "contract.agreement.deposit", "contract.agreement.financier",
+    "contract.agreement.instalment_amount", "contract.agreement.kind",
+    "contract.agreement.term_months", "contract.agreement.total_charges",
+    "contract.agreement.total_payable",
     "invoice.amount_due", "invoice.currency", "invoice.deposit", "invoice.invoice_date",
     "invoice.invoice_id", "invoice.total", "invoice.vendor_name",
-  ], "the set is 0009:2069-2071's — widening it needs a label arm in document-facts-table.tsx, which its own test pins");
+    // #945 — the payroll lane's eleven RUN-LEVEL questions (migration 0296's
+    // `clara._payroll_answers_ok` vocabulary). Nothing below the run level is here, because
+    // nothing below the run level is ever persisted: the per-employee quotes are summed by the
+    // evaluator and discarded.
+    "payroll.run.eis_employee", "payroll.run.eis_employer", "payroll.run.epf_employee",
+    "payroll.run.epf_employer", "payroll.run.gross_pay", "payroll.run.hrdf_levy",
+    "payroll.run.net_pay", "payroll.run.pcb", "payroll.run.period",
+    "payroll.run.socso_employee", "payroll.run.socso_employer",
+  ], "the set is 0009:2069-2071's plus 0296's plus 0299's — widening it needs a label arm in document-facts-table.tsx, which its own test pins");
   assert.equal(isKnownFactPath("invoice.total"), true);
+  assert.equal(isKnownFactPath("payroll.run.gross_pay"), true);
   assert.equal(isKnownFactPath("statement.closing_balance"), false);
   assert.equal(isKnownFactPath(null), false);
+
+  // #945 — the payroll predicate is a NAMESPACE test, not a membership test, because the "not
+  // printed" reading belongs to the whole lane and not only to the eleven paths this app happens
+  // to have labels for.
+  assert.equal(isPayrollFactPath("payroll.run.hrdf_levy"), true);
+  assert.equal(isPayrollFactPath("invoice.total"), false);
+  assert.equal(isPayrollFactPath("statement.closing_balance"), false);
+  assert.equal(isPayrollFactPath(null), false);
+
+  // #948 — the agreement lane's predicate is the same NAMESPACE test, and it is its OWN rather
+  // than a widened payroll one: each lane's claim about what an empty region MEANS stays its own,
+  // and a third lane that wrote empty regions for a different reason would need its own.
+  assert.equal(isKnownFactPath("contract.agreement.cash_price"), true);
+  assert.equal(isAgreementFactPath("contract.agreement.total_charges"), true);
+  assert.equal(isAgreementFactPath("contract.schedule.instalment"), true,
+    "the whole namespace, not only the eleven paths this app has labels for");
+  assert.equal(isAgreementFactPath("payroll.run.hrdf_levy"), false);
+  assert.equal(isAgreementFactPath("invoice.total"), false);
+  assert.equal(isAgreementFactPath(null), false);
+  assert.equal(isPayrollFactPath("contract.agreement.cash_price"), false,
+    "…and neither predicate answers for the other lane");
 });

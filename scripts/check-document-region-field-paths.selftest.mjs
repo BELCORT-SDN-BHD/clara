@@ -12,7 +12,7 @@
 //
 // No dependencies — Node built-ins only.
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +56,10 @@ function write(root, relPath, content) {
 function freshFixture() {
   return mkdtempSync(join(tmpdir(), "check-document-region-field-paths-selftest-"));
 }
+/** The repository root, found the way check-document-region-field-paths.mjs itself finds it. */
+function repoRoot() {
+  return execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+}
 function rm(root) {
   rmSync(root, { recursive: true, force: true });
 }
@@ -68,13 +72,53 @@ const grammar = readFieldPathGrammar();
 // The grammar itself, read from migration 0191's real source text.
 // ---------------------------------------------------------------------------
 
-testCase("grammar: reads the real maxLength (128) and namespace roster from 0191", () => {
+// #945 — the roster is read from the migration that defines `clara._assert_field_path` LAST in
+// chain order, not from 0191 by name. 0191 MINTED the function and was the only file that defined
+// it until 0296 recut it (one namespace, `payroll`, joins the closed set), and a lint still
+// reading 0191 would have refused every lawful `payroll.*` literal in the estate's own tests. The
+// source of truth was never "0191" — it was "whatever the function is today".
+//
+// #948 — 0299 recut it again for `contract` (the agreement family's fact namespace, which names
+// the FACT FAMILY and not the document kind, so #949's tenancy terms read the same one). The
+// COUNT below re-bases with each such widening and is deliberately a literal rather than a
+// derivation: this cell's whole job is to notice that the closed set changed, and a count read
+// out of the same grammar it is checking would notice nothing.
+testCase("grammar: reads the real maxLength (128) and the roster from the migration that defines it last", () => {
   assertEqual(grammar.maxLength, 128, "maxLength");
-  for (const ns of ["invoice", "statement", "myinvois", "opening_tb", "prior_gl",
-    "pages", "tables", "rows", "sheets", "paragraphs"]) {
+  for (const ns of ["invoice", "statement", "myinvois", "opening_tb", "prior_gl", "payroll",
+    "contract", "pages", "tables", "rows", "sheets", "paragraphs"]) {
     if (!grammar.namespaces.has(ns)) throw new Error(`namespace roster missing "${ns}"`);
   }
-  assertEqual(grammar.namespaces.size, 10, "exactly the ten registered namespaces, no more");
+  assertEqual(grammar.namespaces.size, 12, "exactly the twelve registered namespaces, no more");
+});
+
+// FIX ROUND (finding ADV-08) — THE GRAMMAR SOURCE FAILS LOUDLY, IT DOES NOT FALL BACK. The
+// first cut of grammarSourceFile() filtered the candidate set by BOTH the function name and the
+// roster shape, so a future migration that recut clara._assert_field_path with a different roster
+// mechanism matched neither regex, was skipped in silence, and this lint went on reading an OLDER
+// file's namespace roster — the stale-grammar failure the header says the 0191-by-name version
+// was replaced to avoid, one level down. Driven here against a scratch migration directory rather
+// than argued: the highest definer carries no roster, and readFieldPathGrammar must RAISE and
+// NAME it.
+testCase("grammar: a newer definer with no roster RAISES and names the file — never a silent fall back to an older one", () => {
+  const root = freshFixture();
+  try {
+    write(root, "packages/db/migrations/0191_document_capability_registry.sql",
+      readFileSync(join(repoRoot(), "packages/db/migrations/0191_document_capability_registry.sql"), "utf8"));
+    write(root, "packages/db/migrations/9999_roster_moved.sql",
+      "create or replace function clara._assert_field_path(p_path text) returns void\n"
+      + "  language plpgsql as $$ begin null; end $$;\n");
+    let raised = null;
+    try { readFieldPathGrammar(root); } catch (e) { raised = e; }
+    if (raised === null) {
+      throw new Error("readFieldPathGrammar fell back to an older file's roster instead of raising");
+    }
+    if (!String(raised.message).includes("9999_roster_moved.sql")) {
+      throw new Error("the raise must NAME the file it could not read: " + raised.message);
+    }
+  } finally {
+    rm(root);
+  }
 });
 
 testCase("fieldPathViolation: null passes (field_path is nullable by design)", () => {
