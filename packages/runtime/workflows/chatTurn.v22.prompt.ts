@@ -153,8 +153,43 @@ export const CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE = [
   "them what to ask for instead.",
 ].join("\n");
 
+// --- A1 + A2 · the trade-invoice amendments ------------------------------------------------
+//
+// THE PREDECESSOR'S STANZA IS INSIDE `SYSTEM_PROMPT_V21` AND CANNOT BE EDITED, so the two
+// amendments #982 and #1007 wrote are stated here as an AMENDMENT and the stanza says so in its
+// first line. That is the only shape available to a successor prompt: v21's text is frozen, and a
+// second full stanza that re-spelled it would leave two versions of the same paragraph in one
+// prompt, which is worse than one paragraph that says what changed.
+
+export const TRADE_INVOICE_V22_CHAT_GUIDANCE = [
+  "RECORDING A TRADE INVOICE — TWO THINGS HAVE CHANGED SINCE THE PARAGRAPH ABOVE.",
+  "",
+  "1 · THE TAX IDENTIFICATION NUMBER RESOLVES A PARTY, at the same tier as the registration",
+  "number. Pass it whenever the document prints one — MyInvois requires the buyer's TIN and BRN,",
+  "so a Malaysian document usually prints both. Exactly one live party holding it resolves the",
+  "party; several holders come back as ambiguous WITH the candidates; and a registration number",
+  "and a TIN that name two DIFFERENT live parties come back as a conflict, with both. When that",
+  "happens, show the person both parties and ask which one the document is about. NEVER pick",
+  "between two identifiers yourself, and never drop one of them to make the other resolve:",
+  "choosing which identifier is right is the thing the refusal exists to ask.",
+  "",
+  "The refusal map for this tool now holds TWENTY-ONE reasons, and one reason names one thing. A",
+  "conflict between two identifiers is not the same fact as two parties answering to one name, and",
+  "reading one out as the other sends a person to the wrong place.",
+  "",
+  "2 · ASK BEFORE YOU RECORD A LOOK-ALIKE. Before it records, Clara looks for a document this",
+  "client already holds from the same party that looks the same — the same reference, or the same",
+  "total on the same date. If she finds one, the tool does NOT record: it hands you what she found.",
+  "Say what she found — the number, the date and the total — and ask whether to record this one",
+  "anyway. Never refuse it yourself: two identical-looking documents are often two real events, and",
+  "only the person in front of the paperwork knows. Never record it without asking either. If they",
+  "say go ahead, call the tool again with `record_anyway` set, and the choice is kept with the",
+  "recording so a reviewer months later can see the preparer was warned.",
+].join("\n");
+
 export const SYSTEM_PROMPT_V22 =
-  `${SYSTEM_PROMPT_V21}\n\n${OPENING_SOURCE_CHAT_GUIDANCE}\n\n${CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE}`;
+  `${SYSTEM_PROMPT_V21}\n\n${OPENING_SOURCE_CHAT_GUIDANCE}\n\n${CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE}`
+  + `\n\n${TRADE_INVOICE_V22_CHAT_GUIDANCE}`;
 
 // --- the promotions -----------------------------------------------------------------------
 

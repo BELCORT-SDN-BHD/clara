@@ -23,8 +23,24 @@ import { tool } from "ai";
 import { z } from "zod";
 import { buildToolsV21 } from "./chatTurn.v21.tools.js";
 import type { ToolRefusalV21 } from "./chatTurn.v21.tools.js";
+import { authoringRefusal, stableOpKey } from "./chatTurn.v11.tools.js";
+import type { WorkAcceptedPartV19 } from "./chatTurn.v19.parts.js";
 import { pools, readScoped, type PgExec, type ToolCtx } from "./chatTurn.v15.infra.js";
 import { parseOpeningTargets, readOpeningSeed } from "../lib/opening-parse.mjs";
+import {
+  START_TRADE_INVOICE_WORK_TOOL,
+  TRADE_INVOICE_REFUSALS_V2,
+  duplicateQuestion,
+  isTradeInvoiceRefusalV2,
+  journalBasisFromInput,
+  localTradeInvoiceRefusal,
+  shownInvoiceIds,
+  startTradeInvoiceWorkInputSchemaV2,
+  tradeInvoiceFromInput,
+  type StartTradeInvoiceWorkInputV2,
+} from "../lib/trade-invoice-basis.v2.js";
+
+export { START_TRADE_INVOICE_WORK_TOOL, startTradeInvoiceWorkInputSchemaV2, TRADE_INVOICE_REFUSALS_V2 };
 
 /** The tool name, as the model sees it and as every census counts it. */
 export const READ_OPENING_SOURCE_TOOL = "read_opening_source";
@@ -686,8 +702,234 @@ export async function runReadClientFinancialPack(
   return { ok: true, status: "read", pack: pack as Record<string, unknown> };
 }
 
+
+// =============================================================================================
+// `start_trade_invoice_work` — ROSTER ENTRIES A1 (#982) AND A2 (#1007), APPLIED TOGETHER.
+//
+// v21 already serves this tool. v22 REPLACES it (the name is unchanged: a widened argument is not
+// a new act) because two contracts landed on it after v21 was cut, and §1.10 fixes their order:
+//
+//   A1 · #982 — the TIN resolves a party at the registration number's own tier. The zod change is
+//        one `.describe()`; the behaviour change is 0274's, already live in the door.
+//   A2 · #1007 — the tool PROBES for a look-alike before it admits, and a match ASKS rather than
+//        refuses. The owner's ruling, and the shape `claraWork_v4` has and `chatTurn_v21` does
+//        not: an admission-time problem used to be refused outright and the person retried.
+//
+// THREE DOORS, IN THIS ORDER, AND THE ORDER IS THE CONTRACT:
+//   1. `clara.probe_trade_invoice_duplicates_for` — writes nothing, refuses no duplicate, and
+//      raises the admission door's OWN party refusals (including `party_identifier_conflict`), so
+//      the map needs no token for the probe itself;
+//   2. `clara.record_trade_invoice_duplicate_ack` — written BEFORE the admission, under the SAME
+//      intent key the admission will use, carrying the ids the PROBE showed;
+//   3. `clara.admit_trade_invoice_work` — unchanged, argument order included.
+//
+// WHY THE SECOND CALL PROBES AGAIN. The acknowledgement records what a person was shown, so the
+// list it carries must be what this call measured, not what a previous call measured: between the
+// question and the answer another preparer may have recorded one more. Probing twice costs one
+// indexed read and keeps the durable row honest.
+// =============================================================================================
+
+export type StartTradeInvoiceWorkResultV22 =
+  | {
+      ok: true;
+      work_accepted: WorkAcceptedPartV19;
+      task_id: string;
+      status: string;
+      invoice_id: string;
+      kind: string;
+      counterparty_id: string | null;
+      due_date: string | null;
+      due_date_source: string | null;
+      replayed: boolean;
+      /** The acknowledgement this recording rode, when it rode one. NEVER invented: null means
+       *  nothing looked like this document, which is a different fact from "nobody was asked". */
+      duplicate_ack_id: string | null;
+    }
+  | ReturnType<typeof duplicateQuestion>
+  | ToolRefusalV22;
+
+/** A GOVERNED REFUSAL IS A CLR SQLSTATE, AND NOTHING ELSE IS — v21's `isGovernedRefusalV21`,
+ *  restated because a deployed body does not export it. A missing migration, a lost connection and
+ *  a privilege error are FAULTS, answered with this lane's own sentence. */
+function isGovernedRefusalV22(code: unknown): boolean {
+  return typeof code === "string" && /^CLR\d{2}$/.test(code);
+}
+
+type DbErrorV22 = { code?: string; message?: string; detail?: string };
+
+/**
+ * The database's typed refusal, handed back with THIS cut's sentence when the estate knows the
+ * reason and with the door's own message verbatim when it does not.
+ *
+ * THE MAP IS THE TWENTY-ONE-TOKEN ONE. v21's mapper reads the frozen eighteen, so a
+ * `party_identifier_conflict` routed through it would reach the model as the door's raw text
+ * rather than as the sentence `apps/web/messages/en.json` already renders on the other surface.
+ */
+export function tradeInvoiceRefusalFromErrorV22(error: unknown, internalMessage: string): ToolRefusalV22 {
+  const refused = authoringRefusal(error as DbErrorV22);
+  if (refused.ok !== false) return internalFaultV22(internalMessage);
+  if (!isGovernedRefusalV22(refused.code)) return internalFaultV22(internalMessage);
+  const reason = refused.reason;
+  const known = typeof reason === "string" && isTradeInvoiceRefusalV2(reason);
+  return {
+    ok: false,
+    code: refused.code,
+    reason: refused.reason,
+    fix: refused.fix,
+    message: known ? TRADE_INVOICE_REFUSALS_V2[reason as string] : refused.message,
+    details: refused.details,
+  };
+}
+
+/** Read the chat session this turn belongs to FROM THE TASK, never from a model argument — v18's
+ *  rule, carried by every successor since and restated here for the same reason. */
+async function sessionOfTaskV22(c: PgExec, taskId: string): Promise<string | null> {
+  const t = await c.query("select session_id from clara.agent_tasks where id = $1", [taskId]);
+  const row = (t.rows[0] ?? null) as { session_id?: unknown } | null;
+  return typeof row?.session_id === "string" ? row.session_id : null;
+}
+
+export async function runStartTradeInvoiceWorkV22(
+  ctx: ToolCtx,
+  input: StartTradeInvoiceWorkInputV2,
+  modelId: string,
+): Promise<StartTradeInvoiceWorkResultV22> {
+  if (!ctx.clientId) {
+    return noClientRefusalV22(
+      "trade_invoice_needs_client_pin",
+      "This conversation is not bound to a client, so it cannot record a trade invoice.",
+    );
+  }
+  // The carrier's shape refusals, mapped once. Every reason `localTradeInvoiceRefusal` can answer
+  // is a PAYLOAD-shape refusal the door also raises as CLR10, and the sentence is the estate's.
+  const local = localTradeInvoiceRefusal(input);
+  if (local) {
+    const details: Record<string, unknown> = { field: local.field };
+    if (local.detail !== undefined) {
+      for (const [key, value] of Object.entries(local.detail)) details[key] = value;
+    }
+    return {
+      ok: false,
+      code: "CLR10",
+      reason: local.reason,
+      fix: null,
+      message: TRADE_INVOICE_REFUSALS_V2[local.reason as string],
+      details,
+    };
+  }
+
+  const clientId = ctx.clientId;
+  // THE KEY HASHES THE WHOLE INPUT, `record_anyway` INCLUDED, and that is correct rather than
+  // unfortunate: the first call refused nothing and admitted nothing, so there is no earlier Work
+  // for the second call to collide with, and the acknowledgement this call writes carries the same
+  // key the admission below uses.
+  const intentKey = stableOpKey(ctx.taskId, START_TRADE_INVOICE_WORK_TOOL, input);
+  const particulars = tradeInvoiceFromInput(input);
+  const basis = journalBasisFromInput(input);
+  try {
+    return await pools().withRuntime(async (c: PgExec) => {
+      // 1 · THE PROBE. It writes nothing and refuses no duplicate; what it CAN raise is the
+      //     admission door's own client and party refusals, which reach the model through the
+      //     same map by the catch below.
+      const probed = await c.query(
+        "select clara.probe_trade_invoice_duplicates_for($1::uuid, $2::uuid, $3::text, $4::jsonb) as r",
+        [clientId, ctx.createdBy, input.kind, JSON.stringify(particulars)],
+      );
+      const probe = (probed.rows[0]?.r ?? null) as Record<string, unknown> | null;
+      const matchCount = Number((probe ?? {}).match_count ?? 0);
+      const shown = shownInvoiceIds(probe);
+
+      // 2 · THE QUESTION, not a refusal. Nothing has been written at this point and nothing needs
+      //     undoing: the turn simply hands the person what this client already holds.
+      if (matchCount > 0 && input.record_anyway !== true) return duplicateQuestion(probe);
+
+      // 3 · THE ACKNOWLEDGEMENT, under the SAME intent key, BEFORE the admission. It is what lets
+      //     a reviewer see months later that the preparer was warned and went ahead.
+      let ackId: string | null = null;
+      if (matchCount > 0) {
+        const acked = await c.query(
+          "select clara.record_trade_invoice_duplicate_ack($1::uuid, $2::uuid, $3::text, $4::text,"
+          + " $5::jsonb, $6::jsonb) as ack",
+          [clientId, ctx.createdBy, intentKey, input.kind, JSON.stringify(particulars), JSON.stringify(shown)],
+        );
+        const ack = (acked.rows[0]?.ack ?? null) as Record<string, unknown> | null;
+        ackId = ack?.ack_id == null ? null : String(ack.ack_id);
+      }
+
+      // 4 · THE ADMISSION, unchanged from v21 — argument order included.
+      const sessionId = await sessionOfTaskV22(c, ctx.taskId);
+      const sourceRefs = [{ kind: "chat_task", task_id: ctx.taskId, session_id: sessionId }];
+      const r = await c.query(
+        "select clara.admit_trade_invoice_work($1::uuid, $2::uuid, $3::text, $4::text,"
+        + " $5::jsonb, $6::jsonb, $7::text, $8::jsonb, $9::text) as r",
+        [
+          clientId,
+          ctx.createdBy,
+          intentKey,
+          input.kind,
+          JSON.stringify(particulars),
+          JSON.stringify(basis),
+          input.basis_origin,
+          JSON.stringify(sourceRefs),
+          modelId,
+        ],
+      );
+      const receipt = (r.rows[0]?.r ?? null) as Record<string, unknown> | null;
+      if (!receipt || receipt.work_id == null) {
+        return internalFaultV22("The trade invoice could not be recorded. Nothing was recorded.");
+      }
+      return {
+        ok: true as const,
+        work_accepted: {
+          type: "work_accepted" as const,
+          work_id: String(receipt.work_id),
+          client_id: clientId,
+          // THE PURPOSE IS `journal_entry` AND IT IS NOT A PLACEHOLDER — 0225 calls the unchanged
+          // `clara._admit_accounting_work_core(..., 'journal_entry', ...)`.
+          purpose: "journal_entry" as const,
+          logical_op_id: String(receipt.logical_op_id ?? ""),
+        },
+        task_id: String(receipt.task_id ?? ""),
+        status: String(receipt.status ?? "queued"),
+        invoice_id: String(receipt.invoice_id ?? ""),
+        kind: receipt.kind == null ? input.kind : String(receipt.kind),
+        counterparty_id: receipt.counterparty_id == null ? null : String(receipt.counterparty_id),
+        due_date: receipt.due_date == null ? null : String(receipt.due_date),
+        due_date_source: receipt.due_date_source == null ? null : String(receipt.due_date_source),
+        replayed: receipt.replayed === true,
+        duplicate_ack_id: ackId,
+      };
+    });
+  } catch (error) {
+    return tradeInvoiceRefusalFromErrorV22(error, "The trade invoice could not be recorded.");
+  }
+}
+
 export function buildToolsV22(ctx: ToolCtx, modelId: string, segment: number) {
   return Object.assign({}, buildToolsV21(ctx, modelId, segment), {
+    // A1 + A2 — the SAME NAME v21 serves, REPLACED rather than added. `Object.assign` takes the
+    // later value, so this entry supersedes v21's; the name is unchanged because a widened
+    // argument and a question before a write are not a new act.
+    [START_TRADE_INVOICE_WORK_TOOL]: tool({
+      description:
+        "Start an accounting Work that records ONE trade invoice for the client pinned to this "
+        + "conversation: a SALES INVOICE this client issued to a customer, or a SUPPLIER BILL this "
+        + "client received from a vendor. Amounts are integer CENTS. A credit note is NEITHER — say "
+        + "so rather than negating an invoice. Give the party exactly as the document states it (or "
+        + "the counterparty id when you know it); Clara never creates a party. The registration "
+        + "number AND the tax identification number both RESOLVE a party, at the same tier: give "
+        + "whichever the document prints, and if they name two different parties the answer says "
+        + "so and you ask which one it is. Give the document date, the document's own reference, "
+        + "the stated total, and the journal basis with EXACTLY ONE control-account leg of the "
+        + "domain the kind names. Give the due date only when the document STATES one. BEFORE IT "
+        + "RECORDS, CLARA LOOKS for a document this client already holds that looks like this one; "
+        + "if she finds any, she gives them back to you instead of recording, and you show the "
+        + "person what she found and ask. Only set `record_anyway` after they have said to go "
+        + "ahead. This does NOT post the entry — it queues durable Work that posts it under the "
+        + "human's own authority, rechecked at commit. Say you have QUEUED it.",
+      inputSchema: startTradeInvoiceWorkInputSchemaV2,
+      execute: (input: StartTradeInvoiceWorkInputV2) => runStartTradeInvoiceWorkV22(ctx, input, modelId),
+    }),
     [READ_CLIENT_FINANCIAL_PACK_TOOL]: tool({
       description:
         "Read this client's MONEY BAND — the same book cash and period profit the client home "

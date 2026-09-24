@@ -399,12 +399,15 @@ test("v22.prompt: SYSTEM_PROMPT_V22 is v21's text plus this cut's OWN stanzas, b
   const added = v22Prompt.SYSTEM_PROMPT_V22.slice(v21Prompt.SYSTEM_PROMPT_V21.length);
   assert.match(added, /READING AN OPENING SOURCE/);          // #985
   assert.match(added, /THE CLIENT'S MONEY BAND/);            // #1000
+  assert.match(added, /TWO THINGS HAVE CHANGED SINCE THE PARAGRAPH ABOVE/); // #982 + #1007 (A1, A2)
   // EACH TICKET APPENDS ITS OWN, and the whole added text is exactly the exported stanzas joined
   // — nothing is written inline where no cell can see it. Extend this list when a ticket of this
   // lane adds a stanza; never replace it.
   assert.equal(
     added,
-    `\n\n${v22Prompt.OPENING_SOURCE_CHAT_GUIDANCE}\n\n${v22Prompt.CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE}`,
+    `\n\n${v22Prompt.OPENING_SOURCE_CHAT_GUIDANCE}`
+    + `\n\n${v22Prompt.CLIENT_FINANCIAL_PACK_CHAT_GUIDANCE}`
+    + `\n\n${v22Prompt.TRADE_INVOICE_V22_CHAT_GUIDANCE}`,
     "the added text is exactly this cut's exported stanzas, in the order they were added",
   );
 });
