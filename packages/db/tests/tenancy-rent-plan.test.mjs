@@ -45,6 +45,7 @@ import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts,
 import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
 import { addBankAccount, enterStatement } from "./x38-match-fixtures.mjs";
 import { listReviewQueue } from "./wave-a-reads.mjs";
+import { fiscalYear } from "./depreciation-history-fixtures.mjs";
 
 let ready = false;
 let world = null;
@@ -1828,5 +1829,140 @@ test("S9 · the queue still projects every kind it carried before this file, and
     Object.keys(mine).sort(),
     Object.keys(uncoded).sort(),
     "the new kind reuses the EXISTING row shape unchanged — no key more, no key fewer",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// S10 — the prepayment lane is UNTOUCHED (AC7).
+//
+// "A tenancy paid a year up front is not this lane's business: it is a prepayment and goes to the
+// amortisation lane, where the service period stays person-stated and this ticket changes
+// nothing about that." (the brief.) These cells prove the negative the way a negative has to be
+// proven: by driving the OTHER lane's own door and seeing it still refuse.
+// ---------------------------------------------------------------------------
+
+const PREPAYMENTS = "1130";
+
+const shaOf = async (documentId) =>
+  (await rootQuery("select sha256 from clara.documents where id=$1", [documentId])).rows[0].sha256;
+
+const prepaymentSchedule = async (client, entry) =>
+  (
+    await rootQuery("select clara.prepayment_schedule_v1($1::uuid,$2::uuid) as s", [client, entry])
+  ).rows[0].s;
+
+test("S10 · a tenancy prepaid a year up front does NOT amortise from the contract's printed term", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+  await upsertAccount(sub, { client, code: PREPAYMENTS, name: "Prepayments", type: "asset", opKey: opk949("coa") });
+  const firm = await firmOf(client);
+  await fiscalYear(firm, client, { startsOn: "2026-01-01", endsOn: "2026-12-31", status: "open", owner: sub });
+
+  // THE TERM IS RECORDED IN THIS LANE'S OWN RECORD: 2026-01-05 to 2028-01-04, read off the page.
+  const terms = await getTerms(sub, doc.documentId);
+  assert.equal(byKey(terms.terms, "term_start").term_date, TERM_START, "mandatory setup: the contract term is on file");
+  assert.equal(byKey(terms.terms, "term_end").term_date, TERM_END);
+
+  // A year of rent paid up front, booked against the agreement itself.
+  const yearCents = RENT_CENTS * 12;
+  const drafted = await draftEntry(human(sub), {
+    client, resolution: await freshResolution(sub, client), postingDate: "2026-01-06",
+    memo: "twelve months' rent paid in advance",
+    document: doc.documentId, sha256: await shaOf(doc.documentId),
+    lines: [
+      { account_code: PREPAYMENTS, debit_cents: yearCents, credit_cents: 0, description: "rent in advance" },
+      { account_code: BANKCOA, debit_cents: 0, credit_cents: yearCents, description: "bank" },
+    ],
+    opKey: opk949("prepay-draft"),
+  });
+  const token = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [drafted.entry_id])).rows[0].revision_token;
+  await approveEntry(world.users.bob, { entry: drafted.entry_id, expectedRevision: token, opKey: opk949("prepay-approve") });
+
+  const schedule = await prepaymentSchedule(client, drafted.entry_id);
+  assert.equal(
+    schedule.refusal,
+    "prepayment_term_underivable",
+    `the amortisation lane still refuses: ${JSON.stringify(schedule)}`,
+  );
+  assert.equal(
+    schedule.missing,
+    "document_service_periods",
+    "…naming the person-stated fact it is missing, NOT the contract term this lane recorded",
+  );
+  assert.equal(
+    (await rootQuery(
+      "select count(*)::int as n from clara.document_service_periods where document_id=$1",
+      [doc.documentId],
+    )).rows[0].n,
+    0,
+    "and no service period was born from the agreement's printed term",
+  );
+});
+
+test("S10 · once a PERSON states the service period, the schedule derives — the rule is untouched, not bypassed", async (t) => {
+  if (unready(t)) return;
+  const sub = world.users.alice;
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+  await upsertAccount(sub, { client, code: PREPAYMENTS, name: "Prepayments", type: "asset", opKey: opk949("coa") });
+  const firm = await firmOf(client);
+  await fiscalYear(firm, client, { startsOn: "2026-01-01", endsOn: "2026-12-31", status: "open", owner: sub });
+  const yearCents = RENT_CENTS * 12;
+  const drafted = await draftEntry(human(sub), {
+    client, resolution: await freshResolution(sub, client), postingDate: "2026-01-06",
+    memo: "twelve months' rent paid in advance",
+    document: doc.documentId, sha256: await shaOf(doc.documentId),
+    lines: [
+      { account_code: PREPAYMENTS, debit_cents: yearCents, credit_cents: 0, description: "rent in advance" },
+      { account_code: BANKCOA, debit_cents: 0, credit_cents: yearCents, description: "bank" },
+    ],
+    opKey: opk949("prepay2-draft"),
+  });
+  const token = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [drafted.entry_id])).rows[0].revision_token;
+  await approveEntry(world.users.bob, { entry: drafted.entry_id, expectedRevision: token, opKey: opk949("prepay2-approve") });
+
+  // The estate's OWN door, unchanged by this ticket. The person states the twelve months they
+  // actually paid for — which is NOT the tenancy's twenty-four-month term.
+  await humanQuery(
+    sub,
+    namedCall("record_document_service_period", [
+      { name: "p_document" }, { name: "p_period_start" }, { name: "p_period_end" },
+      { name: "p_basis" }, { name: "p_op_key" },
+    ]),
+    // Twelve months, INSIDE the fiscal year the payment sits in — and twelve, not the
+    // twenty-four the tenancy prints.
+    [doc.documentId, "2026-01-01", "2026-12-31", "twelve months paid in advance under clause 3", opk949("sp")],
+  );
+
+  const schedule = await prepaymentSchedule(client, drafted.entry_id);
+  assert.equal(schedule.refusal, undefined, `the schedule derives: ${JSON.stringify(schedule).slice(0, 300)}`);
+  assert.equal(schedule.period_count, 12, "twelve months, from the person's own statement");
+  assert.equal(schedule.period_lines.length, 12);
+  assert.equal(schedule.period_lines[0].period_start, "2026-01-01");
+  assert.equal(schedule.term_start, "2026-01-01", "the term is the PERSON'S, read off their own record");
+  assert.equal(schedule.term_end, "2026-12-31");
+  assert.notEqual(schedule.period_count, 24, "…never the twenty-four months the contract prints");
+  assert.notEqual(schedule.term_end, TERM_END);
+});
+
+test("S10 · no body this migration mints ever writes clara.document_service_periods", async (t) => {
+  if (unready(t)) return;
+  const offenders = (
+    await rootQuery(
+      `select p.oid::regprocedure::text as sig
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'clara'
+          and (p.proname like 'contract@_%' escape '@' or p.proname like '%tenancy%'
+               or p.proname like '%rent_%' or p.proname like '%_contract_term%')
+          and p.prosrc ilike '%document_service_periods%'
+        order by 1`,
+    )
+  ).rows;
+  assert.deepEqual(
+    offenders,
+    [],
+    "this lane cannot weaken the person-stated service period, because no body of it names that table at all",
   );
 });
