@@ -17,7 +17,6 @@
 
 import { z } from "zod";
 import {
-  ACCRUAL_DAY_OF_MONTH_MAX,
   localAccrualRefusal,
   startAccrualWorkInputSchema,
   accrualFromInput,

@@ -42,7 +42,7 @@
       "deployed": true
     },
     "packages/runtime/lib/accrual-basis.v2.ts": {
-      "sha256": "92ac2e35ae68ce713f11ebfeb3802385b5ef850088ae6ffbbd876c061f744db4",
+      "sha256": "6f892e07008705bdf61d1baa954b1b099aac4cc1400deb24cb1ddb60541ed7d4",
       "note": ""
     },
     "packages/runtime/lib/capability-registry-v2.mjs": {

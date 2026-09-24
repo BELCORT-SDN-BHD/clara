@@ -1321,3 +1321,47 @@ _Avoid_: Metric definition version — that belongs to the delta-metric lane and
 **Processing cap / 处理上限**:
 One of the four per-firm document-processing limits a firm sets for itself — documents per day, pages per day, documents processed at once, model readings at once. The firm's own owner or admin sets each one independently, receipted and audited; a cap nobody has set is ABSENT rather than zero, and the enforcing doors fall back to their own built-in figures until the firm's first write. The estate's own ceiling sits above whatever a firm sets and no firm can raise it.
 _Avoid_: A quota a firm has bought; an operator-granted allowance (the operator sets no firm's caps); treating an unset cap as zero, or as the value a first write would land.
+
+<!-- #1135 -->
+**Look-alike document / 看似重复的单据**:
+A trade invoice or bill this client already holds that matches the one being recorded on the same
+party plus either the same document number, normalised, or the same total on the same date. It is a
+QUESTION, never a refusal: two identical-looking documents are often two real events, and only the
+person in front of the paperwork knows. Clara shows what she found — the number, the date, the
+total — and asks; the person's "record it anyway" is kept with the recording as an acknowledgement
+a reviewer can read months later.
+_Avoid_: Duplicate (it asserts the answer the question exists to ask); a blocked submission; a
+match Clara resolved on her own.
+
+**Advance allocation / 预支分摊**:
+How many sen of ONE staff expense claim come off EACH of the advances it discharges, in the order a
+person confirmed. The register records the list that was confirmed and refuses a split nobody
+agreed to, because deciding whose money is discharged first is a judgement rather than an
+arithmetic. Clara may PROPOSE one — oldest advance first, each taking what it still has outstanding
+— and reads it back before it is recorded.
+_Avoid_: A silent first-in-first-out; an allocation Clara chose; splitting a claim into two claims.
+
+**Accrual side / 应计方向**:
+Which way one accrual runs. `expense` is a cost the period incurred that nobody has billed yet;
+`revenue` is work the firm has delivered and not yet invoiced, which sits in an accrued-income
+asset until the invoice is issued. The side is a professional's statement, never inferred from the
+account named, and it cannot be changed afterwards: a correction restates an accrual, it never
+turns one into the other.
+_Avoid_: Reading the side off the account type; "reversing accrual" as a synonym (every accrual
+reverses); treating the revenue side as deferred revenue, which is the opposite case — money
+received before the work.
+
+**Stated period amount / 逐期给定金额**:
+An accrual whose figure a person states for EACH due date of its schedule, with the window's total
+carried beside them. Nothing averages, nothing carries a previous period forward and nothing is
+read off a document; a period the schedule reaches and nobody has stated is a question Clara asks
+BY DATE. An even split's odd cent belongs to the final period, by convention.
+_Avoid_: A computed or apportioned amount; a schedule that fills a gap with the previous figure.
+
+**Configuration receipt / 配置回执**:
+What a prepayment amortisation or a deferred-revenue recognition answers with: the term, the number
+of periods and the two accounts the schedule will use. NOTHING HAS POSTED at the moment it is
+issued — each period's own Work is what puts it on the books — and saying otherwise is the one
+thing a conversational surface must never blur.
+_Avoid_: "Recognised", "amortised" or "posted" for a schedule that has only been configured; a
+figure the answer did not return.
