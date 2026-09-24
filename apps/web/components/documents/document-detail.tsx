@@ -25,6 +25,7 @@ import { DocumentExtractPanel } from "./document-extract-panel";
 import { DocumentStatePanel } from "./document-state-panel";
 import { DocumentEvidence } from "./document-evidence";
 import { DocumentFactsTable } from "./document-facts-table";
+import { TenancyRentPlanSection } from "./tenancy-rent-plan-section";
 import { DocumentKindDialog } from "./document-kind-dialog";
 import { CorrectionWizard } from "./correction-wizard";
 import { CorrectionImpactSheet } from "./correction-impact-sheet";
@@ -352,6 +353,12 @@ export function DocumentDetail({
             </p>
           )}
           <DoorFeedback err={revisions.err} clr={revisions.clr} />
+          {/* #949 — a TENANCY's own terms and the rent plan they would run, under the typed
+              facts they were read from. The section renders NOTHING for any other agreement
+              class (or any other document kind), so this mount costs a non-tenancy page one
+              read and no layout at all. It is here rather than on the accounting tab because
+              the decision it asks for is about what the PAGE says. */}
+          <TenancyRentPlanSection clientId={clientId} documentId={documentId} />
         </div>
       ) : null}
 
