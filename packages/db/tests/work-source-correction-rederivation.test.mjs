@@ -33,7 +33,7 @@ import {
   buildWorkWorld, admitJournalWork, claimWorkRun, basis, workRow,
 } from "./work-journal-fixtures.mjs";
 import {
-  openWorkQuestion, interruptionRow, answerWorkQuestion, twoFieldAnswer,
+  openWorkQuestion, interruptionRow, answerWorkQuestion, twoFieldAnswer, listReviewQueue,
 } from "./work-question-fixtures.mjs";
 import {
   filedDocument, ensureClientEgress, mintLegacyInvoiceFactsTask, claimTask,
@@ -41,7 +41,7 @@ import {
 } from "./s6-fixtures.mjs";
 
 const STEM = "work_source_correction_rederivation$";
-const EXPECTED_CELLS = 9;
+const EXPECTED_CELLS = 10;
 const RUNTIME = "clara_runtime";
 
 let live = false;
@@ -527,4 +527,73 @@ cell("r1030.nonnegotiables: after the lane exists, the retired question still re
     [quiet.documentId])).rows[0].n, 0, "…with no revision row written");
 
   noteLane("r1030.nonnegotiables: retired question still refuses, now naming its successor");
+});
+
+/** Needs-you, flattened to the rows that carry a QUESTION id, whatever envelope key the read
+ *  puts them under. Keyed on the id rather than on a path so this cell is about the ROW reaching a
+ *  person, not about the envelope shape #840 owns. */
+async function reviewQueue(sub) {
+  const q = await listReviewQueue(sub, { limit: 200 });
+  const rows = [];
+  const walk = (v) => {
+    if (Array.isArray(v)) { for (const x of v) walk(x); return; }
+    if (v && typeof v === "object") {
+      const id = v.interruption_id ?? v.question_id;
+      if (typeof id === "string") rows.push(Object.assign({ interruption_id: id }, v));
+      for (const x of Object.values(v)) walk(x);
+    }
+  };
+  walk(q);
+  return rows;
+}
+
+// =============================================================================================
+// §6 · NEEDS-YOU — the first moment "the replacement is ready" becomes literally true.
+// =============================================================================================
+
+cell("r1030.needsyou.shows_the_successor: after a correction Needs-you shows the successor's confirmation question, where before this change it showed nothing", async () => {
+  const s = await invoiceWithFacts({ client: A1(), totalCents: 64000, tag: "needsyou" });
+  const parked = await workParkedOnDocument({
+    client: A1(), document: s.documentId, b: basis({ cents: 64000 }),
+  });
+
+  // BEFORE: the retired Work's question is the only row this document has, and Needs-you has it.
+  const before = await reviewQueue(KEEPER());
+  assert.ok(before.some((r) => r.interruption_id === parked.questionId),
+    "mandatory setup: Needs-you shows the parked Work's question before the correction");
+
+  const { opKey } = await correctAndRetire({ document: s.documentId, parked, to: "RM 999.00" });
+
+  // …AND THE ROW DISAPPEARS. That is #885 as shipped, and it is what "the person is told nothing
+  // arrives" meant: the retirement cancels the question, so it leaves the list.
+  const afterCorrection = await reviewQueue(KEEPER());
+  assert.equal(afterCorrection.some((r) => r.interruption_id === parked.questionId), false,
+    "the retired Work's question leaves Needs-you");
+
+  // NOW THE LANE RUNS. The successor is admitted under the correction's own key and its OWN run
+  // opens the confirmation question — here the run is the fixture's claim + open rather than a
+  // live claraWork_v6 engine (this file has no World), and that boundary is stated rather than
+  // blurred: what `claraWork.v6.ts` opens, and that it opens BEFORE anything can post, is proved
+  // in `packages/runtime/tests/clara-work-v6.test.mjs`. What is proved HERE is the half that is
+  // the database's: a question on the successor reaches Needs-you.
+  const successor = await admitJournalWork({
+    client: A1(), author: KEEPER(), intentKey: opKey, origin: "clara_interpreted",
+    basis: basis({ cents: 99900 }),
+    sourceRefs: [{ kind: "document", document_id: s.documentId }],
+  });
+  await settleRederivation({ opKey, successor: successor.work_id });
+  await claimWorkRun({ task: successor.task_id, runId: opk("r1030-succ-run") });
+  const asked = await openWorkQuestion({ task: successor.task_id });
+
+  const afterSuccessor = await reviewQueue(KEEPER());
+  const row = afterSuccessor.find((r) => r.interruption_id === asked.question_id);
+  assert.ok(row, "Needs-you shows the SUCCESSOR's question — the first moment a replacement is real");
+  // …ATTRIBUTED TO THE SUCCESSOR, read off the row the surface renders from rather than off
+  // whichever envelope key the queue happens to carry the id under (#840 owns that shape).
+  const askedRow = await interruptionRow(asked.question_id);
+  assert.equal(askedRow.work_id, successor.work_id,
+    "…and the question it shows belongs to the successor, not to the Work it replaced");
+  assert.equal(askedRow.status, "pending", "…and it is open, so a person can actually answer it");
+
+  noteLane(`r1030.needsyou.shows_the_successor: ${String(parked.questionId).slice(0, 8)} left the list, ${String(asked.question_id).slice(0, 8)} joined it`);
 });
