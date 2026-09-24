@@ -5221,47 +5221,63 @@ residual until this ticket closed it (the wave-3 integration ruling, 2026-09-23)
 
 **What this file does.** The wrapper's SAME NAME and SAME SEVEN ARGUMENTS now delegate to
 `clara._prepayment_schedule_core` — #915/#939/#940's shared body, already proven identical for the
-`'human'` and `'obo'` lanes — through a THIRD lane, `'wake'`. An agent-lane wake now produces a real
-`clara.prepayment_schedules` row (configuration only, exactly like a person's own call) with the
-SAME roster gate, expense-account wall, term derivation and `clara._reserve_op`/`clara._finish_op`
-idempotency a human or a chat configuration gets. `clara._agent_prepayment_schedule_core` and
-`clara._propose_adjustment_template_core` are never called by this wrapper again.
+`'human'` and `'obo'` lanes — through a THIRD lane, `'wake'`, which **refuses by name**:
+CLR03 `wake_authority_absent`, naming the wake kind it refused, the task that asked, and
+`clara.create_prepayment_schedule` as the door that CAN configure this. Nothing durable is written.
+`clara._agent_prepayment_schedule_core` and `clara._propose_adjustment_template_core` are never
+reached from this wrapper again, which is the residual #1036 exists to close.
 
-### The one genuine architectural problem
+### Why the lane refuses rather than configuring (the fix round, 2026-09-24)
 
-`clara.create_accounting_plan` and its OBO sibling `clara._obo_plan_core` (0193, #915, #941) both
-resolve the plan's authority through `clara._authority_ref_refusal`, which admits only an
-`accounting_work` row or a `chat_turn`-kind `agent_tasks` row with a non-null `created_by` — i.e.
-ONLY a person's own instruction, by design (0307's own words: "the wall that stops a wake run or an
-autodraft from authorising its own amortisation schedule"). A `close_prep` wake is exactly that
-caller: its credential is minted with `on_behalf_of` FORBIDDEN BY CONSTRUCTION (0138:827-830, "there
-is no directing human on the clocked lane"), so it can never supply a ref that wall would admit, and
-`clara.accounting_plans.authority_kind` is a closed one-member CHECK (`explicit_instruction` only) —
-widening it is a real schema change to the plan model this ticket does not make.
+The FIRST cut of this file gave the wake lane its own plan step,
+`clara._prepayment_plan_core_wake`, in `clara._obo_plan_core`'s shape MINUS the
+authority-instruction wall, writing `authority_kind = 'explicit_instruction'` with
+`authorised_by = clara.agent_user_id()`. Two measured facts killed it (review findings ADV-01 and
+L04-SPEC-02):
 
-So this file adds ONE new ungranted core, `clara._prepayment_plan_core_wake`, in
-`clara._obo_plan_core`'s shape MINUS the authority-instruction wall: the authority is recorded
-HONESTLY instead, as `{kind:'agent_wake', wake_kind, task_id}` — never dressed up as a person's
-instruction — and `authorised_by`/`created_by` is `clara.agent_user_id()`, the estate's own "the
-agent wrote this" idiom (0103:264's own words on `agent_act_receipts.acting_actor`; 0154's
-`proposed_by_agent`). Everything else the plan step does — `clara._assert_plan_schedule`,
-`clara._assert_journal_basis`, the client advisory rung, the overlap warning, the next-occurrences
-preview, the audit row — is byte-identical in shape to the human and OBO plan steps.
+1. **It could never post.** `clara.agent_user_id()` holds ZERO `clara.firm_memberships` rows, and
+   `clara._plan_admit_occurrence` (0308) hands the plan's `authorised_by` straight to
+   `clara.admit_journal_work`, whose core raises CLR11 `client_not_found` for an author with no
+   membership. Driven side by side on `clara_l04`: the wake plan's first occurrence answered
+   `{"admitted":false,"code":"CLR11","reason":"client_not_found"}`; an identical human-lane plan
+   answered `{"admitted":true,…}`. Both the belt (`clara.wake_due_plan_occurrences`) and the human
+   catch-up (`clara.request_plan_catch_up`) route through that ONE body, so no path could post. A
+   schedule that looks configured and posts nothing, every month, with no audit row and no Work, is
+   the failure 0308's own `clara._assert_plan_schedule` comment names as the worst this lane can
+   have.
+2. **It lied in the one column a reader filters on.** `clara.accounting_plans.authority_kind` is a
+   closed one-member CHECK whose member means "a person instructed this"; only `authority_ref` was
+   honest about the clocked lane.
+
+The wall the first cut stepped around is `clara._authority_ref_refusal`, narrowed by #977/0250 and
+described by 0307 as "the wall that stops a wake run or an autodraft from authorising its own
+amortisation schedule". A `close_prep` wake is exactly that caller: its credential is minted with
+`on_behalf_of` FORBIDDEN BY CONSTRUCTION (0138:827-830, "there is no directing human on the clocked
+lane"). That wall is the estate's accounting-authority control and it is right; the ticket's "with
+the same validation … a person's own creation gets" cannot be honoured for the plan step, because a
+person's own creation supplies a person. So the lane answers the one thing that is true, and writes
+nothing.
+
+**What would re-open the lane** is an OWNER decision on plan authority for the clocked lane: either
+a directing human the estate can name for an unattended run, or a widened
+`clara.accounting_plans.authority_kind` TOGETHER WITH an admission body that accepts an
+agent-authored plan. Both are changes to the plan-authority model that #1036's own "Out of scope:
+any change to the prepayment door's own rules" forbids this file to make.
 
 | function | who runs it | what it owns |
 |---|---|---|
-| `clara.wake_establish_prepayment_schedule` | `clara_wake_interactive` (unchanged) | `clara._close_wake_ctx`, the purpose/authority framing, the source-entry sub-key |
-| `clara._prepayment_schedule_core` | nobody (definer-internal, unchanged signature) | everything the human and OBO lanes already ran, plus the `'wake'` branch |
-| `clara._prepayment_plan_core_wake` | nobody (definer-internal, new) | the amortisation plan step for the WAKE lane, honestly authored |
+| `clara.wake_establish_prepayment_schedule` | `clara_wake_interactive` (unchanged) | `clara._close_wake_ctx`, the purpose/authority framing, the delegation |
+| `clara._prepayment_schedule_core` | nobody (definer-internal, unchanged signature) | everything the human and OBO lanes already ran, plus the `'wake'` refusal ahead of all of it |
+| `clara._prepayment_plan_core_wake` | — | **dropped** by the fix round; the estate is back to TWO plan-writing bodies for this family, both asking `clara._authority_ref_refusal` |
 | `clara._agent_prepayment_schedule_core` | nobody (definer-internal, retired) | an unconditional refusal — kept present at its exact signature/ACL |
 
-### The multiplicity key
+### No multiplicity key
 
-Carried forward from the retired core (0140:3618-3621, design close-key-1 Annex E):
-`clara._close_wake_ctx`'s op key is derived per (task, verb, CLIENT), so two source entries
-amortised in ONE wake task would collide on ONE
-`clara._reserve_op(create_prepayment_schedule, ...)` slot. The wrapper sub-keys by
-`p_op_key || ':' || p_source_entry`, exactly as the retired core did.
+The retired core derived one per (task, verb, CLIENT) (0140:3618-3621, design close-key-1 Annex E),
+because two source entries amortised in ONE wake task would otherwise collide on a single
+`clara._reserve_op(create_prepayment_schedule, …)` slot. This lane reserves nothing — it refuses
+before the reservation — so the derived key would name an operation that never happens. It returns
+with the lane if the owner re-opens it.
 
 ### The template core is retired 0282's own way
 
@@ -5279,14 +5295,15 @@ lands, has NO caller anywhere in the `clara` schema's own text — the tail meas
   human and OBO plan lanes are pinned unconditionally and take neither branch this file adds.
 - It does not change the roster gate, the expense-account wall, the term derivation or the
   dedupe/idempotency machinery `clara._prepayment_schedule_core` already carries for every lane —
-  the `'wake'` branch changes only which function drafts the plan.
+  the `'wake'` branch adds ONE refusal ahead of all of them and changes nothing else.
 - It does not enable `clara.wake_engine_sources.close_prep` (out of scope, the ticket's own words).
-  The flag stays exactly as #927/#929 left it; this file only makes the path safe to enable, by
-  giving it somewhere real to land — measured with the flag flipped true inside a rolled-back
-  transaction in `prepayment-wake-reroute.test.mjs`'s `p1036.acted`.
+  The flag stays exactly as #927/#929 left it, and the refusal is unconditional on it — measured
+  with the flag flipped true inside a rolled-back transaction in
+  `prepayment-wake-reroute.test.mjs`'s `p1036.refused`.
 - It does not write `clara.agent_act_receipts`. That table's F-A4 Tier-A/B/C rung discipline
-  belonged to the retired core; the `'wake'` lane's refusals now RAISE, exactly as a human's or a
-  chat configuration's do, and its idempotency rides `clara._reserve_op`/`clara._finish_op`.
+  belonged to the retired core; the `'wake'` lane now RAISES, exactly as a human's or a chat
+  configuration's refusals do, and a raised refusal writes nothing anywhere — there is no durable
+  act left for a receipt to describe.
 
 **Prestate pins, MEASURED on `clara_l04` after 0308 and before the first apply** — RECUT (bimodal:
 their measured pre-image, or a body already carrying `#1036`):
@@ -5321,8 +5338,11 @@ migration's header.
 
 Applied via `pnpm db:migrate`; `clara.schema_migrations` reads 294 total, max
 `0315_prepayment_wake_reroute`. Redo-safe by construction (#957): every object is a
-`create or replace function` (one new, three recut), and the file writes no row and no schema
-object at all.
+`create or replace function` (three recut) or a `drop function if exists`, and the file writes no
+row and no schema object at all. Its prestate's residual census is MODE-AWARE — exactly one clara
+function mentions the template core on a FIRST apply, zero on a REDO, because by then this file has
+already retired that one caller. (The first cut expected 1 unconditionally and therefore could not
+be redone at all; found and fixed in the fix round.)
 
 **Gate module, cohort, chain.** `tests/prepayment-wake-reroute-preintegration-gate.mjs` (env
 `CLARA_ALLOW_MISSING_PREPAYMENT_WAKE_REROUTE`); no new `rig-meta.mjs` cohort — the one new function
@@ -5332,10 +5352,12 @@ by running T17 green with `rig-meta.mjs` untouched); the `--import` entry in `pa
 MIGRATION ORDER, at the end of the chain (0315 is the newest migration).
 
 **Tests.** `tests/prepayment-wake-reroute.test.mjs` (new: the reroute driven end to end on a real
-`clara_wake_interactive` session — acted with a real schedule and its occurrence preview and zero
-`adjustment_templates` rows, idempotent replay, the two-source-entries-in-one-task multiplicity key,
-refusal parity against the human door, the template core's zero-caller census, and the wrapper's own
-unchanged shape); `tests/plan-overlap-template-arm-retired.test.mjs` (`p929.containment` replaced by
+`clara_wake_interactive` session — the typed refusal with `close_prep` flipped true in a rolled-back
+transaction and zero durable rows of any kind, the authority wall answering AHEAD of every input
+wall, the refusal's stability across a fresh credential, the absence of any body that writes a plan
+under `clara.agent_user_id()`, the template core's zero-caller census, and the wrapper's own
+unchanged shape — each refusal cell paired with the HUMAN door on the same scene, whose plan is
+driven through `clara._plan_admit_occurrence` and admits); `tests/plan-overlap-template-arm-retired.test.mjs` (`p929.containment` replaced by
 `p1036.containment-closed` — the residual it pinned is closed, not merely held shut by a flag, and
 the three containment facts it named are re-measured as unchanged rather than as a tripwire);
 `tests/f-a4-pr2a-wrapper.test.mjs` and `tests/f-a4-pr2a-books.test.mjs` (the whole Tier-A/B/C

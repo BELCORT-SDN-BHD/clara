@@ -18,37 +18,50 @@
 --
 -- WHAT THIS FILE DOES, IN ONE SENTENCE. The wrapper's SAME NAME and SAME SEVEN ARGUMENTS now
 -- delegate to `clara._prepayment_schedule_core` -- #915's shared body, already proven identical
--- for the 'human' and 'obo' lanes -- through a THIRD lane, 'wake', so an agent-lane wake produces a
--- real `clara.prepayment_schedules` row (configuration only, exactly like a person's own call)
--- with the SAME roster gate, the SAME expense-account eligibility wall, the SAME term derivation
--- and the SAME `clara._reserve_op`/`clara._finish_op` idempotency a human or a chat configuration
--- gets. `clara._agent_prepayment_schedule_core` and `clara._propose_adjustment_template_core` are
--- never called by this wrapper again.
+-- for the 'human' and 'obo' lanes -- through a THIRD lane, 'wake', which REFUSES BY NAME: an
+-- unattended close_prep wake names no directing human, so it authorises no amortisation plan.
+-- `clara._agent_prepayment_schedule_core` and `clara._propose_adjustment_template_core` are never
+-- reached from this wrapper again, which is the residual #1036 exists to close.
 --
--- THE ONE GENUINE ARCHITECTURAL PROBLEM, faced rather than routed around. `clara.create_accounting
--- _plan` and its OBO sibling `clara._obo_plan_core` (0193, #915, #941) BOTH resolve the plan's
--- authority through `clara._authority_ref_refusal`, which admits only an `accounting_work` row or
--- a `chat_turn`-kind `agent_tasks` row with a non-null `created_by` -- i.e. ONLY a person's own
--- instruction, BY DESIGN (0307 sec A's own words: "the wall that stops a wake run or an autodraft
--- from authorising its own amortisation schedule"). A `close_prep` wake is exactly that caller: its
--- credential is minted with `on_behalf_of` FORBIDDEN BY CONSTRUCTION (0138:827-830, "there is no
--- directing human on the clocked lane"), so it can never supply a ref that wall would admit, and
--- `clara.accounting_plans.authority_kind` is a closed one-member CHECK (`explicit_instruction`
--- only) -- widening it is a real schema change to the plan model this ticket does not make. So this
--- file adds ONE new ungranted core, `clara._prepayment_plan_core_wake`, in `clara._obo_plan_core`'s
--- shape MINUS the authority-instruction wall: the authority is recorded HONESTLY instead, as
--- `{kind:'agent_wake', wake_kind, task_id}` -- never dressed up as a person's instruction, and
--- `authorised_by`/`created_by` is `clara.agent_user_id()`, the estate's own "the agent wrote this"
--- idiom (0103:264, 0154's `proposed_by_agent`). Everything else the plan step does --
--- `clara._assert_plan_schedule`, `clara._assert_journal_basis`, the client advisory rung, the
--- overlap warning, the next-occurrences preview, the audit row -- is byte-identical in shape to the
--- human and OBO plan steps.
+-- WHY THE LANE REFUSES RATHER THAN CONFIGURING (the fix round, 2026-09-24; review findings ADV-01
+-- and L04-SPEC-02). The first cut of this file gave the wake lane its own plan step,
+-- `clara._prepayment_plan_core_wake`, in `clara._obo_plan_core`'s shape MINUS the
+-- authority-instruction wall, writing `authority_kind = 'explicit_instruction'` with
+-- `authorised_by = clara.agent_user_id()`. Two measured facts killed it:
 --
--- THE MULTIPLICITY KEY, carried forward from the retired core (0140:3618-3621, design close-key-1
--- Annex E): `clara._close_wake_ctx`'s op key is derived per (task, verb, CLIENT), so two source
--- entries amortised in ONE wake task would collide on ONE `clara._reserve_op(create_prepayment_
--- schedule, ...)` slot. The wrapper sub-keys by `p_op_key || ':' || p_source_entry`, exactly as the
--- retired core did.
+--   1. IT COULD NEVER POST. `clara.agent_user_id()` holds ZERO `clara.firm_memberships` rows
+--      (measured on this rig), and `clara._plan_admit_occurrence` (0308) hands the plan's
+--      `authorised_by` straight to `clara.admit_journal_work`, whose core raises CLR11
+--      `client_not_found` for an author with no membership. DRIVEN side by side: the wake plan's
+--      first occurrence answered {"admitted":false,"code":"CLR11","reason":"client_not_found"},
+--      an identical human-lane plan answered {"admitted":true,...}. Both the belt
+--      (`clara.wake_due_plan_occurrences`) and the human catch-up (`clara.request_plan_catch_up`)
+--      route through that ONE body, so no path could post. A schedule that looks configured and
+--      posts nothing, every month, with no audit row and no Work, is the failure 0308's own
+--      `clara._assert_plan_schedule` comment names as the worst this lane can have.
+--   2. IT LIED IN THE ONE COLUMN A READER FILTERS ON. `clara.accounting_plans.authority_kind` is a
+--      closed one-member CHECK whose member means "a person instructed this"; only `authority_ref`
+--      was honest about the clocked lane.
+--
+-- The wall the first cut stepped around is `clara._authority_ref_refusal`, narrowed by #977/0250
+-- and described by 0307 sec A as "the wall that stops a wake run or an autodraft from authorising
+-- its own amortisation schedule". A `close_prep` wake is exactly that caller: its credential is
+-- minted with `on_behalf_of` FORBIDDEN BY CONSTRUCTION (0138:827-830, "there is no directing human
+-- on the clocked lane"). That wall is the estate's accounting-authority control and it is right;
+-- the ticket's "with the same validation ... a person's own creation gets" cannot be honoured for
+-- the plan step, because a person's own creation supplies a person. So the lane answers the one
+-- thing that is true -- CLR03 `wake_authority_absent`, naming the wake kind it refused and
+-- `clara.create_prepayment_schedule` as the door that CAN configure this -- and writes nothing at
+-- all. Every OTHER acceptance criterion #1036 states (the template core's last caller gone, its
+-- grant matrix, the retirement recorded in this file's tail, the tripwire cell replaced) is
+-- delivered unchanged.
+--
+-- WHAT WOULD RE-OPEN THE LANE, stated so the next reader need not re-derive it: an OWNER decision
+-- on plan authority for the clocked lane -- either a directing human the estate can name for an
+-- unattended run, or a widened `clara.accounting_plans.authority_kind` TOGETHER WITH an admission
+-- body that accepts an agent-authored plan. Both are changes to the plan-authority model that
+-- #1036's own "Out of scope: any change to the prepayment door's own rules" forbids this file to
+-- make. `docs/plan/active/riders-2026-09-20/reports/wave4-lane04-fix.md` carries the question.
 --
 -- THE TEMPLATE CORE IS RETIRED, 0282's OWN WAY (a typed refusal, kept present rather than dropped,
 -- so a future reader who resolves it by name finds a sentence, not an absence). `clara._agent_
@@ -59,22 +72,26 @@
 -- above to say so.
 --
 -- WHAT THIS FILE DELIBERATELY DOES NOT DO.
---   · It does not widen `clara.accounting_plans.authority_kind` or touch `clara._authority_ref_
+--   * It does not widen `clara.accounting_plans.authority_kind` or touch `clara._authority_ref_
 --     refusal`, `clara.create_accounting_plan`, `clara._obo_plan_core` or `clara._prepayment_plan_
---     core` -- the human and OBO plan lanes are pinned unconditionally below and take neither
---     branch this file adds.
---   · It does not change the roster gate, the expense-account wall, the term derivation or the
+--     core` -- the human and OBO plan lanes are pinned unconditionally below and neither is
+--     reached by the branch this file adds.
+--   * It does not change the roster gate, the expense-account wall, the term derivation or the
 --     dedupe/idempotency machinery `clara._prepayment_schedule_core` already carries for every
 --     lane -- `Out of scope: any change to the prepayment door's own rules` (the ticket's own
---     words). The 'wake' branch changes ONLY which function drafts the plan.
---   · It does not enable `clara.wake_engine_sources.close_prep` -- `Out of scope: enabling the
+--     words). The 'wake' branch adds ONE refusal ahead of all of them and changes nothing else.
+--   * It does not enable `clara.wake_engine_sources.close_prep` -- `Out of scope: enabling the
 --     close_prep source on hosted` (the ticket's own words). The flag stays exactly as #927/#929
---     left it; this file only makes the path SAFE to enable, by giving it somewhere real to land.
---   · It does not write `clara.agent_act_receipts`. That table's F-A4 Tier-A/B/C rung discipline
---     belonged to the retired core; the 'wake' lane's refusals now RAISE, exactly as a human's or a
---     chat configuration's do (the ticket's own words: "the same validation... and refusals a
---     person's own creation gets"), and its idempotency rides `clara._reserve_op`/`clara._finish_
---     op`, the newer and stronger mechanism #915/#939/#940 already proved for this door.
+--     left it, and the refusal is unconditional on it (driven inside a rolled-back flip by
+--     `p1036.refused`).
+--   * It does not write `clara.agent_act_receipts`. That table's F-A4 Tier-A/B/C rung discipline
+--     belonged to the retired core; the 'wake' lane now RAISES, exactly as a human's or a chat
+--     configuration's refusals do, and a raised refusal writes nothing anywhere -- there is no
+--     durable act left for a receipt to describe (review finding L04-SPEC-05, answered here in the
+--     header rather than only in a test comment).
+--   * It does not re-derive the retired core's per-(task, verb, CLIENT) multiplicity sub-key
+--     (0140:3618-3621). The 'wake' lane reserves no operation at all, because it refuses before
+--     `clara._reserve_op`; the sub-key returns with the lane if the owner ever re-opens it.
 --
 -- ==================== THE PRESTATE PINS ARE PER BODY, NOT GLOBAL ====================
 -- 0305/0306/0307/0308 state the reasoning in full and this file inherits it: each RECUT body admits
@@ -173,23 +190,34 @@ begin
     end if;
   end loop;
 
-  -- THE ONE NEW FUNCTION IS BORN HERE. On a redo it already exists, stated rather than silently
-  -- tolerated.
+  -- THE AGENT PLAN LANE. This file's FIRST cut created clara._prepayment_plan_core_wake; the fix
+  -- round drops it (see this file's header). Three estates can reach this line and each is named
+  -- rather than silently tolerated: a fresh chain (never created), a redo of the first cut (exists,
+  -- and §A drops it), and a redo of THIS cut (already dropped).
   select count(*)::int into v_i from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'clara' and p.proname = '_prepayment_plan_core_wake';
   if v_i = 0 then
-    raise notice '#1036 prestate: FIRST APPLY -- clara._prepayment_plan_core_wake does not exist yet. Recut modes: %', v_modes;
+    raise notice '#1036 prestate: clara._prepayment_plan_core_wake is absent (fresh chain, or a redo of the fix round). Recut modes: %', v_modes;
   else
-    raise notice '#1036 prestate: REDO -- clara._prepayment_plan_core_wake already exists. Recut modes: %', v_modes;
+    raise notice '#1036 prestate: clara._prepayment_plan_core_wake EXISTS -- this estate ran this file''s first cut; §A drops it. Recut modes: %', v_modes;
   end if;
 
-  -- THE RESIDUAL THIS FILE CLOSES, measured one more time before it is closed: exactly ONE function
-  -- in the whole clara schema mentions the template core by name, and it is the agent core this
-  -- file is about to retire.
+  -- THE RESIDUAL THIS FILE CLOSES, measured one more time before it is closed. The expected count
+  -- is MODE-DEPENDENT and the mode is the one already resolved above, never guessed: on a FIRST
+  -- apply exactly ONE clara function mentions the template core by name and it is the agent core
+  -- this file is about to retire; on a REDO that core already carries this file's retirement, so
+  -- the count is ZERO and a 1 would mean the retirement had been undone underneath us. Getting
+  -- this wrong is not cosmetic -- the file's first cut expected 1 unconditionally and could not be
+  -- redone at all.
   select count(*)::int into v_i from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'clara' and p.prosrc ilike '%_propose_adjustment_template_core%';
-  if v_i <> 1 then
-    raise exception '#1036 prestate: % clara function(s) mention _propose_adjustment_template_core by name, not the expected 1 (clara._agent_prepayment_schedule_core) -- the residual this ticket closes has moved',
+  if position('clara._agent_prepayment_schedule_core(jsonb,uuid,uuid,text,text,text,jsonb,text)=REDO' in v_modes) > 0 then
+    if v_i <> 0 then
+      raise exception '#1036 prestate: REDO -- % clara function(s) still mention _propose_adjustment_template_core by name, not the expected 0 (this file already retired its one caller)',
+        v_i using errcode='CLR10';
+    end if;
+  elsif v_i <> 1 then
+    raise exception '#1036 prestate: FIRST APPLY -- % clara function(s) mention _propose_adjustment_template_core by name, not the expected 1 (clara._agent_prepayment_schedule_core) -- the residual this ticket closes has moved',
       v_i using errcode='CLR10';
   end if;
 end
@@ -198,100 +226,37 @@ $t1036_pre$;
 set role clara_fn_owner;
 
 -- =====================================================================================
--- §A — clara._prepayment_plan_core_wake — THE PLAN STEP THE WAKE LANE TAKES.
+-- §A — clara._prepayment_plan_core_wake — THE PLAN STEP THE WAKE LANE DOES NOT TAKE.
 --
--- IN clara._obo_plan_core's SHAPE (0308), MINUS THE AUTHORITY-INSTRUCTION WALL. Everything from
--- the purpose check onward is the same rung order the human and OBO plan steps take; the ONE
--- structural difference is what precedes it -- a shape check on the wake's own honest authority
--- payload, never clara._authority_ref_refusal (see this file's header for why that wall cannot be
--- asked here at all).
+-- DROPPED (the fix round; review findings ADV-01, L04-SPEC-02, STD-1). The first cut of this file
+-- created it, in `clara._obo_plan_core`'s shape minus the authority-instruction wall. It is gone
+-- for the reasons this file's header measures: the plan it wrote could never admit an occurrence,
+-- and its `authority_kind` said `explicit_instruction` about a clocked run. Dropping it also
+-- removes the ~25 duplicated lines of `clara._obo_plan_core`'s plan-write tail that STD-1 filed --
+-- the estate is back to exactly TWO plan-writing bodies for this family, `clara.create_accounting_
+-- plan` (human) and `clara._prepayment_plan_core` / `clara._obo_plan_core` (on-behalf-of), both
+-- pinned unconditionally below and both asking `clara._authority_ref_refusal`.
 --
--- UNGRANTED (the one-ungranted-core law, 0004:6-12), reachable only from clara._prepayment_
--- schedule_core's 'wake' branch.
+-- `if exists` because this file is REDO-SAFE by construction (#957): on a fresh chain the function
+-- was never created, on a redo of an estate that ran this file's FIRST cut it exists and goes.
+-- The tail asserts its ABSENCE positively rather than trusting this statement.
 -- =====================================================================================
 
-create function clara._prepayment_plan_core_wake(
-    p_firm uuid, p_client uuid, p_actor uuid, p_purpose text, p_authority_ref jsonb,
-    p_frequency text, p_day_rule text, p_day_of_month int, p_timezone text,
-    p_effective_from date, p_effective_to date, p_basis jsonb) returns jsonb
-  language plpgsql security definer set search_path = clara, pg_temp as $$
-declare
-  v_plan uuid; v_rev uuid; v_digest text; v_warning jsonb; v_next jsonb;
-begin
-  -- #1036 -- THE WAKE LANE'S OWN AUTHORITY SHAPE, asserted rather than assumed (law 2). An
-  -- unattended close_prep wake names no person, so this core does not ask clara._authority_ref_
-  -- refusal at all -- it records the authority HONESTLY: kind 'agent_wake', naming the wake_kind
-  -- and the mechanically-bound task that drove it (clara._close_wake_ctx's own `task_id`), never a
-  -- person's instruction and never dressed as one. Unreachable with a malformed payload from the
-  -- one caller that exists (the wrapper always builds this object), so this is a construction
-  -- invariant, checked rather than trusted.
-  if p_authority_ref is null or jsonb_typeof(p_authority_ref) <> 'object'
-     or p_authority_ref ->> 'kind' is distinct from 'agent_wake'
-     or nullif(btrim(coalesce(p_authority_ref ->> 'wake_kind', '')), '') is null
-     or nullif(btrim(coalesce(p_authority_ref ->> 'task_id', '')), '') is null then
-    raise exception 'clara._prepayment_plan_core_wake: malformed wake authority reference'
-      using errcode='CLR10',
-        detail='{"reason":"authority_ref_invalid","constraint":"agent_wake_shape"}';
-  end if;
-
-  if p_purpose is null or btrim(p_purpose) = '' then
-    raise exception 'an accounting plan needs a purpose' using errcode='CLR10',
-      detail='{"reason":"invalid_purpose","constraint":"nonempty"}';
-  end if;
-  perform clara._assert_plan_schedule('amortisation_schedule', p_frequency, p_day_rule,
-    p_day_of_month, p_timezone, p_effective_from, p_effective_to, null);
-  perform clara._assert_journal_basis(p_basis);
-  v_digest := clara._journal_basis_digest(p_basis);
-
-  perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
-
-  v_plan := gen_random_uuid();
-  insert into clara.accounting_plans(id, firm_id, client_id, kind, status, purpose, authority_kind,
-      authority_ref, authorised_by, authority_from, current_revision, created_by)
-    values (v_plan, p_firm, p_client, 'amortisation_schedule', 'active', btrim(p_purpose),
-      'explicit_instruction', p_authority_ref, p_actor, p_effective_from, 1, p_actor);
-  insert into clara.accounting_plan_revisions(plan_id, firm_id, client_id, plan_kind, revision,
-      frequency, day_rule, day_of_month, timezone, effective_from, effective_to, basis,
-      basis_digest, auto_reverse, reversal_day_rule, created_by)
-    values (v_plan, p_firm, p_client, 'amortisation_schedule', 1, p_frequency, p_day_rule,
-      p_day_of_month, p_timezone, p_effective_from, p_effective_to, p_basis, v_digest, false,
-      null, p_actor)
-    returning id into v_rev;
-
-  v_warning := clara._plan_overlap_warning(p_client, p_basis, v_plan);
-  select jsonb_agg(jsonb_build_object('due_date', to_char(e.due_date,'YYYY-MM-DD'), 'leg', e.leg)
-           order by e.due_date) into v_next
-    from clara._plan_due_events(p_effective_from, p_frequency, p_day_rule, p_day_of_month, false,
-           p_effective_from, coalesce(p_effective_to, (p_effective_from + 3650)), 3) e;
-
-  -- THE AUDIT ROW IS 0193'S OWN VERB with this file's `via`, exactly as 0222's and 0307's cores
-  -- stamp their own: the audit trail says a plan was created and by WHICH entrance.
-  perform clara._audit(p_firm, p_actor, null, null, 'create_accounting_plan', null,
-    jsonb_build_object('client', p_client, 'plan', v_plan, 'kind', 'amortisation_schedule',
-      'revision', 1, 'authority', p_authority_ref, 'via', 'wake_establish_prepayment_schedule'));
-
-  return jsonb_build_object('plan_id', v_plan, 'revision_id', v_rev, 'revision', 1,
-    'status', 'active', 'kind', 'amortisation_schedule',
-    'next_occurrences', coalesce(v_next,'[]'::jsonb), 'overlap_warning', v_warning);
-end $$;
-revoke all on function clara._prepayment_plan_core_wake(uuid,uuid,uuid,text,jsonb,text,text,int,text,date,date,jsonb) from public;
-comment on function clara._prepayment_plan_core_wake(uuid,uuid,uuid,text,jsonb,text,text,int,text,date,date,jsonb) is
-  '#1036: the amortisation plan step for the WAKE lane, in clara._obo_plan_core''s shape (0308) '
-  'minus the person-instruction wall -- an unattended close_prep wake names no person, so the '
-  'authority is recorded honestly as {kind:''agent_wake'',wake_kind,task_id} and clara._authority_'
-  'ref_refusal is never asked. UNGRANTED: reached only from clara._prepayment_schedule_core''s '
-  '''wake'' lane.';
+drop function if exists clara._prepayment_plan_core_wake(
+  uuid, uuid, uuid, text, jsonb, text, text, int, text, date, date, jsonb);
 
 -- =====================================================================================
--- §B — clara._prepayment_schedule_core — RECUT: A THIRD LANE, 'wake'.
+-- §B — clara._prepayment_schedule_core — RECUT: A THIRD LANE, 'wake', WHICH REFUSES.
 --
 -- THE SAME BODY #915/#939/#940 built, with EXACTLY two changes (diffed against the live pre-image
--- in this file's own report): the lane closed-set widens to admit 'wake', and the plan-step branch
--- gains one more arm calling clara._prepayment_plan_core_wake instead of clara.create_accounting_
--- plan / clara._prepayment_plan_core. Nothing else moved -- the purpose wall, the op reservation,
--- the duplicate check, the document/memo branch, #940's roster gate, 0042's shared negative wall,
--- the expense half, the allocation, the basis rung, the insert race and the audit are byte-for-byte
--- what the human and OBO lanes already ran.
+-- in this file's own report): the lane closed-set widens to admit 'wake', and the 'wake' lane is
+-- answered by ONE typed refusal placed ahead of every other rung -- ahead of the op reservation,
+-- so a refused wake reserves nothing and leaves no receipt behind, and ahead of the input walls,
+-- so a wake is never told to fix an expense account on a lane that would refuse it whatever it
+-- sent. Nothing else moved -- the purpose wall, the op reservation, the duplicate check, the
+-- document/memo branch, #940's roster gate, 0042's shared negative wall, the expense half, the
+-- allocation, the basis rung, the plan step, the insert race and the audit are byte-for-byte what
+-- the human and OBO lanes already ran, and the plan step is back to its TWO arms.
 -- =====================================================================================
 
 create or replace function clara._prepayment_schedule_core(
@@ -320,6 +285,41 @@ begin
     raise exception 'clara._prepayment_schedule_core: unknown lane %', coalesce(p_lane, '(null)')
       using errcode='CLR10', detail='{"reason":"prepayment_lane_unknown"}';
   end if;
+
+  -- #1036 (fix round) -- THE WAKE LANE AUTHORISES NO PLAN, AND SAYS SO FIRST.
+  --
+  -- An amortisation schedule is a PLAN, and every plan in this estate names the person whose
+  -- instruction authorises it: clara.create_accounting_plan and clara._obo_plan_core both resolve
+  -- that person through clara._authority_ref_refusal, and clara._plan_admit_occurrence then posts
+  -- each month's Work AS that person (0308: `clara.admit_journal_work(p.client_id,
+  -- p.authorised_by, ...)`, which re-checks their membership, activity and rank). An unattended
+  -- close_prep wake has no such person -- clara.mint_wake_credential_for_task forbids
+  -- `on_behalf_of` BY CONSTRUCTION (0138:827-830) -- so a plan written on this lane could never
+  -- admit a single occurrence. MEASURED, not reasoned: the first cut of this file wrote one, and
+  -- its first occurrence answered CLR11 `client_not_found` while an identical human-lane plan
+  -- answered `admitted`. Configuring something that can never run is worse than refusing, so the
+  -- lane refuses.
+  --
+  -- WHY IT IS ANSWERED HERE rather than in the wrapper: this is the ONE body every entrance to
+  -- this door shares (#915's whole argument), so every reason the door can refuse is readable in
+  -- one place, and re-opening the lane later is one arm in one body rather than a second door.
+  --
+  -- THE REFUSAL NAMES THE DOOR THAT CAN DO IT (0140's own "the refusal NAMES what to record and
+  -- where"): a person configures this recognition through clara.create_prepayment_schedule.
+  if p_lane = 'wake' then
+    raise exception 'an unattended % wake names no directing human, so it cannot authorise an amortisation plan',
+      coalesce(p_authority_ref ->> 'wake_kind', 'agent')
+      using errcode='CLR03',
+        detail=jsonb_build_object(
+          'reason','wake_authority_absent',
+          'reason_text','an unattended wake names no directing human, so it cannot authorise an amortisation plan',
+          'lane','wake',
+          'wake_kind', p_authority_ref ->> 'wake_kind',
+          'task_id', p_authority_ref ->> 'task_id',
+          'source_entry', p_source_entry,
+          'remedy','clara.create_prepayment_schedule')::text;
+  end if;
+
   if p_purpose is null or btrim(p_purpose) = '' then
     raise exception 'a prepayment schedule needs a purpose' using errcode='CLR10',
       detail='{"reason":"invalid_purpose","constraint":"nonempty"}';
@@ -733,6 +733,11 @@ begin
   -- not. It costs the OBO lane nothing — the outer `create_prepayment_schedule` key already covers
   -- the whole configuration, and a second reservation under a DERIVED key would only be reachable
   -- by a caller that could name it, which no runtime caller can.
+  --
+  -- #1036 (fix round) -- AND THERE IS NO THIRD ARM. The 'wake' lane never reaches this line: it is
+  -- answered by the typed refusal at the top of this body, because the estate has no person for a
+  -- clocked run to write a plan under. Two arms, two plan-writing bodies, both asking
+  -- clara._authority_ref_refusal -- which is the invariant this door now carries end to end.
   if p_lane = 'human' then
     v_plan := clara.create_accounting_plan(
       p_client => p_client, p_kind => 'amortisation_schedule', p_purpose => btrim(p_purpose),
@@ -740,22 +745,10 @@ begin
       p_frequency => 'monthly', p_day_rule => 'last_day_of_month', p_day_of_month => null,
       p_timezone => 'Asia/Kuala_Lumpur', p_effective_from => v_from, p_effective_to => v_to,
       p_basis => v_basis, p_reversal_day_rule => null, p_op_key => p_op_key || ':plan');
-  elsif p_lane = 'obo' then
+  else
     v_plan := clara._prepayment_plan_core(
       p_firm => p_firm, p_client => p_client, p_author => p_actor, p_purpose => btrim(p_purpose),
       p_authority_kind => 'explicit_instruction', p_authority_ref => p_authority_ref,
-      p_frequency => 'monthly', p_day_rule => 'last_day_of_month', p_day_of_month => null,
-      p_timezone => 'Asia/Kuala_Lumpur', p_effective_from => v_from, p_effective_to => v_to,
-      p_basis => v_basis);
-  else
-    -- #1036 -- THE WAKE LANE. An unattended close_prep wake names no person (0138:827-830), so the
-    -- plan step runs through clara._prepayment_plan_core_wake, which records the authority
-    -- HONESTLY (kind 'agent_wake') and never asks clara._authority_ref_refusal -- that wall exists
-    -- precisely to stop an unattended run from authorising its own schedule (0307 sec A /
-    -- clara._obo_plan_core), and this lane IS that caller, by construction, not by omission.
-    v_plan := clara._prepayment_plan_core_wake(
-      p_firm => p_firm, p_client => p_client, p_actor => p_actor, p_purpose => btrim(p_purpose),
-      p_authority_ref => p_authority_ref,
       p_frequency => 'monthly', p_day_rule => 'last_day_of_month', p_day_of_month => null,
       p_timezone => 'Asia/Kuala_Lumpur', p_effective_from => v_from, p_effective_to => v_to,
       p_basis => v_basis);
@@ -866,36 +859,41 @@ declare v_ctx jsonb; v_purpose text; v_authority jsonb;
 begin
   v_ctx := clara._close_wake_ctx('wake_establish_prepayment_schedule', 'client', p_client, p_op_key);
 
-  -- #1036 -- p_rationale DOUBLES AS THE PLAN'S PURPOSE: the shared core's own purpose wall (below,
-  -- inside clara._prepayment_schedule_core) needs something non-blank, and the model's stated
-  -- rationale for amortising this recognition is exactly that sentence -- refused by the CORE's own
-  -- wall, never duplicated here. p_model is accepted for signature stability (the ticket keeps this
-  -- door's name and arguments unchanged) and carries nothing this lane still reads: the request-
-  -- digest/receipt machinery that once consumed it belonged to the retired agent core.
+  -- #1036 -- p_rationale DOUBLES AS THE PLAN'S PURPOSE, kept even though the lane refuses ahead of
+  -- the purpose wall: the wrapper's job is to translate this door's seven arguments into the
+  -- shared core's, and a translation that silently dropped one would be a second contract. p_model
+  -- is accepted for signature stability (the ticket keeps this door's name and arguments
+  -- unchanged) and carries nothing this lane still reads: the request-digest/receipt machinery
+  -- that once consumed it belonged to the retired agent core.
   v_purpose := nullif(btrim(coalesce(p_rationale, '')), '');
 
-  -- THE AUTHORITY IS RECORDED HONESTLY, never as a person's instruction (this file's header
-  -- explains why clara._obo_plan_core cannot be asked here at all).
+  -- THE AUTHORITY IS DESCRIBED HONESTLY, never as a person's instruction: kind 'agent_wake',
+  -- naming the wake kind and the mechanically-bound task that drove it (clara._close_wake_ctx's
+  -- own `task_id`). It is not written to any row -- the shared core refuses this lane -- it is
+  -- what the refusal QUOTES back, so an operator reading the answer can see which clocked run
+  -- asked and under which task.
   v_authority := jsonb_build_object('kind', 'agent_wake', 'wake_kind', v_ctx ->> 'wake_kind',
     'task_id', v_ctx ->> 'task_id');
 
-  -- THE SUB-KEY, the retired core's own idiom (0140:3618-3621): clara._close_wake_ctx derives its
-  -- key per (task, verb, CLIENT), so two source entries amortised in ONE wake task would otherwise
-  -- collide on ONE clara._reserve_op(create_prepayment_schedule, ...) slot.
+  -- NO SUB-KEY. The retired core derived one per (task, verb, CLIENT) (0140:3618-3621) because two
+  -- source entries amortised in ONE wake task would otherwise collide on a single
+  -- clara._reserve_op(create_prepayment_schedule, ...) slot. This lane reserves nothing -- the
+  -- shared core refuses before the reservation -- so the derived key would be a key for an
+  -- operation that never happens. It returns with the lane if the owner re-opens it.
   return clara._prepayment_schedule_core(p_firm => (v_ctx ->> 'firm_id')::uuid,
     p_client => p_client, p_actor => clara.agent_user_id(), p_lane => 'wake',
     p_source_entry => p_source_entry, p_expense_account => p_target_account,
     p_expense_basis => p_target_basis, p_purpose => v_purpose, p_authority_ref => v_authority,
-    p_op_key => p_op_key || ':' || p_source_entry::text);
+    p_op_key => p_op_key);
 end $wake$;
 
 comment on function clara.wake_establish_prepayment_schedule(uuid, uuid, text, text, text, jsonb, text) is
-  '#1036: wrapper 12, REROUTED. Reaches clara._prepayment_schedule_core''s ''wake'' lane and lands '
-  'in clara.prepayment_schedules -- the same durable record a person''s own configuration does -- '
-  'with the same roster gate, expense-account wall, term derivation and op-key idempotency. Never '
-  'reaches clara._agent_prepayment_schedule_core or clara._propose_adjustment_template_core again '
-  '(both retired as this door''s callers). DRAFT-ONLY BY CONSTRUCTION: configuration_only=true, '
-  'exactly like the human and chat entrances.';
+  '#1036: wrapper 12, REROUTED onto clara._prepayment_schedule_core''s ''wake'' lane, which '
+  'REFUSES: an unattended close_prep wake names no directing human (0138:827-830), so it '
+  'authorises no amortisation plan, and the answer is CLR03 wake_authority_absent naming '
+  'clara.create_prepayment_schedule as the door that can. Never reaches '
+  'clara._agent_prepayment_schedule_core or clara._propose_adjustment_template_core again (both '
+  'retired as this door''s callers) and mints no clara.adjustment_templates row.';
 
 -- =====================================================================================
 -- §D — clara._agent_prepayment_schedule_core — RETIRED, 0282's OWN WAY.
@@ -929,7 +927,6 @@ do $t1036_tail$
 declare
   v_n int; v_sig text; v_src text; v_sha text; v_acl text;
   v_expect text[] := array[
-    'clara._prepayment_plan_core_wake(uuid,uuid,uuid,text,jsonb,text,text,int,text,date,date,jsonb)',
     'clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)',
     'clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)',
     'clara._agent_prepayment_schedule_core(jsonb,uuid,uuid,text,text,text,jsonb,text)'
@@ -959,7 +956,7 @@ declare
      '000c730cd29d6544b014ecb0635fc30d9a238f23cdbd8d224ae8f4331086e2f1']
   ];
 begin
-  -- 1 · THE FOUR TOUCHED/NEW FUNCTIONS RESOLVE AT THEIR EXACT SIGNATURES, this estate's posture:
+  -- 1 · THE THREE TOUCHED FUNCTIONS RESOLVE AT THEIR EXACT SIGNATURES, this estate's posture:
   --     owned by clara_fn_owner, SECURITY DEFINER, search_path pinned.
   foreach v_sig in array v_expect loop
     if to_regprocedure(v_sig) is null then
@@ -984,7 +981,6 @@ begin
     raise exception '#1036 tail: wake_establish_prepayment_schedule gained a grant it must not hold (%)', v_acl using errcode='CLR10';
   end if;
   foreach v_sig in array array[
-      'clara._prepayment_plan_core_wake(uuid,uuid,uuid,text,jsonb,text,text,int,text,date,date,jsonb)',
       'clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)',
       'clara._agent_prepayment_schedule_core(jsonb,uuid,uuid,text,text,text,jsonb,text)'] loop
     select coalesce(array_to_string(p.proacl::text[],'|'),'(default)') into v_acl
@@ -1026,6 +1022,36 @@ begin
    where p.oid = 'clara._agent_prepayment_schedule_core(jsonb,uuid,uuid,text,text,text,jsonb,text)'::regprocedure;
   if position('_propose_adjustment_template_core' in v_src) > 0 then
     raise exception '#1036 tail: the retired agent core still mentions the template core' using errcode='CLR10';
+  end if;
+
+  -- 4b · THE AGENT PLAN LANE IS ABSENT, AND SO IS EVERY OTHER BODY THAT WOULD WRITE A PLAN UNDER
+  --      THE AGENT'S OWN IDENTITY. Not "the one I dropped is gone" -- the property, by text, so a
+  --      future body that re-opened the lane under another name is caught here too.
+  select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara' and p.proname = '_prepayment_plan_core_wake';
+  if v_n <> 0 then
+    raise exception '#1036 tail: clara._prepayment_plan_core_wake still exists -- the agent plan lane must be dropped'
+      using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara' and p.prosrc ilike '%insert into clara.accounting_plans%'
+     and p.prosrc ilike '%agent_user_id%';
+  if v_n <> 0 then
+    raise exception '#1036 tail: % clara function(s) write a clara.accounting_plans row under clara.agent_user_id() -- such a plan can never admit an occurrence',
+      v_n using errcode='CLR10';
+  end if;
+
+  -- 4c · THE WAKE LANE'S REFUSAL IS IN THE SHARED BODY, by name, and the body still knows the
+  --      lane -- so neither half can be lost without this file's own tail catching it.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)'::regprocedure;
+  if position('wake_authority_absent' in v_src) = 0 then
+    raise exception '#1036 tail: clara._prepayment_schedule_core does not refuse the wake lane by name'
+      using errcode='CLR10';
+  end if;
+  if position('_prepayment_plan_core_wake' in v_src) > 0 then
+    raise exception '#1036 tail: clara._prepayment_schedule_core still calls the dropped agent plan core'
+      using errcode='CLR10';
   end if;
 
   -- 5 · THE RESIDUAL IS CLOSED: NO function anywhere in clara mentions the template core by name.
@@ -1071,6 +1097,6 @@ begin
     end if;
   end loop;
 
-  raise notice '#1036 tail: OK -- wrapper 12 reroutes to clara._prepayment_schedule_core''s new ''wake'' lane through clara._prepayment_plan_core_wake, keeps its exact signature/ACL (clara_wake_interactive only), and the close_prep allowlist is untouched at thirteen rows. clara._agent_prepayment_schedule_core is retired to an unconditional refusal at its pre-#1036 signature/ACL. clara._propose_adjustment_template_core is byte-unchanged, still ungranted, and now has ZERO callers anywhere in the clara schema''s own text -- the residual plan-overlap-template-arm-retired.test.mjs''s p929.containment cell pinned is closed. Eleven unconditional neighbours (the human and OBO plan lanes, both prepayment doors, the wake ctx ladder and the five plan-writing helpers) are byte-identical to their measured pre-images.';
+  raise notice '#1036 tail: OK -- wrapper 12 reroutes to clara._prepayment_schedule_core''s ''wake'' lane, which REFUSES CLR03 wake_authority_absent (an unattended close_prep wake names no directing human, so it authorises no amortisation plan) and writes nothing; the wrapper keeps its exact signature/ACL (clara_wake_interactive only) and the close_prep allowlist is untouched at thirteen rows. clara._prepayment_plan_core_wake is DROPPED and no clara body writes an accounting plan under clara.agent_user_id(). clara._agent_prepayment_schedule_core is retired to an unconditional refusal at its pre-#1036 signature/ACL. clara._propose_adjustment_template_core is byte-unchanged, still ungranted, and now has ZERO callers anywhere in the clara schema''s own text -- the residual plan-overlap-template-arm-retired.test.mjs''s p929.containment cell pinned is closed. Eleven unconditional neighbours (the human and OBO plan lanes, both prepayment doors, the wake ctx ladder and the five plan-writing helpers) are byte-identical to their measured pre-images.';
 end
 $t1036_tail$;

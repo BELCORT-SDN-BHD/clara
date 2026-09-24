@@ -1,9 +1,27 @@
 // #1036 (riders wave 4, lane 04) — the agent-lane prepayment wake door
-// (`clara.wake_establish_prepayment_schedule`) stops proposing a retired 0045 adjustment template
-// and lands in the SAME durable record a person's own configuration does. Migration:
-// 0315_prepayment_wake_reroute.sql. Frontier-gated on its own STABLE STEM
+// (`clara.wake_establish_prepayment_schedule`) stops proposing a retired 0045 adjustment template.
+// Migration: 0315_prepayment_wake_reroute.sql. Frontier-gated on its own STABLE STEM
 // (`prepayment_wake_reroute$`), never its number — numbers are claimed at merge
 // (packages/db/README.md) — the `prepayment_schedule_obo_twin$` idiom.
+//
+// WHAT THE FIX ROUND CHANGED, AND WHY THIS FILE'S SUBJECT MOVED WITH IT (ADV-01 / L04-SPEC-02).
+// The first cut of #1036 rerouted the wrapper onto `clara._prepayment_schedule_core`'s new 'wake'
+// lane AND gave that lane its own plan step, `clara._prepayment_plan_core_wake`, which wrote a
+// `clara.accounting_plans` row with `authorised_by = clara.agent_user_id()`. Measured on this rig:
+// the agent user holds ZERO `clara.firm_memberships` rows, and `clara._plan_admit_occurrence`
+// hands the plan's `authorised_by` to `clara.admit_journal_work`, which raises CLR11
+// `client_not_found` for an author with no membership. So that plan was configured and could never
+// post — every month, forever — which is the failure 0308's own `clara._assert_plan_schedule`
+// comment calls the worst this lane can have. The wall the first cut stepped around
+// (`clara._authority_ref_refusal`, narrowed by #977/0250 and quoted by 0307 as "the wall that
+// stops a wake run or an autodraft from authorising its own amortisation schedule") is the
+// estate's accounting-authority control, and it was right.
+//
+// So the lane now REFUSES at configuration time, by name, and writes nothing: an unattended
+// `close_prep` wake names no directing human (`clara.mint_wake_credential_for_task` forbids
+// `on_behalf_of` BY CONSTRUCTION, 0138:827-830), so it authorises no amortisation plan. The
+// ticket's real deliverable — `clara._propose_adjustment_template_core` loses its last caller and
+// the wake can never mint a retired 0045 template again — is unchanged and is proved below.
 //
 // CONTRACT-BLIND against the migration's own tail: its `raise notice … OK` describes one apply,
 // this file describes the live catalog and the door's behaviour, driven for real.
@@ -17,8 +35,9 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { withTxn } from "./rig-txn.mjs";
 import { humanQuery } from "./rig-helpers.mjs";
+import { instructionRef } from "./accounting-plans-fixtures.mjs";
 import {
-  ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, wake12, caught, uniq, opk,
+  ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, wake12, caught, opk,
 } from "./f-a4-pr2a-fixtures.mjs";
 let skipped = 0;
 const markSkip = () => { skipped += 1; };
@@ -28,6 +47,9 @@ after(async () => {
     console.log(`p1036: ${skipped} cell(s) skipped -- probed at the live catalog`);
   }
 });
+
+/** The agent identity every wake act is attributed to (0002's one fixed row). */
+const AGENT = "00000000-0000-4000-8000-000000c1a7a0";
 
 // A SECOND, INDEPENDENT gate, on THIS ticket's own migration: the F-A4 PR-2a frontier (`hasPR2A`)
 // is true from 0140 onward, long before #1036 exists, so a cell here needs its OWN stem check --
@@ -63,34 +85,49 @@ async function rerouteGate(t) {
   return false;
 }
 
-/** The human door, called for real, so a refusal cell can compare it byte for byte against the
- *  wake's own answer. Mirrors clara.create_prepayment_schedule's own seven arguments. */
-function humanCreate(sub, sc, { account = sc.target, basis = "human battery basis",
-    purpose = "p1036 human comparison", opKey } = {}) {
-  return humanQuery(sub,
+/** The human door, called for real — the CONTRAST every refusal cell below is measured against.
+ *  Mirrors clara.create_prepayment_schedule's own seven arguments. */
+async function humanCreate(sub, sc, { account = sc.target, basis = "human battery basis",
+    purpose = "p1036 human comparison", ref = null, opKey } = {}) {
+  const r = await humanQuery(sub,
     `select clara.create_prepayment_schedule($1::uuid,$2::uuid,$3,$4,$5,$6::jsonb,$7) as r`,
     [sc.client, sc.entry, account, basis, purpose,
-      JSON.stringify({ kind: "chat_task", id: sc.entry }), // deliberately invalid ref; only used
-                                                            // for the SHARED refusals below, never
-                                                            // for a call expected to SUCCEED.
-      opKey ?? opk("p1036-human")]).then((r) => r.rows[0].r);
+      // An invalid ref unless a cell supplies a real one: the shared refusals below never reach
+      // the plan step, and a cell that expects the door to SUCCEED passes `ref`.
+      JSON.stringify(ref ?? { kind: "chat_task", id: sc.entry }),
+      opKey ?? opk("p1036-human")]);
+  return r.rows[0].r;
+}
+
+/** Every durable thing a wake call could leave behind, for one client. */
+async function durableFootprint(sc) {
+  const r = await rootQuery(
+    `select (select count(*)::int from clara.prepayment_schedules where client_id = $1) as schedules,
+            (select count(*)::int from clara.accounting_plans where client_id = $1) as plans,
+            (select count(*)::int from clara.adjustment_templates where firm_id = $2) as templates,
+            (select count(*)::int from clara.op_receipts where firm_id = $2
+              and fn = 'create_prepayment_schedule') as reservations`,
+    [sc.client, sc.firm]);
+  return r.rows[0];
 }
 
 // ---------------------------------------------------------------------------------------------
-// AC1 — THE WAKE PRODUCES A REAL SCHEDULE, WITH ITS OCCURRENCES, AND NO ADJUSTMENT TEMPLATE.
+// AC1 (as the fix round re-cut it) — THE WAKE REFUSES BY NAME AND WRITES NOTHING, AND THE HUMAN
+// DOOR ON THE SAME SCENE CONFIGURES A SCHEDULE WHOSE PLAN CAN ACTUALLY POST.
 // ---------------------------------------------------------------------------------------------
-test("p1036.acted -- with close_prep ENABLED (a rolled-back flip), the wake door configures a real "
-  + "prepayment schedule with its occurrences, and mints NO clara.adjustment_templates row",
+test("p1036.refused -- with close_prep ENABLED (a rolled-back flip), the wake door refuses CLR03 "
+  + "wake_authority_absent, writes NO schedule, NO plan and NO adjustment template; the same scene "
+  + "through the HUMAN door configures a schedule whose plan ADMITS its first occurrence",
 async (t) => {
   if (await rerouteGate(t)) return;
-  const sc = await prepaidScene("p1036acted");
+  const sc = await prepaidScene("p1036refused");
   await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
 
-  const templatesBefore = await rootQuery(
-    "select count(*)::int as n from clara.adjustment_templates where firm_id = $1", [sc.firm]);
-  assert.equal(templatesBefore.rows[0].n, 0, "the scene already carries a template -- fixture leak");
+  const before = await durableFootprint(sc);
+  assert.equal(before.schedules, 0, "the scene already carries a schedule -- fixture leak");
+  assert.equal(before.templates, 0, "the scene already carries a template -- fixture leak");
 
-  let r;
+  let err;
   await withTxn(async (c) => {
     await c.query(
       `update clara.wake_engine_sources
@@ -101,176 +138,147 @@ async (t) => {
     assert.equal(flipped.rows[0].enabled, true, "the mutant could not flip the flag");
     // THE ACT ITSELF, inside the SAME rolled-back transaction the flag flip lives in -- the wake
     // door does not consult this flag at all (the runtime's claim step does, packages/runtime/lib
-    // /wake-engine.mjs:392-397/:801-804), so this proves the reroute is unconditional on it too.
-    r = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+    // /wake-engine.mjs:392-397/:801-804), so this proves the refusal is unconditional on it too:
+    // enabling close_prep does NOT open the lane.
+    err = await caught(() => wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target }));
   }, { commit: false });
   const after = await rootQuery(
     "select enabled from clara.wake_engine_sources where source_key = 'close_prep'");
   assert.equal(after.rows[0].enabled, false, "the flag mutant leaked -- close_prep is left enabled");
 
-  // THE SCHEDULE, real and inspectable.
-  assert.equal(r.kind, "amortisation_schedule");
-  assert.equal(r.configuration_only, true, "the wake posted books -- draft-only by construction");
-  assert.ok(r.schedule_id, "no schedule_id in the wake's answer");
-  assert.ok(r.plan_id, "no plan_id in the wake's answer");
-  assert.equal(r.term_source, "document_service_period");
-  assert.equal(r.period_count, 3);
-  assert.equal(r.total_cents, sc.cents);
-  assert.equal(r.prepaid_account_code, sc.prepaid);
-  assert.equal(r.expense_account_code, sc.target);
+  assert.ok(err, "the wake door configured a schedule -- an unattended wake authorises no plan");
+  assert.equal(err.code, "CLR03", "a wake-authority refusal is CLR03, the estate's own wake class");
+  const detail = JSON.parse(err.detail);
+  assert.equal(detail.reason, "wake_authority_absent");
+  assert.equal(detail.lane, "wake");
+  assert.equal(detail.wake_kind, "close_prep", "the refusal does not name the wake it refused");
+  assert.equal(detail.remedy, "clara.create_prepayment_schedule",
+    "the refusal must NAME the door that can configure this -- 0140's own 'the refusal names what "
+    + "to record and where'");
 
-  // THE OCCURRENCES -- the preview the plan step derives, exactly as a human's or a chat
-  // configuration's own answer carries it.
-  assert.equal(Array.isArray(r.next_occurrences), true);
-  assert.equal(r.next_occurrences.length, 3, "the schedule's occurrence preview is missing periods");
+  const post = await durableFootprint(sc);
+  assert.deepEqual(post, before, "the refused wake left something durable behind");
 
-  const row = await rootQuery(
-    "select * from clara.prepayment_schedules where id = $1", [r.schedule_id]);
-  assert.equal(row.rows.length, 1, "no clara.prepayment_schedules row for the wake's own schedule_id");
-  assert.equal(row.rows[0].source_entry_id, sc.entry);
-  assert.equal(row.rows[0].created_by, "00000000-0000-4000-8000-000000c1a7a0",
-    "the schedule is not attributed to clara.agent_user_id()");
-
-  const plan = await rootQuery(
-    "select authority_kind, authority_ref, authorised_by, created_by from clara.accounting_plans where id = $1",
-    [r.plan_id]);
-  assert.equal(plan.rows[0].authority_kind, "explicit_instruction");
-  assert.equal(plan.rows[0].authority_ref.kind, "agent_wake");
-  assert.equal(plan.rows[0].authority_ref.wake_kind, "close_prep");
-  assert.equal(plan.rows[0].authority_ref.task_id, sc.s.task, "the plan does not name the wake's own task");
-  assert.equal(plan.rows[0].authorised_by, "00000000-0000-4000-8000-000000c1a7a0",
-    "the plan claims a human authorised it -- it must be clara.agent_user_id()");
-  assert.equal(plan.rows[0].created_by, "00000000-0000-4000-8000-000000c1a7a0");
-
-  // AND NO ADJUSTMENT TEMPLATE -- the acceptance criterion's own second half.
-  const templatesAfter = await rootQuery(
-    "select count(*)::int as n from clara.adjustment_templates where firm_id = $1", [sc.firm]);
-  assert.equal(templatesAfter.rows[0].n, 0,
-    "the wake minted a clara.adjustment_templates row -- the reroute did not take");
+  // ---- THE CONTRAST. The same recognition, the same client, through the HUMAN door: it
+  // configures, and the plan it writes ADMITS its first occurrence for real. Without this the
+  // refusal above could be hiding a broken scene rather than a ruled wall.
+  const ref = await instructionRef({ client: sc.client, author: sc.bob });
+  const human = await humanCreate(sc.alice, sc, { ref, opKey: opk("p1036-contrast") });
+  assert.ok(human.schedule_id, "the human door refused a scene the wake refusal is measured on");
+  const admitted = await rootQuery(
+    "select clara._plan_admit_occurrence($1::uuid,$2::date,'primary','p1036') as r",
+    [human.plan_id, human.next_occurrences[0].due_date]);
+  assert.equal(admitted.rows[0].r.admitted, true,
+    `the HUMAN lane's plan could not admit its own first occurrence: ${JSON.stringify(admitted.rows[0].r)}`);
+  assert.ok(admitted.rows[0].r.work_id, "an admitted occurrence with no Work");
 });
 
 // ---------------------------------------------------------------------------------------------
-// AC2 — THE WAKE'S IDEMPOTENCY: THE SAME WAKE TWICE YIELDS ONE SCHEDULE.
+// THE AUTHORITY WALL COMES FIRST — before every other reason this door can refuse, so a wake is
+// never told "fix the expense account" about a lane that will refuse it whatever it sends.
 // ---------------------------------------------------------------------------------------------
-test("p1036.idempotent -- the same wake driven twice, same session, same derived op key, yields "
-  + "ONE schedule, byte-identical on replay",
+test("p1036.authority-first -- a wake call carrying an input the HUMAN door refuses by its own "
+  + "name (a blank expense account) is still answered wake_authority_absent, and the human door "
+  + "still answers its own reason for the same input",
 async (t) => {
   if (await rerouteGate(t)) return;
-  const sc = await prepaidScene("p1036idem");
+  const sc = await prepaidScene("p1036first");
   await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
 
-  const first = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
-  const second = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
-  assert.deepEqual(second, first, "a replay under the same derived op key answered differently");
+  const wakeErr = await caught(() => wake12(sc.s, { client: sc.client, entry: sc.entry, target: "" }));
+  assert.ok(wakeErr, "the wake accepted a blank expense account");
+  assert.equal(JSON.parse(wakeErr.detail).reason, "wake_authority_absent",
+    "the wake was answered about its input instead of about its authority");
 
-  const rows = await rootQuery(
-    "select count(*)::int as n from clara.prepayment_schedules where source_entry_id = $1", [sc.entry]);
-  assert.equal(rows.rows[0].n, 1, "the replay minted a SECOND schedule row");
+  const humanErr = await caught(() => humanCreate(sc.alice, sc, { account: "" }));
+  assert.ok(humanErr, "the human door accepted a blank expense account");
+  assert.equal(JSON.parse(humanErr.detail).reason, "prepayment_target_underivable");
+  assert.equal(JSON.parse(humanErr.detail).axis, "account_missing");
 
-  const plans = await rootQuery(
-    "select count(*)::int as n from clara.accounting_plans where id = $1", [first.plan_id]);
-  assert.equal(plans.rows[0].n, 1);
+  const post = await durableFootprint(sc);
+  assert.equal(post.schedules, 0);
+  assert.equal(post.plans, 0);
 });
 
 // ---------------------------------------------------------------------------------------------
-// THE MULTIPLICITY KEY -- 0140's OWN CONCERN (W14), CARRIED FORWARD: two source entries amortised
-// in ONE wake task must not collide on the ONE client-scoped op key _close_wake_ctx derives.
+// THE REFUSAL IS A STATE, NOT A FLAKE — and a wake under a FRESH close_prep credential answers the
+// same way, so nothing accumulates across attempts.
 // ---------------------------------------------------------------------------------------------
-test("p1036.multiplicity -- two source entries amortised in ONE wake task get TWO independent "
-  + "schedules, not a collision on the task-scoped op key",
+test("p1036.refusal-stable -- the same wake driven twice, and once more under a FRESH close_prep "
+  + "credential, answers the identical refusal and leaves the estate byte-identical",
 async (t) => {
   if (await rerouteGate(t)) return;
-  const sc = await prepaidScene("p1036multi");
+  const sc = await prepaidScene("p1036stable");
   await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
+  const before = await durableFootprint(sc);
 
-  const { seedVerifiedDocument, fileDocument } = await import("./rig-docs-fixtures.mjs");
-  const { draftEntryV3, approveEntry } = await import("./wave-a-reads.mjs");
-  const { freshResolution } = await import("./wave-a-fixtures.mjs");
-  const doc2 = await seedVerifiedDocument({ firm: sc.firm, client: null, filename: `p1036-${uniq()}.pdf` });
-  await fileDocument(sc.alice, { document: doc2.documentId, client: sc.client, opKey: opk("p1036-file2") });
-  const cents2 = 90000;
-  const d2 = await draftEntryV3(sc.alice, {
-    client: sc.client,
-    resolution: await freshResolution(sc.alice, sc.client,
-      { subjectKind: "document", subjectId: doc2.documentId }),
-    memo: `p1036 second prepaid ${uniq()}`, postingDate: "2025-01-16",
-    document: doc2.documentId, sha256: doc2.sha256,
-    lines: [
-      { account_code: sc.prepaid, debit_cents: cents2, credit_cents: 0, description: "prepaid" },
-      { account_code: "170-C56", debit_cents: 0, credit_cents: cents2, description: "paid" },
-    ],
-    opKey: opk("p1036-draft2"),
-  });
-  await approveEntry(sc.bob, { entry: d2.entry_id, expectedRevision: d2.revision_token,
-    opKey: opk("p1036-appr2") });
-  await recordPeriod(sc.alice, { document: doc2.documentId, start: "2025-02-01", end: "2025-04-30" });
+  const first = await caught(() => wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target }));
+  const second = await caught(() => wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target }));
+  assert.equal(second.code, first.code);
+  assert.deepEqual(JSON.parse(second.detail), JSON.parse(first.detail));
 
-  const r1 = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
-  const r2 = await wake12(sc.s, { client: sc.client, entry: d2.entry_id, target: sc.target });
-  assert.notEqual(r2.schedule_id, r1.schedule_id, "two source entries collapsed onto ONE schedule");
-  assert.equal(r1.total_cents, sc.cents);
-  assert.equal(r2.total_cents, cents2);
+  const { mintClosePrepSession } = await import("./f-a4-pr1c-fixtures.mjs");
+  const s2 = await mintClosePrepSession(sc.firm, sc.client);
+  const third = await caught(() => wake12(s2, { client: sc.client, entry: sc.entry, target: sc.target }));
+  // `task_id` is the ONE key that is EXPECTED to move: it names the mechanically-bound task of the
+  // credential that asked, which is the whole point of quoting it back. Everything else must be
+  // identical, and the moved key is asserted to be the new session's own task rather than merely
+  // excluded.
+  const bare = (d) => { const x = { ...JSON.parse(d) }; delete x.task_id; return x; };
+  assert.deepEqual(bare(third.detail), bare(first.detail),
+    "a fresh credential was answered differently -- the refusal is a session accident, not a state");
+  assert.equal(JSON.parse(third.detail).task_id, s2.task,
+    "the refusal does not name the task of the credential that actually asked");
+  assert.equal(JSON.parse(first.detail).task_id, sc.s.task);
 
-  const rows = await rootQuery(
-    "select count(*)::int as n from clara.prepayment_schedules where source_entry_id = any($1::uuid[])",
-    [[sc.entry, d2.entry_id]]);
-  assert.equal(rows.rows[0].n, 2);
+  assert.deepEqual(await durableFootprint(sc), before,
+    "three refused wakes left something durable behind");
 });
 
 // ---------------------------------------------------------------------------------------------
-// REFUSALS -- THE SAME VALIDATION, THE SAME REASON, A PERSON'S OWN CREATION GETS.
+// THE AGENT PLAN LANE IS ABSENT, NOT MERELY UNUSED (the fix round's own census cell).
 // ---------------------------------------------------------------------------------------------
-test("p1036.refusals -- the wake refuses exactly the reasons the human door refuses, and writes "
-  + "nothing on any of them",
+test("p1036.no-agent-plan-lane -- no clara function writes an accounting plan under the agent's "
+  + "own authority: clara._prepayment_plan_core_wake does not exist, no body inserts such a plan, "
+  + "and a driven wake adds none",
 async (t) => {
   if (await rerouteGate(t)) return;
 
-  // (a) no expense account -- prepayment_target_underivable / account_missing, both lanes.
-  {
-    const sc = await prepaidScene("p1036refA");
-    await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
-    const wakeErr = await caught(() => wake12(sc.s, { client: sc.client, entry: sc.entry, target: "" }));
-    assert.ok(wakeErr, "the wake accepted a blank expense account");
-    assert.equal(JSON.parse(wakeErr.detail).reason, "prepayment_target_underivable");
-    assert.equal(JSON.parse(wakeErr.detail).axis, "account_missing");
+  const fn = await rootQuery(
+    `select count(*)::int as n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname = '_prepayment_plan_core_wake'`);
+  assert.equal(fn.rows[0].n, 0,
+    "clara._prepayment_plan_core_wake still exists -- the agent plan lane was left callable");
 
-    const humanErr = await caught(() => humanCreate(sc.alice, sc, { account: "" }));
-    assert.equal(JSON.parse(humanErr.detail).reason, JSON.parse(wakeErr.detail).reason);
-    assert.equal(JSON.parse(humanErr.detail).axis, JSON.parse(wakeErr.detail).axis);
-    assert.equal(humanErr.message, wakeErr.message, "the human and wake sentences differ");
+  // NOT A NAME CHECK: any body that inserts into clara.accounting_plans with the agent identity
+  // is caught here whatever it is called.
+  const writers = await rootQuery(
+    `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.prosrc ilike '%insert into clara.accounting_plans%'
+        and p.prosrc ilike '%agent_user_id%'`);
+  assert.deepEqual(writers.rows, [],
+    `a clara body writes an accounting plan under the agent identity: ${JSON.stringify(writers.rows)}`);
 
-    const rows = await rootQuery(
-      "select count(*)::int as n from clara.prepayment_schedules where source_entry_id = $1", [sc.entry]);
-    assert.equal(rows.rows[0].n, 0);
-  }
-
-  // (b) an unknown expense account code -- prepayment_target_ineligible / account_unknown.
-  {
-    const sc = await prepaidScene("p1036refB");
-    await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
-    const bogus = "99999999";
-    const wakeErr = await caught(() => wake12(sc.s, { client: sc.client, entry: sc.entry, target: bogus }));
-    assert.equal(JSON.parse(wakeErr.detail).reason, "prepayment_target_ineligible");
-    assert.equal(JSON.parse(wakeErr.detail).axis, "account_unknown");
-    const humanErr = await caught(() => humanCreate(sc.alice, sc, { account: bogus }));
-    assert.deepEqual(JSON.parse(humanErr.detail), JSON.parse(wakeErr.detail));
-  }
-
-  // (c) the recognition already has a schedule -- prepayment_schedule_exists (CLR13), naming it.
-  {
-    const sc = await prepaidScene("p1036refC");
-    await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
-    const first = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
-    const dup = await caught(() => humanCreate(sc.alice, sc));
-    assert.ok(dup, "the human door configured a SECOND schedule for the same entry");
-    assert.equal(JSON.parse(dup.detail).reason, "prepayment_schedule_exists");
-    assert.equal(JSON.parse(dup.detail).schedule_id, first.schedule_id,
-      "the duplicate refusal names a different schedule than the wake's own");
-  }
+  // THE DELTA, NOT THE TOTAL. This rig is never rebuilt from scratch and carries the plans this
+  // file's FIRST cut minted before the fix round dropped that lane (they are inert: the lane is
+  // closed and those plans can admit nothing). The claim that can be made on ANY database, and is
+  // the one that matters, is that driving the door today adds none.
+  const count = async () => Number((await rootQuery(
+    "select count(*)::int as n from clara.accounting_plans where authorised_by = $1::uuid",
+    [AGENT])).rows[0].n);
+  const before = await count();
+  const sc = await prepaidScene("p1036noagent");
+  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
+  const err = await caught(() => wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target }));
+  assert.equal(JSON.parse(err.detail).reason, "wake_authority_absent");
+  assert.equal(await count(), before,
+    "a driven wake minted an accounting plan authorised by the agent -- it could never admit an "
+    + "occurrence, because clara.agent_user_id() holds no firm membership");
 });
 
 // ---------------------------------------------------------------------------------------------
 // THE TEMPLATE CORE -- RETIRED, WITH NO CALLER AND NO EXECUTABLE PATH FOR ANY APPLICATION ROLE.
+// (The ticket's real deliverable, unchanged by the fix round.)
 // ---------------------------------------------------------------------------------------------
 test("p1036.template-core-retired -- clara._propose_adjustment_template_core has NO caller anywhere "
   + "in the clara schema and is executable by no application role; the retired agent core refuses "

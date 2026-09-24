@@ -93,17 +93,19 @@ with the remainder wholly in the final period. It is DERIVED, not typed: the amo
 count, the per-period figures, the cadence and the authority window all come from the frozen
 evaluator's reading of rows this database already holds, and the only things a person supplies are
 which prepayment, under WHOSE INSTRUCTION, which expense account, why, and what the schedule is
-for — through their own door, through the On-behalf-of door Clara uses in a conversation (which
-records the same person and shares the same idempotency key), or — naming no person at all — through
-the agent-lane close_prep wake, which records that honestly as its OWN authority rather than
-dressing itself up as a person's instruction. It configures an Accounting plan of kind
+for — through their own door, or through the On-behalf-of door Clara uses in a conversation, which
+records the same person and shares the same idempotency key. A PERSON IS NOT OPTIONAL: the plan the
+schedule configures is authorised by a named human, and every month's Work is admitted as that
+human, so the agent-lane close_prep wake — which names nobody by construction — refuses rather than
+configuring something no belt could ever post. It configures an Accounting plan of kind
 `amortisation_schedule`; the belt admits each period.
 _Avoid_: A recurring adjustment template — the 0045 template lane was fully retired 2026-09-18
 (#788, delivered by #927–#929); its one remaining live entrance, the agent-lane close_prep wake, was
 REROUTED onto this door rather than left parked (#1036, the 2026-09-23 integration ruling) and never
-mints one again; an editable table of period amounts; a schedule that pays anything — the money left
-the bank before the schedule existed; "configured" as a synonym for "posted", which is a different
-fact and a different count.
+mints one again; a schedule an unattended run configured for itself — that lane refuses by name
+(`wake_authority_absent`) because the estate has no person for it to post as; an editable table of
+period amounts; a schedule that pays anything — the money left the bank before the schedule
+existed; "configured" as a synonym for "posted", which is a different fact and a different count.
 
 **Prepayment account roster**:
 The per-client list of accounts a firm has enrolled as holding prepayments. It is the POSITIVE half

@@ -8,11 +8,13 @@
 // `p_target_account`/`p_target_basis`/`p_rationale`/`p_model`, and an `agent_act_receipts` row for
 // every verdict. #1036 reroutes the wrapper onto `clara._prepayment_schedule_core`'s new 'wake'
 // lane -- #915/#939/#940's shared body, already proven for the 'human' and 'obo' lanes -- which
-// RAISES on refusal exactly as a human or a chat configuration's own call does (the ticket's own
-// words: "the same validation... and refusals a person's own creation gets"), idempotently through
-// `clara._reserve_op`/`clara._finish_op` rather than a request digest, and writes NO
-// `agent_act_receipts` row at all. Every one of those old cells' PREMISES is gone, not merely its
-// assertions' expected values, so retyping them against the new shape would be re-authoring this
+// RAISES exactly as a human or a chat configuration's own call does rather than returning a
+// verdict, and writes NO `agent_act_receipts` row at all. (The fix round of 2026-09-24 went
+// further: that lane's ONE answer is a typed refusal, because an unattended close_prep wake names
+// no directing human and so authorises no amortisation plan. `prepayment-wake-reroute.test.mjs`
+// carries that subject; this file's subject is the receipt discipline.) Every one of those old
+// cells' PREMISES is gone, not merely its assertions' expected values, so retyping them against
+// the new shape would be re-authoring this
 // file's whole subject rather than updating it -- exactly #927's own precedent for
 // `x42-adjustments.test.mjs`'s propose/sign lifecycle cells.
 //
@@ -64,31 +66,37 @@ async function rerouteGate(t) {
 }
 
 test("fa4p2a.W13-retired (#1036) wrapper 12 writes NO clara.agent_act_receipts row any more, on "
-  + "either an acted or a refused call -- the Tier A/B/C receipt discipline this file used to test "
-  + "belonged to the retired agent core", async (t) => {
+  + "either a well-formed or a malformed call -- the Tier A/B/C receipt discipline this file used "
+  + "to test belonged to the retired agent core, and a RAISED refusal writes nothing at all",
+async (t) => {
   if (await rerouteGate(t)) return;
 
   const before1 = await rootQuery("select count(*)::int as n from clara.agent_act_receipts");
 
-  const sc = await prepaidScene("w13r-acted");
+  // A WELL-FORMED CALL — everything the door asks for, correctly supplied. It is refused on
+  // AUTHORITY (an unattended close_prep wake names no directing human, so it authorises no
+  // amortisation plan: 0315 §B, `prepayment-wake-reroute.test.mjs`'s own cells), and the point
+  // here is narrower: the refusal RAISES and leaves no agent-lane receipt behind.
+  const sc = await prepaidScene("w13r-wellformed");
   await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
-  const acted = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
-  assert.ok(acted.schedule_id, "the acted call did not produce a schedule");
+  await assert.rejects(
+    () => wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target }),
+    "a well-formed wake call returned a value -- the lane raises, it does not answer a verdict");
   assert.deepEqual(await receiptsForTask(sc.s.task), [],
-    "an acted wake call wrote an agent_act_receipts row -- the retired discipline is still live");
+    "a well-formed wake call wrote an agent_act_receipts row -- the retired discipline is still live");
 
-  const sc2 = await prepaidScene("w13r-refused");
+  const sc2 = await prepaidScene("w13r-malformed");
   await recordPeriod(sc2.alice, { document: sc2.document, start: "2025-02-01", end: "2025-04-30" });
   await assert.rejects(
     () => wake12(sc2.s, { client: sc2.client, entry: sc2.entry, target: "" }),
-    "a refusal case unexpectedly succeeded");
+    "a malformed case unexpectedly succeeded");
   assert.deepEqual(await receiptsForTask(sc2.s.task), [],
-    "a refused wake call wrote an agent_act_receipts row -- the retired discipline is still live");
+    "a malformed wake call wrote an agent_act_receipts row -- the retired discipline is still live");
 
   const after1 = await rootQuery("select count(*)::int as n from clara.agent_act_receipts");
   assert.equal(after1.rows[0].n, before1.rows[0].n,
-    "clara.agent_act_receipts grew across an acted+refused pair -- wrapper 12 still writes it");
-  noteLane("W13-retired: wrapper 12 writes zero agent_act_receipts rows, acted or refused");
+    "clara.agent_act_receipts grew across the pair -- wrapper 12 still writes it");
+  noteLane("W13-retired: wrapper 12 writes zero agent_act_receipts rows, whatever it is sent");
 });
 
 test("fa4p2a.armed-skip the focused run records ZERO skips", async () => {
