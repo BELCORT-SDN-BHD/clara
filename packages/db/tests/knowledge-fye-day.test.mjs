@@ -450,9 +450,20 @@ pairCell("fd.12 ...and the mirror image: a POSSIBLE pair is not refused because 
     "31 January is a real calendar day; a sibling month at another applicability must not refuse it");
 
   // The default applicability is untouched -- it still holds February alone, with no day beside it.
+  //
+  // `collate "C"` IS LOAD-BEARING, and it is the whole reason this cell failed on the runner
+  // while passing on the rig. Two of these three rows share a knowledge_key and are separated
+  // only by `applies_when::text` — `{"from_fy": 2025}` against `{}`. Under the C collation that
+  // is a byte comparison, so `"` (0x22) beats `}` (0x7D) and the FY2025 row sorts first; under a
+  // locale collation (glibc en_US.UTF-8, which is what the postgres:17 service container initdb's
+  // to, and what CI therefore runs) punctuation is ignored at the primary level, so `{}` reduces
+  // to the empty string and sorts FIRST instead. The rows and the answer were identical on both;
+  // only the READBACK's order moved. Pinning the ORDER, not the assertion, is the fix: a
+  // literal expectation is only meaningful against a total order the database cannot renegotiate.
   const rows = await rootQuery(
     `select r.knowledge_key, r.value, r.applies_when from clara.knowledge_records r
-      where r.client_id = $1 and r.state = 'live' order by r.knowledge_key, r.applies_when::text`,
+      where r.client_id = $1 and r.state = 'live'
+      order by r.knowledge_key collate "C", (r.applies_when::text) collate "C"`,
     [w.clientA]);
   assert.deepEqual(
     rows.rows.map((r) => [r.knowledge_key, r.value, r.applies_when]),
