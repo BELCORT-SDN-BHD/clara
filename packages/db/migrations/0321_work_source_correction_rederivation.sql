@@ -78,7 +78,8 @@
 -- contract is `claraWork_v6` plus `lib/source-correction-rederive.mjs` and
 -- `lib/reconciler-work-source-correction.mjs`.
 --
--- NO NEW RELATION, NO NEW COLUMN. Three reads, one settlement, two recut bodies, two new helpers.
+-- NO NEW RELATION, NO NEW COLUMN. Six new functions (two for the rule, four for the lane), two
+-- recut bodies, and not one new row written at apply.
 -- =====================================================================================
 
 set local statement_timeout = '20min';  -- PRECAUTIONARY, not load-bearing: this file creates and replaces
@@ -150,10 +151,10 @@ begin
     from pg_proc p where p.oid = 'clara.revise_document_fact(uuid,text,jsonb,integer,text,text)'::regprocedure;
   if v_sha = c_revise_pre then
     v_mode := 'FIRST APPLY';
-  elsif position('#1030' in v_src) > 0 then
+  elsif position('clara._fact_value_changed(v_prior_value, v_new_value, p_field_path)' in v_src) > 0 then
     v_mode := 'REDO';
   else
-    raise exception '#1030 prestate: clara.revise_document_fact has DRIFTED — live sha % is neither the pinned pre-image % nor a body carrying this file''s own #1030 attribution. Re-measure before re-pinning; do not widen this check.',
+    raise exception '#1030 prestate: clara.revise_document_fact has DRIFTED — live sha % is neither the pinned pre-image % nor a body carrying this file''s own substitution. Re-measure before re-pinning; do not widen this check.',
       v_sha, c_revise_pre using errcode = 'CLR10';
   end if;
 
@@ -163,8 +164,8 @@ begin
     raise exception '#1030 prestate: clara._question_source_corrected has DRIFTED — live sha % is not the pinned pre-image %',
       v_sha, c_question_pre using errcode = 'CLR10';
   end if;
-  if v_mode = 'REDO' and position('#1030' in v_src) = 0 then
-    raise exception '#1030 prestate: half-applied — clara.revise_document_fact carries this file''s attribution but clara._question_source_corrected does not'
+  if v_mode = 'REDO' and position('clara._fact_value_changed(r.prior_value, r.new_value, r.field_path)' in v_src) = 0 then
+    raise exception '#1030 prestate: half-applied — clara.revise_document_fact carries this file''s substitution but clara._question_source_corrected does not'
       using errcode = 'CLR10';
   end if;
 
@@ -172,16 +173,21 @@ begin
   -- them do. Anything between is a half-applied file and says so by name.
   select count(*)::int into v_i from (values
       ('clara._fact_calendar_day(text)'),
-      ('clara._fact_value_changed(jsonb,jsonb,text)')) t(sig)
+      ('clara._fact_value_changed(jsonb,jsonb,text)'),
+      ('clara._source_correction_rederivation_brief(text)'),
+      ('clara.source_correction_rederivations(integer)'),
+      ('clara.settle_source_corrected_rederivation(text,uuid,text)'),
+      ('clara.source_correction_successor_brief(uuid)')) t(sig)
    where to_regprocedure(t.sig) is not null;
   if v_mode = 'FIRST APPLY' and v_i <> 0 then
-    raise exception '#1030 prestate: partial birth — % of this file''s 2 new functions already exist while clara.revise_document_fact is still 0268''s own body',
+    raise exception '#1030 prestate: partial birth — % of this file''s 6 new functions already exist while clara.revise_document_fact is still 0268''s own body',
       v_i using errcode = 'CLR10';
   end if;
-  if v_mode = 'REDO' and v_i <> 2 then
-    raise exception '#1030 prestate: partial redo — clara.revise_document_fact already carries this file''s attribution but only % of its 2 new functions exist',
-      v_i using errcode = 'CLR10';
-  end if;
+  -- NO COUNT CHECK ON THE REDO BRANCH, and the absence is deliberate rather than an oversight.
+  -- Every object below is `create or replace`, so a redo over ANY subset of them is safe, and a
+  -- file that legitimately GREW between two redos of an unmerged migration is indistinguishable
+  -- here from a half-applied one. Completeness is asserted where it can be measured instead of
+  -- guessed: §TAIL requires all six to exist AFTER this file, on every apply.
 
   -- (0.4) THE NEIGHBOURS, UNCONDITIONALLY.
   for v_i in 1 .. array_length(v_pins, 1) loop
@@ -583,6 +589,253 @@ comment on function clara._question_source_corrected(uuid) is
   'clara._fact_value_changed(jsonb,jsonb,text), so an edit that only re-spells a value the estate '
   'canonicalises never makes a question unanswerable.';
 
+set role clara_fn_owner;
+
+-- =====================================================================================
+-- §D — THE RE-DERIVATION LANE. One ungranted builder, two reads and one settlement.
+-- =====================================================================================
+
+-- D0 · THE BRIEF, BUILT ONCE SO THE TWO READS CANNOT DISAGREE.
+--
+-- Given a retirement's own op key, it answers everything the Work runtime needs and nothing it
+-- does not: the correction (what the document used to say and what it says now, on whose
+-- authority), the RETIRED INSTRUCTION (its purpose, its evidence, and the basis it was admitted
+-- on — so a question can QUOTE the figure a person last saw rather than paraphrase it), and the
+-- document's LIVE FACTS, read off its newest done `invoice_facts` extraction through the estate's
+-- own observation helper. NULL when the key names no revision, or no Work of that revision's firm.
+--
+-- THE LIVE FACTS ARE THE SOURCE OF TRUTH FOR THE FIGURES, and the retired basis is NOT. That is
+-- the ruling's own line ("never the retired Work's own basis"): the basis is here so the question
+-- can name both readings, and a re-derivation that took a figure from it rather than from
+-- `live_facts` would be carrying the pre-correction reading forward under a new id.
+--
+-- UNGRANTED, like every sibling of the 0268 cohort: it reads `clara.document_fact_revisions`
+-- joined across the Work lane and its only legitimate callers are the two definer doors below.
+create or replace function clara._source_correction_rederivation_brief(p_op_key text)
+  returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  v_rev uuid; v_work uuid; r record; w record; obs record; v_facts jsonb;
+begin
+  -- THE KEY'S SHAPE IS THE WALL. `source_corrected:<revision>:<work>` is 0268's own derivation
+  -- and anything else is not this lane's business; the regex runs BEFORE either cast, so a
+  -- malformed key can never raise an invalid-uuid error out of a read.
+  if p_op_key is null
+     or p_op_key !~ '^source_corrected:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then
+    return null;
+  end if;
+  v_rev := split_part(p_op_key, ':', 2)::uuid;
+  v_work := split_part(p_op_key, ':', 3)::uuid;
+
+  select * into r from clara.document_fact_revisions dr where dr.id = v_rev;
+  if not found then return null; end if;
+  -- THE FIRM TERM IS THE REVISION'S OWN. A Work of another firm carrying the same uuid is not
+  -- this correction's Work, and this read must not be the place that learns it exists.
+  select * into w from clara.accounting_work aw where aw.id = v_work and aw.firm_id = r.firm_id;
+  if not found then return null; end if;
+
+  select * into obs from clara._document_source_observation(r.document_id);
+  select coalesce(jsonb_object_agg(g.field_path, jsonb_strip_nulls(
+           jsonb_build_object('text', g.text_content, 'cents', g.monetary_cents))), '{}'::jsonb)
+    into v_facts
+    from clara.document_regions g
+   where g.extraction_id = obs.facts_extraction_id and g.firm_id = r.firm_id;
+
+  return jsonb_build_object(
+    'op_key', p_op_key,
+    'revision_id', r.id,
+    'document_id', r.document_id,
+    'field_path', r.field_path,
+    'prior_value', r.prior_value,
+    'new_value', r.new_value,
+    'corrected_by', r.recorded_by,
+    'corrected_at', r.recorded_at,
+    'firm_id', r.firm_id,
+    'client_id', w.client_id,
+    'retired_work_id', w.id,
+    'retired_purpose', w.purpose,
+    'retired_source_refs', w.source_refs,
+    'retired_basis', w.basis,
+    'retired_basis_origin', w.basis_origin,
+    'successor_work_id', w.superseded_by,
+    'live_extraction_id', obs.facts_extraction_id,
+    'facts_version', obs.facts_version,
+    'live_facts', v_facts);
+end $$;
+revoke all on function clara._source_correction_rederivation_brief(text) from public;
+comment on function clara._source_correction_rederivation_brief(text) is
+  '#1030: everything the Work runtime needs to re-derive after ONE source correction, keyed by '
+  'the retirement''s own op key -- the correction, the retired instruction, and the document''s '
+  'LIVE facts (the figures'' only source of truth; the retired basis is here to be QUOTED, never '
+  'to be carried). NULL for a key that names no revision or no Work of that revision''s firm. '
+  'Ungranted: reached only from clara.source_correction_rederivations and '
+  'clara.source_correction_successor_brief.';
+
+-- D1 · THE BACKLOG. Every retirement still owed a successor, oldest correction first.
+--
+-- A plpgsql loop rather than one SELECT, deliberately: the op key has to pass its shape regex
+-- BEFORE anything casts it to a uuid, and a planner is free to reorder a WHERE against a JOIN.
+-- The loop makes the order a property of the code.
+--
+-- WHAT LEAVES THE BACKLOG, and there are exactly two ways: a `source_correction_rederivation`
+-- receipt exists for this correction (the lane settled it, either by claiming a successor or by
+-- declining with a reason), or the retired Work already points at one. Nothing else.
+create or replace function clara.source_correction_rederivations(p_limit integer default 20)
+  returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare o record; v_out jsonb := '[]'::jsonb; v_b jsonb; v_n int := 0; v_lim int;
+begin
+  v_lim := least(greatest(coalesce(p_limit, 20), 0), 200);
+  for o in
+    select rc.op_key from clara.op_receipts rc
+     where rc.fn = 'cancel_accounting_work'
+       and rc.op_key like 'source\_corrected:%'
+       and not exists (select 1 from clara.op_receipts s
+                        where s.firm_id = rc.firm_id
+                          and s.fn = 'source_correction_rederivation'
+                          and s.op_key = rc.op_key)
+     order by rc.created_at, rc.op_key
+  loop
+    exit when v_n >= v_lim;
+    v_b := clara._source_correction_rederivation_brief(o.op_key);
+    continue when v_b is null;
+    continue when (v_b->>'successor_work_id') is not null;
+    v_out := v_out || jsonb_build_array(v_b);
+    v_n := v_n + 1;
+  end loop;
+  return v_out;
+end $$;
+revoke all on function clara.source_correction_rederivations(integer) from public;
+grant execute on function clara.source_correction_rederivations(integer) to clara_runtime;
+comment on function clara.source_correction_rederivations(integer) is
+  '#1030: every source correction that retired a Work and is still owed a successor, oldest '
+  'first, each as the full re-derivation brief. The Work runtime''s own backlog read: it names '
+  'what to re-derive and from what, and it decides nothing. clara_runtime only.';
+
+-- D2 · THE SETTLEMENT. One answer per correction, exactly once, through the estate's own
+--      reservation.
+--
+-- TWO ANSWERS AND NO THIRD. Either a successor was admitted -- and then this is the ONE writer of
+-- `superseded_by` for this lane, the claim #885 deliberately left open -- or none could be, and
+-- the reason is recorded so the lane does not re-decide the same correction every cycle. A
+-- decline with no reason is refused: a silent one is a fact nobody can read.
+--
+-- THE LINK IS PROVED, NOT ASSERTED. The successor must be a Work of the SAME firm and the SAME
+-- client whose own `intent_key` IS this correction's op key. That is what makes the key a link
+-- rather than a label: a Work admitted for anything else cannot claim it, and the admission door
+-- already makes the key unique per (firm, client), so the successor is also idempotent to admit.
+create or replace function clara.settle_source_corrected_rederivation(
+    p_op_key text, p_successor uuid, p_reason text)
+  returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  v_rev uuid; v_work uuid; v_firm uuid; w record; sx record;
+  v_dedupe jsonb; v_result jsonb; v_reason text; v_actor uuid;
+begin
+  if p_op_key is null
+     or p_op_key !~ '^source_corrected:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then
+    raise exception 'this is not a source-correction retirement key' using errcode = 'CLR10',
+      detail = '{"reason":"invalid_op_key"}';
+  end if;
+  v_rev := split_part(p_op_key, ':', 2)::uuid;
+  v_work := split_part(p_op_key, ':', 3)::uuid;
+
+  -- THE CORRECTION MUST HAVE HAPPENED. The cancellation receipt is the durable evidence 0268
+  -- wrote, and it is also where this lane's firm comes from -- never from the caller.
+  select rc.firm_id into v_firm from clara.op_receipts rc
+   where rc.fn = 'cancel_accounting_work' and rc.op_key = p_op_key;
+  if v_firm is null then
+    raise exception 'no source-correction retirement carries this key' using errcode = 'CLR11',
+      detail = '{"reason":"correction_not_found"}';
+  end if;
+
+  select * into w from clara.accounting_work aw
+   where aw.id = v_work and aw.firm_id = v_firm for update;
+  if not found then
+    raise exception 'no source-correction retirement carries this key' using errcode = 'CLR11',
+      detail = '{"reason":"correction_not_found"}';
+  end if;
+
+  v_reason := nullif(btrim(coalesce(p_reason, '')), '');
+  if p_successor is null and v_reason is null then
+    raise exception 'a declined re-derivation must say why' using errcode = 'CLR10',
+      detail = '{"reason":"decline_reason_required"}';
+  end if;
+
+  if p_successor is not null then
+    select * into sx from clara.accounting_work aw where aw.id = p_successor for update;
+    if not found or sx.firm_id <> v_firm or sx.client_id <> w.client_id
+       or sx.id = w.id or sx.intent_key is distinct from p_op_key then
+      raise exception 'that Work was not admitted for this correction' using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'successor_not_for_this_correction',
+          'op_key', p_op_key)::text;
+    end if;
+  end if;
+
+  v_dedupe := clara._reserve_op(v_firm, 'source_correction_rederivation', p_op_key,
+    clara._hash(jsonb_build_object('op_key', p_op_key, 'successor', p_successor,
+      'reason', coalesce(v_reason, ''))));
+  if v_dedupe is not null then return v_dedupe || '{"replayed":true}'::jsonb; end if;
+
+  if p_successor is not null then
+    -- #885 left `superseded_by` NULL on purpose so a real successor could claim it honestly.
+    -- This is that claim, and it is symmetric: the retired Work points forward, the successor
+    -- points back, exactly as #721's restatement writes the pair.
+    update clara.accounting_work set superseded_by = p_successor, updated_at = now()
+     where id = w.id;
+    update clara.accounting_work set supersedes = w.id, updated_at = now()
+     where id = p_successor;
+  end if;
+
+  select dr.recorded_by into v_actor from clara.document_fact_revisions dr where dr.id = v_rev;
+  perform clara._audit(v_firm, v_actor, null, null, 'source_correction_rederivation', null,
+    jsonb_build_object('op_key', p_op_key, 'revision', v_rev, 'retired_work', w.id,
+      'successor_work', p_successor, 'reason', v_reason));
+
+  v_result := jsonb_build_object('op_key', p_op_key, 'revision_id', v_rev,
+    'retired_work_id', w.id, 'successor_work_id', p_successor,
+    'claimed', p_successor is not null, 'reason', v_reason, 'replayed', false);
+  return clara._finish_op(v_firm, 'source_correction_rederivation', p_op_key, v_result);
+end $$;
+revoke all on function clara.settle_source_corrected_rederivation(text,uuid,text) from public;
+grant execute on function clara.settle_source_corrected_rederivation(text,uuid,text) to clara_runtime;
+comment on function clara.settle_source_corrected_rederivation(text,uuid,text) is
+  '#1030: the ONE answer a source correction''s re-derivation gets -- the successor that was '
+  'admitted (claiming the superseded_by link #885 left open, proved by the successor''s own '
+  'intent_key being this correction''s op key) or the reason none could be. Exactly once, through '
+  'clara._reserve_op / clara._finish_op. clara_runtime only.';
+
+-- D3 · THE SUCCESSOR'S OWN BRIEF, so its run can name BOTH figures before anything may post.
+--
+-- A Work whose `intent_key` is a real correction's retirement key IS a successor, and that is the
+-- only thing that makes it one -- no column, no flag, no marker on the basis. NULL for every
+-- ordinary Work, so a run can ask unconditionally and a missing answer is not a default.
+create or replace function clara.source_correction_successor_brief(p_work uuid)
+  returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare w record; v_b jsonb; v_firm uuid;
+begin
+  select * into w from clara.accounting_work aw where aw.id = p_work;
+  if not found or w.intent_key is null then return null; end if;
+  select rc.firm_id into v_firm from clara.op_receipts rc
+   where rc.fn = 'cancel_accounting_work' and rc.op_key = w.intent_key and rc.firm_id = w.firm_id;
+  if v_firm is null then return null; end if;
+  v_b := clara._source_correction_rederivation_brief(w.intent_key);
+  if v_b is null then return null; end if;
+  return v_b
+    || jsonb_build_object(
+         'successor_work_id', p_work,
+         'retired_reading', v_b->'prior_value',
+         'corrected_reading', v_b->'new_value');
+end $$;
+revoke all on function clara.source_correction_successor_brief(uuid) from public;
+grant execute on function clara.source_correction_successor_brief(uuid) to clara_runtime;
+comment on function clara.source_correction_successor_brief(uuid) is
+  '#1030: is this Work the successor a source correction owed, and if so what must its own run '
+  'say before anything may post -- the reading the retired Work was admitted on, the reading the '
+  'document carries now, and the retired basis to quote. NULL for every ordinary Work. '
+  'clara_runtime only.';
+
 reset role;
 
 -- =====================================================================================
@@ -703,6 +956,83 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice '#1030 §TAIL: clean — both recut bodies reverse to their pinned pre-images, the two-argument notion is untouched, and the typed rule answers all four arms';
+  -- (T7) THE LANE'S ACL, THE COMPLETE DELTA ON THE MACHINE SIDE: three EXECUTEs, all to
+  -- clara_runtime, and NOTHING anywhere else. No human door (a person corrects and reads through
+  -- the doors they already have), no agent-read grant (this lane writes), no wake wrapper (the
+  -- runtime credential is the lane's own).
+  select count(*)::int into v_n from (
+    select p.oid::regprocedure::text as sig, unnest(coalesce(p.proacl, '{}'::aclitem[])) as a
+      from pg_proc p
+     where p.oid in ('clara.source_correction_rederivations(integer)'::regprocedure,
+                     'clara.settle_source_corrected_rederivation(text,uuid,text)'::regprocedure,
+                     'clara.source_correction_successor_brief(uuid)'::regprocedure)) t
+   where a::text like 'clara_runtime=%';
+  if v_n <> 3 then
+    raise exception '#1030 §TAIL: % of 3 lane doors carry the clara_runtime EXECUTE', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from (
+    select unnest(coalesce(p.proacl, '{}'::aclitem[])) as a from pg_proc p
+     where p.oid in ('clara.source_correction_rederivations(integer)'::regprocedure,
+                     'clara.settle_source_corrected_rederivation(text,uuid,text)'::regprocedure,
+                     'clara.source_correction_successor_brief(uuid)'::regprocedure)) t
+   where a::text not like 'clara_fn_owner=%' and a::text not like 'clara_runtime=%';
+  if v_n <> 0 then
+    raise exception '#1030 §TAIL: % grant(s) beyond clara_runtime on this lane''s doors', v_n
+      using errcode = 'CLR10';
+  end if;
+  -- …and the builder they share is granted to NOBODY, the one-ungranted-core law.
+  select count(*)::int into v_n from (
+    select unnest(coalesce(p.proacl, '{}'::aclitem[])) as a from pg_proc p
+     where p.oid = 'clara._source_correction_rederivation_brief(text)'::regprocedure) t
+   where a::text not like 'clara_fn_owner=%';
+  if v_n <> 0 then
+    raise exception '#1030 §TAIL: the shared brief builder carries % non-owner grant(s)', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  -- (T8) THE KEY-SHAPE WALL, DRIVEN. A key that is not this lane's derivation answers NULL from
+  -- the reads and CLR10 from the settlement — never an invalid-uuid error out of a read.
+  if clara._source_correction_rederivation_brief('not-a-key') is not null
+     or clara._source_correction_rederivation_brief(null) is not null
+     or clara._source_correction_rederivation_brief('source_corrected:abc:def') is not null then
+    raise exception '#1030 §TAIL: the brief builder answered for a key that is not this lane''s'
+      using errcode = 'CLR10';
+  end if;
+  -- …and a well-shaped key naming a revision nobody wrote is also NULL, not a raise.
+  if clara._source_correction_rederivation_brief(
+       'source_corrected:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222')
+     is not null then
+    raise exception '#1030 §TAIL: the brief builder answered for a correction nobody performed'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (T8b) ALL SIX NEW OBJECTS EXIST. This is where completeness is asserted, because it is the
+  -- only place it can be MEASURED rather than guessed (see §0.3's note on the redo branch).
+  select count(*)::int into v_n from (values
+      ('clara._fact_calendar_day(text)'),
+      ('clara._fact_value_changed(jsonb,jsonb,text)'),
+      ('clara._source_correction_rederivation_brief(text)'),
+      ('clara.source_correction_rederivations(integer)'),
+      ('clara.settle_source_corrected_rederivation(text,uuid,text)'),
+      ('clara.source_correction_successor_brief(uuid)')) t(sig)
+   where to_regprocedure(t.sig) is not null;
+  if v_n <> 6 then
+    raise exception '#1030 §TAIL: only % of this file''s 6 new functions exist', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  -- (T9) THIS FILE WRITES NO ROW AT APPLY. The lane is doors, not a backfill: nothing here
+  -- claims a link, declines a re-derivation, or moves a Work that a person has not been told
+  -- about. A correction retired before this migration stays exactly where 0268 left it until the
+  -- runtime lane reaches it.
+  select count(*)::int into v_n from clara.op_receipts
+   where fn = 'source_correction_rederivation';
+  if v_n <> 0 then
+    raise exception '#1030 §TAIL: % settlement receipt(s) exist at apply — this file settles nothing',
+      v_n using errcode = 'CLR10';
+  end if;
+
+  raise notice '#1030 §TAIL: clean — both recut bodies reverse to their pinned pre-images, the two-argument notion is untouched, the typed rule answers all four arms, and the lane is three clara_runtime doors over one ungranted builder';
 end
 $r1030_tail$;

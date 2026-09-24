@@ -2708,9 +2708,21 @@ export const WORK_SOURCE_CORRECTION_0268_COHORT = [...WORK_SOURCE_CORRECTION_026
 //   what this roster keys on and that name has been on WORK_SOURCE_CORRECTION_0268_UNGRANTED_FNS
 //   since 0268, so listing it again would make this cohort resolve on databases 0321 has not
 //   touched.
-const WORK_SOURCE_REDERIVATION_0321_UNGRANTED_FNS = ["_fact_calendar_day"];
+const WORK_SOURCE_REDERIVATION_0321_UNGRANTED_FNS = [
+  "_fact_calendar_day", "_source_correction_rederivation_brief",
+];
+//   THREE MACHINE DOORS, clara_runtime ALONE, and the whole ACL delta is those three EXECUTEs
+//   (0321's §TAIL asserts it by counting). No human door — a person corrects and reads through
+//   the doors they already have; no agent-READ grant — this lane writes; no wake wrapper — the
+//   runtime credential IS this lane's own. `settle_source_corrected_rederivation` is the ONLY
+//   writer of `superseded_by` for a source correction, the claim #885 deliberately left open.
+const WORK_SOURCE_REDERIVATION_0321_RUNTIME_FNS = [
+  "source_correction_rederivations", "settle_source_corrected_rederivation",
+  "source_correction_successor_brief",
+];
 export const WORK_SOURCE_REDERIVATION_0321_COHORT = [
   ...WORK_SOURCE_REDERIVATION_0321_UNGRANTED_FNS,
+  ...WORK_SOURCE_REDERIVATION_0321_RUNTIME_FNS,
 ];
 // #1030 END
 
@@ -3918,6 +3930,14 @@ export const ALLOWED = {
     // [#721, 0200] the restate door — clara_runtime ONLY, the same lane the cancel door sits in.
     ...WORK_RESTATE_0200_RUNTIME_FNS,
     // #721
+    // [#1030, 0321] the source-correction re-derivation lane — clara_runtime ONLY, the same lane
+    // clara.admit_journal_work and the restate door above sit in. The backlog read names what the
+    // Work runtime still owes a successor; the settlement is the ONLY writer of `superseded_by`
+    // for a source correction (the claim #885 deliberately left open, proved by the successor's
+    // own intent_key being that correction's op key); the successor brief is what its run must say
+    // before anything may post. Declared here so a grant to clara_authenticated (a second human
+    // door with no _human_ctx floor) or to either wake role FAILS the matrix.
+    ...WORK_SOURCE_REDERIVATION_0321_RUNTIME_FNS,
     // [#644, 0192] the runtime knowledge lane: a capture attributed to a named, verified human
     // and the context pack. Plus the shared promotion door (also clara_authenticated above).
     ...KNOWLEDGE_0192_RUNTIME_FNS,

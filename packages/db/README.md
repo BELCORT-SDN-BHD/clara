@@ -1372,6 +1372,27 @@ Pinned by `r1030.cosmetic.canonical`, `r1030.cosmetic.control` and `r1030.cosmet
 0321's own §TAIL, which drives all four arms and re-derives both recut bodies by reversing their
 single substitution.
 
+**THE RE-DERIVATION LANE — the successor #885 could not admit** (#1030, 0321). #885 retires a Work
+and admits nothing, because deriving a basis from a corrected reading is an interpretation act and
+`journalBasisSchema` has no back-link from a line to a document field path. 0321 does not derive
+anything either: it hands the Work runtime what it needs and takes back one answer.
+
+| door | granted to | what it is |
+|---|---|---|
+| `clara.source_correction_rederivations(int)` | `clara_runtime` | every source correction that retired a Work and is still owed a successor, oldest first, each as a full brief: the correction (`prior_value`, `new_value`, `corrected_by`), the RETIRED INSTRUCTION (`retired_purpose`, `retired_source_refs`, `retired_basis`, `retired_basis_origin`) and the document's **live facts** off its newest done `invoice_facts` extraction. The figures' only source of truth is `live_facts`; the retired basis is there to be QUOTED, never carried. Capped at 200 per call. |
+| `clara.settle_source_corrected_rederivation(text,uuid,text)` | `clara_runtime` | the ONE answer per correction: the successor that was admitted, or the reason none could be. Claiming sets `superseded_by` on the retired Work and `supersedes` on the successor — the link #885 deliberately left NULL — and it is **proved, not asserted**: the successor must be a Work of the same firm and client whose own `intent_key` IS this correction's op key. Exactly once, through `clara._reserve_op` / `clara._finish_op` under `fn = 'source_correction_rederivation'`. Refusals: CLR10 `invalid_op_key`, CLR11 `correction_not_found`, CLR10 `successor_not_for_this_correction`, CLR10 `decline_reason_required`. |
+| `clara.source_correction_successor_brief(uuid)` | `clara_runtime` | is this Work the successor a correction owed, and if so BOTH figures its own run must name before anything may post (`retired_reading`, `corrected_reading`) plus the retired basis. NULL for every ordinary Work, so a run can ask unconditionally. |
+
+**Why a backlog and not the retired run.** The retirement puts the parked task into
+`cancel_requested`, and the runtime's control listener then ABORTS that engine run — so the retired
+run is not guaranteed to be resumed at all and cannot be the lane that re-derives. A durable,
+restartable backlog plus an exactly-once settlement is what survives that. A lane that crashes
+between admitting and settling re-reads the SAME correction and re-admits idempotently, because the
+successor's `intent_key` is the op key and `clara.admit_journal_work` replays on it.
+
+**0321 writes no row at apply** (§TAIL T9). Corrections retired before it stay exactly where #885
+left them until the runtime lane reaches them.
+
 **A question whose source was corrected is not answerable — even where the Work is carved out.**
 The retirement rule deliberately does not touch a Work holding a committed receipt (#676's
 territory), and before this round a person could still answer that Work's pending question after
