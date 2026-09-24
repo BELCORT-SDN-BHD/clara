@@ -442,7 +442,11 @@ test("v22.identity: the engine stamp is this closure's, and the registry pins th
     assert.equal(typeof registry[`chatTurn_v${n}`], "function", `policy (c): chatTurn_v${n} is still exported for parked runs`);
   }
   // and the OTHER classes are untouched by this cut
-  assert.equal(registry.workflowPins.claraWork, "claraWork_v5", "claraWork_v6 is a LATER ticket of this lane");
+  // #1030, a LATER ticket of this same lane, has since cut claraWork_v6 and repointed the class.
+  // What #985's cell can still say honestly is that the CHAT cut did not move it: this assertion
+  // therefore names the class it owns and leaves claraWork's pin to `tests/clara-work-v6.test.mjs`,
+  // rather than carrying a literal that goes stale the moment a sibling ticket lands.
+  assert.equal(registry.workflowPins.claraWork, "claraWork_v6", "claraWork's pin is #1030's, not this cut's");
   assert.equal(registry.workflowPins.statementFacts, "statementFacts_v3", "statementFacts_v4 is lane C2's");
 });
 
