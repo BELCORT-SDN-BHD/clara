@@ -66,8 +66,11 @@ export async function registerAccount(sub, client) {
 /** A live-shaped `clara.documents` row. `storage_path` must satisfy
  *  `ck_documents_storage_path_v2` (`^firms/<firm>/docs/<sha>.<ext>$`), so it is built from the
  *  sha rather than invented. */
-export async function seedDocument({ firm, kind = "bank_statement", mime = "application/pdf", pageCount = 2 }) {
-  const sha = fx.sha(`stmt-v4-${randomUUID()}`);
+export async function seedDocument({ firm, kind = "bank_statement", mime = "application/pdf", pageCount = 2, sha256 = null }) {
+  // #1037 AC3 — a caller that will SERVE the canonical bytes (a World leg's vision channel reads
+  // them through `downloadCanonical`, which verifies the digest) hands in the sha of the bytes it
+  // is going to serve. Every other caller keeps the random one: nothing reads those bytes.
+  const sha = sha256 ?? fx.sha(`stmt-v4-${randomUUID()}`);
   const ext = mime === "application/pdf" ? "pdf" : (mime.split("/")[1] ?? "bin");
   const r = await fx.rootQuery(
     `insert into clara.documents
@@ -118,12 +121,18 @@ export async function seedOcrRegion({ firm, extraction, fieldPath, textContent, 
 /** A CLAIMED (`running`) `statement_facts` task PLUS its processing-call reservation, which
  *  `_settle_processing_call` requires unconditionally in v2. Direct-inserted for the reason the
  *  db-side fixture names: nothing mints one from a raw `document_filings` insert. */
-export async function runningStatementTask({ firm, documentId, engineId, versionN = 1, pagesReserved = 5 }) {
+export async function runningStatementTask({ firm, documentId, engineId, versionN = 1, pagesReserved = 5, status = "running" }) {
+  // #1037 AC3 — `status: "queued"` is the shape a WORLD leg needs and the unit batteries do not:
+  // a task the reconciler may still discover, bound to NO workflow run, so the engine itself
+  // mints the run and the body under test is the one the image pins. 'running' with a synthetic
+  // run token stays the default, because every unit cell above drives the frozen behaviour
+  // directly and would otherwise have its task claimed out from under it.
+  const queued = status === "queued";
   const r = await fx.rootQuery(
     `insert into clara.document_processing_tasks
        (firm_id, document_id, engine_id, version_n, lane, status, workflow_run_id, started_at)
-     values ($1,$2,$3,$4,'statement_facts','running',$5, now()) returning id`,
-    [firm, documentId, engineId, versionN, `rig-stmt-v4-${randomUUID().slice(0, 8)}`],
+     values ($1,$2,$3,$4,'statement_facts',$6,$5, case when $6 = 'running' then now() else null end) returning id`,
+    [firm, documentId, engineId, versionN, queued ? null : `rig-stmt-v4-${randomUUID().slice(0, 8)}`, status],
   );
   const taskId = r.rows[0].id;
   await fx.rootQuery(
@@ -212,10 +221,10 @@ export function workedHeader(accountDigits) {
  * respect to insertion order — which is exactly what makes a cell that resolves an idx meaningful
  * instead of tautological.
  */
-export async function buildStatementSituation(label, { engineId, pageCount = 3 } = {}) {
+export async function buildStatementSituation(label, { engineId, pageCount = 3, taskStatus = "running", sha256 = null } = {}) {
   const { owner, firm, client } = await fx.buildFirm(label);
   const account = await registerAccount(owner, client);
-  const doc = await seedDocument({ firm, pageCount });
+  const doc = await seedDocument({ firm, pageCount, sha256 });
   await fileTo({ firm, documentId: doc.documentId, client });
   const ocrId = await seedOcrExtraction({ firm, documentId: doc.documentId, pageCount });
   const regionIds = [];
@@ -232,7 +241,7 @@ export async function buildStatementSituation(label, { engineId, pageCount = 3 }
   }
   const numbered = (await fx.rootQuery(
     "select idx, region_id, page from clara.witness_citation_regions($1) order by idx", [ocrId])).rows;
-  const task = await runningStatementTask({ firm, documentId: doc.documentId, engineId });
+  const task = await runningStatementTask({ firm, documentId: doc.documentId, engineId, status: taskStatus });
   const consent = await liveWitnessConsent(owner, { firm, client });
   return {
     owner, firm, client, account, ocrId, regionIds, numbered, consent,

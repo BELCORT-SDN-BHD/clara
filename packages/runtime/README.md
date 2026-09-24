@@ -1000,6 +1000,33 @@ exit path — and the leg has its own skip probe over `clara.open_interruption` 
 `clara.answer_interruption`. Local evidence 2026-09-15: both legs green in one run; hosted evidence
 pending.
 <!-- /#794 -->
+<!-- #1037 -->
+**Since #1037 it has a THIRD leg, on the lane with no human in it at all.** `statementFacts` has no
+`clara.accounting_work` row, no typed Work question and no chat clarification — its body is claim ->
+two model reads -> one persist — so there is nothing for a drill to park on the way the other two
+legs park. What it has instead is a paid read, and that is what the leg holds: the shared scripted
+model (`tests/two-build-serve.mjs`) keeps the TEXT channel open until the drill writes its answer
+file, which it does only once the predecessor image is stopped, and the successor image's engine
+REDELIVERS that step to a process that answers it. The leg builds a third scratch image
+(`className: "statementFacts"`, its own scratch-image `name`), derives its pair from `registry.ts`
+with no version literal, seeds a bank statement through the estate's own doors with its canonical
+bytes in the per-run local object store (so the vision channel runs the real `downloadCanonical`,
+digest check included), and then asserts the same law the other two legs assert: the run's own body
+identifier never moves, the preflight refuses a target that drops the predecessor body and names it,
+and the successor's `/api/build-info` roster still carries the retained body. It goes one step
+further than the other two on the product question #990 asked, because the rows are readable: the
+run resumed on the PREDECESSOR persists its lines UNCITED (that body's line schema carries no
+region) inside an image pinned to the successor, and a SECOND statement admitted inside that image
+binds the successor and persists every line with its page and the `clara.document_regions` locator
+itself. Three numbers are worth keeping, all measured on the 2026-09-25 rig before the leg was
+written: SIGTERM with the read in flight exits in 37ms; the successor resumes and settles the run
+2.2s after it is ready; and the two shapes that do NOT work are a `statementWitnessWait` retry
+(`DEFAULT_STEP_MAX_RETRIES` is 3 with a 1s/2s/4s backoff — a ~7s window, shorter than one image
+boot) and a SIGKILL (it leaves the queue row locked). The leg has its own skip probe over
+`clara.persist_statement_facts_v2`, `clara.witness_citation_regions` and
+`clara.claim_document_processing_task`, and its own cleanup: both document tasks are SETTLED, never
+deleted, and the per-run storage/spool/answer directories are removed on every exit path.
+<!-- /#1037 -->
 <!-- #850 -->
 **Since #850 the two legs' scratch builds OVERLAP instead of running back to back.** The
 `clara.open_interruption` / `clara.answer_interruption` probe that decides whether the chatTurn leg
