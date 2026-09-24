@@ -4561,3 +4561,139 @@ re-judgement.
 
 **Why a separate file rather than an edit to 0279.** #957's redo path re-applies only the HIGHEST
 applied version, and 0279 is no longer it. The number is provisional and claimed at MERGE.
+
+## 0295 — the wave-4 chart pre-step: four standard-chart rows, minted as a new template version (#941/#942/#946/#949)
+
+`0295_wave4_chart_rows.sql` is the ONE migration wave-4's deferred-revenue (#941),
+accrued-income (#942), payroll-posting (#946) and tenancy-rent (#949) lanes share: it lands the
+standard-chart rows all four name, alone, before any of those lanes is cut, so every lane
+resolves the accounts by name and none of them inserts its own. Codes and rulings (owner,
+2026-09-20; `gh issue view <n> --json body,comments`): `2030 Deferred Revenue` (liability, #941),
+`1180 Accrued Income` (asset, SHARED by #941 and #942 — Clara suggests it by default, the
+accountant may pick another suitable active, non-control asset account), `Salaries Payable`
+(liability, #946, "an ordinary liability with no class") and `Rent Payable` (liability, #949,
+"not 2010 Other Payables and not 2020 Accruals... so each month's unpaid rent is visible on its
+own"). 2030 and 1180 are the rulings' own literals; this file chose `2040 Salaries Payable` and
+`2050 Rent Payable`, continuing `trade_payables`' own contiguous 2000/2010/2020/2030 run, next to
+the rows they sit beside — a band this file's own prestate measures empty before choosing it.
+`1180 Accrued Income` joins `trade_receivables` at `sort_ordinal 45`, between `1130 Prepayments`
+(40) and `1190 Allowance for Doubtful Debts` (50).
+
+**Why a new template VERSION, not a new row on v1.** MEASURED on the rig, not asserted: inserting
+a fifth account against the live, published `my_sme_starter` v1 raises `CLR08 "coa template <id>
+is published, not a draft -- its families and accounts are frozen"` from
+`t_coa_template_accounts_freeze` / `clara._tf_coa_template_child_freeze()` (0150:604-663) — D-2's
+own promise that a published template's content, and the hash over it, never move again.
+Disabling that trigger to write into v1 directly would falsify `content_sha256` for every past
+reader who trusted it and would turn `coa-template-pr-a.test.mjs`'s C1/C2 ("the seed's structural
+invariants — 42 families / 142 accounts") into a description of a moving target instead of 0150's
+own fixed artifact. `clara.coa_templates.version` and
+`uq_coa_templates_platform_version (template_key, version) where scope='platform'` exist for
+exactly this case, so 0295 mints `my_sme_starter` **v2**: `INSERT ... SELECT` copies v1's 42
+families and 142 accounts verbatim (the same shape `clara.fork_coa_template` itself uses,
+0150:889-899), the four new accounts are appended, and the row is published with a raw
+`UPDATE ... SET state='published', published_at=now(), content_sha256=...` — exactly how 0150
+published v1 (0150:1649-1652), because `clara._coa_template_for_edit` refuses ANY edit of a
+platform-scope template by name (`platform_template_not_editable`) whether it is v1 or v2. v1's
+CONTENT is never touched — this file issues no INSERT, DELETE or content UPDATE against its own
+rows — so `coa-template-pr-a.test.mjs`'s C1–C5 and its J4 field-by-field comparison against the two
+research dossiers keep testing 0150's own fixed artifact. `coa-template-pr-a-helpers.mjs`'s
+`platformTemplate()` had no version filter — nothing needed one while only one platform row ever
+existed — so this migration adds the one line `and version = 1` to it, in the same commit.
+
+**v1 is RETIRED, in the same migration** (orchestrator ruling 2026-09-24 under the owner's standing
+delegation, recorded on #941, answering the review finding that the four rows were reachable but
+not delivered). Two PUBLISHED starters carry the identical title
+`Malaysian SME Standard Chart of Accounts (starter)`; `clara.list_coa_templates` orders by version
+ASCENDING (0150:1286) so the 142-account v1 renders ABOVE the 146-account v2 in
+`ApplyStandardChartControl`, nothing preselects either and nothing marks one as current — a
+bookkeeper who picks the first familiar option gets a client whose chart has NONE of the four rows
+all four wave-4 lanes then resolve by name. `update ... set state='retired', retired_at=now()` is
+the one transition `clara._tf_coa_template_freeze` admits out of `published` (0150:624-630) and it
+moves no content: neither `get_coa_template` nor `list_coa_templates` filters on state, so every
+firm that adopted v1 still reads exactly what it adopted and `listPublishedCoaTemplates`
+(`apps/web/lib/onboarding/coa.ts:137-149`) simply stops offering it. The UPDATE is conditional on
+`state='published'`, which is what makes the redo branch a no-op for v1 (a retired template is
+immutable, so the redo cannot and must not put it back).
+
+**What retiring v1 costs, measured.** Two doors refuse a template that is not published:
+`apply_coa_template` rung 4 (0156:768, `template_not_published`) and `fork_coa_template`
+(0150:869-872, `source_not_published`). The two batteries that DRIVE those doors against the
+platform starter move to the published one in the same commit — `coa-template-pr-b-helpers.mjs`'s
+`platformStarter()` now reads the highest PUBLISHED version (its expectations all come from the
+template itself, via `expectedChartMap` / `coreFamilies`, so the battery follows the shipped
+starter), and `coa-template-pr-a.test.mjs` keeps `platform` pinned to v1 for its content census
+while a new `publishedPlatformStarter()` handle feeds its twelve fork sites and its two
+fork-count assertions read the source's own counts instead of the literal 142.
+`dba-coding-lane-classification.test.mjs` already reads
+`... where state='published' order by version desc limit 1` and needed no change. No migration
+between 0150 and 0294 is affected: 0156 is the only other file naming `my_sme_starter`, it asserts
+v1 published in its own prestate (0156:283-297), and it runs long before 0295 in the ladder.
+`apps/web`'s two `list_coa_templates` fixtures (`onboarding-amend-and-chart.test.tsx:248-254`,
+`e2e/agentic-finish-mock.mjs:336-345`) each model a ONE-row published list, which is what the
+estate now ships again; no cell asserts the version they carry, so neither was changed.
+
+**Existing clients are not touched, by construction.** A client's chart
+(`clara.coa_accounts`) is copied once, at `apply_coa_template` time, out of whichever
+`template_id` the caller names (0156's own "copy-not-reference" header); no door in the estate
+re-syncs an already-planted chart against a template afterward — MEASURED: no
+publish-template-row-to-existing-clients mechanism exists anywhere in `packages/db`,
+`packages/runtime` or `apps/web`, and none of the four rulings asks for one, so none is invented
+here. A client who already adopted v1 keeps exactly the chart they were given; a NEW client
+reaches the four rows through the unchanged `list_coa_templates` / `apply_coa_template` doors, and
+since v1 is retired the ONE starter those doors offer is the one that carries them.
+
+**A new version carries FOUR tiers, not two.** `clara.coa_template_entity_overrides`
+(0156:388-412) is a template's third child tier and it is keyed by `template_id`
+(`primary key (template_id, entity_type, account_code)`), with 0156's two reviewed society rows
+seeded against v1 only (`... and t.version = 1`, 0156:443-459). A version that copied only the
+families and the accounts would ship a chart whose society variant is GONE — a society client on
+it is planted BOTH `3040 Accumulated Fund` and an un-relabelled `3900 Retained Earnings`, the
+two-accounts-one-name defect 0156's seed exists to discharge. 0295 therefore copies that tier too,
+verbatim (the `basis` text travels with each row), after the accounts because
+`fk_coa_override_account` references `coa_template_accounts(template_id, account_code)`; the tail
+proves v2's census EQUALS v1's row for row (a symmetric `except` in both directions, not a count).
+The tier does not enter `clara._coa_template_content_sha256`, which hashes families and accounts
+only, so the copy leaves v2's published hash unchanged. `coa-template-pr-b.test.mjs` §5.2's
+restore assertion moved from a global `count(*) = 2` to a per-template count in the same commit:
+a global census is satisfied by a version that carries none of them, which is precisely the
+omission this review caught.
+
+**No rig-meta cohort is owed.** This file mints no relation, no function, no role and no grant —
+four INSERTs and one UPDATE against tables 0150 already created — the same claim 0278 and 0292
+make for the same reason. A template row is data, not a name a cohort would track.
+
+**Redo (#957).** The prestate detects an existing `my_sme_starter` v2 (this file's own marker,
+since a data-only migration has no `prosrc` to embed one in), decides FIRST vs REDO from it before
+it judges v1's state, and on the redo branch tears v2's rows down — entity overrides FIRST (the
+composite `fk_coa_override_account` points at the accounts), then accounts, families and the
+header, with the three freeze triggers disabled for exactly those statements and re-enabled
+immediately in the same transaction (precedent 0227:346-348, 0176:261-266, 0184:406-408,
+0007:831-853). v1 is admitted `published` OR `retired` on the redo branch and only `published` on
+a first apply, because a retired template is immutable and the redo cannot put it back; the
+retirement UPDATE is conditional so it matches zero rows there. A second apply after a redo is
+therefore byte-identical for v2 — measured across four redos, `content_sha256` is
+`6a36ad00be8c20c231740f89f4308729b0b540c1c2ca8fe2878c979696b7b4ef` every time, the surrogate uuid
+and the timestamps being the only things that differ and nothing pinning those — and a no-op for
+v1.
+
+The redo refuses outright if v2 already carries a client adoption. **On a lane database that is
+expected, not exceptional:** `wave4-chart-rows.test.mjs` S3/S5 and
+`dba-coding-lane-classification.test.mjs` all plant real adoptions of the CURRENT published
+template, so after any battery run the rig's own adoption rows must be deleted before a redo (the
+refusal message says so). On a database carrying real client data, do not redo at all.
+
+**Cells** (`tests/wave4-chart-rows.test.mjs`, gated on
+`tests/wave4-chart-rows-preintegration-gate.mjs`): S1 reads the four rows absent from v1 and
+present on v2 by code/name/type/family/flag; S2 reconstructs the world before 0295 inside a
+rolled-back transaction — v1 put back to `published`, a freshly-born client (through
+`clara.create_client` + the onboarding commit door) planted off it through the real
+`apply_coa_template` — shows none of the four codes land, and then checks the rollback restored
+the retirement; S3 drives the same doors against the CURRENT published template and shows all four
+land with the right types and no control-account flag; S4 shows none of the four codes collides
+across every `scope='platform'` row in `clara.coa_template_accounts`; S5 drives a SOCIETY client
+through the same doors and shows 3900 relabelled `Accumulated Fund` and 3040 absent, with the
+override census equal to v1's row for row; S6 drives `clara.list_coa_templates()` through a real
+firm session and shows exactly ONE published `my_sme_starter` row — version 2, 146 accounts — with
+v1 retired, unmoved at 42/142 and still carrying 0150's own content hash. Each carries its own
+vacuity control (a rolled-back mutation of the exact fact under test).

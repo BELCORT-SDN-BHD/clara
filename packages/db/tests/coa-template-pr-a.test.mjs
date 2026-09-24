@@ -46,7 +46,8 @@ import {
   forkTemplate, upsertFamily, removeFamily, upsertTemplateAccount, removeTemplateAccount,
   publishTemplate, retireTemplate, listTemplates, getTemplate,
   humanFamilyCodes, humanAccountCodes,
-  platformTemplate, rawTemplate, snapshotTemplate, templateCounts,
+  platformTemplate,
+  publishedPlatformStarter, rawTemplate, snapshotTemplate, templateCounts,
   withRolledBackTx, raisedCode, refusalReason,
   waitBlockedByOrThrow, openHumanTxn, openHumanAutocommit, releaseSession,
   templateMap, mergedResearch,
@@ -58,6 +59,10 @@ const ACCOUNT_DOOR = "clara.upsert_coa_template_account(uuid,text,text,text,text
 let world;
 let ready = false;
 let platform = null;
+/** The platform starter the estate currently PUBLISHES. Since 0295 that is v2, not v1: 0295
+ *  retires v1, and clara.fork_coa_template admits only a PUBLISHED source. Every cell that forks
+ *  takes this; every cell that reads 0150's own fixed artifact keeps taking `platform` (v1). */
+let forkSource = null;
 /** A DRAFT fork of the platform starter, kept for the cells that need editable content. */
 let draft = null;
 /** A PUBLISHED fork, kept for the immutability and copy-not-reference cells. */
@@ -92,15 +97,16 @@ before(async () => {
   }
   world = await buildWorld();
   platform = await platformTemplate();
+  forkSource = await publishedPlatformStarter();
 
   const d = await forkTemplate(world.users.alice, {
-    source: platform.id, key: nextKey("draft"), title: "Firm A working draft",
+    source: forkSource.id, key: nextKey("draft"), title: "Firm A working draft",
     basis: "forked from the platform starter", opKey: opk("fork"),
   });
   draft = d.template_id;
 
   const p = await forkTemplate(world.users.alice, {
-    source: platform.id, key: nextKey("pub"), title: "Firm A published standard",
+    source: forkSource.id, key: nextKey("pub"), title: "Firm A published standard",
     basis: "forked from the platform starter", opKey: opk("fork"),
   });
   await publishTemplate(world.users.alice, { template: p.template_id, opKey: opk("pub") });
@@ -262,13 +268,20 @@ test("B1 · all seven mirrored predicates are byte-equal to coa_accounts' own", 
 // C -- THE PLATFORM STARTER SEED
 // =============================================================================================
 
-test("C1 · the platform starter is PUBLISHED, migration-authored, and content-hashed", async (t) => {
+test("C1 · 0150's starter is migration-authored and content-hashed, and 0295 RETIRED it without moving a row", async (t) => {
   if (unready(t)) return;
   assert.notEqual(platform, null, "the platform starter is absent");
   assert.equal(platform.scope, "platform");
   assert.equal(platform.firm_id, null);
   assert.equal(platform.version, 1);
-  assert.equal(platform.state, "published");
+  // 0295 (#941/#942/#946/#949's pre-step) mints my_sme_starter v2 with four more accounts and
+  // retires this row, so the picker offers ONE starter rather than a choice between two
+  // identically-titled ones. The retirement is a STATE stamp and nothing else: every assertion
+  // below, and C2-C5 and J4's field-by-field dossier comparison, read exactly what 0150 seeded.
+  assert.equal(platform.state, "retired");
+  assert.notEqual(platform.retired_at, null, "a retired template carries its retire stamp");
+  assert.notEqual(forkSource, null, "the estate must still publish a platform starter");
+  assert.ok(forkSource.version > platform.version, "and the published one is a later version of the same key");
   assert.equal(platform.framework_hint, "MPERS");
   assert.equal(platform.created_by, null, "a migration-authored template must name no human author");
   assert.equal(platform.published_by, null, "a migration-authored template must name no human publisher");
@@ -550,22 +563,27 @@ test("E1 · fork happy path: a published source is COPIED into a new firm draft 
   if (unready(t)) return;
   const key = nextKey("e1");
   const out = await forkTemplate(world.users.alice, {
-    source: platform.id, key, title: "E1", basis: "e1 basis", opKey: opk("fork"),
+    source: forkSource.id, key, title: "E1", basis: "e1 basis", opKey: opk("fork"),
   });
   assert.equal(out.state, "draft");
   assert.equal(out.version, 1);
-  assert.equal(out.families, 42);
-  assert.equal(out.accounts, 142);
+  // The fork COPIES the source, so the expectation is the SOURCE's own counts, measured
+  // independently of the door's receipt -- not a literal that has to be edited every time the
+  // published starter gains a row (0295 took it from 42/142 to 42/146).
+  const srcCounts = await templateCounts(forkSource.id);
+  assert.ok(srcCounts.accounts > 100, "mandatory setup: the source is the real starter, not an empty draft");
+  assert.equal(out.families, srcCounts.families);
+  assert.equal(out.accounts, srcCounts.accounts);
   const row = await rawTemplate(out.template_id);
   assert.equal(row.scope, "firm");
   assert.equal(row.firm_id, world.firms.A);
-  assert.equal(row.forked_from, platform.id);
+  assert.equal(row.forked_from, forkSource.id);
   assert.equal(row.created_by, world.users.alice);
   assert.equal(row.content_sha256, null, "a draft must carry no content hash");
 
   // A second fork of the SAME key lands at version 2 -- versions exist so a firm knows what it applied.
   const out2 = await forkTemplate(world.users.alice, {
-    source: platform.id, key, title: "E1 again", basis: "e1 basis", opKey: opk("fork"),
+    source: forkSource.id, key, title: "E1 again", basis: "e1 basis", opKey: opk("fork"),
   });
   assert.equal(out2.version, 2);
 });
@@ -582,7 +600,7 @@ test("E2 · fork with a NULL source starts an EMPTY firm draft", async (t) => {
 
 test("E3 · fork refusals, each by typed code AND name", async (t) => {
   if (unready(t)) return;
-  const ok = { source: platform.id, key: nextKey("e3"), title: "x", basis: "b" };
+  const ok = { source: forkSource.id, key: nextKey("e3"), title: "x", basis: "b" };
   await assertRaises(CLR.authz, () => forkTemplate(world.users.bob, { ...ok, opKey: opk("f") }),
     "a bookkeeper forks");
   await assertRaises(CLR.authz, () => forkTemplate(world.users.carol, { ...ok, opKey: opk("f") }),
@@ -614,18 +632,18 @@ test("E4 · a replay under the SAME op_key returns the stored result and forks n
   const key = nextKey("e4");
   const opKey = opk("e4");
   const first = await forkTemplate(world.users.alice, {
-    source: platform.id, key, title: "E4", basis: "b", opKey,
+    source: forkSource.id, key, title: "E4", basis: "b", opKey,
   });
   const before = await rootQuery("select count(*)::int n from clara.coa_templates");
   const replay = await forkTemplate(world.users.alice, {
-    source: platform.id, key, title: "E4", basis: "b", opKey,
+    source: forkSource.id, key, title: "E4", basis: "b", opKey,
   });
   const after = await rootQuery("select count(*)::int n from clara.coa_templates");
   assert.equal(replay.template_id, first.template_id, "the replay did not return the stored result");
   assert.equal(after.rows[0].n, before.rows[0].n, "the replay planted a second template");
   // The same op_key with DIFFERENT args is a CLR10, not a silent second fork.
   await assertRaises(CLR.badRequest, () => forkTemplate(world.users.alice, {
-    source: platform.id, key, title: "E4 DIFFERENT", basis: "b", opKey,
+    source: forkSource.id, key, title: "E4 DIFFERENT", basis: "b", opKey,
   }), "op_key reused with different args");
 });
 
@@ -839,19 +857,22 @@ test("F6 · remove_coa_template_account: happy path and the unknown-code refusal
 test("G1 · publish stamps the publisher, the time and the content hash", async (t) => {
   if (unready(t)) return;
   const f = await forkTemplate(world.users.alice, {
-    source: platform.id, key: nextKey("g1"), title: "G1", basis: "b", opKey: opk("fork"),
+    source: forkSource.id, key: nextKey("g1"), title: "G1", basis: "b", opKey: opk("fork"),
   });
   const out = await publishTemplate(world.users.alice, { template: f.template_id, opKey: opk("pub") });
   assert.equal(out.state, "published");
-  assert.equal(out.families, 42);
-  assert.equal(out.accounts, 142);
+  const srcCounts = await templateCounts(forkSource.id);
+  assert.ok(srcCounts.accounts > 100, "mandatory setup: the fork came off the real starter");
+  assert.equal(out.families, srcCounts.families);
+  assert.equal(out.accounts, srcCounts.accounts);
   const row = await rawTemplate(f.template_id);
   assert.equal(row.state, "published");
   assert.equal(row.published_by, world.users.alice);
   assert.notEqual(row.published_at, null);
   assert.equal(row.content_sha256.toString("hex"), out.content_sha256);
-  // Two publishes of IDENTICAL content are visibly identical (design D-2).
-  assert.equal(out.content_sha256, platform.content_sha256.toString("hex"),
+  // Two publishes of IDENTICAL content are visibly identical (design D-2) -- compared against
+  // the SOURCE that was forked, which since 0295 is the published v2 rather than v1.
+  assert.equal(out.content_sha256, forkSource.content_sha256.toString("hex"),
     "an unedited fork of the starter must hash to the starter's own content");
 });
 
@@ -903,7 +924,7 @@ test("G2 · publish refusals, each by typed code AND name", async (t) => {
 test("G3 · retire is a STATE, and refuses everything that is not a published template of mine", async (t) => {
   if (unready(t)) return;
   const f = await forkTemplate(world.users.alice, {
-    source: platform.id, key: nextKey("g3"), title: "G3", basis: "b", opKey: opk("fork"),
+    source: forkSource.id, key: nextKey("g3"), title: "G3", basis: "b", opKey: opk("fork"),
   });
   await assertRefusal(CLR.badRequest, "template_not_published",
     () => retireTemplate(world.users.alice, { template: f.template_id, opKey: opk("r") }), "retiring a draft");
@@ -986,7 +1007,10 @@ test("H3 · get_coa_template returns the whole document, and list_coa_templates 
   if (unready(t)) return;
   const doc = await getTemplate(world.users.alice, platform.id);
   assert.equal(doc.scope, "platform");
-  assert.equal(doc.state, "published");
+  // Retired by 0295 and still fully readable: neither clara.get_coa_template nor
+  // clara.list_coa_templates filters on state, which is what makes retiring v1 safe for every
+  // firm that adopted it.
+  assert.equal(doc.state, "retired");
   assert.equal(doc.families.length, 42);
   assert.equal(doc.accounts.length, 142);
   assert.equal(doc.content_sha256, platform.content_sha256.toString("hex"));
@@ -1259,7 +1283,7 @@ test("I-M11 · ck_coa_tmpl_add_back_class: dropping it lets an unlisted add-back
 test("J1 · HIGH-1 the publish/edit RACE, EDITOR FIRST: publish blocks, then hashes the editor's row", async (t) => {
   if (unready(t)) return;
   const f = await forkTemplate(world.users.alice, {
-    source: platform.id, key: nextKey("j1a"), title: "J1a", basis: "b", opKey: opk("fork"),
+    source: forkSource.id, key: nextKey("j1a"), title: "J1a", basis: "b", opKey: opk("fork"),
   });
   let t1 = null, t2 = null;
   try {
@@ -1319,7 +1343,7 @@ test("J1 · HIGH-1 the publish/edit RACE, EDITOR FIRST: publish blocks, then has
 test("J1b · HIGH-1 the RACE, PUBLISHER FIRST: the editor blocks, then refuses by name", async (t) => {
   if (unready(t)) return;
   const f = await forkTemplate(world.users.alice, {
-    source: platform.id, key: nextKey("j1b"), title: "J1b", basis: "b", opKey: opk("fork"),
+    source: forkSource.id, key: nextKey("j1b"), title: "J1b", basis: "b", opKey: opk("fork"),
   });
   let t1 = null, t2 = null;
   try {
@@ -1761,7 +1785,7 @@ test("J8 · LOW the fork allocator serialises: T2 blocks, then gets the NEXT ver
     const first = await t1.client.query(
       `select clara.fork_coa_template(p_source => $1::uuid, p_template_key => $2::text,
          p_title => 'J8 one', p_framework_hint => 'MPERS', p_basis => 'b', p_op_key => $3::text) as r`,
-      [platform.id, key, opk("j8a")],
+      [forkSource.id, key, opk("j8a")],
     );
     assert.equal(first.rows[0].r.version, 1);
 
@@ -1770,7 +1794,7 @@ test("J8 · LOW the fork allocator serialises: T2 blocks, then gets the NEXT ver
       .query(
         `select clara.fork_coa_template(p_source => $1::uuid, p_template_key => $2::text,
            p_title => 'J8 two', p_framework_hint => 'MPERS', p_basis => 'b', p_op_key => $3::text) as r`,
-        [platform.id, key, opk("j8b")],
+        [forkSource.id, key, opk("j8b")],
       )
       .then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
 
