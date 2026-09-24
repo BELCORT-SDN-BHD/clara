@@ -84,12 +84,20 @@
 //     are additive, at the end of the list, with nothing reformatted or renamed, so the
 //     multi-lane merge risk the rule exists to control is not raised. No counts.* key and no
 //     new json key from either.
-// The LIVE row_kind set is therefore FIFTEEN values, not the four the 0011 body
+//   - 0302_accrual_bill_conflict.sql (#938, riders wave 4 lane 03) — adds
+//     row_kind='accrual_bill_conflict', the SIXTEENTH kind: ONE row per accrual PLAN whose
+//     earliest posted, unreversed occurrence has a document-sourced, approved journal entry on
+//     the same profit-and-loss account inside that occurrence's own period. #942's 0304 widened
+//     it to the accrual's P&L leg on EITHER side and added two keys DERIVED FROM THE SHARED `id`
+//     (accrual_side, accrual_plan_status), the same idiom authority_id uses, so no arm's column
+//     vector moves. Section `needs_you`, lane `needs_you`; derived, stores nothing, clears itself
+//     when a reversal is admitted for the period. No counts.* key.
+// The LIVE row_kind set is therefore SIXTEEN values, not the four the 0011 body
 // alone would suggest: draft, uncoded_filing, open_question, coding_task,
 // compliance_watch, lint_finding, fixed_asset_incomplete, staff_advance_incomplete,
 // work_question, depreciation_authority_pending, payroll_posting_blocked,
 // payroll_net_pay_unsettled, agreement_posting_blocked, rent_payable_unsettled,
-// rent_escalation_pending — see REVIEW_QUEUE_ROW_KINDS below, the single source
+// rent_escalation_pending, accrual_bill_conflict — see REVIEW_QUEUE_ROW_KINDS below, the single source
 // components/firm/needs-you-row.tsx's label lookup is built from (never a hand-cast key path).
 //
 // THE ORDINALS COUNT THE LIVE ARRAY, and they say so because they got it wrong once: 0288
@@ -102,8 +110,8 @@
 // `counts` carries NINE integers (depreciation_authority_pending adds none — its lane is
 // `needs_you`, so ready/needs_review/needs_you folds it in without a dedicated tally; the
 // retired seeding_proposal added none either, so its removal moves no tally; #946's
-// payroll_posting_blocked, #947's payroll_net_pay_unsettled, #948's agreement_posting_blocked
-// and #949's two rent kinds add none for the same reason as
+// payroll_posting_blocked, #947's payroll_net_pay_unsettled, #948's agreement_posting_blocked,
+// #949's two rent kinds and #938's accrual_bill_conflict add none for the same reason as
 // depreciation_authority_pending). The envelope ALSO
 // carries top-level `compliance`/`lint` detail objects (per-client SST/lint figures,
 // BYTE-UNCHANGED by 裁-17) that THIS BUILD DOES NOT RENDER — a named, scoped gap (not
