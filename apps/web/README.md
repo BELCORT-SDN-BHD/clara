@@ -1911,3 +1911,62 @@ offer and the door would refuse one on an unenrolled account.
 (`i18n/request.ts` pins `const locale = "en"` and `messages/` holds `en.json` alone), so there is no
 zh catalogue for the strings to land in. The namespace is `PrepaymentAccounts`, plus five keys in
 `Prepayments` for the form's banner and the roster refusal.
+
+
+## #941 — the Deferred revenue destination, and a roster that now holds two purposes
+
+A customer's advance is the mirror of a prepayment: the same evaluator, the same cadence, the same
+monthly Work. It is NOT the same table on screen. A prepayment is money the client PAID ahead (an
+asset being released into expense) and an advance is money it RECEIVED ahead (a liability being
+earned as revenue), so `deferred-revenue` is its own destination beside `prepayments` rather than a
+view of it — one table for both would need a sign column to tell a reader which side of the books a
+row is on.
+
+**Three persistent statements, not two.** The list, the form and the detail all carry the no-invoice
+boundary ("a recognition schedule never issues an invoice and never touches MyInvois — the advance
+was received before any of this, which is what makes it deferred"), the
+configuration-is-not-a-posting boundary, and this lane's OWN third: service tax is never recognised
+as revenue. That last sentence is the one an accountant needs WHILE they decide, so it is on screen
+before any read resolves and it is never a toast.
+
+**Both attention arms, with the READ's own next act.** Arm A is "the last period did not post" and
+arm B is "received in advance, not yet recognised". Arm B's next act is
+`next_step` — `configure_schedule`, `record_document_service_period` or `state_service_period` — read
+off the door's answer, never inferred from the absence of a document id: a web build ahead of its
+database would get that wrong for every row. The two acts that lead to the configure form share one
+destination with the receipt in the query string, and differ only in their label, because a person
+who has to state a term and then configure a schedule should not have to find the page twice.
+
+**The form asks five things and derives everything else.** Which posted advance, which instruction
+authorises it, which revenue account each period credits, why that account, and what the schedule is
+for. There is no amount field, no date field, no cadence control and no pattern control, and
+`lib/deferred-revenue/schedule.ts` computes no money and no date at all: the amount is the receipt's
+own credited liability leg, the term is its carrier's, the allocation and the cadence are the frozen
+evaluator's. `941.form.derives_nothing` holds that as a cell over the door's actual payload.
+
+**Two facts a surface must never confuse.** `posted_periods` counts periods with a COMMITTED
+receipt, never admitted Work, and the corrected-term badge is keyed on `term_moved === true` — an
+ABSENT field paints nothing, because a truthiness test would put the warning on every schedule in
+the firm.
+
+**The roster panel stops being purpose-blind (`components/registers/prepayment-accounts-panel.tsx`).**
+The form's empty state sends a bookkeeper to that panel, and until this ticket the panel could only
+enrol a PREPAYMENT: it read one arm of the roster, offered asset accounts only, and called both
+doors with the default purpose — a live pointer to a dead end. It now reads the whole live roster,
+prints each row's own purpose as a word (never inferred from the account's type, which is the door's
+judgement), asks what the account holds BEFORE which account it is (the answer decides which
+accounts can be offered at all), and carries the purpose into both doors. Retire carries the row's
+purpose because the roster is keyed on (client, account, purpose): the default would have closed a
+different enrolment from the row whose control a person pressed.
+
+**The browser leg.** `deferred-revenue-walk.spec.ts` runs three cells on
+`deferred-revenue-mock.mjs`: the list (three statements, both arms, `2 of 12 periods`, and the
+term-source filter narrowing the answer the page already holds), the configure journey (an attention
+row lands on a form that already knows the receipt; a refused configure keeps every field, prints
+the database's own words and says the advance is still posted; the retry recognises twelve whole
+months with the remainder in the final one), and a running schedule's detail (a posted period told
+from a refused one in the database's own word, and the who/when/why behind a person-stated term).
+
+**Copy is EN only**, for the reason #940 records above: this build ships a single static locale, so
+the brief's "en and zh copy" has no zh catalogue to land in. The namespace is `DeferredRevenue`,
+plus six keys in `PrepaymentAccounts` for the panel's purpose control and its row badges.

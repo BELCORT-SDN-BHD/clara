@@ -179,6 +179,12 @@ import { accrualWorkListPage, handleAccrualSupabase } from "./accrual-mock.mjs";
 // reuses. Every handler is id-scoped and its RPC half guards `readJson` on an exact-verb
 // allow-list, so it drains no other lane's request stream and can run anywhere in the chain below.
 import { handlePrepaymentsSupabase, prepaymentWorkListPage } from "./prepayments-mock.mjs";
+// #941's deferred-revenue lane — the recognition doors for an advance a customer paid ahead.
+// Every handler is id-scoped and its RPC half guards `readJson` on an exact-verb allow-list, so
+// it drains no other lane's request stream and can run anywhere in the chain below.
+import {
+  handleDeferredRevenueSupabase, deferredRevenueWorkListPage,
+} from "./deferred-revenue-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -672,6 +678,7 @@ async function handleSupabase(request, response, url) {
       // above: null means "not mine".
       ?? accrualWorkListPage(body)
       ?? prepaymentWorkListPage(body)
+      ?? deferredRevenueWorkListPage(body)
       ?? { status: 200, body: { rows: [], next_cursor: null, truncated: false } };
     sendJson(response, answer.status, answer.body, cors);
     return;
@@ -797,6 +804,10 @@ async function handleSupabase(request, response, url) {
   // It sits AFTER the plan lane because the two share the four plan lifecycle verbs, each gated on
   // its own plan id — a declared share rather than a collision (see e2e-fixture-ownership.test.ts).
   if (await handlePrepaymentsSupabase(request, response, path, url, sendJson, cors)) return;
+  // #941's deferred-revenue lane. Position is not load-bearing for the same reason its sibling's
+  // is not: every branch is scoped to this lane's own client or schedule id and falls through
+  // otherwise, and its four rpc verbs are owned by no other lane.
+  if (await handleDeferredRevenueSupabase(request, response, path, url, sendJson, cors)) return;
   // #656's opening lane. ABOVE the home board, and that position IS load-bearing (DECISIONS
   // §6.1's ruling on #657's finding, which is general): `home-board-mock.mjs`'s EMPTY_RELATIONS
   // answers `/rest/v1/opening_seed_registry` AND `/rest/v1/coa_accounts` with an honest `[]` for

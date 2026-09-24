@@ -121,6 +121,25 @@ which the shared wall reads as a CONTROL account and would make every prepaid ac
 back-check of schedules already running, or an automatic enrolment derived from history; reading a
 retirement as "that amortisation stops"; a second roster for deferred revenue.
 
+**Revenue recognition schedule**:
+The derived recognition of ONE receipt a customer paid ahead: the entry that put the advance on the
+books, the deferred-revenue account read off that entry's own single credited liability leg —
+ENROLLED on the client's Prepayment account roster under the deferred-revenue purpose, and judged
+ELIGIBLE by the same rule every other lane uses — the Service period its document states or a person
+stated, the revenue account a person judged with the grounds they wrote, and the exact allocation
+across whole calendar months with the remainder wholly in the final period. It posts Dr deferred
+revenue / Cr revenue, one entry a month, until the liability clears to zero. It is the mirror of a
+Prepayment schedule and rides the SAME frozen evaluator, released on the other side; it configures an
+Accounting plan of kind `revenue_recognition_schedule`, and the belt admits each period. Service tax
+is never part of it: an output-tax leg on the same receipt is not a candidate at all, because tax
+owed to the customs department is not revenue and never becomes revenue.
+_Avoid_: An invoice — the advance was received and posted before any schedule existed, and nothing
+here touches MyInvois; usage-based or milestone recognition, which needs a measure of progress this
+estate does not record and is refused by name; a schedule over the gross receipt, which would
+recognise the tax as income; revising a running schedule to correct its term — the correction is a
+new schedule from the next period; "configured" as a synonym for "recognised", which is a different
+fact and a different count.
+
 **On-behalf-of door**:
 The second entrance to a write a person may make, for the times Clara makes it FOR them in a
 conversation. It is a separate function whose name ends `_for`, granted to the runtime lane and to

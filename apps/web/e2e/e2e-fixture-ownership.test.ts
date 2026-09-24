@@ -65,6 +65,7 @@ const LANE_MOCKS = [
   "chat-parity-mock.mjs",
   "client-create-mock.mjs",
   "counterparty-identity-mock.mjs",
+  "deferred-revenue-mock.mjs",
   "depreciation-mock.mjs",
   "document-correction-mock.mjs",
   "documents-intake-mock.mjs",
@@ -604,6 +605,17 @@ const LANE_DECLARATIONS: Record<string, { unscopeable: string[]; debt: string[] 
   // lifecycle doors this lane REUSES rather than re-cuts, so they are a declared share with
   // `plans-mock.mjs` below, each side gated on its own plan id.
   "prepayments-mock.mjs": { unscopeable: [], debt: [] },
+  // #941's deferred-revenue lane, built to the same shape as the prepayment lane beside it:
+  // every handler names this lane's own client id or schedule id before it answers and falls
+  // through otherwise — the four PostgREST reads (`clients` by `id`, and `coa_accounts`,
+  // `prepayment_account_enrolments` and `accounting_work` by `client_id`) and all four RPC verbs.
+  // The `prepayment_account_enrolments` read is the configure form's roster read, which
+  // `prepayments-mock.mjs` answers for ITS client and this lane for its own; it is a RELATION
+  // read rather than a door, so the verb census below cannot see it and it is declared here
+  // instead. The authority PICKER reads `clara.list_accounting_work`, answered through
+  // `deferredRevenueWorkListPage` beside the three lanes already spliced into `serve-built.mjs`'s
+  // single reader for that verb. None of this lane's four verbs is claimed by any other mock.
+  "deferred-revenue-mock.mjs": { unscopeable: [], debt: [] },
   // #625's membership-lifecycle lane, declaring neither list. Its scope is the signed-in PERSONA
   // rather than a client id, because the three relations it answers carry no client at all — they
   // are firm-altitude reads keyed on the caller. `serve-built.mjs` passes the address it already

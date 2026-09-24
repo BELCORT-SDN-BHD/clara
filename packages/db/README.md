@@ -5094,3 +5094,116 @@ a lane that adds a rule adds it to `clara._prepayment_schedule_core` and both en
 `clara_runtime` roster, the two cores ungranted), bimodal like 0306's; the `--import` entry in
 `package.json` in MIGRATION ORDER, immediately after
 `prepayment-account-roster-preintegration-gate.mjs`.
+
+
+## 0308 — a receipt a customer paid ahead is recognised as revenue over its service period (#941, riders wave 4, lane 04)
+
+The expense side of the release lane has been complete since 0223/0305/0306/0307: a prepaid ASSET,
+released by credit into expense, month by month. The REVENUE side had nothing. A customer who pays a
+year of membership up front leaves the firm with a contract LIABILITY (MFRS 15 / MPERS §23 — the
+entity owes a service, not money) and no way to earn it: the money sat in a liability account until
+somebody remembered to journal it out by hand.
+
+**What this file adds.** A `revenue_recognition_schedule` accounting-plan kind, a
+`clara.revenue_recognition_schedules` relation in `clara.prepayment_schedules`' exact shape, the
+deferred-revenue arm of #940's enrolment door, a recognition door with the OBO twin and the
+machine-lane read #915 gave the expense side, the monthly admission arm, and three human reads (a
+list, a detail, an attention band) in 0223's own shape.
+
+### The accounting, stated so a reviewer can check it against the standard
+
+One entry a month, `Dr deferred revenue / Cr the revenue account the accountant chose`, whole
+calendar months, straight line, the cent remainder wholly in the final period, until the liability
+clears to zero. Two rules are structural rather than conventional:
+
+* **SST output tax is never recognised as revenue.** Output tax on an advance is owed to the Royal
+  Malaysian Customs Department under the Service Tax Act 2018; it is not revenue and never becomes
+  revenue. §F excludes any credited leg stamped `special_acc_type = 'sst_output'` from the candidate
+  set BY THE ESTATE'S OWN STAMP rather than by code or name, so a receipt of `Dr bank / Cr deferred
+  revenue / Cr SST output` has exactly ONE candidate liability leg. That is an impossibility removed
+  from the set, not a choice made between two legs — which is why it cannot be wrong for a client
+  whose chart numbers its tax accounts differently.
+* **Straight line is the only pattern.** Usage-based and milestone recognition need a measure of
+  progress this estate does not carry, and inventing one would be the database choosing a number.
+  Anything else is refused by name, `recognition_pattern_unsupported`.
+
+The evaluator is #939's FROZEN `clara.prepayment_schedule_v2`, ridden with `release_side = 'debit'`
+— the argument #939 put there for exactly this caller ("a prepaid ASSET is released by credit and a
+deferred-revenue LIABILITY by debit"). No second arithmetic exists on this side of the books.
+
+### Why a second relation rather than a `kind` column on `clara.prepayment_schedules`
+
+That table's own CHECK pins `plan_kind = 'amortisation_schedule'` and its columns are named for the
+expense side (`prepaid_account_code`, `expense_account_code`, `expense_account_basis`). Widening it
+would either file a liability schedule under columns that name it wrongly, or rename columns that
+four batteries, three reads and a web surface already spell. `clara.revenue_recognition_schedules`
+is that table COLUMN FOR COLUMN with three renamed for this side, which is what the brief asks for.
+
+`clara.prepayment_schedules` is byte-identical after this file, and §TAIL re-measures the five
+prepayment bodies this file relies on to prove it.
+
+### The refusal tokens are this lane's own
+
+0140's five prepayment tokens say "prepayment", and a bookkeeper recognising a customer's advance on
+a Deferred revenue page would be told the wrong half of the books. The SHAPE is carried over token
+for token — `_source_unfit` with an `axis`, `_term_underivable` with a `missing` and a `remedy`,
+`_target_ineligible` / `_target_underivable` — so every surface that renders one renders the other
+with no second grammar.
+
+| token | when |
+|---|---|
+| `deferred_revenue_source_unfit` | the entry is not approved, has no single credited liability leg, or that leg's account is not on the roster (`axis: deferred_account_not_enrolled`) |
+| `deferred_revenue_term_underivable` | no live service period and no live stated term stands for it |
+| `revenue_target_ineligible` / `revenue_target_underivable` | the credited revenue account is unknown, inactive or not an income account; or its written basis is missing |
+| `deferred_revenue_amount_below_period_granularity` | the advance cannot divide over that many months without a period recognising nothing |
+| `deferred_revenue_schedule_exists` | that receipt already has a schedule |
+| `recognition_pattern_unsupported` | any pattern but straight line |
+
+### §A — the second purpose stops being a column and becomes a rule
+
+0306 carried `purpose in ('prepayment','deferred_revenue')` on the COLUMN from birth and refused the
+second value at the door, because the account-type rule was this ticket's to state. It now branches:
+`prepayment` wants a prepaid ASSET (`axis: not_asset_class`), `deferred_revenue` a contract
+LIABILITY (`axis: not_liability_class`). The CONTROL axis is already discharged by the shared
+negative wall above it, so the arm adds the TYPE and nothing else. The roster stays keyed on
+(client, account, purpose), so the two arms version forward independently and neither can retire the
+other's enrolment.
+
+### The prestate pins, with their modes
+
+Six RECUT bodies (each admits its measured pre-image OR a body already carrying `#941`, so a redo is
+safe) and nine KEPT neighbours (pinned unconditionally). Measured on the lane rig after 0307.
+
+| recut signature | pre-image `sha256(prosrc)` |
+|---|---|
+| `clara.enrol_prepayment_account(uuid,text,text,text,text)` | `d55dcbdebd05a7d07adc8f1e8988d8ba440fdfed99b2573c24ea7f8ff07b56a1` |
+| `clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)` | `99f6078775c07440122cde4f180c2f2f11aea7fcd5f0504cb6ffe6c8776cb424` |
+| `clara._assert_plan_schedule(text,text,text,integer,text,date,date,text)` | `1aca2dc26d5a9d0ac5ead59144561eb3292feb9df520f45982952604a9666b40` |
+| `clara._prepayment_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)` | `0b34d44d70fa92f78f1d13dcf7866ce38aa99f7a6d2430cf329a48e4a7cd17dc` |
+| `clara._plan_admit_occurrence(uuid,date,text,text,boolean)` | `a34744199379ebf9fbdcbbd19cd68768ef228409533f19dfcf0daa0c3393ec46` |
+| `clara.preview_accounting_plan(uuid,integer)` | `49416814c59f54bc43d07ee0d795b87edb40aa41c6b54e058ed12fc81a7b05c6` |
+
+| kept neighbour | `sha256(prosrc)` |
+|---|---|
+| `clara._adj_line_eligibility_breach(uuid,jsonb)` | `727fceade766c85a8fc4753d03e6e071a9008334e149266488e5d5232dd98021` |
+| `clara._prepayment_account_enrolled(uuid,text,text)` | `0c10eafa94824a00a5d4c7b08ae1ba093d52f0e4f2c0b953a7951b46a27948db` |
+| `clara.prepayment_schedule_v2(bigint,text,text,date,date)` | `9f5123adf67fcbf573b994efa60d27b1aa35beab8ced54ffbc4a3078896f0194` |
+| `clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)` | `acf5d120aa7f3a6e751ce3a21d02e7bdced202067540ec1d81a85396de4b82aa` |
+| `clara._authority_ref_refusal(text,uuid,uuid,uuid)` | `c4148f6d95cd03876d6b8efe97d658e07e493e1743a075e1fe81901fd8fa61b7` |
+| `clara._assert_journal_basis(jsonb)` | `2ba8e307098f4d5c6214ad48770b84eb574f0edf55cab11f5e122b5adbcc3684` |
+| `clara.prepayment_schedule_v1(uuid,uuid)` | `ecbc76053272a2abb6055740062895d6feb308ffae348a6363391190046727f2` |
+| `clara._plan_amortisation_period_line(uuid,date)` | `88d712d7f9b8e4edc8ece28936a75bfd30611476842dd6f7113d36735192578c` |
+| `clara._plan_occurrence_basis(jsonb,date,text,uuid,jsonb)` | `cef3264e2a8956dc3d08259b6c1f6bf90bd5c155c7f473f88504f778f611829e` |
+
+The prestate also asserts three preconditions that are not shas: `clara.prepayment_stated_terms` and
+`clara.prepayment_account_enrolments` exist, the purpose CHECK already admits `deferred_revenue`,
+and a PUBLISHED platform chart template carries `2030` as a LIABILITY — the wave-4 pre-step (0295,
+`my_sme_starter` version 2, v1 retired) is the first half of this ticket and this file mints no
+chart row at all.
+
+**Gate module, cohort, chain.** `tests/deferred-revenue-preintegration-gate.mjs` (env
+`CLARA_ALLOW_MISSING_DEFERRED_REVENUE`); `DEFERRED_REVENUE_0308_COHORT` in `tests/rig-meta.mjs`
+(the three human reads and the write on `clara_authenticated`, the OBO twin and the machine-lane
+read on `clara_runtime`, the cores and the trigger function ungranted), bimodal like 0307's; the
+`--import` entry in `package.json` in MIGRATION ORDER, immediately after
+`prepayment-schedule-obo-preintegration-gate.mjs`.
