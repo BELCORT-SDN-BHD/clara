@@ -19,6 +19,47 @@ The registry selects the current chat, autodraft, statement/witness facts, docum
 firm interview, client onboarding, and bank/close wake workflows. Read it for the exact versions
 and retained exports; repository state alone is not evidence of a deployed image.
 
+### The pin the 2026-09-25 cut phase moved (so far)
+
+`chatTurn → chatTurn_v22`. The cut phase carries every successor contract the riders waves wrote
+into ONE new body per class; `#985` is its first ticket, and this section grows as the tickets
+behind it land. `claraWork` is still pinned to `claraWork_v5` and `statementFacts` to
+`statementFacts_v3` at this commit. Every superseded body stays exported and in `workflowBodies` —
+the boot census refuses to start the world database-wide if a body a parked run needs is missing,
+and that is policy (c) enforced rather than promised.
+
+* **`chatTurn_v22`** — v21's thirty-nine tools by import plus exactly ONE: `read_opening_source`
+  (#985, the contract #656 wrote and v21 deliberately left out). It takes `{client_id, seed_id}`
+  `.strict()` and nothing else — no amount, no account code, no document id — because the tie
+  document is the basis's own and every figure is re-derived by the database from that document's
+  stored regions. It calls the ROUTE CORE `parseOpeningTargets(client, {seedId, firmId, reassert})`
+  on a `clara_runtime` connection, the same function `POST /api/opening/parse-targets` calls, and
+  never `clara.record_opening_targets_parsed` itself, so the chat lane and the browser record the
+  same targets under the same op key. It restates the route's bookkeeper+ floor through
+  `clara.resolve_chat_principal` (the writer takes no author and checks no role: the runtime
+  credential IS the authority, so this floor is the only one on the chat path), masks a sibling
+  client's basis exactly as a basis that does not exist, and carries every refusal the core can
+  return VERBATIM — the named region ids, the chart gap's `unmapped_accounts`, the producer's own
+  refusal text and the door's own CLR code. NO new wire kind, NO new `WORK_ACCEPTED_PURPOSES`, and
+  the tool is deliberately OUT of `hasCodingIntent_v22`: it mints no terminal card, so a successful
+  read must not collect "the coding could not be completed into a review card this turn".
+  **No coupled migration**: every door it touches has been live since 0017 and 0006, and v21's own
+  deploy-order obligations (0225, 0227, 0230) are inherited unchanged because v22 carries v21's
+  whole tool map.
+
+**One module joined a frozen closure at this cut**: `lib/opening-parse.mjs`, because v22's tool
+imports it. THE COST IS EXACTLY THAT FILE — it has no relative imports of its own, so nothing
+travels with it, and #656 arranged that on purpose (its `OPENING_TB_REFUSAL_ENVELOPE_KEY` comment
+spells the producer's envelope key out rather than importing `lib/opening-tb-produce.mjs`, "the
+door must not gain an import edge into the producer, which would freeze the producer the day a
+Clara tool imports this door"). Its four other importers keep importing it and stay editable; what
+is frozen is this file's own text, so a behavioural change to the opening parse is now a NEW module
+plus a chatTurn successor that imports it, never an edit in place (owner ruling 2026-09-15).
+A versioned COPY under the frozen file set was the alternative and was refused: it would put a
+second derivation of a client's opening figures in the estate and break #656's own "the tool must
+not reimplement the core" clause, which is what makes "the same targets as the browser action"
+(#985 AC2) checkable at all.
+
 ### The two pins the wave 2026-09-18 cut moved
 
 `chatTurn → chatTurn_v21`, `claraWork → claraWork_v5`. Every superseded body stays exported and in
@@ -1653,6 +1694,18 @@ serialize and the reservation and the receipt commit together), which is exactly
 be papered over. A DB-side mirror of #936's own `pending` branch was considered and left out: no
 cell could ever drive it through the door, so it would be untestable defensive code inside a
 migration whose tail census cannot reach behaviour.
+
+### The chat half of that lane (#985), taken at the 2026-09-25 cut
+
+#656's successor contract — "a future `chatTurn_vN`" — is TAKEN: `read_opening_source` ships in
+`chatTurn_v22` (top of this file). It is the only tool in the estate that reaches this lane, and it
+reaches it the way the contract fixed: through `parseOpeningTargets`, never through
+`clara.record_opening_targets_parsed`, so there is ONE derivation of a client's opening figures and
+one op key behind both roads. `refreshOpeningTargets` has NO chat tool yet — #986's chat half is a
+separate contract in the same cut phase, and the refusal sentence `read_opening_source` answers for
+`source_reread_since_parse` names the act a PERSON takes on the register rather than a tool the
+model does not hold. That sentence is the one thing to revisit when the refresh tool lands.
+
 ## The intake batch lane (#636)
 
 `lib/intake-batches.mjs` is a NEW, NON-FROZEN module carrying every line of batch logic:
