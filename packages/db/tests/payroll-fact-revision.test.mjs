@@ -236,3 +236,145 @@ test("S3 · a second declaration joins the first, and the month is declared with
   assert.deepEqual(thrice.human_declared, ["payroll.run.hrdf_levy", "payroll.run.period"]);
   assert.equal(thrice.facts["payroll.run.period"].printed_raw, "2026-09", "…and the newest wins");
 });
+
+// ---------------------------------------------------------------------------------------------
+// S4 — the human door, driven as a bookkeeper (AC1, AC3)
+//
+// Named arguments only, so a parameter-name divergence is a real finding rather than a silent
+// positional mismatch (rig-docs-source-revision.test.mjs's own discipline).
+// ---------------------------------------------------------------------------------------------
+
+async function reviseFact(sub, { document, fieldPath, value: v, observedVersion,
+    reason = "#1056 rig: the reader misread the printed figure", opKey = null }) {
+  const r = await humanQuery(sub,
+    `select clara.revise_document_fact(p_document => $1, p_field_path => $2, p_value => $3::jsonb,
+       p_observed_version => $4, p_reason => $5, p_op_key => $6) as r`,
+    [document, fieldPath, JSON.stringify(v), observedVersion, reason, opKey ?? opk("fact")]);
+  return r.rows[0].r;
+}
+
+function refusal(err) {
+  let detail = {};
+  try { detail = JSON.parse(err.detail); } catch { detail = {}; }
+  return { code: err.code, reason: detail.reason, detail };
+}
+
+const revisionsOf = async (document) =>
+  (await rootQuery(
+    `select revision_kind, field_path, prior_value, new_value, observed_version_n,
+            observed_extraction_id, resulting_extraction_id, reason, recorded_by, recorded_at, op_key
+       from clara.document_fact_revisions where document_id=$1 order by recorded_at, id`,
+    [document])).rows;
+
+/** A payroll run the gate BLOCKS, because the two channels read the gross differently — #1056's
+ *  own first named case ("a channel disagreement the evaluator could not resolve"). Nothing is
+ *  posted from it, so it is the unposted arm of AC2. */
+async function blockedRun() {
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: { "payroll.run.gross_pay": value("5,050.00") },
+    visionAnswers: { "payroll.run.gross_pay": value("5,000.00") },
+  });
+  const v = await verdictOf(doc.documentId);
+  assert.equal(v.verdict, "blocked", `mandatory setup: the run did not post (${JSON.stringify(v.reason)})`);
+  assert.equal(v.rung, "channels_agree", "…and the gate stopped on the disagreement, not on something else");
+  return doc;
+}
+
+test("S4 · a payroll question a person corrects lands in the PAYROLL chain, carrying the other ten forward", async (t) => {
+  if (gate(t)) return;
+
+  const doc = await blockedRun();
+  const machine = (await payrollExtractionsOf(doc.documentId))
+    .find((e) => e.engine_kind === "payroll_text_facts");
+  const machineRegionsBefore = await regionsOf(machine.id);
+  assert.equal(machineRegionsBefore.length, 11, "mandatory setup: eleven regions, one per question");
+
+  const out = await reviseFact(world.users.alice, {
+    document: doc.documentId, fieldPath: "payroll.run.gross_pay",
+    value: "5,000.00", observedVersion: 1,
+  });
+
+  assert.equal(out.field_path, "payroll.run.gross_pay");
+  assert.equal(out.facts_version, 2, "the payroll facts version moved by exactly one");
+  assert.equal(out.observed_extraction_id, machine.id, "…against the reading the person was shown");
+  assert.equal(Number(out.new_value.cents), 500000);
+  assert.equal(out.carried_regions, 10, "the other ten questions rode forward");
+
+  // THE APPENDED ROW IS A PAYROLL ROW. This is the whole point of the lane: an `invoice_facts`
+  // extraction here would be invisible to clara._payroll_posting_verdict.
+  const after = await payrollExtractionsOf(doc.documentId);
+  const appended = after.find((e) => e.id === out.extraction_id);
+  assert.ok(appended, "the receipt names an extraction that exists");
+  assert.equal(appended.engine_kind, "payroll_text_facts");
+  assert.equal(appended.engine_id, "clara-fact-human:v1");
+  assert.equal(appended.status, "done");
+  assert.equal(appended.envelope.source, "human");
+  assert.equal(appended.envelope.field_path, "payroll.run.gross_pay");
+  assert.equal(appended.envelope.revises_extraction_id, machine.id);
+
+  // …and NOTHING landed in the invoice chain.
+  const invoice = (await rootQuery(
+    "select count(*)::int as n from clara.document_extractions where document_id=$1 and engine_kind='invoice_facts'",
+    [doc.documentId])).rows[0].n;
+  assert.equal(invoice, 0, "a payroll correction never mints an invoice_facts extraction");
+
+  // THE ELEVEN REGIONS ARE ALL THERE, the corrected one carrying what the person typed.
+  const regions = await regionsOf(appended.id);
+  assert.equal(regions.length, 11, "one region per question, still");
+  const gross = regions.find((r) => r.field_path === "payroll.run.gross_pay");
+  assert.equal(gross.text_content, "5,000.00");
+  assert.equal(Number(gross.monetary_cents), 500000);
+  assert.equal(Number(gross.engine_confidence), 1, "a person's own reading, at full confidence");
+
+  // IT APPENDS. The machine's extraction and its regions are untouched, which is what makes "the
+  // previous reading is still readable" true at the row level (0217's own claim).
+  assert.deepEqual(await regionsOf(machine.id), machineRegionsBefore);
+
+  // AC3 — auditable the same way an invoice fact revision is: who, when, and the prior value.
+  const rows = await revisionsOf(doc.documentId);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].revision_kind, "fact");
+  assert.equal(rows[0].field_path, "payroll.run.gross_pay");
+  assert.equal(rows[0].observed_version_n, 1, "the payroll facts version the human was reading");
+  assert.equal(rows[0].observed_extraction_id, machine.id);
+  assert.equal(rows[0].resulting_extraction_id, appended.id);
+  assert.match(rows[0].reason, /misread/, "the human's own reason, verbatim");
+  assert.ok(rows[0].recorded_by, "attributed to the human who revised it");
+  assert.ok(rows[0].recorded_at instanceof Date);
+  // The value it replaced is still readable: the TEXT channel's own rendering, with no cents,
+  // because the two channels disagreed and there was no figure both readings supported.
+  assert.deepEqual(rows[0].prior_value, { text: "5,050.00" });
+  assert.deepEqual(rows[0].new_value, { text: "5,000.00", cents: 500000 });
+});
+
+test("S4 · a per-employee cell and a foreign lane's path are still refused", async (t) => {
+  if (gate(t)) return;
+
+  const doc = await blockedRun();
+  // A cell the estate never persisted. The grammar admits the path (0296 registered the
+  // namespace); the LANE arbiter is what refuses it, and it must, because there is no region to
+  // revise and no figure to replace.
+  await assert.rejects(
+    () => reviseFact(world.users.alice, {
+      document: doc.documentId, fieldPath: "payroll.row.gross_pay",
+      value: "3,000.00", observedVersion: 1,
+    }),
+    (e) => {
+      const r = refusal(e);
+      assert.equal(r.code, "CLR10");
+      assert.equal(r.reason, "field_path_not_revisable");
+      return true;
+    });
+  // An INVOICE path on a payroll document: admitted by the lane wall, refused by the observation,
+  // because this document carries no invoice reading at all.
+  await assert.rejects(
+    () => reviseFact(world.users.alice, {
+      document: doc.documentId, fieldPath: "invoice.total", value: "5,000.00", observedVersion: 1,
+    }),
+    (e) => {
+      assert.equal(refusal(e).reason, "no_facts_to_revise");
+      return true;
+    });
+  assert.deepEqual(await revisionsOf(doc.documentId), [], "and neither attempt left a revision row");
+});
