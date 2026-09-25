@@ -7701,8 +7701,12 @@ plans it produced is a decision #1050 was not given; it is filed as a follow-up.
 and `drop constraint if exists` before §C's re-add. The file writes no row and backfills nothing.
 The prestate pins the three recut bodies by `sha256(prosrc)` measured on this lane's rig and admits
 exactly two pre-images each — the pin, or a body already carrying this file's own `0338`
-attribution — so a redo is admitted and real drift still refuses by name. Measured on this rig: the
-first apply reported `2 FIRST, 0 REDO`, the third `1 FIRST, 2 REDO`.
+attribution — so a redo is admitted and real drift still refuses by name. BOTH branches were
+measured on this rig for all three bodies as the file grew section by section: `2 FIRST, 0 REDO`
+when §D and §E first applied, `1 FIRST, 2 REDO` when §F joined them, and `0 FIRST, 3 REDO` on the
+final redo of the finished file — whose checksum
+(`0ebcab8519dcdb73777f896093dbb2f3dad4e8f473990202b11494280348970d`) is unchanged across two
+consecutive redos.
 
 **Integration seam, named rather than discovered.** `clara._obo_plan_core` is also written by lane
 L1 (#1051, which extracts one shared authority predicate from it and
