@@ -96,11 +96,17 @@ declare
   -- closing wave lane L2 database `clara_c02`, 337 files, max `0361_reservation_release_advice`),
   -- never copied from an older migration's header — several of these have been recut since the
   -- file that first wrote them. Each admits exactly TWO pre-images: its measured live sha, or a
-  -- body already carrying this file's own `0364` attribution, so a redo (#957) is admitted and
-  -- real drift still refuses BY NAME.
+  -- body already carrying this file's own `#1150 [0364]` attribution, so a redo (#957) is admitted
+  -- and real drift still refuses BY NAME. The marker is a SUBSTRING test, so it is the full
+  -- attribution and not the bare number: every one of §A-§F writes `#1150 [0364]` into the body it
+  -- installs, while a body that merely MENTIONS 0364 in prose — "superseded by a later cut; see
+  -- 0364 for the previous shape" — is not this file's own recut and must refuse
+  -- (`waveK-lane02-review-adversarial.json` ADV-03, driven both ways).
   --
   --   · `create_accrual_adjustment` is 0222's own door, unmoved since.
-  --   · `correct_accrual_adjustment` is 0284 (#936)'s.
+  --   · `correct_accrual_adjustment` is 0284 (#936)'s door as 0303 and 0304 left it: 0303
+  --     (`accrual_period_amounts`) and 0304 (`accrual_revenue_side`) each recut it, and the pin
+  --     below is 0304's body, measured live.
   --   · `_confirm_tenancy_rent_plan_core` and `_confirm_tenancy_rent_plan_revision_core` are
   --     0353 (#1137)'s, as its own fix round left them.
   --   · `_obo_plan_core` is 0338 (#1050)'s, as the sweep wave's integration merge recut it.
@@ -206,7 +212,7 @@ begin
       raise exception '0364 prestate: % is absent', v_recut[v_i][1] using errcode='CLR10';
     elsif v_sha = v_recut[v_i][2] then
       v_first := v_first + 1; v_modes := v_modes || v_recut[v_i][1] || '=FIRST ';
-    elsif position('0364' in v_src) > 0 then
+    elsif position('#1150 [0364]' in v_src) > 0 then
       v_redo := v_redo + 1; v_modes := v_modes || v_recut[v_i][1] || '=REDO ';
     else
       raise exception '0364 prestate: % is neither its pinned pre-image (%) nor this file''s own recut; live sha %',
@@ -339,7 +345,9 @@ end $c0364_a$;
 -- =====================================================================================
 -- §B — clara.correct_accrual_adjustment — THE ACCRUAL LANE'S NESTED **REVISION** RESERVATION.
 --
--- 0284's own body (#936), verbatim from the live catalog, with ONE hunk in three places: the
+-- 0284's door (#936) AS 0303 AND 0304 LEFT IT — 0303_accrual_period_amounts and
+-- 0304_accrual_revenue_side each recut this body after 0284 created it, so the pre-image here is
+-- 0304's, taken verbatim from the live catalog — with ONE hunk in three places: the
 -- derived key handed to `clara.revise_accounting_plan`, the `nested_op_key` the typed
 -- `plan_op_key_conflict` refusal names, and the comment that explains both. #936's own wrap —
 -- which types an UNTYPED CLR10 out of the nested call and re-raises everything else byte for byte

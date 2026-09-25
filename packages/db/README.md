@@ -10482,7 +10482,7 @@ reservation on its own door short-circuits the whole body — driven per lane in
 | § | object | what it is |
 |---|---|---|
 | A | `clara.create_accrual_adjustment` | 0222's body verbatim; the derived key becomes `:acplan` |
-| B | `clara.correct_accrual_adjustment` | 0284's body verbatim; `:acrev`, and #936's typed `plan_op_key_conflict` names the key it really derives |
+| B | `clara.correct_accrual_adjustment` | 0284's door **as 0303 and 0304 left it** (both recut it after 0284 created it, and the pin is 0304's body); `:acrev`, and #936's typed `plan_op_key_conflict` names the key it really derives |
 | C | `clara._confirm_tenancy_rent_plan_core` | 0353's body verbatim; `:tnplan` on the HUMAN branch, plus the closed lane set |
 | D | `clara._confirm_tenancy_rent_plan_revision_core` | 0353's body verbatim; the closed lane set |
 | E | `clara._obo_plan_core` | 0338's body verbatim; the closed kind set admits `recurring_journal` and stamps its entrance |
@@ -10556,6 +10556,17 @@ consolidates a pair the cell says which entry to drop. Both directions are shown
 deliberately broken subject inside the cell (a decoy body deriving `':plan'` under
 `create_accounting_plan`, a second decoy on `':tnplan'`, and the live rows with one pair member
 removed).
+
+**Redo (#957), and what the prestate's marker is.** Every one of §A–§F is a `create or replace
+function`, so the file is redo-safe by construction. Its prestate is bimodal: each of the six recut
+bodies is admitted at its pinned pre-image (FIRST) or as a body already carrying this file's own
+attribution (REDO). **That marker is a substring test**, so it is the full `#1150 [0364]` string
+every one of §A–§F writes into the body it installs, not the bare number: with the bare number a
+body that only *mentions* `0364` in a comment — "superseded by a later cut; see 0364 for the
+previous shape" — was admitted as this file's own recut and would have been spliced over in
+silence. Driven both ways in a rolled-back transaction, before and after the tightening
+(`waveK-lane02-review-adversarial.json` ADV-03, and `waveK-lane02-fix.md`). A later file reusing the
+idiom should pick a marker that cannot occur by accident for the same reason.
 
 **What the census can and cannot see.** It reads a derivation written as `p_op_key || ':x'` and
 attributes it to the nearest ENCLOSING plan-door call, walking outwards through wrapper calls
