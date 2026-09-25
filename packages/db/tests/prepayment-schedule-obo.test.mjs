@@ -418,6 +418,25 @@ async () => {
   }), "the human door against the same unenrolled account");
   assert.deepEqual(humanSide.detail, refused.detail);
 
+  // 1b — #1114's WHOLE ACCEPTANCE CRITERION, at ONE door, in ONE cell: the refusal a bookkeeper
+  //      acts on and the internal wiring error are told apart BY ERRCODE ALONE. Driven here rather
+  //      than asserted from a catalog read, because the claim is about what the door answers.
+  //      `prepayment_source_unfit` keeps CLR10 -- it carries a remedy and a panel and the
+  //      Prepayments form renders it -- while a null author, which the estate's own successor
+  //      contract calls "an internal wiring error, never shown", answers CLR44.
+  const wiring = await assertPair(await callerContractCode(), OBO_REASON.invalidAuthor,
+    () => createPrepaymentScheduleFor({
+      client: scene.client, author: null, sourceEntry: plain.entry,
+      expenseAccount: scene.target, authorityRef: ref, opKey: opk("p915-roster-null"),
+    }), "the same door, handed no author at all");
+  assert.equal(refused.err.code, CLR.badRequest,
+    "the account-not-enrolled refusal is the one a surface renders, and it stays on CLR10");
+  assert.notEqual(wiring.err.code, refused.err.code,
+    "#1114 AC1: the invalid-author refusal and the account-not-enrolled refusal must be "
+    + "distinguishable by errcode alone, not only by the reason inside the detail payload");
+  assert.equal(PREPAY_REASON.sourceUnfit, refused.detail.reason);
+  assert.equal(PREPAID_NOT_ENROLLED_AXIS, refused.detail.axis);
+
   // 2 — ENROL IT AND THE SAME OBO CALL SUCCEEDS. A gate cell that only ever measured the refusal
   //     could not tell a gate from a ban.
   await enrolPrepaymentAccount(scene.bob, { client: scene.client, account: plain.code });
