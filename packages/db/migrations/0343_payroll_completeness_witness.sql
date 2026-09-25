@@ -1246,3 +1246,743 @@ comment on function clara._payroll_entry_plan(uuid, jsonb) is
   '#946, widened by #1048: THE DRAFTING BODY. An established payroll fact state (0296''s or 0343''s evaluator output, v1 or v2) plus this client''s own chart in; the payroll entry out -- the gross debited to salaries and wages, each employer contribution the document prints debited to its own employment-cost account, every statutory deduction credited to its own payable, and the net credited to salaries payable. A figure comes from the PRINTED total whenever the page prints one; when the page prints no gross or net total, #1048 admits the evaluator''s own ROW SUM instead -- but only where the reading is WITNESSED complete (a printed headcount equal to the lines read, a printed page count of one, or a named person''s yes), and never where a printed headcount CONTRADICTS the lines read. Every leg names the question it came from and suffixes `#row_sum` where the figure was summed; `posting_basis` names the basis, the witness and the summed questions. It still gives an unprinted line no leg at all, resolves every account by code in the client''s chart, and requires EXACT balance rather than the rounding tolerance clara._validate_entry_lines allows. It reads no table but clara.coa_accounts and is a pure function of its inputs: the completeness ANSWER is injected into the state by clara._payroll_posting_verdict under `completeness_answer`, never read here. Every failure is a named refusal in `refusals`; it writes nothing.';
 
 reset role;
+
+-- =====================================================================================
+-- SectionF  WHAT A NAMED PERSON SAID, AND WHEN -- clara.payroll_completeness_answers.
+--
+--     THE PARKED QUESTION'S ONLY DURABLE PART. Everything else in this lane is DERIVED: the
+--     verdict stores nothing, the Needs-you rows store nothing, and a block clears itself the
+--     moment its cause does. An ANSWER cannot work that way -- it is a fact about what a person
+--     asserted, and it is the basis a posted entry stands on -- so it is a row, and the row is the
+--     evidence.
+--
+--     IT IS BOUND TO THE READING, NOT TO THE DOCUMENT. `extraction_id` is the payroll pair's own
+--     text row, UNIQUE, so one answer belongs to one reading. This is the whole integrity of the
+--     mechanism: if somebody says "yes, these twelve are everyone" and the page is then re-read
+--     and fifteen lines come back, the old yes does not authorise the new sum -- there is simply no
+--     answer for the new reading, and the question is parked again. A document-scoped answer would
+--     have silently carried consent from one reading to another.
+--
+--     IT RECORDS WHAT WAS AFFIRMED, NOT MERELY THAT SOMETHING WAS. `rows_read` is the line count
+--     the person was shown and said yes to, frozen at that moment, so a later reader can see the
+--     assertion itself rather than re-deriving it from a state that may since have moved.
+--
+--     APPEND-ONLY. No UPDATE and no DELETE: a changed mind is a new READING (re-file or re-read the
+--     payslip) with its own question and its own answer, exactly as #949's contract_plan_confirmations
+--     treats a changed mind as a revision. A record of one moment is never edited.
+--
+--     A `no` IS A ROW TOO, and it must be: "no answer yet" and "a person looked and said this is
+--     not the whole run" are different states of the world, they clear differently, and the second
+--     is what stops the Needs-you question coming back at the same person every day.
+--
+--     REDO-SAFE: `create table if not exists`, `create index if not exists`, `drop policy if
+--     exists` before each create, `create or replace function` for the triggers.
+--
+--     UNDER `set role clara_fn_owner`, LIKE EVERY OTHER clara TABLE. The owner is not cosmetic:
+--     clara._payroll_completeness_answer is SECURITY DEFINER owned by clara_fn_owner, and a table
+--     the migration principal owned instead would refuse it `permission denied` -- measured on
+--     this rig, which is how this line came to be written. `force row level security` applies to
+--     the owner too, which is why the owner policy below exists rather than being implied.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create table if not exists clara.payroll_completeness_answers (
+  id                uuid        primary key default gen_random_uuid(),
+  firm_id           uuid        not null references clara.firms(id),
+  client_id         uuid        not null,
+  document_id       uuid        not null references clara.documents(id),
+  -- THE READING this answer is about. UNIQUE: one answer per reading, and a re-read is a new
+  -- reading with its own question.
+  extraction_id     uuid        not null unique references clara.document_extractions(id),
+  -- THE LINE COUNT THE PERSON AFFIRMED, frozen at the moment they affirmed it.
+  rows_read         int         not null check (rows_read > 0),
+  answer            text        not null check (answer in ('yes','no')),
+  note              text        check (note is null or btrim(note) <> ''),
+  answered_by       uuid        not null references clara.users(id),
+  answered_at       timestamptz not null default now(),
+  constraint fk_payroll_completeness_answers_client foreign key (client_id, firm_id)
+    references clara.clients(id, firm_id),
+  constraint fk_payroll_completeness_answers_document foreign key (document_id, firm_id)
+    references clara.documents(id, firm_id)
+);
+
+comment on table clara.payroll_completeness_answers is
+  '#1048: one row per act of a named person answering "this summary prints no total; is this every employee for the month?" about ONE READING of one payroll summary. Bound to clara.document_extractions by a UNIQUE extraction_id rather than to the document, so a re-read asks again rather than inheriting an older yes. `rows_read` freezes the line count the person was shown and affirmed. A `yes` is the posting basis clara._payroll_entry_plan admits the evaluator''s row sum against; a `no` keeps the document unposted and says who said so. Append-only: a changed mind is a new reading, with its own question and its own answer.';
+
+comment on column clara.payroll_completeness_answers.extraction_id is
+  '#1048: the payroll_text_facts extraction this answer is about. UNIQUE -- one answer per reading, never per document, so consent cannot travel from a reading of twelve lines to a later reading of fifteen.';
+comment on column clara.payroll_completeness_answers.rows_read is
+  '#1048: the number of agreed employee lines the person was shown when they answered. Frozen here rather than re-derived, so the assertion itself is on the record.';
+
+create index if not exists ix_payroll_completeness_answers_document
+  on clara.payroll_completeness_answers(document_id, answered_at desc);
+create index if not exists ix_payroll_completeness_answers_client
+  on clara.payroll_completeness_answers(client_id, answered_at desc);
+
+alter table clara.payroll_completeness_answers enable row level security;
+alter table clara.payroll_completeness_answers force row level security;
+drop policy if exists p_payroll_completeness_answers_owner on clara.payroll_completeness_answers;
+create policy p_payroll_completeness_answers_owner on clara.payroll_completeness_answers
+  for all to clara_fn_owner using (true) with check (true);
+drop policy if exists p_payroll_completeness_answers_human on clara.payroll_completeness_answers;
+create policy p_payroll_completeness_answers_human on clara.payroll_completeness_answers
+  for select to clara_authenticated using (firm_id = clara.jwt_firm());
+-- NO AGENT-LANE GRANT AND NO AGENT POLICY (#949's own SPEC-08 posture, applied here for the same
+-- reason): this table records a human's professional judgement about a client's payroll, and the
+-- agent read lane has no business in it. A person's answer reaches the agent, when it must, through
+-- the entry it produced and that entry's own receipt.
+drop policy if exists p_payroll_completeness_answers_agent on clara.payroll_completeness_answers;
+grant select on clara.payroll_completeness_answers to clara_authenticated;
+revoke all on clara.payroll_completeness_answers from clara_agent_ro;
+
+create or replace function clara._tf_payroll_completeness_answer_immutable() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $tfpcai$
+begin
+  raise exception 'a completeness answer is a record of one moment: it is never % (re-read the payslip instead, which asks its own question)', lower(tg_op)
+    using errcode='CLR08', detail='{"reason":"payroll_completeness_answer_immutable"}';
+end $tfpcai$;
+
+revoke all on function clara._tf_payroll_completeness_answer_immutable() from public;
+
+comment on function clara._tf_payroll_completeness_answer_immutable() is
+  '#1048: clara.payroll_completeness_answers admits INSERT alone. UPDATE and DELETE are both refused outright -- an answer is what a named person asserted at a moment, and a changed mind is a new reading with its own answer.';
+
+drop trigger if exists t_payroll_completeness_answers_immutable on clara.payroll_completeness_answers;
+create trigger t_payroll_completeness_answers_immutable
+  before delete or update on clara.payroll_completeness_answers
+  for each row execute function clara._tf_payroll_completeness_answer_immutable();
+drop trigger if exists t_payroll_completeness_answers_no_truncate on clara.payroll_completeness_answers;
+create trigger t_payroll_completeness_answers_no_truncate
+  before truncate on clara.payroll_completeness_answers
+  for each statement execute function clara._tf_no_truncate();
+
+reset role;
+
+-- =====================================================================================
+-- SectionG  THE READING-BOUND ANSWER READ -- clara._payroll_completeness_answer(uuid) returns jsonb.
+--
+--     ONE place resolves "what did a person say about THIS document's newest reading", so the gate,
+--     the queue and the door cannot disagree about it. It returns the answer as a jsonb record (or
+--     SQL NULL when the newest reading has no answer), carrying the name of the person who gave it
+--     -- because a basis a person supplied has to be attributable on its face, not through a join a
+--     later reader has to think of.
+--
+--     IT RESOLVES THE NEWEST READING ITSELF rather than taking an extraction id, for the same
+--     reason clara._payroll_posting_verdict judges the newest pair: a re-extraction mints a new
+--     version, and the live reading is the one every caller is asking about.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._payroll_completeness_answer(p_document uuid)
+  returns jsonb language sql stable security definer
+  set search_path = clara, pg_temp as $pca$
+  select jsonb_build_object(
+           'answer_id', a.id,
+           'answer', a.answer,
+           'note', a.note,
+           'rows_read', a.rows_read,
+           'extraction_id', a.extraction_id,
+           'answered_at', to_char(a.answered_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SSZ'),
+           'answered_by', a.answered_by,
+           'answered_by_name', u.display_name)
+    from clara.payroll_completeness_answers a
+    join clara.users u on u.id = a.answered_by
+   where a.extraction_id = (
+           select e.id from clara.document_extractions e
+            where e.document_id = p_document and e.engine_kind = 'payroll_text_facts'
+              and e.status = 'done'
+            order by e.version_n desc, e.extracted_at desc limit 1);
+$pca$;
+
+revoke all on function clara._payroll_completeness_answer(uuid) from public;
+
+comment on function clara._payroll_completeness_answer(uuid) is
+  '#1048: what a named person said about the NEWEST payroll reading of this document -- the answer, the note, the line count they affirmed, when, and who, as one jsonb record; SQL NULL when the newest reading has no answer. One resolver, so the gate, the queue and the answer door cannot disagree about which reading an answer belongs to. Ungranted: reached from clara._payroll_posting_verdict and clara.answer_payroll_completeness.';
+
+reset role;
+
+-- =====================================================================================
+-- SectionH  THE GATE GAINS ONE RUNG -- clara._payroll_posting_verdict recut (AC2, AC3).
+--
+--     0297's gate, with ONE rung added to the closed roster and everything else in place. The
+--     roster, the first-failure rule, the stability (it still WRITES NOTHING), the four duplicate
+--     scopes, the closed-period rung and every sentence it already built are untouched, and the
+--     #946 battery re-drives all of them.
+--
+--     THE NEW RUNG IS `completeness_witness`, AND IT SITS IMMEDIATELY AFTER `run_totals_printed`,
+--     which is where reading order puts it: "does this page give me a gross and a net to post?" is
+--     asked first, and "may I stand the row sum in for them?" only if the answer was no. The two
+--     never both fail -- SectionE emits `run_totals_not_printed` when no sum exists at all and a
+--     `completeness_*` reason when one does -- so a person is told exactly one thing, and the rung
+--     vector shows which question was even reached.
+--
+--     ONE RUNG, THREE NAMED REASONS, because they are three different situations and a person acts
+--     differently on each:
+--       completeness_contradicted -- the page names more employees than the reading found. Nothing
+--                                    can be affirmed here: the reading is KNOWN incomplete, and the
+--                                    remedy is a complete copy of the summary.
+--       completeness_unwitnessed  -- the page says nothing about its own completeness. This is the
+--                                    PARKED QUESTION, and it is the only one of the three a person
+--                                    can answer away. `completeness.parked` is true for exactly
+--                                    this case, and SectionJ's two queue arms split on it.
+--       completeness_declined     -- a named person looked and said this is not every employee.
+--                                    The document stays unposted, and the sentence says who.
+--
+--     THE ANSWER IS READ HERE AND INJECTED INTO THE STATE THE PLAN SEES. clara._payroll_entry_plan
+--     is a pure function of (client, state) and stays one; this body is the impure edge that knows
+--     about tables, so it resolves the answer for the newest reading and merges it in under
+--     `completeness_answer`. That keeps ONE body deciding the admission and ONE body knowing where
+--     an answer lives.
+--
+--     THE GATE STILL WRITES NOTHING AND IS STILL STABLE. Reading clara.payroll_completeness_answers
+--     is a read; the row it finds was written by the door in SectionK, by a named person, under an
+--     op key.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._payroll_posting_verdict(p_document uuid)
+  returns jsonb language plpgsql stable
+  set search_path = clara, pg_temp as $ppv$
+declare
+  -- THE CLOSED ROSTER, in the order a person should be told about a failure. `filed` and
+  -- `facts_read` come first because without them the rest is unanswerable; the middle five are
+  -- the brief's own conditions; #1048's `completeness_witness` follows `run_totals_printed`
+  -- because it is only reachable when that question had no printed answer; `entry_balances` is a
+  -- belt that cannot fail once the arithmetic rung passed, and is evaluated anyway because a gate
+  -- that assumes its own invariants is a gate that stops checking them.
+  v_rungs text[] := array['filed','facts_read','channels_agree','arithmetic_holds',
+                          'period_established','period_open','run_totals_printed',
+                          'completeness_witness',
+                          'accounts_resolve','entry_balances','no_duplicate_entry'];
+  v_tokens jsonb := jsonb_build_object(
+    'filed','not_filed', 'facts_read','payroll_not_read',
+    'channels_agree','channels_disagree', 'arithmetic_holds','arithmetic_failed',
+    'period_established','period_not_established', 'period_open','period_closed',
+    'run_totals_printed','run_totals_not_printed',
+    'completeness_witness','completeness_unwitnessed',
+    'accounts_resolve','account_missing', 'entry_balances','entry_unbalanced',
+    'no_duplicate_entry','duplicate_entry');
+  v_vector jsonb := '{}'::jsonb;
+  v_detail jsonb := '{}'::jsonb;
+  v_first text; v_rung text;
+  f record;
+  v_filing uuid; v_client uuid; v_firm uuid; v_sha text;
+  v_extraction uuid; v_state jsonb; v_plan jsonb := null;
+  v_disagree text[] := '{}'; v_arith text[] := '{}';
+  v_contested jsonb; v_unbal jsonb; v_unchk jsonb;
+  v_dup_entry uuid; v_dup_scope text;
+  v_sentence text; v_month_label text;
+  -- #1048's own locals.
+  v_answer jsonb; v_cw text; v_comp jsonb; v_rows_read int;
+  v_gross_sum bigint; v_net_sum bigint; v_parked boolean := false;
+begin
+  -- 1 · FILED. The entry this lane posts is a DOCUMENT entry bound to the document's live
+  --     filing, so a document with no live filing has nothing to bind to.
+  select f2.id, f2.client_id, f2.firm_id into v_filing, v_client, v_firm
+    from clara.document_filings f2
+   where f2.document_id = p_document and f2.retired_at is null
+   order by f2.filed_at desc limit 1;
+  v_vector := v_vector || jsonb_build_object('filed', case when v_filing is null then 'not_filed' else 'pass' end);
+
+  -- 2 · FACTS READ. The newest payroll pair banked for this document.
+  if v_filing is not null then
+    select e.id, e.envelope->'payroll_state' into v_extraction, v_state
+      from clara.document_extractions e
+     where e.document_id = p_document and e.engine_kind = 'payroll_text_facts' and e.status = 'done'
+     order by e.version_n desc, e.extracted_at desc limit 1;
+  end if;
+  v_vector := v_vector || jsonb_build_object('facts_read',
+    case when v_state is null then 'payroll_not_read' else 'pass' end);
+
+  if v_state is not null then
+    -- 3 · CHANNELS AGREE. A question the two readings answer differently, or a quoted employee
+    --     row they read differently -- either one means there is no single reading to post.
+    v_contested := coalesce(v_state->'rows'->'contested','[]'::jsonb);
+    for f in select k, v from jsonb_each(coalesce(v_state->'facts','{}'::jsonb)) as t(k, v) order by k loop
+      if (f.v->>'state') in ('channels_disagree','rows_contested') then
+        v_disagree := v_disagree || f.k;
+      elsif (f.v->>'state') in ('totals_mismatch','rows_unbalanced','unreadable','unanswered') then
+        v_arith := v_arith || f.k;
+      end if;
+    end loop;
+    -- #1048: a WITNESS the two channels read differently is a reading disagreement like any other,
+    -- and it is folded in HERE rather than left to the completeness rung -- a page whose headcount
+    -- one channel read as 12 and the other as 13 has not been read, whatever the lines say. The
+    -- witness questions live outside `facts` precisely so that an UNANSWERED one (a prompt that
+    -- never asked) is silent here instead of blocking the whole estate.
+    for f in select k, v from jsonb_each(coalesce(v_state->'witness','{}'::jsonb)) as t(k, v) order by k loop
+      if (f.v->>'state') = 'channels_disagree' then v_disagree := v_disagree || f.k; end if;
+    end loop;
+    if coalesce(array_length(v_disagree,1),0) > 0 or jsonb_array_length(v_contested) > 0 then
+      v_vector := v_vector || jsonb_build_object('channels_agree','channels_disagree');
+      v_detail := v_detail || jsonb_build_object('fields', to_jsonb(v_disagree),
+        'contested_rows', v_contested);
+    else
+      v_vector := v_vector || jsonb_build_object('channels_agree','pass');
+    end if;
+
+    -- 4 · ARITHMETIC HOLDS. A row whose own gross-minus-deductions identity fails, a row the
+    --     evaluator could not check at all, a printed total the row sum contradicts, or a
+    --     rendering that is not a figure.
+    v_unbal := coalesce(v_state->'rows'->'unbalanced','[]'::jsonb);
+    v_unchk := coalesce(v_state->'rows'->'unchecked','[]'::jsonb);
+    if coalesce(array_length(v_arith,1),0) > 0
+       or jsonb_array_length(v_unbal) > 0 or jsonb_array_length(v_unchk) > 0 then
+      v_vector := v_vector || jsonb_build_object('arithmetic_holds','arithmetic_failed');
+      v_detail := v_detail || jsonb_build_object('fields', to_jsonb(v_arith),
+        'unbalanced_rows', v_unbal, 'unchecked_rows', v_unchk);
+    else
+      v_vector := v_vector || jsonb_build_object('arithmetic_holds','pass');
+    end if;
+
+    -- 5-9 · THE DRAFTING BODY ANSWERS THE REST. The month, the run totals, #1048's completeness
+    --       admission, the chart and the balance are exactly what SectionE already decides, so they
+    --       are read off its refusals rather than re-decided here -- one body per question, never
+    --       two. #1048: the ANSWER a named person gave about the newest reading is resolved here
+    --       and merged into the state the plan sees, so the plan stays a pure function of its
+    --       inputs and this body stays the only one that knows where an answer lives.
+    v_answer := clara._payroll_completeness_answer(p_document);
+    v_plan := clara._payroll_entry_plan(v_client,
+                v_state || jsonb_build_object('completeness_answer', coalesce(v_answer, 'null'::jsonb)));
+    foreach v_rung in array array['period_established','run_totals_printed','accounts_resolve','entry_balances'] loop
+      if exists (select 1 from jsonb_array_elements(v_plan->'refusals') x
+                  where x->>'reason' = v_tokens->>v_rung) then
+        v_vector := v_vector || jsonb_build_object(v_rung, v_tokens->>v_rung);
+      else
+        v_vector := v_vector || jsonb_build_object(v_rung, 'pass');
+      end if;
+    end loop;
+    -- #1048: ONE RUNG, THREE NAMED REASONS -- read off the plan's own refusals, so the gate never
+    -- re-decides an admission the drafting body already decided.
+    select x->>'reason' into v_cw from jsonb_array_elements(v_plan->'refusals') x
+     where x->>'reason' in ('completeness_contradicted','completeness_unwitnessed','completeness_declined')
+     limit 1;
+    v_vector := v_vector || jsonb_build_object('completeness_witness', coalesce(v_cw,'pass'));
+    v_comp := coalesce(v_state->'completeness','null'::jsonb);
+    v_rows_read := coalesce(nullif(v_state->'rows'->>'agreed','')::int, 0);
+    v_gross_sum := case when jsonb_typeof(v_state->'facts'->'payroll.run.gross_pay'->'computed_cents') = 'number'
+                        then (v_state->'facts'->'payroll.run.gross_pay'->>'computed_cents')::bigint end;
+    v_net_sum := case when jsonb_typeof(v_state->'facts'->'payroll.run.net_pay'->'computed_cents') = 'number'
+                      then (v_state->'facts'->'payroll.run.net_pay'->>'computed_cents')::bigint end;
+    v_detail := v_detail || jsonb_build_object(
+      'missing_accounts', coalesce(v_plan->'missing_accounts','[]'::jsonb),
+      'plan_refusals', coalesce(v_plan->'refusals','[]'::jsonb),
+      'completeness', v_comp,
+      'completeness_witness', coalesce(v_state->'witness','null'::jsonb),
+      'completeness_answer', coalesce(v_answer,'null'::jsonb));
+
+    -- 9 · THE PERIOD IS STILL OPEN. `clara._tf_period_wall` refuses an approved touch whose
+    --     posting date falls inside a fiscal year in `closing` or `closed`, and it is right to:
+    --     a closed year is closed. The gate asks the SAME question up front rather than letting
+    --     the wall raise at the post, for one reason that matters to a person: the Needs-you row
+    --     is derived from this verdict, so a condition the gate did not evaluate would make that
+    --     row say "ready" about a run the estate will refuse. A rung that only the wall knows
+    --     about is a row that lies.
+    if v_plan->>'posting_date' is null then
+      v_vector := v_vector || jsonb_build_object('period_open','not_evaluated');
+    elsif exists (select 1 from clara.fiscal_years fy
+                   where fy.client_id = v_client
+                     and (v_plan->>'posting_date')::date between fy.starts_on and fy.ends_on
+                     and fy.status in ('closing','closed')) then
+      v_vector := v_vector || jsonb_build_object('period_open','period_closed');
+      v_detail := v_detail || jsonb_build_object('closed_fiscal_year',
+        (select jsonb_build_object('label', fy.label, 'status', fy.status,
+                  'starts_on', fy.starts_on, 'ends_on', fy.ends_on)
+           from clara.fiscal_years fy
+          where fy.client_id = v_client
+            and (v_plan->>'posting_date')::date between fy.starts_on and fy.ends_on
+            and fy.status in ('closing','closed')
+          order by fy.starts_on desc limit 1));
+    else
+      v_vector := v_vector || jsonb_build_object('period_open','pass');
+    end if;
+
+    -- 10 · NO PAYROLL ENTRY FOR THIS CLIENT AND MONTH IS ALREADY POSTED (0297 AC4). FOUR SCOPES,
+    --      in the order a person would want to hear them, and the FIRST match is the one reported
+    --      because it is the most specific thing that can be said: same_document, same_filing,
+    --      same_month_payroll_run (another document's run already covers this month -- the
+    --      re-upload case), payroll_obligation (0194's own periodic payroll lane already booked
+    --      it). THE REFUSAL POINTS AT THE ENTRY, with its date and its memo, so a person can tell
+    --      a CORRECTION from a RE-UPLOAD without opening the ledger. A reversed entry is not a
+    --      duplicate: `reversed_by is null` throughout, so a reversal re-opens the month.
+    v_dup_entry := clara._document_posting_entry(v_client, p_document);
+    if v_dup_entry is not null then
+      v_dup_scope := 'same_document';
+    end if;
+    if v_dup_entry is null then
+      select j.id into v_dup_entry from clara.journal_entries j
+       where j.filing_id = v_filing
+         and (j.status = 'draft' or (j.status = 'approved' and j.reversed_by is null))
+       order by j.created_at limit 1;
+      if v_dup_entry is not null then v_dup_scope := 'same_filing'; end if;
+    end if;
+    if v_dup_entry is null and (v_plan->>'period_month') is not null then
+      select j.id into v_dup_entry from clara.journal_entries j
+       where j.client_id = v_client and j.status = 'approved' and j.reversed_by is null
+         and j.document_id is distinct from p_document
+         and j.flags->'payroll_run'->>'period_month' = v_plan->>'period_month'
+       order by j.created_at limit 1;
+      if v_dup_entry is not null then v_dup_scope := 'same_month_payroll_run'; end if;
+    end if;
+    if v_dup_entry is null and (v_plan->>'period_month') is not null then
+      select j.id into v_dup_entry from clara.journal_entries j
+       where j.client_id = v_client and j.status = 'approved' and j.reversed_by is null
+         and j.flags ? 'payroll_obligation'
+         and (j.flags->'payroll_obligation'->>'period_start') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         and (j.flags->'payroll_obligation'->>'period_end') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         -- The obligation's own period OVERLAPS the payslip's month.
+         and (j.flags->'payroll_obligation'->>'period_start')::date
+               <= ((v_plan->>'period_month')::date + interval '1 month - 1 day')::date
+         and (j.flags->'payroll_obligation'->>'period_end')::date >= (v_plan->>'period_month')::date
+       order by j.created_at limit 1;
+      if v_dup_entry is not null then v_dup_scope := 'payroll_obligation'; end if;
+    end if;
+
+    if v_dup_entry is null then
+      v_vector := v_vector || jsonb_build_object('no_duplicate_entry','pass');
+    else
+      v_vector := v_vector || jsonb_build_object('no_duplicate_entry','duplicate_entry');
+      v_detail := v_detail || jsonb_build_object('duplicate',
+        (select jsonb_build_object('scope', v_dup_scope, 'entry_id', j.id,
+                  'status', j.status, 'posting_date', to_char(j.posting_date,'YYYY-MM-DD'),
+                  'memo', j.memo)
+           from clara.journal_entries j where j.id = v_dup_entry));
+    end if;
+  else
+    -- Nothing was read, so nothing downstream of it was evaluated. Every rung still carries an
+    -- explicit verdict: `not_evaluated` is a verdict, an absent key is a hole.
+    foreach v_rung in array array['channels_agree','arithmetic_holds','period_established',
+                                  'period_open','run_totals_printed','completeness_witness',
+                                  'accounts_resolve','entry_balances','no_duplicate_entry'] loop
+      v_vector := v_vector || jsonb_build_object(v_rung, 'not_evaluated');
+    end loop;
+  end if;
+
+  -- THE FIRST FAILING RUNG IS THE REASON. Walked over the CLOSED roster, so a rung whose key the
+  -- vector somehow lacks reads as a failure rather than as a pass.
+  v_first := null;
+  foreach v_rung in array v_rungs loop
+    if v_first is null and coalesce(v_vector->>v_rung,'') <> 'pass' then v_first := v_rung; end if;
+  end loop;
+
+  -- #1048: PARKED means "a person can settle this by answering". Exactly one of the three
+  -- completeness reasons is answerable, and only when it is the FIRST failure -- a run whose month
+  -- is also unreadable is not waiting on an answer, it is waiting on a legible page.
+  v_parked := (v_first = 'completeness_witness' and coalesce(v_cw,'') = 'completeness_unwitnessed');
+
+  select d.sha256 into v_sha from clara.documents d where d.id = p_document;
+
+  -- THE SENTENCE A PERSON READS, BUILT HERE AND NOWHERE ELSE. The Needs-you rows render it
+  -- verbatim, so the words on screen and the decision the lane took come out of ONE body. A
+  -- sentence built in the queue instead would be a second opinion about the same facts, and the
+  -- two would drift the first time a rung changed.
+  v_month_label := case when (v_plan->>'period_month') is not null
+                        then to_char((v_plan->>'period_month')::date, 'FMMonth YYYY') end;
+  v_sentence := case coalesce(v_first, 'ready')
+    when 'ready' then
+      format('Payroll run %s is ready to post but no entry exists yet -- re-file the payslip to post it.',
+        coalesce(v_month_label, 'for this payslip'))
+    when 'not_filed' then 'This payroll summary is not filed under a client, so it has nothing to post against.'
+    when 'facts_read' then 'This payroll summary has not been read yet.'
+    when 'channels_agree' then
+      format('Payroll run %s was not posted: the two readings of this payslip disagree (%s). Check the page and re-file it.',
+        coalesce(v_month_label, '(month not established)'),
+        coalesce(nullif(array_to_string(v_disagree, ', '), ''), 'a quoted employee row'))
+    when 'arithmetic_holds' then
+      format('Payroll run %s was not posted: the page does not add up (%s). Nothing is posted on a page that contradicts itself.',
+        coalesce(v_month_label, '(month not established)'),
+        concat_ws('; ',
+          nullif(array_to_string(v_arith, ', '), ''),
+          case when jsonb_array_length(coalesce(v_unbal,'[]'::jsonb)) > 0
+               then 'rows that do not balance: ' || replace(trim(both '[]' from v_unbal::text), ',', ', ') end,
+          case when jsonb_array_length(coalesce(v_unchk,'[]'::jsonb)) > 0
+               then 'rows that could not be checked: ' || replace(trim(both '[]' from v_unchk::text), ',', ', ') end))
+    when 'period_established' then
+      format('A payroll summary was read but its month could not be established from what the page prints (%s), so nothing was posted. Tell Clara which month this run covers, or re-file a payslip that names it.',
+        coalesce(quote_literal(v_plan->>'period_raw'), 'the page prints no period'))
+    when 'period_open' then
+      format('Payroll run %s was not posted: the fiscal year covering %s is %s.',
+        coalesce(v_month_label, 'for this payslip'), v_plan->>'posting_date',
+        coalesce(v_detail->'closed_fiscal_year'->>'status', 'not open'))
+    when 'run_totals_printed' then
+      format('A payroll summary for %s was read but prints no run totals to post from (gross pay and net pay are both required), so nothing was posted.',
+        coalesce(v_month_label, 'an unestablished month'))
+    -- #1048: THE THREE COMPLETENESS SENTENCES. Each one names the two numbers that decided it, so
+    -- a person can see the whole argument without opening the page.
+    when 'completeness_witness' then
+      case coalesce(v_cw,'')
+        when 'completeness_contradicted' then
+          format('A payroll summary for %s prints no run totals and says it covers %s employees, but only %s employee line(s) could be read -- so the reading is incomplete and nothing was posted. Re-file a complete copy of the summary.',
+            coalesce(v_month_label, 'an unestablished month'),
+            coalesce(v_comp->>'employee_count', 'a different number of'), v_rows_read)
+        when 'completeness_declined' then
+          format('Payroll run %s was not posted: %s answered that this summary is not every employee for the month. Re-file a complete copy of the summary.',
+            coalesce(v_month_label, 'for this payslip'),
+            coalesce(v_answer->>'answered_by_name', 'somebody at this firm'))
+        else
+          -- THE PARKED QUESTION, in the brief's own words, with the figures a person needs in order
+          -- to answer it. RM and two decimals, because that is how a payslip prints money.
+          format('This payroll summary for %s prints no total; is this every employee for the month? Clara read %s employee line(s), totalling RM %s gross and RM %s net. Answer yes and the run posts from those lines; answer no and it stays unposted.',
+            coalesce(v_month_label, 'an unestablished month'), v_rows_read,
+            coalesce(to_char(v_gross_sum / 100.0, 'FM999,999,990.00'), 'an unreadable amount'),
+            coalesce(to_char(v_net_sum / 100.0, 'FM999,999,990.00'), 'an unreadable amount'))
+      end
+    when 'accounts_resolve' then
+      format('Payroll run %s was not posted: this client''s chart of accounts has no %s. Add the account(s) and re-file the payslip.',
+        coalesce(v_month_label, 'for this payslip'),
+        coalesce(nullif(replace(trim(both '[]' from coalesce(v_plan->'missing_accounts','[]'::jsonb)::text), '"', ''), ''), 'account it needs'))
+    when 'entry_balances' then
+      format('Payroll run %s was not posted: the entry it would make does not balance (%s debit, %s credit).',
+        coalesce(v_month_label, 'for this payslip'), v_plan->>'debit_cents', v_plan->>'credit_cents')
+    when 'no_duplicate_entry' then
+      format('Payroll run %s is already posted (%s, %s). This payslip was not posted again -- open that entry to decide whether this is a correction or a re-upload.',
+        coalesce(v_month_label, 'for this payslip'),
+        coalesce(v_detail->'duplicate'->>'memo', 'an existing entry'),
+        coalesce(v_detail->'duplicate'->>'posting_date', 'no date'))
+    else format('Payroll run %s was not posted (%s).', coalesce(v_month_label,'for this payslip'),
+                coalesce(v_tokens->>v_first, v_first))
+  end;
+
+  return jsonb_build_object(
+    'sentence', v_sentence,
+    'period_label', to_jsonb(v_month_label),
+    'verdict', case when v_first is null then 'ready' else 'blocked' end,
+    'rung', to_jsonb(v_first),
+    'reason', to_jsonb(case when v_first is null then null
+                            when v_first = 'completeness_witness' then coalesce(v_cw, v_tokens->>v_first)
+                            else v_tokens->>v_first end),
+    'rung_vector', v_vector,
+    'detail', v_detail,
+    -- #1048: what the queue splits on, and what a person's answer would be about.
+    'completeness', jsonb_build_object(
+      'parked', v_parked,
+      'state', coalesce(v_comp,'null'::jsonb),
+      'witness', coalesce(v_state->'witness','null'::jsonb),
+      'answer', coalesce(v_answer,'null'::jsonb),
+      'rows_read', coalesce(v_rows_read, 0),
+      'gross_sum_cents', to_jsonb(v_gross_sum),
+      'net_sum_cents', to_jsonb(v_net_sum)),
+    'document_id', p_document,
+    'client_id', to_jsonb(v_client),
+    'firm_id', to_jsonb(v_firm),
+    'filing_id', to_jsonb(v_filing),
+    'source_doc_sha256', to_jsonb(v_sha),
+    'extraction_id', to_jsonb(v_extraction),
+    'existing_entry_id', to_jsonb(v_dup_entry),
+    'period_month', coalesce(v_plan->'period_month','null'::jsonb),
+    'posting_date', coalesce(v_plan->'posting_date','null'::jsonb),
+    'plan', coalesce(v_plan,'null'::jsonb));
+end $ppv$;
+
+revoke all on function clara._payroll_posting_verdict(uuid) from public;
+
+comment on function clara._payroll_posting_verdict(uuid) is
+  '#946, widened by #1048: THE UNATTENDED GATE for a payroll summary -- the closed rung roster the brief names, walked in order, every rung carrying an explicit verdict and the FIRST failure being the reason a person is told. #1048 adds ONE rung, `completeness_witness`, immediately after `run_totals_printed` (it is only reachable when that question had no printed answer), with three named reasons: completeness_contradicted (the page names more employees than the reading found -- nothing to affirm), completeness_unwitnessed (THE PARKED QUESTION, the only answerable one, flagged by `completeness.parked`) and completeness_declined (a named person said this is not every employee). It resolves the answer for the newest reading and merges it into the state clara._payroll_entry_plan sees, so the plan stays a pure function of its inputs. It still WRITES NOTHING (STABLE): clara._post_payroll_run acts on it, clara.list_review_queue DERIVES two row kinds from it, and clara.answer_payroll_completeness refuses an answer to a question it says was not asked -- so the decision the lane took and the sentence a person reads are the same body and cannot drift. Judges the NEWEST payroll pair banked for the document. Ungranted.';
+
+reset role;
+
+-- =====================================================================================
+-- SectionI  THE ENTRY AND ITS RECEIPT NAME THE BASIS -- clara._post_payroll_run recut (AC1).
+--
+--     0297's poster, with ONE addition: what the figures came from travels with the entry. The
+--     gate call, the closed conversion set, the return-rather-than-raise discipline, the agent
+--     maker/checker identity, the receipt's deterministic `model_snapshot` and the entry.posted
+--     event are all untouched, and the #946 battery re-drives them.
+--
+--     WHY IT GOES ON THE ENTRY AND NOT ONLY IN THE RECEIPT. `flags->'payroll_run'` is written at
+--     the DRAFT INSERT and nowhere else, because clara._tf_entry_immutable's draft->approved
+--     allowset does not include `flags`. An auditor reading the LEDGER -- not the receipt table --
+--     must be able to see that August's staff cost came from a row sum over two lines rather than
+--     from a printed total, because that is the difference between a figure the document states and
+--     a figure this estate computed. Putting it only in the receipt would make the ledger's own
+--     story incomplete for exactly the entries that need it most.
+--
+--     AND WHY IT ALSO GOES IN THE RATIONALE, IN WORDS. `gate_verdicts.plan` already carries the
+--     whole plan including `posting_basis`, so the machine-readable half was free. The rationale is
+--     the half a person reads, and 0297's sentence -- "posted unattended from a payroll summary
+--     whose two readings agreed, whose arithmetic held and whose accounts all resolved" -- would be
+--     TRUE and MISLEADING about a row-sum post: it says nothing about where the figures came from.
+--     A receipt that is true and misleading is the thing this estate's own evidence rule exists to
+--     prevent, so the sentence now names the basis, the line count and the witness, and for an
+--     answered question the person who answered it.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._post_payroll_run(p_document uuid)
+  returns jsonb language plpgsql security definer
+  set search_path = clara, pg_temp as $ppr$
+declare
+  v jsonb; v_entry uuid; v_receipt uuid; v_lines jsonb; v_flags jsonb; v_memo text;
+  v_client uuid; v_firm uuid; v_filing uuid; v_sha text; v_month date; v_posting date;
+  v_extraction uuid; v_engine text; v_code text; v_detail text; v_reason text; v_pair boolean;
+  -- #1048's own locals.
+  v_basis jsonb; v_rationale text;
+begin
+  v := clara._payroll_posting_verdict(p_document);
+  if v->>'verdict' <> 'ready' then
+    return jsonb_build_object('posted', false, 'entry_id', null,
+      'reason', v->'reason', 'rung', v->'rung', 'rung_vector', v->'rung_vector');
+  end if;
+
+  v_client := (v->>'client_id')::uuid;
+  v_firm := (v->>'firm_id')::uuid;
+  v_filing := (v->>'filing_id')::uuid;
+  v_sha := v->>'source_doc_sha256';
+  v_extraction := (v->>'extraction_id')::uuid;
+  v_month := (v->>'period_month')::date;
+  v_posting := (v->>'posting_date')::date;
+  v_basis := coalesce(v->'plan'->'posting_basis', 'null'::jsonb);
+  select t.engine_id into v_engine from clara.document_processing_tasks t
+   where t.document_id = p_document and t.lane = 'payroll_facts' and t.status = 'done'
+   order by t.version_n desc limit 1;
+
+  -- THE LEGS, in the plan's own order, in the estate's own line shape.
+  select jsonb_agg(jsonb_build_object(
+           'account_code', l->>'account_code',
+           'debit_cents',  case when l->>'side' = 'debit'  then (l->>'cents')::bigint else 0 end,
+           'credit_cents', case when l->>'side' = 'credit' then (l->>'cents')::bigint else 0 end,
+           'description',  l->>'description') order by ord)
+    into v_lines
+    from jsonb_array_elements(v->'plan'->'legs') with ordinality as t(l, ord);
+  -- The estate's own canonicaliser: it re-checks that every code resolves to an ACTIVE account
+  -- of this client and that the entry balances. Its rounding arm cannot fire here -- SectionE
+  -- already refused anything that did not balance to the cent -- and that is the point of asking
+  -- it: two independent bodies now agree the entry is postable before a row is written.
+  v_lines := clara._validate_entry_lines(v_client, v_lines);
+
+  v_memo := 'Payroll run ' || to_char(v_month, 'FMMonth YYYY');
+  -- #1048: the marker gains `posting_basis`, so the LEDGER itself says whether August's staff cost
+  -- came from a printed total or from a row sum over N witnessed lines.
+  v_flags := jsonb_build_object('payroll_run', jsonb_build_object(
+    'period_month', to_char(v_month, 'YYYY-MM-DD'),
+    'document_id', p_document,
+    'extraction_id', v_extraction,
+    'state_version', coalesce(v->'plan'->>'plan_version','v1'),
+    'posting_basis', v_basis));
+
+  -- #1048: THE RATIONALE SAYS WHERE THE FIGURES CAME FROM. 0297's sentence stays verbatim as its
+  -- first half -- it is still true -- and a row-sum post adds the half that would otherwise be
+  -- missing: which questions were summed, over how many lines, and on whose witness.
+  v_rationale := 'Payroll run ' || to_char(v_month, 'FMMonth YYYY')
+    || ' posted unattended from a payroll summary whose two readings agreed, whose arithmetic held and whose accounts all resolved in this client''s chart.';
+  if v_basis->>'kind' = 'row_sum' then
+    v_rationale := v_rationale || format(
+      ' The page printed no run total for %s, so those figures are the deterministic evaluator''s own ROW SUM over %s agreed employee line(s), admitted on the completeness witness `%s`%s.',
+      coalesce(nullif(replace(trim(both '[]' from coalesce(v_basis->'row_sum_fields','[]'::jsonb)::text), '"', ''), ''), 'the run totals'),
+      coalesce(v_basis->>'rows_read', '0'),
+      coalesce(v_basis->>'witness', 'none'),
+      case when v_basis->>'witness' = 'answered_question'
+           then format(' -- %s answered on %s that this summary is every employee for the month',
+                  coalesce(v_basis->'answer'->>'answered_by_name', 'a named person'),
+                  coalesce(v_basis->'answer'->>'answered_at', 'an unrecorded date'))
+           when v_basis->>'witness' = 'headcount'
+           then format(' -- the page prints a headcount of %s and %s line(s) were read',
+                  coalesce(v_basis->>'employee_count','?'), coalesce(v_basis->>'rows_read','?'))
+           when v_basis->>'witness' = 'single_page'
+           then ' -- the page prints a page count of one, so the document is not truncated'
+           else '' end);
+  else
+    v_rationale := v_rationale || ' Every figure is a run total the page itself prints.';
+  end if;
+
+  begin
+    insert into clara.journal_entries(client_id, status, posting_date, memo, origin,
+        document_id, source_doc_sha256, filing_id, maker_actor, last_human_editor, flags)
+      values (v_client, 'draft', v_posting, v_memo, 'document',
+        p_document, v_sha, v_filing, clara.agent_user_id(), null, v_flags)
+      returning id into v_entry;
+
+    insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents, credit_cents,
+        description)
+      select v_entry, x.idx, x.elem->>'account_code',
+        (x.elem->>'debit_cents')::bigint, (x.elem->>'credit_cents')::bigint,
+        x.elem->>'description'
+      from jsonb_array_elements(v_lines) with ordinality as x(elem, idx);
+    perform clara._assert_balanced(v_entry);
+
+    update clara.journal_entries
+       set status = 'approved', checker_actor = clara.agent_user_id(), approved_at = now(),
+           updated_at = now()
+     where id = v_entry;
+
+    -- THE RECEIPT. `model_snapshot` names the DETERMINISTIC producer, not a model, because no
+    -- model took part in this post: the frozen evaluator did every sum at read time and the plan
+    -- resolved every account from the chart. `gate_verdicts` carries the reading's own extraction
+    -- (the column the table's CHECK requires) and the engine id of the call that produced it, so
+    -- the model that READ the page is still reachable from the receipt.
+    insert into clara.entry_post_receipts(id, firm_id, client_id, entry_id, acting_actor,
+        on_behalf_of, via_wake_kind, model_snapshot, rationale, gate_verdicts, approval_arm,
+        maker_active_at_approval, op_key)
+      values (gen_random_uuid(), v_firm, v_client, v_entry, clara.agent_user_id(),
+        null, 'payroll_facts',
+        jsonb_build_object('provider','clara_db','model','payroll_entry_plan','version','v1'),
+        v_rationale,
+        jsonb_build_object('extraction_id', v_extraction, 'engine_id', v_engine,
+          'rung_vector', v->'rung_vector', 'plan', v->'plan',
+          'completeness', coalesce(v->'completeness','null'::jsonb)),
+        'payroll_unattended',
+        -- NULL rather than false-by-inference: this lane has no on_behalf_of, so there is no
+        -- maker whose membership could be active or lapsed (the invoice lane's own law 68).
+        null, 'payroll-post:' || p_document::text)
+      returning id into v_receipt;
+
+    perform clara._append_event(v_firm, 'entry.posted', v_client, clara.agent_user_id(), null,
+      null, v_entry, p_document, null,
+      jsonb_build_object('post_receipt_id', v_receipt, 'approval_arm', 'payroll_unattended',
+        'period_month', to_char(v_month,'YYYY-MM-DD'), 'rung_vector', v->'rung_vector'));
+
+    perform clara._audit(v_firm, null, null, null, 'post_payroll_run', null,
+      jsonb_build_object('document', p_document, 'entry', v_entry, 'receipt', v_receipt,
+        'period_month', to_char(v_month,'YYYY-MM-DD'),
+        'debit_cents', v->'plan'->'debit_cents',
+        'posting_basis', v_basis));
+
+    return jsonb_build_object('posted', true, 'entry_id', v_entry, 'post_receipt_id', v_receipt,
+      'posting_date', to_char(v_posting,'YYYY-MM-DD'),
+      'period_month', to_char(v_month,'YYYY-MM-DD'),
+      'posting_basis', v_basis,
+      'reason', null, 'rung', null, 'rung_vector', v->'rung_vector');
+
+  exception when others then
+    get stacked diagnostics v_code = returned_sqlstate, v_detail = pg_exception_detail;
+    begin
+      v_reason := nullif(v_detail,'')::jsonb->>'reason';
+    exception when others then
+      v_reason := null;
+    end;
+    -- The CLOSED conversion set. Anything else propagates, and must: a payroll post that turned
+    -- an unknown defect into a quiet "not posted" would be exactly the silent failure this lane
+    -- exists to remove.
+    if v_code = '23505' then
+      -- uq_journal_entries_one_open_draft_filing: somebody else's open draft is already on this
+      -- filing. A person decides which of the two is the run; this lane never overwrites.
+      v_pair := true; v_reason := 'filing_already_drafted';
+    elsif v_code = 'CLR19' then
+      -- The closed-period wall. The `period_open` rung asks the same question first, so reaching
+      -- here means the year closed between the verdict and the write.
+      v_pair := true; v_reason := 'period_closed';
+    else
+      v_pair := (v_code, coalesce(v_reason,'')) in (
+        ('CLR13','source_already_posted'),
+        ('CLR21','double_coded'));
+      if v_pair then v_reason := 'duplicate_entry'; end if;
+    end if;
+    if not v_pair then raise; end if;
+    return jsonb_build_object('posted', false, 'entry_id', null,
+      'reason', coalesce(v_reason, 'duplicate_entry'), 'rung', 'post_wall',
+      'rung_vector', v->'rung_vector', 'clr', v_code);
+  end;
+end $ppr$;
+
+revoke all on function clara._post_payroll_run(uuid) from public;
+
+comment on function clara._post_payroll_run(uuid) is
+  '#946, widened by #1048: the UNATTENDED post for a payroll summary. Asks clara._payroll_posting_verdict and acts: ready means one document-bound, filing-bound approved entry with its legs, its clara.entry_post_receipts row (via_wake_kind `payroll_facts`, approval_arm `payroll_unattended`) and an entry.posted event; blocked means NOTHING is written and the verdict is returned so the caller can record it. #1048: the entry''s own `flags->payroll_run->posting_basis` and the receipt''s rationale both name what the figures came from -- a printed run total, or the evaluator''s row sum over N witnessed lines and the witness that admitted it -- because an auditor reading the LEDGER must be able to tell a figure the document states from one this estate computed. It RETURNS rather than raises, because it runs inside the payroll read''s own transaction and a raise would lose the facts a person needs in order to clear the block. Ungranted: reached from clara.persist_payroll_facts and from clara.answer_payroll_completeness.';
+
+reset role;

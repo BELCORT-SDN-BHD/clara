@@ -153,9 +153,13 @@ const PRINTED = {
 
 /** The page that prints the month and the employee rows and NO run totals at all -- the summary
  *  #1048 exists for. */
-const NO_TOTALS = Object.fromEntries(
-  RUN_FIELDS.map((f) => [f, f === "payroll.run.period" ? value("2026-08") : notPrinted()]),
-);
+//  The month is a PARAMETER because every cell below that actually POSTS must post a DIFFERENT
+//  month: 0297's duplicate guard refuses a second payroll run for one client and one month by name
+//  (`same_month_payroll_run`), and it is right to. One month each keeps the cells readable against
+//  a single seeded chart, which one client each would not.
+const noTotals = (period) =>
+  Object.fromEntries(RUN_FIELDS.map((f) => [f, f === "payroll.run.period" ? value(period) : notPrinted()]));
+const NO_TOTALS = noTotals("2026-08");
 
 function payslipRow(rowNo, r) {
   const cells = {
@@ -438,7 +442,7 @@ test("W3 · the lane banks a v2 fact state, and the witness answers ride the sto
 
   await seedPayrollChart(world.users.alice, world.clients.A1);
   const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
-    answers: NO_TOTALS,
+    answers: noTotals("2026-01"),
     witness: { "payroll.run.employee_count": value("2"), "payroll.run.page_count": value("1") },
   });
 
@@ -562,4 +566,91 @@ test("W4b · AC4's control: a page that DOES print its totals is untouched -- th
   for (const leg of p.legs) {
     assert.doesNotMatch(leg.basis, /#row_sum/, `leg ${leg.account_code} came from a printed figure`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// W5 — the unattended gate and the post (AC1 end to end)
+// ---------------------------------------------------------------------------
+
+test("W5 · AC1: a summary with no totals row but a printed headcount equal to its lines POSTS, and the entry names the row sum and the witness", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: noTotals("2026-02"),
+    witness: { "payroll.run.employee_count": value("2") },
+  });
+
+  // The lane posts inside the READ's own transaction: the settle receipt says what it did.
+  assert.equal(doc.receipt.posting.posted, true, `the run posted: ${JSON.stringify(doc.receipt.posting)}`);
+
+  const entries = await entriesOf(doc.documentId);
+  assert.equal(entries.length, 1, "exactly one entry, with no human in the loop");
+  const e = entries[0];
+  assert.equal(e.status, "approved");
+  assert.equal(e.posting_date, "2026-02-28", "dated at the end of the payslip's own month");
+  assert.equal(e.memo, "Payroll run February 2026");
+
+  // AC1: "the entry's basis names the row-sum and the witness." On the entry itself, so a reader
+  // of the ledger never has to go back to the reading to learn what the figures came from.
+  assert.equal(e.flags.payroll_run.posting_basis.kind, "row_sum");
+  assert.equal(e.flags.payroll_run.posting_basis.witness, "headcount");
+  assert.equal(e.flags.payroll_run.posting_basis.rows_read, 2);
+  assert.equal(e.flags.payroll_run.posting_basis.employee_count, 2);
+
+  const legs = await legsOf(e.id);
+  assert.deepEqual(
+    legs.map((l) => [l.account_code, Number(l.debit_cents), Number(l.credit_cents)]),
+    [
+      ["6000", 500000, 0],
+      ["2100", 0, 55000],
+      ["2110", 0, 2450],
+      ["2120", 0, 980],
+      ["2130", 0, 16000],
+      ["2040", 0, 425570],
+    ],
+    "the six-leg entry the worked example computes by hand, and it balances at 500000 both ways",
+  );
+
+  // …and on the receipt, in words a person reads, with the whole plan beside it.
+  const receipt = (
+    await rootQuery(
+      `select rationale, gate_verdicts, approval_arm, via_wake_kind
+         from clara.entry_post_receipts where entry_id=$1`,
+      [e.id],
+    )
+  ).rows[0];
+  assert.equal(receipt.approval_arm, "payroll_unattended");
+  assert.equal(receipt.via_wake_kind, "payroll_facts");
+  assert.match(receipt.rationale, /row sum/i, "the receipt says the figures were summed, not printed");
+  assert.match(receipt.rationale, /headcount/i, "…and names the witness that admitted the sum");
+  assert.equal(receipt.gate_verdicts.plan.posting_basis.kind, "row_sum");
+  assert.equal(receipt.gate_verdicts.rung_vector.completeness_witness, "pass");
+});
+
+test("W6 · AC3: a summary whose printed headcount disagrees with its lines is REFUSED, and the sentence says which two numbers disagree", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  // The page says three employees; the reading found two. The reading is KNOWN incomplete, so a
+  // witness here is worse than silence and nothing may post -- not even a parked question, because
+  // there is nothing for a person to affirm.
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: noTotals("2026-03"),
+    witness: { "payroll.run.employee_count": value("3") },
+  });
+
+  assert.equal(doc.receipt.posting.posted, false);
+  assert.deepEqual(await entriesOf(doc.documentId), [], "nothing at all was written");
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.verdict, "blocked");
+  assert.equal(v.rung, "completeness_witness");
+  assert.equal(v.reason, "completeness_contradicted");
+  assert.equal(v.rung_vector.completeness_witness, "completeness_contradicted");
+  assert.equal(v.rung_vector.run_totals_printed, "pass", "the rung about a printed total is not the one that failed");
+  assert.equal(v.completeness.parked, false, "a contradiction is not a question a person can answer away");
+  assert.match(v.sentence, /3/, "the sentence names the printed headcount");
+  assert.match(v.sentence, /2/, "…and the number of lines read");
+  assert.match(v.sentence, /March 2026/, "…and the month it is about");
 });
