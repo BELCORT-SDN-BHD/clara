@@ -139,9 +139,26 @@ export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
    * A caller that passes no `rowProps` at all — the staff-advance register's own dialog, which has
    * no field-id-addressed validation to begin with — is untouched: `rowProps?.(...)` is undefined,
    * the spread below is empty, and the button renders byte for byte as before.
+   *
+   * FIX ROUND (ADV-01, ADV-02) — TWO THINGS THE FIRST CUT GOT WRONG, both only in the state a
+   * caller ADDRESSES this button in.
+   *
+   *   * IT MUST STAY OPERABLE. `disabled` used to follow `candidates.length === 0` alone, so a
+   *     claimant with nothing outstanding got a DISABLED node as the refusal's focus target —
+   *     and `.focus()` on a disabled element is a silent no-op (the claim form's own measured
+   *     note, and `test/keyboardWalk.ts`'s own rule). An empty CANDIDATE list is an emptiness of
+   *     OPTIONS, not a reason the one addressed node may not take focus; adding a row with an
+   *     empty chooser is exactly what a preparer in that state should be able to do. A caller
+   *     that addresses nothing keeps the old "nothing to add" disabled button.
+   *   * IT MUST KEEP ITS OWN NAME. `<button>` is a labelable element, so the claim form's
+   *     `<Label htmlFor={claimFieldId("advanceId")}>` would supply its accessible name and the
+   *     one control that ADDS a row would be announced as "Which advance". An explicit
+   *     `aria-label` outranks a native label, so the button says what it does.
    */
-  const emptyStateProps: Record<string, unknown> =
-    allocations.length === 0 ? (rowProps?.(0, "advance") ?? {}) : {};
+  const addressesEmptyState = allocations.length === 0 && rowProps !== undefined;
+  const emptyStateProps: Record<string, unknown> = addressesEmptyState
+    ? { ...(rowProps?.(0, "advance") ?? {}), "aria-label": t("addAllocation") }
+    : {};
 
   return (
     <div className="flex flex-col gap-2">
@@ -229,7 +246,8 @@ export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
       </Table>
       <Button type="button" variant="outline" size="sm" onClick={addAllocation}
         {...emptyStateProps}
-        disabled={candidates.length === 0 || Boolean(emptyStateProps.disabled)}>
+        disabled={(candidates.length === 0 && !addressesEmptyState)
+          || Boolean(emptyStateProps.disabled)}>
         {t("addAllocation")}
       </Button>
       {candidates.length === 0 ? <p className="text-xs text-muted-foreground">{t("noOutstanding")}</p> : null}

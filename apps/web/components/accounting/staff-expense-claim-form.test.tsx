@@ -27,6 +27,7 @@ import { NextIntlClientProvider } from "next-intl";
 
 import { renderComponent, setCheckboxChecked, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
+import { focusableElements } from "../../test/keyboardWalk";
 import { StaffExpenseClaimFormView } from "./staff-expense-claim-form";
 import { claimDraftKey } from "../../lib/work/staff-expense-claim-draft";
 import type { DraftStorage } from "../../lib/work/journal-draft";
@@ -851,6 +852,22 @@ test("ticket 1068 the SAME empty-list focus holds when the claim never had an op
     assert.equal(focused, F("advanceId"));
     const node = h.find((n) => attrOf(n, "id") === focused);
     assert.ok(node, "focus still lands on a real node with nothing outstanding to offer either");
+    // FIX ROUND (ADV-01 / L03-SPEC-02). The harness's `.focus()` stub only ever sets
+    // `document.activeElement`, so "focusedId() names it" passes over a DISABLED node that a real
+    // browser refuses focus on and keeps out of the tab order. The sibling cell above already
+    // makes this assertion; the state THIS cell drives — no outstanding advance at all — is the
+    // one the first cut left disabled, so it makes it too, plus the repo's own focusability rule.
+    assert.equal(attrOf(node, "disabled"), null,
+      "…a node a real browser will actually focus, not a disabled one");
+    assert.equal(
+      focusableElements(h.container as Stub).some((n) => attrOf(n as Stub, "id") === focused),
+      true,
+      "…and the repo's own focusability rule agrees it is keyboard-operable");
+    // ADV-02. `<button>` is labelable, so without a name of its own the `<Label htmlFor>` this
+    // Field renders would announce the ADD affordance as "Which advance".
+    assert.equal(attrOf(node, "aria-label"),
+      messages.StaffAdvances.allocationsEditor.addAllocation,
+      "…and it is announced as what it does, not as the chooser it stands in for");
   } finally {
     await h.unmount();
   }

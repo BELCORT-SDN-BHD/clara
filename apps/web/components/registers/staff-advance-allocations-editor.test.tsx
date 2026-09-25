@@ -21,6 +21,7 @@ import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
 import { renderComponent } from "../../test/hookHarness";
+import { focusableElements } from "../../test/keyboardWalk";
 import { StaffAdvanceAllocationsEditor } from "./staff-advance-allocations-editor";
 import type { StaffAdvanceSummaryRow } from "../../lib/registers/staff-advances-doors";
 import messages from "../../messages/en.json";
@@ -53,6 +54,7 @@ const CANDIDATES: StaffAdvanceSummaryRow[] = [
 
 function Editor(props: {
   allocations?: { advance_id: string; amount_cents: number }[];
+  candidates?: StaffAdvanceSummaryRow[];
   sourceEnrolment?: (candidate: StaffAdvanceSummaryRow) => string | null;
   rowProps?: (index: number, key: "advance" | "amount") => Record<string, unknown>;
 }): ReactElement {
@@ -63,7 +65,7 @@ function Editor(props: {
     children: createElement(StaffAdvanceAllocationsEditor, {
       allocations: props.allocations ?? [{ advance_id: "", amount_cents: 0 }],
       onChange: () => {},
-      candidates: CANDIDATES,
+      candidates: props.candidates ?? CANDIDATES,
       newRow: () => ({ advance_id: "", amount_cents: 0 }),
       optionLabel: (a) => `${a.issue_date} — ${a.outstanding_cents} outstanding`,
       ...(props.sourceEnrolment === undefined ? {} : { sourceEnrolment: props.sourceEnrolment }),
@@ -210,6 +212,71 @@ test("ticket 1068 an EMPTY list wires row zero's own field props onto the add-a-
     assert.equal(attrOf(node, "aria-invalid"), "true",
       "the caller's own invalid wiring rides along, exactly as it would on a real row 0");
     assert.equal(attrOf(node, "aria-describedby"), "advanceId-help advanceId-error");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1068 fix round the error anchor on an empty list stays FOCUSABLE even with nothing to choose", async () => {
+  // ADV-01 / L03-SPEC-02. `candidates.length === 0` is an emptiness of OPTIONS, not a reason the
+  // one node the refusal is addressed to may not take focus: `.focus()` on a DISABLED element is
+  // a silent no-op (the claim form's own measured note), and the repo's own focusability helper
+  // agrees. A caller that ADDRESSES the empty state by field id therefore keeps its stand-in
+  // operable; a caller that addresses nothing keeps the old "nothing to add" disabled button.
+  const h = await renderComponent(Editor({
+    allocations: [],
+    candidates: [],
+    rowProps: (i, key) => (i === 0 && key === "advance" ? { id: "advanceId" } : {}),
+  }));
+  try {
+    await h.settle();
+    const node = h.find((n) => attrOf(n as Stub, "id") === "advanceId");
+    assert.ok(node, "the empty state still carries row 0's field id with nothing outstanding");
+    assert.equal(attrOf(node as Stub, "disabled"), null,
+      "…and it is NOT disabled, so focus actually lands on it");
+    const reachable = focusableElements(h.container as Stub)
+      .some((n) => attrOf(n as Stub, "id") === "advanceId");
+    assert.equal(reachable, true,
+      "…and the repo's own focusability rule agrees it is keyboard-operable");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1068 fix round the empty-state stand-in keeps its OWN accessible name", async () => {
+  // ADV-02. `<button>` is a labelable element, so the claim form's `<Label htmlFor=...>` would
+  // otherwise supply its accessible name and the one control that ADDS a row would be announced
+  // as the chooser it replaced ("Which advance"). An explicit `aria-label` outranks the native
+  // label, so the affordance keeps the name its own text carries.
+  const h = await renderComponent(Editor({
+    allocations: [],
+    rowProps: (i, key) => (i === 0 && key === "advance" ? { id: "advanceId" } : {}),
+  }));
+  try {
+    await h.settle();
+    const node = h.find((n) => attrOf(n as Stub, "id") === "advanceId");
+    assert.ok(node, "the empty state carries row 0's field id");
+    assert.equal(attrOf(node as Stub, "aria-label"),
+      messages.StaffAdvances.allocationsEditor.addAllocation,
+      "…and names itself, rather than inheriting the field's label");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1068 fix round a caller that addresses NOTHING keeps the old disabled empty state", async () => {
+  // The register's own book-application dialog passes no rowProps: with nothing outstanding its
+  // add button is still disabled and still unnamed, byte for byte as before this fix round.
+  const h = await renderComponent(Editor({ allocations: [], candidates: [] }));
+  try {
+    await h.settle();
+    const button = h.find((n) => (n as Stub).tagName === "BUTTON" && textOf(n as Stub).includes(
+      messages.StaffAdvances.allocationsEditor.addAllocation));
+    assert.ok(button, "the add-a-row button still renders");
+    assert.equal(attrOf(button as Stub, "disabled"), "",
+      "…still disabled when there is nothing at all to add");
+    assert.equal(attrOf(button as Stub, "aria-label"), null,
+      "…and no aria-label is invented for a caller that names no field");
   } finally {
     await h.unmount();
   }
