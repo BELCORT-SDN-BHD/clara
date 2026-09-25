@@ -1266,7 +1266,7 @@ A document's own *reading* now has two governed human doors and two reads, all f
 
 | Door | What it does |
 |---|---|
-| `clara.revise_document_fact(uuid,text,jsonb,int,text,text)` | Appends ONE `clara-fact-human:v1` / `invoice_facts` extraction carrying the whole fact set with one field revised. It never UPDATEs `clara.document_regions`: the kind-scoped supersede chain (0089) is what keeps the previous reading readable, and the DEFERRABLE arithmetic belt (0191) re-derives the six-term identity over the new numbers. Refusals: `stale_source_version` (CLR19, echoing the attempted value), `field_path_syntax` / `field_path_namespace` (CLR10, from `clara._assert_field_path`), `field_path_not_revisable`, `typed_facts_not_supported`, `no_facts_to_revise`, `monetary_value_malformed`, `component_must_not_be_negative`, `live_bank_statement_present`, CLR11 for a foreign document, CLR03 for an agent identity. |
+| `clara.revise_document_fact(uuid,text,jsonb,int,text,text)` | Appends ONE `clara-fact-human:v1` / `invoice_facts` extraction carrying the whole fact set with one field revised. It never UPDATEs `clara.document_regions`: the kind-scoped supersede chain (0089) is what keeps the previous reading readable, and the DEFERRABLE arithmetic belt (0191) re-derives the six-term identity over the new numbers. Refusals: `stale_source_version` (CLR19, echoing the attempted value), `field_path_syntax` / `field_path_namespace` (CLR10, from `clara._assert_field_path`), `field_path_not_revisable`, `typed_facts_not_supported`, `no_facts_to_revise`, `monetary_value_malformed`, `component_must_not_be_negative`, `live_bank_statement_present`, `value_unchanged` (#885/#1030 — a revision that leaves the recorded value where it was, judged per field against the canonical form the estate keeps for it), CLR11 for a foreign document, CLR03 for an agent identity. |
 | `clara.dismiss_orphaned_classification_question(uuid,text,text)` | Closes the dead end `clara.set_document_kind`'s own prose names (0169:236-255). It admits `origin='classification'` + `status='open'` + **zero live filings** for that (document, client) and nothing else; `clara._active_document_filing` is untouched, because `resolve_open_question` and `dismiss_open_question` ride it. |
 | `clara.list_source_revisions(uuid)` | One chronological lineage: `clara.document_fact_revisions` LEFT-JOINED read-side to `clara.filing_corrections` and to the filings a correction retired. No door ever denormalises a wrong-client refile into the new ledger. |
 | `clara.list_source_dependents(uuid)` | A READ-ONLY projection of the knowledge records, open questions and parked Work questions standing on this document. It writes nothing: automatic re-assessment is accepted-but-deferred (`docs/PRD.md:123`, owned by #658/#663). |
@@ -1347,6 +1347,76 @@ fact the reader never persisted has no prior value, and anything is a change aga
 `clara._question_source_corrected` ask it — the predicate reads revision rows through it too, so a
 row written before this guard existed cannot make a question read as source-corrected either.
 Pinned by `w885.noop.refused`.
+
+**…AND A RE-SPELLING IS NOT A CORRECTION EITHER, WHERE THE ESTATE HAS A CANONICAL FORM** (#1030,
+`0321_work_source_correction_rederivation.sql`). #885 implemented "the stored value, not the
+keystrokes" for MONEY only, so re-casing `MYR` to `myr` or respelling a date to the same calendar
+day still retired every Work parked on that document and made a carved-out question's answer
+permanently refused. The rule is now decided **per field, and the test is whether the estate has a
+canonical form for that field's value**:
+
+| field | what "unchanged" means | why |
+|---|---|---|
+| every monetary path | the normalised **cents** | 0268's own rule, unchanged and reached by delegation |
+| `invoice.currency` | the **ISO 4217 code**, case-insensitively, **when both sides spell a three-letter code** | the standard defines the code, not its typography, and this estate stores it upper-cased everywhere it reaches the books — but a region carrying PROSE ("Ringgit Malaysia") has no canonical form and gets the text rule, which the first cut got wrong (ADV-C1-06) |
+| `invoice.invoice_date` | the **calendar day**, when both sides spell one **unambiguously** | `5 March 2026` and `2026-03-05` are the same day. `clara._fact_calendar_day` pins `DateStyle` to `ISO, YMD`, so a slash or dot date whose meaning depends on the session (`03/05/2026` is 3 May on a Malaysian invoice and 5 March under this cluster's MDY) answers NULL and falls through to the text rule. Without the pin the guard REFUSED a real correction of an ambiguous printed date, and which one it refused moved with the session — measured across all three orderings (ADV-C1-04) |
+| everything else (`invoice.vendor_name`, `invoice.invoice_id`, a registration number, …) | the **trimmed text**, exactly as before | the estate has no canonical form for a name or an identifier, so the recorded spelling IS the fact — a professional correcting `ACME SDN BHD` to the mixed case actually printed on the page is making a real correction, and folding that into the guard would leave them a door that refuses the only edit they wanted |
+
+`clara._fact_value_changed(jsonb,jsonb)` is **not** recut: it still answers exactly what it always
+answered for a caller with no field path. The typed notion is a three-argument sibling,
+`clara._fact_value_changed(jsonb,jsonb,text)`, which delegates to it for every field the estate
+does not canonicalise, and both of 0268's callers pass the path they already hold — the door's
+`p_field_path` and the predicate's `r.field_path` — so the one-notion property is kept. A NULL path
+is the two-argument answer, so a caller who does not know the field can never get the widened one.
+Pinned by `r1030.cosmetic.canonical`, `r1030.cosmetic.control` and `r1030.cosmetic.text`, and by
+0321's own §TAIL, which drives all four arms and re-derives both recut bodies by reversing their
+single substitution.
+
+**THE RE-DERIVATION LANE — the successor #885 could not admit** (#1030, 0321). #885 retires a Work
+and admits nothing, because deriving a basis from a corrected reading is an interpretation act and
+`journalBasisSchema` has no back-link from a line to a document field path. 0321 does not derive
+anything either: it hands the Work runtime what it needs and takes back one answer.
+
+| door | granted to | what it is |
+|---|---|---|
+| `clara.source_correction_rederivations(int)` | `clara_runtime` | every source correction that retired a Work and is still owed a successor, oldest first, each as a full brief: the correction (`prior_value`, `new_value`, `corrected_by`), the RETIRED INSTRUCTION (`retired_purpose`, `retired_source_refs`, `retired_basis`, `retired_basis_origin`) and the document's **live facts** off its newest done `invoice_facts` extraction. The figures' only source of truth is `live_facts`; the retired basis is there to be QUOTED, never carried. Capped at 200 per call. |
+| `clara.settle_source_corrected_rederivation(text,uuid,text)` | `clara_runtime` | the ONE answer per correction: the successor that was admitted, or the reason none could be. Claiming sets `superseded_by` on the retired Work and `supersedes` on the successor — the link #885 deliberately left NULL — and it is **proved, not asserted**: the successor must be a Work of the same firm and client whose own `intent_key` IS this correction's op key. Exactly once, through `clara._reserve_op` / `clara._finish_op` under `fn = 'source_correction_rederivation'`. Refusals: CLR10 `invalid_op_key`, CLR11 `correction_not_found`, CLR10 `successor_not_for_this_correction`, CLR10 `decline_reason_required`. |
+| `clara.source_correction_successor_brief(uuid)` | `clara_runtime` | is this Work the successor a correction owed, and if so BOTH figures its own run must name before anything may post (`retired_reading`, `corrected_reading`) plus the retired basis. NULL for every ordinary Work, so a run can ask unconditionally. |
+
+**Why a backlog and not the retired run.** The retirement puts the parked task into
+`cancel_requested`, and the runtime's control listener then ABORTS that engine run — so the retired
+run is not guaranteed to be resumed at all and cannot be the lane that re-derives. A durable,
+restartable backlog plus an exactly-once settlement is what survives that. A lane that crashes
+between admitting and settling re-reads the SAME correction and re-admits idempotently, because the
+successor's `intent_key` is the op key and `clara.admit_journal_work` replays on it.
+
+**0321 writes no row at apply** (§TAIL T9) — on a FIRST APPLY, which is the only mode that can
+state it. §0 hands §TAIL its mode through 0115's temporary-table idiom, because between the first
+apply and a REDO of an unmerged file a rig runs the battery and the lane writes real settlements
+this file did not write; the redo branch reports the count instead of refusing over it. A
+from-scratch chain always takes the first-apply branch. Corrections retired before 0321 stay
+exactly where #885 left them until the runtime lane reaches them.
+
+**A RECORDING IS NOT ITS OWN LOOK-ALIKE** (#1135's cut-phase fix round,
+`0323_trade_invoice_probe_self_exclusion.sql`). `chatTurn_v22` calls #1007's duplicate probe BEFORE
+`clara.admit_trade_invoice_work`, and the admission door is idempotent on its intent key — so a
+retried tool call was shown the invoice its OWN earlier attempt had admitted, and the tool asked
+the person whether to record a duplicate of their own recording. Measured on `clara_l01` as
+`clara_runtime` in one rolled-back transaction: probe 0 matches → admit invoice X → admit again
+under the same key replays X → probe now returns X.
+
+0323 adds SIBLINGS and edits nothing: `clara._trade_invoice_probe_core(uuid,text,jsonb,text)` calls
+0275's three-argument core and removes the invoices recorded under the caller's own intent key,
+restating `match_count` over what survives; `clara.probe_trade_invoice_duplicates_for(uuid,uuid,text,jsonb,text)`
+(`clara_runtime`) is the door that carries the key. Neither new argument has a DEFAULT, so a
+four-argument call still resolves to 0275's own door — which `chatTurn_v21`'s parked runs reach and
+which §TAIL pins byte-for-byte along with four other bodies. The acknowledgement door is
+deliberately untouched: with the self-match gone a retried identical recording is shown the same
+earlier invoices, hashes the same `ack_digest` and replays the first row, while 0275's own
+ADV-1007-1 ruling — a second acknowledgement under one key for DIFFERENT figures is a second record
+by design — stays true and stays green. Pinned by
+`packages/db/tests/trade-invoice-probe-self-exclusion.test.mjs` (4 cells, one of which reproduces
+the self-match against the four-argument door so the fix cannot be quietly undone).
 
 **A question whose source was corrected is not answerable — even where the Work is carved out.**
 The retirement rule deliberately does not touch a Work holding a committed receipt (#676's
@@ -7263,3 +7333,83 @@ PARTIAL signal rather than guessing. Both branches were exercised on the lane da
 APPLY through `pnpm db:migrate` (with all four recut pins checked), and the REDO branch through
 `CLARA_MIGRATION_REDO=0318_knowledge_fye_pair_applicability` after the promotion door was put back
 at its pre-image for `kp.14`'s vacuity control.
+
+## 0320 — one body, two entrances: the model lane reaches the client home's money band (#1000, riders cut phase, lane C1)
+
+`clara.get_client_financial_pack` (0232, #660) is the ONE read behind the client home's money
+band — book cash over a governed, versioned cash account set and period profit over the approved
+ledger, each with the same ten-field envelope, six points of history and its own comparison. It was
+`STABLE SECURITY INVOKER`, floored inline on `clara.jwt_sub()`, granted to `clara_authenticated`
+alone, and scoped by forced firm-scoped RLS. The chat lane runs on pooled credentials that carry no
+`request.jwt.claims` at all, so #1000's tool could not reach it.
+
+**Four routes were measured before one was written, and three are closed by something the estate
+already decided.** (1) A grant to `clara_agent_ro` buys a door that answers CLR04 `no authenticated
+actor` on every call — "a tool that could only return a grant refusal, and that is not a
+capability". (2) A wake wrapper that sets `request.jwt.claims` from the credential's
+`on_behalf_of` is refused by name: `0082_wave_e_zeta_render_jobs_part4.sql:14-17` rules that
+"setting request.jwt.claims from a production function to borrow a human's identity is
+impersonation; in this repo that idiom appears ONLY inside migration probes, never on a production
+path". (3) A second, machine-side copy of the computation is refused by the same header
+("DUPLICATION IS REFUSED — a second copy of a gate is a second place to forget it") and by #660's
+own "one fact, one definition". (4) A SECURITY INVOKER wrapper, so the estate's own `p_*_agent` RLS
+policies would scope it, needs five new table grants and two new policies for `clara_agent_ro` —
+measured: `clara.cash_account_set_versions` and `clara.cash_account_set_members` carry no agent
+policy at all, and `clara.opening_seed_registry`, `clara.onboarding_plans` and
+`clara.onboarding_plan_items` carry one with no SELECT grant behind it. That is a widening of the
+model lane's RELATION reach, which #1000's own last acceptance criterion forbids.
+
+So 0082's remaining option is the one taken: **SPLIT**. `clara._client_financial_pack_core(p_firm,
+p_client, p_as_of, p_month)` carries the computation and is granted to NOBODY;
+`clara.get_client_financial_pack` keeps its signature, defaults, return type, envelope, refusal
+codes and ACL and becomes that core's VIEWER-floored delegate through `clara._human_ctx`; and
+`clara.wake_get_client_financial_pack` is the model lane's own audited door — EXECUTE to
+`clara_agent_ro` alone, ONE `clara.wake_fn_allowlist` row for the `interactive` kind.
+
+### The firm predicate is explicit now, and it is the whole tenancy wall
+
+Measured on the lane rig rather than recalled: `clara.clients` is FORCE ROW LEVEL SECURITY, and its
+`p_clients_owner` policy is `TO clara_fn_owner USING (true)` — so a SECURITY DEFINER body owned by
+`clara_fn_owner` sees every firm's clients (506 of them on `clara_l01`). 0232's visibility test was
+a plain existence probe that let RLS do the scoping, which was exact for an INVOKER read running AS
+a human and is not exact for this core. It now reads
+`where cl.id = p_client and cl.firm_id = p_firm`, and that ONE predicate is what keeps one firm's
+money out of another firm's answer: every other statement in the body is keyed on `p_client` and
+every one of them is inside the `if v_visible` arm. Both lanes' cells red when it is removed —
+`p1000.wake.no_oracle` on the machine side and #660's own `p660.pack.cross_firm` on the human
+side — which was driven once, on purpose, before the core was restored through
+`CLARA_MIGRATION_REDO`.
+
+### How the pasted body is proved
+
+The core's body is written out statically (no `pg_get_functiondef` splice, so no new entry in
+`apps/web/tests/firm-scope-db-pins.corpus.ts` is owed — this file contains no dynamic SQL at all),
+and it is 0232's own body with exactly THREE anchored edits: the `c record` declaration and the
+inline JWT floor removed, and the visibility test's firm predicate added. §TAIL proves it by
+REVERSE SUBSTITUTION, 0318's own idiom: it reads the installed core, puts all three pre-images
+back, and requires the result to hash to the `sha256(prosrc)` the prestate pinned. A digit changed
+anywhere in ~720 lines of accounting arithmetic reds the migration instead of shipping. The
+behavioural half is #660's own 36-cell battery, which runs unchanged against the human door.
+
+### The floor each lane carries
+
+The human lane is VIEWER, through `clara._human_ctx(clara.role_rank('viewer'))`, which raises the
+same three CLR04s (`no authenticated actor`, `actor has no active membership`, `insufficient role`)
+the inline block raised — it IS the body those three predicates were written from. The model lane is
+BOOKKEEPER+, and not by this file's choice: `clara.mint_wake_credential` refuses a below-bookkeeper
+`on_behalf_of` outright (CLR10 `authority_lost`) and `clara.wake_context` re-validates the same
+standing on EVERY use, so a demoted person's outstanding credential goes inert mid-conversation.
+The model lane is therefore STRICTLY NARROWER than the door it reaches, which is what "carrying the
+human door's role floor rather than widening either" has to mean. Both halves are driven by
+`p1000.wake.floor_is_the_credential`.
+
+### Redo-safe by construction (#957)
+
+Every object is `create or replace function` and the one row it writes is `on conflict do nothing`
+against `clara.wake_fn_allowlist`'s primary key. The prestate admits TWO pre-images for the one body
+it recuts — the measured live sha, or a body already carrying this file's `#1000` attribution — and
+refuses a PARTIAL birth (one of the two new functions present without the other) by name rather
+than completing it. Both branches were exercised on `clara_l01`: the FIRST APPLY through
+`pnpm db:migrate`, and the REDO branch through
+`CLARA_MIGRATION_REDO=0320_client_financial_pack_wake_read` after the firm predicate was removed
+from the live core for `p1000.wake.no_oracle`'s vacuity control.

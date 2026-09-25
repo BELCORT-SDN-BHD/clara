@@ -27,6 +27,9 @@ import {
   runStatementWitnessTextRead as runTextReadV3,
   classifyStatementWitnessFailure as classifyStatementWitnessFailureV3,
 } from "../workflows/statementFacts.v3.behavior.mjs";
+import {
+  runStatementWitnessTextRead as runTextReadV4,
+} from "../workflows/statementFacts.v4.behavior.mjs";
 import { STATEMENT_WITNESS_ENGINE_SNAPSHOT } from "../workflows/statementFacts.v2.services.mjs";
 
 // The registry and the workflow modules are TypeScript, so they are reached through the SAME
@@ -37,14 +40,18 @@ const registryMod = await import("../workflows/registry.ts");
 const statementV1Mod = await import("../workflows/statementFacts.v1.ts");
 const statementV2Mod = await import("../workflows/statementFacts.v2.ts");
 const statementV3Mod = await import("../workflows/statementFacts.v3.ts");
+const statementV4Mod = await import("../workflows/statementFacts.v4.ts");
 
-/** The provenance guard is BYTE-CARRIED from v2 into v3 (H-02/H-03/H-05 touch the prompts, the
- *  header transforms and the persist arm — never the pre-egress stamp check). Every in-flight
- *  cell below therefore runs against BOTH bodies: v3 because it is what live traffic reaches,
- *  v2 because it stays exported and frozen for parked runs and a rollback. A guard proven on
- *  only one of two reachable bodies is a guard proven on the wrong one half the time. */
+/** The provenance guard is BYTE-CARRIED from v2 into v3 and again into v4 (H-02/H-03/H-05 touch
+ *  the prompts, the header transforms and the persist arm; #1037 touches the text channel's
+ *  schema and one added read — never the pre-egress stamp check). Every in-flight cell below
+ *  therefore runs against EVERY reachable body: v4 because it is what live traffic reaches, v3
+ *  and v2 because they stay exported and frozen for parked runs and a rollback. A guard proven on
+ *  only one of three reachable bodies is a guard proven on the wrong one two thirds of the
+ *  time. */
 const BODIES = [
-  ["v3 (the live pointer)", runTextReadV3],
+  ["v4 (the live pointer)", runTextReadV4],
+  ["v3 (still frozen and reachable)", runTextReadV3],
   ["v2 (still frozen and reachable)", runTextReadV2],
 ];
 
@@ -61,33 +68,43 @@ after(() => {
 // THE REPOINT — the one line that takes live traffic
 // ---------------------------------------------------------------------------
 
-test("repoint: `statementFacts:` IS statementFacts_v3 — object identity, not a name", () => {
+test("repoint: `statementFacts:` IS statementFacts_v4 — object identity, not a name", () => {
   // A registry entry is the routing for a LIVE lane: `statement_facts` tasks are minted today,
   // so this key decides which body claims them the moment the image deploys. Compared by
   // reference against the module's own export, because a name-shaped check would pass against a
   // re-export that pointed anywhere.
-  assert.equal(registryMod.workflows.statementFacts, statementV3Mod.statementFacts_v3);
+  assert.equal(registryMod.workflows.statementFacts, statementV4Mod.statementFacts_v4);
+  assert.notEqual(registryMod.workflows.statementFacts, statementV3Mod.statementFacts_v3,
+    "v3 must no longer be the pointer");
   assert.notEqual(registryMod.workflows.statementFacts, statementV2Mod.statementFacts_v2,
     "v2 must no longer be the pointer");
   assert.notEqual(registryMod.workflows.statementFacts, statementV1Mod.statementFacts_v1,
     "v1 must no longer be the pointer");
+  assert.equal(registryMod.workflowPins.statementFacts, "statementFacts_v4",
+    "the provenance pin an operator reads names the same body the dispatch table does");
 });
 
-test("repoint: statementFacts_v1 AND v2 stay EXPORTED and reachable — parked runs are never stranded", () => {
+test("repoint: statementFacts_v1, v2 AND v3 stay EXPORTED and reachable — parked runs are never stranded", () => {
   // Policy (c): a repoint must never make an older body unreachable. v1 is not merely legacy
-  // here — v3 reaches v1's own claim+process steps for the `statement_parse` (csv/ofx) lane —
-  // and v2's parks are the ordinary kind, since the defect v3 fixes (H-05) is precisely a run
-  // that keeps retrying a persist against a task nobody settled. Read off the REGISTRY module's
-  // re-exports, which is the surface policy (c) is about.
+  // here — every successor reaches v1's own claim+process steps for the `statement_parse`
+  // (csv/ofx) lane — and v2's and v3's parks are the ordinary kind. Read off the REGISTRY
+  // module's re-exports AND its body roster, which is the surface policy (c) is about and the
+  // one the boot-time stranded-body census reads.
   assert.equal(typeof registryMod.statementFacts_v1, "function", "the v1 re-export must still resolve");
   assert.equal(typeof registryMod.statementFacts_v2, "function", "the v2 re-export must still resolve");
-  assert.equal(typeof registryMod.statementFacts_v3, "function");
+  assert.equal(typeof registryMod.statementFacts_v3, "function", "the v3 re-export must still resolve");
+  assert.equal(typeof registryMod.statementFacts_v4, "function");
+  for (const id of ["statementFacts_v1", "statementFacts_v2", "statementFacts_v3", "statementFacts_v4"]) {
+    assert.ok(registryMod.workflowBodies.includes(id),
+      `${id} must be in workflowBodies — a body missing there reads to the boot census and to a rollback preflight as one this image cannot run`);
+  }
   const bodies = new Set([
     statementV1Mod.statementFacts_v1,
     statementV2Mod.statementFacts_v2,
     statementV3Mod.statementFacts_v3,
+    statementV4Mod.statementFacts_v4,
   ]);
-  assert.equal(bodies.size, 3, "three distinct bodies, all three reachable");
+  assert.equal(bodies.size, 4, "four distinct bodies, all four reachable");
 });
 
 // ---------------------------------------------------------------------------

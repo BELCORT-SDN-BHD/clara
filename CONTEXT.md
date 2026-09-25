@@ -49,9 +49,14 @@ _Avoid_: Edit, amend, correction as synonyms — a correction acts on a posted o
 <!-- #721 -->
 
 **Source-corrected work**:
-Work that a *source revision* retired. When a human corrects what a document says, every work of that firm still waiting on a question about that document — and holding no committed receipt — is cancelled inside the correcting transaction, with the reason *source corrected* carried on the correction's own receipt and on the cancellation's key. NOTHING IS RE-ADMITTED IN ITS PLACE: a basis nobody has re-derived from the corrected document is not the corrected facts, whoever first stated it, so the instruction has to be given again — a *restated work*, by a person, on the corrected reading. The retired work therefore points at no successor. A revision that leaves the recorded value where it was is not a correction at all and is refused: nothing is retired and no question reads as corrected. Its question can no longer be answered, and neither can a question about the corrected document on a work the rule deliberately left alone (one holding a committed receipt): the answer door refuses both as *source corrected* and says when the source moved.
+Work that a *source revision* retired. When a human corrects what a document says, every work of that firm still waiting on a question about that document — and holding no committed receipt — is cancelled inside the correcting transaction, with the reason *source corrected* carried on the correction's own receipt and on the cancellation's key. NOTHING IS RE-ADMITTED IN THE CORRECTING TRANSACTION: a basis nobody has re-derived from the corrected document is not the corrected facts, whoever first stated it. Re-deriving one is an interpretation act, so the Work runtime does it afterwards — a *re-derived successor* — and the retired work then points at it through the correction's own durable key. A revision that leaves the recorded value where it was is not a correction at all and is refused: nothing is retired and no question reads as corrected. Whether a value CHANGED is judged per field against the canonical form this estate keeps for it — the cents for money, the ISO 4217 code for a currency, the calendar day for a date — and the recorded text everywhere else, where the spelling on the page IS the fact. Its question can no longer be answered, and neither can a question about the corrected document on a work the rule deliberately left alone (one holding a committed receipt): the answer door refuses both as *source corrected* and says when the source moved.
 _Avoid_: Re-evaluation, re-assessment as synonyms — those act on recorded experience or on a posted outcome and are parked; this one retires an instruction that never posted. Calling it a supersession: *superseded by* is what a restatement (a person's own act) writes, and a source correction writes none.
-<!-- #885 -->
+<!-- #885, #1030 -->
+
+**Re-derived successor**:
+The work the Work runtime admits in place of one a *source correction* retired. Its figures come from the corrected document's live facts and from nowhere else; its accounts, memo and posting date come from the instruction the person originally gave, because a correction of what a document says does not move the instruction. It is admitted under the retirement's own operation key, which is what makes it idempotent to admit and what makes *superseded by* provable, and its own run PARKS on a confirmation question naming BOTH figures — the one the retired work was admitted on and the one the document now says. Nothing may post until a person answers it. Where the mapping is not obvious — the correction moves no figure the instruction carried, or the re-derivation would not balance — none is admitted and the reason is recorded.
+_Avoid_: A restated work — that is a person's own act through #721's door, and it carries a basis they stated. A proposal the model made: the figures are the database's reading of the document and the confirmation is a person's. Calling the confirmation an approval — it is the authority the basis carries, asked before anything exists to approve.
+<!-- #1030 -->
 
 **Accounting plan**:
 An explicitly authorised schedule for future accounting. It records what it posts, the schedule it
@@ -1268,9 +1273,10 @@ path`/`Typed fact`: a statement line is not a `clara.document_regions` row, so i
 as three plain columns on the line itself rather than a link to one.
 _Avoid_: A journal line; a transaction the product created; an amount a human may edit to make
 something tie; treating an absent citation on the CSV/hand-keyed lanes as a defect rather than a
-structural fact about that lane; assuming a citation exists on every machine-lane line today —
-the persist door accepts one when a payload states it, but no live producer states one yet
-(0291's own residual, closed as a successor contract in #990's report).
+structural fact about that lane; assuming a citation exists on every machine-lane line — since
+`statementFacts_v4` (#1037) the witness pair's text reader names the region it read each row from
+and the body resolves it to that region's own page and locator, but a row it could not honestly
+cite still persists uncited, and every line banked before that cut has no citation at all.
 
 **Remaining capacity**:
 How much of one approved journal entry's movement on a given bank account is still unallocated,
@@ -1316,3 +1322,47 @@ _Avoid_: Metric definition version — that belongs to the delta-metric lane and
 **Processing cap / 处理上限**:
 One of the four per-firm document-processing limits a firm sets for itself — documents per day, pages per day, documents processed at once, model readings at once. The firm's own owner or admin sets each one independently, receipted and audited; a cap nobody has set is ABSENT rather than zero, and the enforcing doors fall back to their own built-in figures until the firm's first write. The estate's own ceiling sits above whatever a firm sets and no firm can raise it.
 _Avoid_: A quota a firm has bought; an operator-granted allowance (the operator sets no firm's caps); treating an unset cap as zero, or as the value a first write would land.
+
+<!-- #1135 -->
+**Look-alike document / 看似重复的单据**:
+A trade invoice or bill this client already holds that matches the one being recorded on the same
+party plus either the same document number, normalised, or the same total on the same date. It is a
+QUESTION, never a refusal: two identical-looking documents are often two real events, and only the
+person in front of the paperwork knows. Clara shows what she found — the number, the date, the
+total — and asks; the person's "record it anyway" is kept with the recording as an acknowledgement
+a reviewer can read months later.
+_Avoid_: Duplicate (it asserts the answer the question exists to ask); a blocked submission; a
+match Clara resolved on her own.
+
+**Advance allocation / 预支分摊**:
+How many sen of ONE staff expense claim come off EACH of the advances it discharges, in the order a
+person confirmed. The register records the list that was confirmed and refuses a split nobody
+agreed to, because deciding whose money is discharged first is a judgement rather than an
+arithmetic. Clara may PROPOSE one — oldest advance first, each taking what it still has outstanding
+— and reads it back before it is recorded.
+_Avoid_: A silent first-in-first-out; an allocation Clara chose; splitting a claim into two claims.
+
+**Accrual side / 应计方向**:
+Which way one accrual runs. `expense` is a cost the period incurred that nobody has billed yet;
+`revenue` is work the firm has delivered and not yet invoiced, which sits in an accrued-income
+asset until the invoice is issued. The side is a professional's statement, never inferred from the
+account named, and it cannot be changed afterwards: a correction restates an accrual, it never
+turns one into the other.
+_Avoid_: Reading the side off the account type; "reversing accrual" as a synonym (every accrual
+reverses); treating the revenue side as deferred revenue, which is the opposite case — money
+received before the work.
+
+**Stated period amount / 逐期给定金额**:
+An accrual whose figure a person states for EACH due date of its schedule, with the window's total
+carried beside them. Nothing averages, nothing carries a previous period forward and nothing is
+read off a document; a period the schedule reaches and nobody has stated is a question Clara asks
+BY DATE. An even split's odd cent belongs to the final period, by convention.
+_Avoid_: A computed or apportioned amount; a schedule that fills a gap with the previous figure.
+
+**Configuration receipt / 配置回执**:
+What a prepayment amortisation or a deferred-revenue recognition answers with: the term, the number
+of periods and the two accounts the schedule will use. NOTHING HAS POSTED at the moment it is
+issued — each period's own Work is what puts it on the books — and saying otherwise is the one
+thing a conversational surface must never blur.
+_Avoid_: "Recognised", "amortised" or "posted" for a schedule that has only been configured; a
+figure the answer did not return.

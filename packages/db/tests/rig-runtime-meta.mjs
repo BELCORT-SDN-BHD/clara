@@ -104,10 +104,30 @@ export async function overloadFailures() {
   // the 6-arity carries NO defaulted parameters, so a 5-argument call can only resolve to
   // the 5-arity and a 6-argument call only to the new one — asserted by 0046's own tail arm
   // (3), which measures pronargdefaults rather than asserting it in prose.
+  // AMENDMENT 0321 (#1030, cut phase 2026-09-25): _fact_value_changed gains a ratified SECOND
+  // arity carrying p_field_path -- the TYPED notion (an ISO currency code is case-insensitive, an
+  // invoice date is a calendar day, everything else is the trimmed text). 0268's two-argument
+  // notion is deliberately NOT recut, because a row written before the guard existed must be read
+  // the same way it was written, and 0321's own §TAIL (T2) pins sha256(prosrc) of the
+  // two-argument body to refuse a recut. Same safety proof as the 0040 and 0046 pairs and a
+  // stricter one: BOTH arities carry pronargdefaults = 0 (measured on the live 312-file catalog),
+  // so a two-argument call can only resolve to the two-arity and a three-argument call only to
+  // the new one. 0321's §TAIL additionally drives the equivalence -- a NULL field path answers
+  // exactly what the two-argument notion answers -- so the pair cannot silently diverge.
+  // AMENDMENT 0323 (#1135, cut phase 2026-09-25): _trade_invoice_probe_core and
+  // probe_trade_invoice_duplicates_for each gain a ratified SECOND arity carrying p_intent_key,
+  // the self-exclusion the duplicate probe needs so a Work does not report its OWN recording as a
+  // duplicate of itself. 0323 ADDS A SIBLING and edits neither three/four-argument body (both are
+  // byte-untouched, asserted by its §0 prestate), because the keyless callers must keep the
+  // answer they have. The no-ambiguity proof is 0323's own §TAIL (T2), which measures
+  // pronargdefaults > 0 over both new siblings and refuses the migration if either carries a
+  // default; re-measured here on the live catalog, all four arities are pronargdefaults = 0.
   const RATIFIED = {
     prepare_egress_dispatch: 2, consume_egress_dispatch: 2,
     match_bank_line: 2, settle_from_bank_line: 2,
     settle_autodraft_task: 2,
+    _fact_value_changed: 2,
+    _trade_invoice_probe_core: 2, probe_trade_invoice_duplicates_for: 2,
   };
   const r = await rootQuery(
     `select p.proname, count(*)::int as n from pg_proc p join pg_namespace n on n.oid = p.pronamespace

@@ -1347,6 +1347,19 @@ const FIRM_PORTFOLIO_PACK_0231_CLOCK_NAMES = ["get_firm_portfolio_pack"];
 const CLIENT_FINANCIAL_PACK_0232_CLOCK_NAMES = [
   "get_client_financial_pack", "propose_client_cash_accounts", "publish_client_cash_account_set",
 ];
+// #1000 [0320] - THE SAME THREE READINGS, ONE OF THEM UNDER A NEW NAME, and it is a MOVE rather
+// than an addition. 0320 lifted `clara.get_client_financial_pack`'s body byte for byte into
+// `clara._client_financial_pack_core` so the chat lane could reach ONE definition through its own
+// audited wake wrapper instead of a second copy; the door it left behind resolves its caller
+// through `clara._human_ctx` and delegates, and carries no clock token at all. `v_now
+// timestamptz := now()` - the SAMPLED INSTANT this arm reads, unchanged in reading and unchanged
+// in text - travelled with the body. The other two names are untouched by 0320 and stay exactly
+// as the block above describes them. The swap is REVERSE-GATED on 0320's own stem, the shape
+// KL_ROSTER_0223_PREPAYMENT already uses for 0307's identical extraction, so a `db-slice-frontiers`
+// chain that carries 0232 and not 0320 still pins the door.
+const CLIENT_FINANCIAL_PACK_WAKE_0320_CLOCK_NAMES = [
+  "_client_financial_pack_core", "propose_client_cash_accounts", "publish_client_cash_account_set",
+];
 // WAVE 2026-09-18 END
 
 // RIDER #1008 [0234, the platform's legal enforcement mode] — ONE name, and it is
@@ -1495,6 +1508,30 @@ const SCHEDULE_CORRECTION_0317_CLOCK_NAMES = [
   "replace_prepayment_schedule", "replace_revenue_recognition_schedule",
 ];
 
+// RIDERS CUT PHASE (0321, #1030) — ONE NAME, and the adjudication is the CHEAP one wave 3 could
+// use and wave 4's seven could not, because it holds here by measurement rather than by argument.
+//
+// `clara.settle_source_corrected_rederivation` is the lane that claims a source correction's
+// successor. Measured on the live 312-file catalog (from-scratch chain, 2026-09-25):
+//   · its clock lines are TWO, and both are the same idiom —
+//       update clara.accounting_work set superseded_by = p_successor, updated_at = now()
+//       update clara.accounting_work set supersedes    = w.id,        updated_at = now()
+//   · it declares NO date-typed local (`v_rev uuid; v_work uuid; v_firm uuid; w record; sx record;
+//     v_dedupe jsonb; v_result jsonb; v_reason text; v_actor uuid;`), and its body carries no
+//     `::date`, no `current_date`, no `date_trunc` and no `clara._book_today()` token at all;
+//   · the ONLY relation it writes is `clara.accounting_work`, which carries no DATE column
+//     whatsoever (`information_schema.columns` where `data_type = 'date'` returns nothing for it),
+//     and `updated_at` is `timestamp with time zone`.
+// So both clock reads land on a timestamptz target, no date is derived from either, and the house
+// legal date is not owed: the body never answers "what is today". The op-receipt it settles is
+// written by `clara._finish_op`, a separate body with its own roster entry.
+//
+// 0320 (#1000) and 0323 (#1135) add NO arm-(D) name, and that is MEASURED rather than assumed:
+// the live census over the 312-file chain returns exactly one name this roster did not hold.
+// 0320's sampled instant moved from the pack door into its core and is already carried by
+// CLIENT_FINANCIAL_PACK_WAKE_0320_CLOCK_NAMES's reverse gate below.
+const WORK_SOURCE_REDERIVATION_0321_CLOCK_NAMES = ["settle_source_corrected_rederivation"];
+
 // #720 [0198, chat-clarify expiry] — ADDS NO NAME AND MOVES NONE, and that is MEASURED rather than
 // assumed: 0198 creates no body at all. It RECUTS exactly one, `clara.expire_due_interruptions`,
 // which already sits on WORK_QUESTIONS_0180_CLOCK_NAMES above, and the recut deletes a predicate
@@ -1633,7 +1670,15 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("intake_batches$")) names.push(...INTAKE_BATCHES_0229_CLOCK_NAMES);
   if (await appliedStem("knowledge_retrieval$")) names.push(...KNOWLEDGE_RETRIEVAL_0230_CLOCK_NAMES);
   if (await appliedStem("firm_portfolio_pack$")) names.push(...FIRM_PORTFOLIO_PACK_0231_CLOCK_NAMES);
-  if (await appliedStem("client_financial_pack$")) names.push(...CLIENT_FINANCIAL_PACK_0232_CLOCK_NAMES);
+  // #1000 [0320] — reverse-gated, the KL_ROSTER_0223_PREPAYMENT shape: the pack's body moved into
+  // its core, so above 0320 the CORE carries the sampled instant and the door carries nothing.
+  if (await appliedStem("client_financial_pack$")) {
+    if (await appliedStem("client_financial_pack_wake_read$")) {
+      names.push(...CLIENT_FINANCIAL_PACK_WAKE_0320_CLOCK_NAMES);
+    } else {
+      names.push(...CLIENT_FINANCIAL_PACK_0232_CLOCK_NAMES);
+    }
+  }
   // RIDER #1008 (0234) - stem-gated, never number-gated, for the reason :207-214 gives.
   if (await appliedStem("legal_enforcement_mode$")) names.push(...LEGAL_ENFORCEMENT_0234_CLOCK_NAMES);
   // RIDER #912 (0243) - stem-gated, never number-gated, for the reason :207-214 gives.
@@ -1671,6 +1716,12 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("prepayment_account_roster$")) names.push(...PREPAYMENT_ACCOUNT_ROSTER_0306_CLOCK_NAMES);
   if (await appliedStem("invite_preview_public_door$")) names.push(...INVITE_PREVIEW_0309_CLOCK_NAMES);
   if (await appliedStem("schedule_term_correction$")) names.push(...SCHEDULE_CORRECTION_0317_CLOCK_NAMES);
+  // RIDERS CUT PHASE (0321) - stem-gated, never number-gated, for the reason :207-214 gives; and
+  // the stem is the FULL one, because 0268 is `work_source_correction_supersede` and a shorter
+  // gate would witness the wrong file. See the array's own header for the adjudication.
+  if (await appliedStem("work_source_correction_rederivation$")) {
+    names.push(...WORK_SOURCE_REDERIVATION_0321_CLOCK_NAMES);
+  }
   return names.sort();
 }
 
@@ -1938,6 +1989,16 @@ const KL_ROSTER_0231_FIRM_PORTFOLIO = ["get_firm_portfolio_pack"];
 const KL_ROSTER_0232_CLIENT_FINANCIAL = [
   "get_client_financial_pack", "propose_client_cash_accounts", "publish_client_cash_account_set",
 ];
+// #1000 [0320] - THE SAME ROSTER WITH ONE NAME MOVED, for the reason the arm (D) block above
+// states in full: 0320 lifted the pack's body byte for byte into
+// `clara._client_financial_pack_core`, so the `Asia/Kuala_Lumpur` string this arm reads - the
+// `timezone` key every figure group publishes so a face can state the calendar it counted in -
+// travelled with it, and the door left behind spells no zone at all. Nothing was added to the
+// duplication ledger and nothing was removed from it: exactly one body still publishes that
+// string for this read, and it is the same body it always was under a new name.
+const KL_ROSTER_0320_CLIENT_FINANCIAL_CORE = [
+  "_client_financial_pack_core", "propose_client_cash_accounts", "publish_client_cash_account_set",
+];
 // WAVE 2026-09-18 END
 
 // ===========================================================================================
@@ -2006,7 +2067,14 @@ export async function s5KlDuplicationRoster(query) {
   if (await appliedStem("intake_batches$")) names.push(...KL_ROSTER_0229_INTAKE_BATCHES);
   if (await appliedStem("knowledge_retrieval$")) names.push(...KL_ROSTER_0230_KNOWLEDGE_RETRIEVAL);
   if (await appliedStem("firm_portfolio_pack$")) names.push(...KL_ROSTER_0231_FIRM_PORTFOLIO);
-  if (await appliedStem("client_financial_pack$")) names.push(...KL_ROSTER_0232_CLIENT_FINANCIAL);
+  // #1000 [0320] — reverse-gated, the KL_ROSTER_0223_PREPAYMENT shape (see the array's header).
+  if (await appliedStem("client_financial_pack$")) {
+    if (await appliedStem("client_financial_pack_wake_read$")) {
+      names.push(...KL_ROSTER_0320_CLIENT_FINANCIAL_CORE);
+    } else {
+      names.push(...KL_ROSTER_0232_CLIENT_FINANCIAL);
+    }
+  }
   // RIDERS WAVE 2 - stem-gated, never number-gated.
   if (await appliedStem("document_ingest_window_myt$")) names.push(...KL_ROSTER_0252_DOCUMENT_INGEST_WINDOW);
   // RIDERS WAVE 4, LANE 01 (#949, 0300) - stem-gated, never number-gated.

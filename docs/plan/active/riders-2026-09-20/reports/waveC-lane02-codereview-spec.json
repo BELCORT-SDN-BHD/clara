@@ -1,0 +1,123 @@
+{
+  "axis": "SPEC",
+  "lane": "riders wave C, lane C2",
+  "branch": "riders/wC-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "fixed_point": "6da02a8de",
+  "commits": [
+    "5d7cf8753 feat(runtime): #1037 statementFacts.v4.prompts",
+    "fa3805f31 feat(runtime): #1037 statementFacts.v4.citations",
+    "feac894dd feat(runtime): #1037 statementFacts.v4.behavior",
+    "fe0b3eafc feat(runtime): #1037 the statementFacts cut - v4 body, impl, five registry edits",
+    "b8916de72 test(runtime): #1037 the live-rig battery",
+    "e031069c9 test(runtime): #1037 the cut keeps registry.ts in the shape the two-build drill rewrites"
+  ],
+  "spec_sources": [
+    "GitHub issue #1037 (body Agent Brief; gh reports ZERO comments, so the body is the newest and only brief; state OPEN, labels enhancement + ready-for-agent)",
+    "docs/plan/active/riders-2026-09-20/CUT-PLAN.md sections 1.7, 2, 3.2",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md (+ wave-2 and wave-3 addenda)",
+    "the lane prompt (computed task) items (a) to (g)"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "The cut is real and the producer half of #990 is genuinely delivered: statementFacts_v4 is minted per CUT-PLAN section 2.1 (five new frozen files, .dispatch and .services correctly NOT copied), the five registry edits are in the exact textual shape scratch-image.mjs rewrites, the boot pin moves with workflowPins/workflowBodies, no migration was written (0322 correctly UNUSED), no chatTurn or claraWork file is touched, and the citation is proven against real clara.document_regions rows on clara_l02. Two of the ticket's four acceptance criteria are NOT met as written - AC3 (no statementFacts leg in the two-build cutover drill) and, in its wrapper only, AC1 (no durable WDK World leg) - both declared PARTIAL/qualified by the implementer and both verified here as genuinely new infrastructure. Everything else the report calls 'already satisfied' or 'not owed' checks out against the branch. Five notes record contract-prose corrections the orchestrator should carry forward rather than code defects.",
+  "gates_rerun_by_this_reviewer": [
+    "node --test packages/runtime/tests/statement-facts-v4-citation-db.test.mjs -> 4 pass, 0 fail (live clara_l02)",
+    "node --test packages/runtime/tests/statement-facts-v4-citation.test.mjs -> 7 pass, 0 fail",
+    "node --test packages/runtime/tests/f-a2-statement-activation.test.mjs -> 12 pass, 0 fail",
+    "node --test packages/runtime/tests/registry-view.test.mjs -> 7 pass, 0 fail",
+    "node scripts/check-frozen-workflows.mjs -> OK, 327 frozen files, 58 use-workflow modules, 3 retired",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK, emittable set unchanged, no new wire kind"
+  ],
+  "findings": [
+    {
+      "id": "C2-SPEC-01",
+      "ticket": 1037,
+      "severity": "major",
+      "kind": "requirement-missing",
+      "title": "AC3 is not met as written: the two-build cutover drill still has no statementFacts leg",
+      "evidence": "Ticket #1037 acceptance criterion 3, verbatim: \"The two-build cutover drill passes for the statement-facts family: a run parked on v3 completes on v3 inside the new build.\" Measured on the branch: packages/runtime/tests/two-build-cutover-e2e.mjs builds exactly two scratch images, className \"claraWork\" (:597-602) and className \"chatTurn\" (:582), and every assertion in it matches /claraWork=/ or /chatTurn=/ (:658, :662, :732, :749). There is no statementFacts leg and no statementFacts child bootstrap. The drill running green therefore proves nothing about this family; what the lane substitutes is cell 1037.x1 in packages/runtime/tests/statement-facts-v4-citation.test.mjs, which drives deriveVersionPair(registrySrc, \"statementFacts\") and rewriteRegistryToPrevious against the real registry.ts - a STATIC proof that a v3-pinned build could be constructed, not a parked run resuming on v3 inside build B. The lane report states this openly as AC3 PARTIAL, and CUT-PLAN.md section 3.2 cost 1 priced it as new work before the lane started, so this is a known and declared residual, not a concealed one.",
+      "required_fix": "Do not record #1037's AC3 as met. File the follow-up the lane report specifies (a statementFacts leg parked at a statementWitnessWait - no done OCR extraction on build A, seed the extraction and regions, resume on build B - plus a statement-facts-serve.mjs child that injects a scripted __claraStatementWitnessServices) and have the orchestrator decide explicitly whether the cut ships with AC3 partial. The compensating evidence that a parked v3 run is not stranded (f-a2-statement-activation.test.mjs object-identity cells, workflowBodies roster cell, check-workflow-bundle's 58 superseded bodies) should be cited in that decision."
+    },
+    {
+      "id": "C2-SPEC-02",
+      "ticket": 1037,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "AC1's 'World leg' wrapper is not driven; the durable replay of the widened text-read return value is unmeasured",
+      "evidence": "Ticket #1037 acceptance criterion 1, verbatim: \"A World leg drives a bank statement through the successor body and finds every extracted line carrying a page and a region that the viewer can render.\" The SECOND half is fully proven: cell 1037.db1 (packages/runtime/tests/statement-facts-v4-citation-db.test.mjs) was re-run by this reviewer on clara_l02 and passes - all three persisted lines carry citation_page equal to the clara.document_regions row's own locator page, citation_region deep-equal to that locator verbatim, citation_extraction_id equal to the receipt's reader1_extraction_id, and the Matching tab's own door clara.get_bank_line_matching_context reports citation_page = 1. The FIRST half is not: the cell calls runStatementWitnessTextRead / runStatementWitnessVisionRead / persistStatementWitnessPair directly rather than through a durable WDK World. The claim that no statementFacts World driver exists checks out - grep of packages/runtime/tests shows World-driving harnesses only for chatTurn, claraWork, wake, intake, fixed-asset and periodic-adjustment, none for statementFacts. The unmeasured risk is narrow and named in the report: whether the engine memoizes the step return value now that each cited line carries one integer and one locator object across the WDK boundary.",
+      "required_fix": "Accept as substantively met but record AC1 as qualified, tied to the same follow-up as C2-SPEC-01 (a statementFacts World driver is the prerequisite for both). No code change is owed in this lane."
+    },
+    {
+      "id": "C2-SPEC-03",
+      "ticket": 1037,
+      "severity": "note",
+      "kind": "instruction-deviation-justified",
+      "title": "The lane prompt's '--lock-deployed in the same commit' was deliberately not executed, correctly",
+      "evidence": "The lane prompt item (b) says \"the manifest lock via check-frozen-workflows --lock-deployed in the same commit\". The branch does not do it: the frozen-workflows.json diff appends five statementFacts.v4.* entries carrying only sha256 and note, with no \"deployed\": true (contrast every neighbouring entry). The implementer used --update instead and justified it from two sources this reviewer verified verbatim: CUT-PLAN.md section 2.4 (\"--lock-deployed is NOT a cut gate ... it belongs to the hosted release ceremony (runbook step 11a)\") and packages/runtime/README.md:1064-1066 (\"run node scripts/check-frozen-workflows.mjs --lock-deployed and commit the manifest after the image is live - locking before deploy would freeze a body that no parked run can yet exist for\"). The same prompt ordered CUT-PLAN.md to be read first, so the binding document wins. Running it from the lane would also have globally locked wave 4's ten payrollFacts.v1.* / agreementFacts.v1.* entries.",
+      "required_fix": "None in the lane. The orchestrator must confirm the hosted release ceremony's step 11a locks exactly the fifteen currently-unlocked entries (wave 4's ten plus this cut's five), and should correct the lane prompt template so a later lane is not told to lock before deploy."
+    },
+    {
+      "id": "C2-SPEC-04",
+      "ticket": 1037,
+      "severity": "note",
+      "kind": "contract-prose-wrong",
+      "title": "CUT-PLAN section 3.2 and #990's successor contract name the wrong channel; the code is right and the plan text should be corrected",
+      "evidence": "CUT-PLAN.md section 3.2 says \"statementFacts.v4.prompts.mjs adds ONE instruction to the vision-channel prompt\", and reports/wave3-lane08-ticket990.md's successor contract says the same. The implementation puts the stanza on the TEXT channel and documents the reason in three module headers. Verified independently here: buildStatementWitnessVisionPrompt() (statementFacts.v3.prompts.mjs:295-304) returns four sentences and passes no regions at all, while the numbered [idx page] rendering is built only by buildStatementWitnessTextPrompt (:256-293); and persistStatementWitnessPair (statementFacts.v3.behavior.mjs:462) fills readers.reader1.lines from textRead.lines, which is exactly where 0291's splice reads (v_r1->'lines'). A vision-side region_idx would have nothing to resolve against and would land in reader2, which the persist core never reads. The ticket's own Agent Brief names no channel, so this is not a deviation from the ticket.",
+      "required_fix": "Correct the channel in CUT-PLAN.md section 3.2 and note the correction against reports/wave3-lane08-ticket990.md, so a later reader does not 'restore' the vision channel. No code change."
+    },
+    {
+      "id": "C2-SPEC-05",
+      "ticket": 1037,
+      "severity": "note",
+      "kind": "already-satisfied-claim-checked",
+      "title": "AC2's 'rendered cell' half is satisfied compositionally, not by one cell that renders a v4-produced row",
+      "evidence": "Ticket #1037 acceptance criterion 2, verbatim: \"A line extracted by the previous body (a fixture from before the cut) still shows the stated-absence sentence, and a line from the successor shows its citation; a rendered cell proves both.\" The report claims the rendered half is already satisfied on main. Checked on the branch and it holds: apps/web/lib/bank/citation.test.ts carries four cells over the three-state decision, and apps/web/components/bank/matching-section.test.tsx carries three [990] cells at :301, :329 and :357 rendering the present / lane_none / not_recorded sentences. Both files predate the branch and were not re-driven from a v4-produced row; they render from prop-level citation_page states. The bridge is at the door rather than in the DOM: 1037.db1 reads clara.get_bank_line_matching_context and sees citation_page = 1 after v4, 1037.db2 sees null after v3 on the SAME fixture through statementFacts_v3 - both re-run green here. No apps/web file changed, which work-order rule 3 makes the correct outcome.",
+      "required_fix": "None. Record AC2 as met by the db-door cells plus the pre-existing rendered cells, and say so in the ticket's closing evidence rather than leaving 'a rendered cell proves both' implying a new one exists."
+    },
+    {
+      "id": "C2-SPEC-06",
+      "ticket": 1037,
+      "severity": "note",
+      "kind": "requirement-satisfied-by-explanation",
+      "title": "AC4's 'and the retired one' names an act that policy (c) forbids; nothing is retired and nothing should be",
+      "evidence": "Ticket #1037 acceptance criterion 4, verbatim: \"The frozen manifest records the new body and the retired one\". Nothing was retired. statementFacts_v3 stays imported (registry.ts:44 area), re-exported (export { statementFacts_v3 }), rostered in workflowBodies and hash-locked, per docs/ARCHITECTURE.md:428-429 policy (c). check-frozen-workflows still reports \"3 retired entr(ies)\" - the same three chatTurn v1-era files as before the branch - and --compare-base shows the manifest change is five additions only. f-a2-statement-activation.test.mjs's rewritten cells assert v1, v2, v3 and v4 are four distinct reachable bodies and all four are in workflowBodies; re-run here, 12/12 pass.",
+      "required_fix": "None. The AC's wording should be read as 'records the new body and leaves the superseded one rostered'; say so when closing, so a later reader does not retire v3."
+    },
+    {
+      "id": "C2-SPEC-07",
+      "ticket": 1037,
+      "severity": "note",
+      "kind": "planned-work-correctly-skipped",
+      "title": "CUT-PLAN section 3.2 cost 2's f-a2-statement-header-v4.test.mjs sibling is genuinely not owed",
+      "evidence": "CUT-PLAN.md section 3.2 cost 2 asks for a sibling of f-a2-statement-header-v3.test.mjs \"because that file's drift guard parses the clara.bank_institutions seed out of migration 0038\". The lane did not write one and argued v4 mints no header module. Verified: ls packages/runtime/workflows shows statementFacts.v4.{behavior.mjs,citations.mjs,impl.ts,prompts.mjs,ts} and no statementFacts.v4.header.mjs; v4 reaches the header transforms through statementFacts.v3.behavior.mjs, which it re-exports unchanged. There is therefore exactly one mirror of 0038's seed, still v3's, still covered by the existing guard. A sibling would assert the same mirror twice.",
+      "required_fix": "None. Record the cost as discharged-by-measurement in the cut report so the next cut does not re-price it."
+    },
+    {
+      "id": "C2-SPEC-08",
+      "ticket": 1037,
+      "severity": "note",
+      "kind": "prompt-wording",
+      "title": "The frozen v4 text prompt appends rule 8 after v3's closing instruction, and sits beside v3's 'never infer anything from the numbers themselves'",
+      "evidence": "STATEMENT_WITNESS_TEXT_SYSTEM_PROMPT in statementFacts.v4.prompts.mjs is [v3's whole prompt, \"\", \"ONE MORE THING...\", \"8. SAY WHERE YOU READ EACH ROW...\"]. v3's prompt ends with \"Report the header once and every transaction line in the printed order.\" (statementFacts.v3.prompts.mjs:222), so rule 8 now appears AFTER that closing line rather than inside the rule block, and the prompt's own earlier line (\":204-206\" area) tells the reader \"The NUMBER on each region is only its identifier; never infer anything from the numbers themselves.\" Rule 8 explicitly forbids inference and asks only for transcription of the bracketed number, so the two are reconcilable, and the numbering is correct (SHARED_RULES ends at 7, verified at statementFacts.v3.prompts.mjs:196-203). But this text is FROZEN: any later wording change costs a statementFacts_v5 cut. No cell measures whether a real model answers a correct region_idx (the lane says so under 'anything unverified'), and the body is written so a wrong index lands as no citation (cell 1037.db3, re-run green here).",
+      "required_fix": "None now. Flag for the corpus-tuning pass: if hosted reads show region_idx null-rate or mis-indexing, the fix is a v5 prompt, not an edit."
+    }
+  ],
+  "verified_and_clean": [
+    "Lane prompt (a): ONE ticket, #1037 only. Six commits, all naming #1037.",
+    "Lane prompt (b) mint per section 2.1: five new files, all carrying // @frozen on line 1, .dispatch.mjs imported from v2 relatively and .services.mjs not copied, as the section requires. Closure reported as 11 modules, every predecessor already frozen, no lib/ module newly locked.",
+    "Lane prompt (b) five registry edits per section 2.2: import after v3's, dispatch line '  statementFacts: statementFacts_v4,', bare 'export { statementFacts_v4 };', workflowBodies entry '  \"statementFacts_v4\",', workflowPins 'statementFacts: \"statementFacts_v4\"'. No aliased or namespace import. Cell 1037.x1 drives rewriteRegistryToPrevious against the real file and all five substitutions apply.",
+    "Lane prompt (b) boot pin per section 2.3: statementFacts mints no bundle banner - grep of plugins/startWorld.ts finds banner imports and console.log lines for claraWork v1-v5 only - so the class's boot pin is carried by emitProvenanceLine's read of workflowPins and strandedBodyCensusOnWorld(workflowBodies), both moved by the five edits. The claraWork_v6 sixth-banner trap does not apply here.",
+    "Lane prompt (b) registry-view.test.mjs reads statementFacts_v4: the file carries no version literal by design; it derives from the module namespace and asserts every workflowBodies id resolves, every export is rostered, and every pin equals workflows[class]. Re-run: 7/7 pass, so it does red on any of the five edits being left out.",
+    "Lane prompt (c) prompt stanza: statementWitnessTextSchema adds region_idx per line, and the stanza asks for the bracketed number. Cell 1037.p1 (text asked, vision not) and 1037.p2 (hash names v4 on both channels) pass.",
+    "Lane prompt (c) both-or-neither: attachStatementLineCitations sets page and region together or returns the line untouched; indexStatementRegionCitations drops any region without an integer page >= 1 or a non-array object locator, which is exactly 0291's ck_shape. Cell 1037.db3 lands one cited row beside a null-answered row and an out-of-range-index row, both uncited on all three columns, statement still done. Re-run green.",
+    "Lane prompt (c) the citation reaches clara.document_regions: cell 1037.db1 compares citation_region against 'select locator from clara.document_regions where id=$1' for the seeded region, deep-equal, and the idx it cites is READ BACK from the published numbering (ordered by uuid, not insertion order). clara.witness_citation_regions (0095_f_a1_writer.sql:297-307) derives its page from locator->>'page', so the stored page and the stored region cannot disagree by construction.",
+    "Lane prompt (d) statement walk: bank-match-walk.spec.ts is the walk that owns the surface the citation lands on; reported 6/6 on the lane triple. No apps/web file changed, so the web parts census is a correct no-op.",
+    "Lane prompt (d) parts census: check-parts-parity re-run OK here; the emittable set is unchanged and adds no kind. The three new exemption rows are the two byte-identical withMeteredStatementChannel fingerprints (evidence the wrapper did not move) plus the one genuinely new attachStatementLineCitations spread, which assigns no type.",
+    "Lane prompt (e): git diff --name-only 6da02a8de...HEAD matches zero chatTurn or claraWork paths.",
+    "Lane prompt (f): no migration in the diff; 0322 is UNUSED, as CUT-PLAN section 3.2 expected. persist_statement_facts_v2's name and argument order are unchanged.",
+    "Lane prompt (g): the report states no mid-task status request arrived.",
+    "Positional-alignment risk checked and clean: attachStatementLineCitations aligns writer lines to wire lines by array index, and toWriterLines (statementFacts.v3.prompts.mjs:349-362) is a 1:1 .map with no filtering, so a dropped row cannot shift a citation onto the wrong line.",
+    "Scope: nothing in the diff is behaviour the ticket did not ask for. CONTEXT.md, packages/runtime/README.md and the startWorld.ts comment are the docs work-order rule 9 and CUT-PLAN section 2.8 require; the f-a2-statement-activation.test.mjs edits are the repoint assertions moving, which the same cut makes mandatory.",
+    "docs/ARCHITECTURE.md drift (:183, :293) was correctly handed to the orchestrator and not edited in the lane, per AGENTS.md rule 4."
+  ]
+}

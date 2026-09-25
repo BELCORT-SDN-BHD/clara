@@ -28,7 +28,7 @@ import { fileURLToPath } from "node:url";
 // Grows in step with the driver conversions landing on #1018 (one small commit per group, per
 // the work order's vertical-slice rule): this list names only the drivers ALREADY converted at
 // each commit, so this cell is green at every commit boundary, never red-and-waiting. The full
-// 23-file roster (every standalone World e2e that carried this gate on 2026-09-20) lands across
+// 24-file roster (the 23 that carried this gate on 2026-09-20, plus #1135's v22 walk) lands across
 // the ticket's commits and is intact by the ticket's last one.
 export const DRIVERS = Object.freeze([
   "intake-e2e.mjs",
@@ -46,6 +46,10 @@ export const DRIVERS = Object.freeze([
   "chat-turn-v19-e2e.mjs",
   "chat-turn-v20-e2e.mjs",
   "chat-turn-v21-e2e.mjs",
+  // CUT PHASE 2026-09-25 (#1135) — the chatTurn_v22 / claraWork_v6 walk. A separate file per
+  // version, on purpose and for the reason each of its predecessors gives: its script is this
+  // cut's, and widening v21's would put it in the path of a lane that has nothing to do with it.
+  "chat-turn-v22-e2e.mjs",
   "fixed-asset-acquisition-e2e.mjs",
   "work-egress-e2e.mjs",
   "periodic-adjustment-e2e.mjs",

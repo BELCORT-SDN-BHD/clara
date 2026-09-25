@@ -35,6 +35,32 @@
 // else's turn on a question no one will answer. Only a turn carrying this drill's own marker is
 // clarified; every other turn gets the narration this file always sent.
 
+// #1037 - AND IT NOW DRIVES THE statementFacts LANE TOO, under the same discipline and for the
+// third leg's own reason. That lane's two channels are `generateObject` calls, not tool calls, so
+// the branch below reads the RESPONSE SCHEMA the SDK is handed rather than any prompt text: a
+// statement call is one whose schema declares a `lines` array of rows carrying
+// `running_balance_cents`, and the VISION channel is the one whose converted prompt carries a
+// file part. Neither probe names a version, so a v3 call and a v4 call are both recognised - which
+// is exactly what a cutover drill needs, since the parked run keeps answering v3's five-key line
+// schema inside an image that pins v4's six-key one.
+//
+// THE PARK IS THE HOLD, AND THE HOLD IS A FACT ABOUT THE WORLD, NOT A CALL COUNTER. statementFacts
+// has no interruption point: its body is claim -> two reads -> one persist, with nothing a human
+// answers. So the drill parks the run by holding this channel OPEN - the model call simply does
+// not return - until the drill writes its answer file (`CLARA_STMT_DRILL_ANSWER`). That file does
+// not exist while build A runs, so build A's run sits non-terminal on the predecessor body; the
+// drill stops build A, writes the file, and build B's engine redelivers the same step to a child
+// that now answers. A counter would make the resumed attempt take a different branch from the
+// original, which is the one thing this file's header forbids; a file on disk is the same input on
+// every attempt, and it is the drill that changes the world between them.
+//
+// A CALL WITH NO ANSWER FILE AND NO DRILL IS NOT HELD. `CLARA_STMT_DRILL_ANSWER` unset means no
+// statementFacts leg is running in this process, and a shared rig's leftover statement tasks must
+// not be parked on a file nobody will write: they get the loud refusal below instead, which the
+// lane classifies and settles on its own terms.
+
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 
 const serveTarget = process.env.CLARA_TWO_BUILD_SERVE;
@@ -201,6 +227,98 @@ function clarifyChunks() {
   ];
 }
 
+/** #1037 - the path the drill writes its scripted statement answer to, once build A is stopped.
+ *  Unset in every other run of this child, which is what keeps the hold below scoped to the leg. */
+const STMT_ANSWER_PATH = process.env.CLARA_STMT_DRILL_ANSWER || null;
+/** The marker this child touches the INSTANT it starts holding a statement channel. The drill
+ *  waits for it rather than for a clock, so "the run is parked inside the read" is evidence the
+ *  held process itself produced, not an inference from a row that merely says 'running'. */
+const STMT_HELD_PATH = process.env.CLARA_STMT_DRILL_HELD || null;
+/** How long a held channel waits before giving up. Generous against a scratch build plus a boot
+ *  (the drill's own watchdog is 15 minutes), bounded so a broken leg fails loudly instead of
+ *  hanging this child for the life of the drill. */
+const STMT_HOLD_DEADLINE_MS = 10 * 60 * 1000;
+const STMT_HOLD_POLL_MS = 200;
+
+/** TRUE for a statement-witness `generateObject` call, read off the SCHEMA THE SDK IS HANDED - the
+ *  structural fact, not a sentence. `running_balance_cents` is a statement row's own key and
+ *  appears in no other schema this runtime sends (measured: it is declared in
+ *  statementFacts.v2.prompts.mjs's line shape and in v4's, and nowhere else). */
+function isStatementCall(options) {
+  const schema = options?.responseFormat?.schema;
+  const line = schema?.properties?.lines?.items?.properties;
+  return Boolean(line && Object.prototype.hasOwnProperty.call(line, "running_balance_cents"));
+}
+
+/** The channel, told apart the way f-a1-witness-fixtures.mjs tells it apart: the VISION channel is
+ *  the one whose converted prompt carries a file part. */
+function statementChannel(options) {
+  const parts = (options?.prompt ?? []).flatMap((m) => (Array.isArray(m?.content) ? m.content : []));
+  return parts.some((p) => p?.type === "file") ? "vision" : "text";
+}
+
+/** TRUE when this call's schema is v4's - it declares the citation index. Read for the SAME reason
+ *  `wantsTypedFields` reads the ask_question schema: the two bodies answer different vocabularies
+ *  and a wrong shape must fail at the schema, loudly, rather than quietly take the other path. */
+function wantsRegionIdx(options) {
+  const line = options?.responseFormat?.schema?.properties?.lines?.items?.properties;
+  return Boolean(line && Object.prototype.hasOwnProperty.call(line, "region_idx"));
+}
+
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Wait for the drill's answer file and return what it says. THE HOLD - see this file's header. */
+async function awaitStatementAnswer() {
+  if (!STMT_ANSWER_PATH) {
+    throw Object.assign(
+      new Error("no statementFacts drill is running in this process (CLARA_STMT_DRILL_ANSWER unset) - this child will not answer a statement channel it was not asked to drive"),
+      { code: "internal" },
+    );
+  }
+  // Read ONCE before announcing the hold: on the resume the answer is already there, and a child
+  // that announced a hold it never took would tell the drill a park happened twice.
+  if (!existsSync(STMT_ANSWER_PATH) && STMT_HELD_PATH) {
+    try {
+      writeFileSync(STMT_HELD_PATH, `${new Date().toISOString()} pid=${process.pid}\n`);
+    } catch {
+      /* the drill's own timeout is the backstop; a marker we cannot write is not worth failing a read for */
+    }
+  }
+  const end = Date.now() + STMT_HOLD_DEADLINE_MS;
+  for (;;) {
+    if (existsSync(STMT_ANSWER_PATH)) {
+      const raw = readFileSync(STMT_ANSWER_PATH, "utf8");
+      if (raw.trim().length > 0) return JSON.parse(raw);
+    }
+    if (Date.now() >= end) {
+      throw Object.assign(
+        new Error(`the statementFacts drill answer file never appeared within ${STMT_HOLD_DEADLINE_MS}ms (${STMT_ANSWER_PATH})`),
+        { code: "internal" },
+      );
+    }
+    await sleepMs(STMT_HOLD_POLL_MS);
+  }
+}
+
+/** One channel's answer, built from the drill's file. The VISION channel is handed the SAME rows
+ *  with the citation index left off - its own schema carries none, and reader2 is the agreement
+ *  check, so the two readers must agree on every field the writer reads. */
+function statementAnswer(scripted, options) {
+  const channel = statementChannel(options);
+  const lines = (scripted.lines ?? []).map((line) => {
+    const out = {
+      entry_date: line.entry_date ?? null,
+      value_date: line.value_date ?? null,
+      description: line.description ?? null,
+      amount_cents: line.amount_cents ?? null,
+      running_balance_cents: line.running_balance_cents ?? null,
+    };
+    if (channel === "text" && wantsRegionIdx(options)) out.region_idx = line.region_idx ?? null;
+    return out;
+  });
+  return { header: scripted.header, lines };
+}
+
 const model = new MockLanguageModelV4({
   // The CHAT half. A turn carrying this drill's marker and not yet answered gets the `clarify` call
   // the chatTurn leg parks on; a turn whose clarification HAS been answered gets the closing
@@ -218,6 +336,19 @@ const model = new MockLanguageModelV4({
     return { stream: simulateReadableStream({ chunks: narrationChunks("This process is running the two-build cutover e2e."), chunkDelayInMs: 2 }) };
   },
   doGenerate: async (options) => {
+    // #1037 - THE statementFacts CHANNELS, decided FIRST and structurally: they are the only
+    // `generateObject` calls this child sees, they carry no tools at all, and every branch below
+    // reads a tool roster that a statement call does not have.
+    if (isStatementCall(options)) {
+      const scripted = await awaitStatementAnswer();
+      return {
+        content: [{ type: "text", text: JSON.stringify(statementAnswer(scripted, options)) }],
+        finishReason: { unified: "stop", raw: "stop" },
+        usage: usage(),
+        warnings: [],
+      };
+    }
+
     const prompt = options?.prompt ?? [];
     const text = promptText(prompt);
     const used = toolsUsed(prompt);

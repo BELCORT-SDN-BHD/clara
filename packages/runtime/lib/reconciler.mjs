@@ -32,6 +32,7 @@ import { reconcilePlanOccurrences } from "./plan-occurrences.mjs";
 import { reconcileWakeEngineTasks } from "./reconciler-wake.mjs";
 import { cancelSettleForWork, reconcileAccountingWorkTasks, settleWorkTerminal, workResultForTask } from "./reconciler-work.mjs";
 import { reconcileIntakeBatchCancellations } from "./reconciler-batches.mjs"; // #636 belt (0229)
+import { reconcileWorkSourceCorrections } from "./reconciler-work-source-correction.mjs"; // #1030 belt (0321)
 // #852 — the chat lane's clarification belt, registered HERE at last. It ran from leader.mjs for
 // one reason only: `reconciler-chat-clarify.mjs` took its two resume symbols from control.mjs,
 // and control.mjs imports THIS module, so the direct edge closed a cycle. Those symbols now live
@@ -804,11 +805,19 @@ export async function runReconcilerSweep(client, deps) {
   const batchCancels = await belt("intake batch cancellations",
     () => reconcileIntakeBatchCancellations(client, { log, withRuntime: deps.withRuntime ?? null }),
     { batchCancelOk: false });
+  // #1030 belt (0321) — unconditional, like the accounting-work and batch-cancellation belts
+  // above: the module feature-detects its own door per cycle, so an image that predates 0321 boots
+  // dormant and lights on the next leader cycle after the migration applies, with no restart. It
+  // runs AFTER the accounting-work belt because a Work settled there is a Work this belt must not
+  // still see as live, and BEFORE the trace prune, which owns no lane state.
+  const sourceCorrections = await belt("source correction re-derivation",
+    () => reconcileWorkSourceCorrections(client, { log, withRuntime: deps.withRuntime ?? null }),
+    { sourceCorrectionOk: false });
   const prune = deps.prune ? await belt("trace prune", () => pruneTraces(client, {}), { pruned: 0 }) : { pruned: 0 };
   // A FAILED BELT CONTRIBUTES NO COUNTERS, deliberately: a zeroed fallback would claim "nothing
   // to settle" where the truth is "we do not know", and it would let a caller's `"key" in swept`
   // assertion pass for a belt that never ran. `beltErrors` names them positively instead — the
   // autodraft edge's own law (a failure that is COUNTED stays visible; a failure that is only
   // logged is one grep away from invisible).
-  return { heartbeatOk: true, beltErrors, ...chatClarify, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...sst, ...lint, ...fa, ...plans, ...wake, ...work, ...batchCancels, ...prune };
+  return { heartbeatOk: true, beltErrors, ...chatClarify, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...sst, ...lint, ...fa, ...plans, ...wake, ...work, ...batchCancels, ...sourceCorrections, ...prune };
 }

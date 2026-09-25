@@ -30,17 +30,20 @@ import { chatTurn_v18 } from "./chatTurn.v18.js";
 import { chatTurn_v19 } from "./chatTurn.v19.js";
 import { chatTurn_v20 } from "./chatTurn.v20.js";
 import { chatTurn_v21 } from "./chatTurn.v21.js";
+import { chatTurn_v22 } from "./chatTurn.v22.js";
 import { claraWork_v1 } from "./claraWork.v1.js";
 import { claraWork_v2 } from "./claraWork.v2.js";
 import { claraWork_v3 } from "./claraWork.v3.js";
 import { claraWork_v4 } from "./claraWork.v4.js";
 import { claraWork_v5 } from "./claraWork.v5.js";
+import { claraWork_v6 } from "./claraWork.v6.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
 import { statementFacts_v1 } from "./statementFacts.v1.js";
 import { statementFacts_v2 } from "./statementFacts.v2.js";
 import { statementFacts_v3 } from "./statementFacts.v3.js";
+import { statementFacts_v4 } from "./statementFacts.v4.js";
 import { payrollFacts_v1 } from "./payrollFacts.v1.js";
 import { agreementFacts_v1 } from "./agreementFacts.v1.js";
 import { witnessFacts_v1 } from "./witnessFacts.v1.js";
@@ -217,7 +220,22 @@ export const workflows = {
   // `clara.get_knowledge_pack`, and changes no database state. Trade-invoice Works already
   // admitted keep their durable surfaces and their queued Work still runs under the claraWork pin;
   // depreciation periods already charged are journal entries and stay charged.
-  chatTurn: chatTurn_v21,
+  //
+  // THE CUT PHASE (wave 2026-09-25): REPOINTED v21 -> v22. #985 is the first ticket of that phase
+  // and it mints the whole `chatTurn.v22.*` file set for the contracts behind it to land in. v22
+  // is v21's thirty-nine tools plus ONE: `read_opening_source` (#985, the chat half #656 wrote
+  // and v21 deliberately left out — "a future chatTurn_vN, NOT this wave's v21").
+  //
+  // NO COUPLED MIGRATION AND NO DEPLOY-ORDER OBLIGATION OF ITS OWN. Every door the new tool
+  // touches has been live since 0017 (`clara.record_opening_targets_parsed`, EXECUTE to
+  // `clara_runtime`) and 0006 (`clara.resolve_chat_principal`), and the tool reaches the first
+  // ONLY through the route core `src/openingRoutes.ts` already calls. v21's own obligations
+  // (0225, 0227, 0230) are inherited unchanged, because v22 carries v21's whole tool map.
+  //
+  // ROLLBACK TO v21 stops offering the tool and changes no database state: opening targets
+  // already recorded are rows on a basis a person still has to approve, authored by the
+  // database's own re-derivation rather than by this image.
+  chatTurn: chatTurn_v22,
   // #623 — A NEW CLASS, never a repoint. `accounting_work` tasks are dispatched here by
   // src/workRoutes.ts's post-commit enqueue and by the reconciler's own `accounting_work`
   // re-enqueue arm (lib/reconciler-work.mjs); both resolve the body through THIS object, which
@@ -343,7 +361,7 @@ export const workflows = {
   // read-set rows already written stay readable. A Work parked on a v5 question stays ANSWERABLE
   // under a v4 image, but the resumed v4 run will not be told about drift — so a rollback should
   // drain parked questions first rather than assume they resume identically.
-  claraWork: claraWork_v5,
+  claraWork: claraWork_v6,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -361,7 +379,17 @@ export const workflows = {
   // vocabulary to the same unchanged verb under v2's own engine snapshot and services bundle,
   // so a v3 task's DB-stamped engine_id matches this image the moment this line deploys, and a
   // rollback to v2 is fail-closed for free. statementFacts_v2 stays exported and frozen.
-  statementFacts: statementFacts_v3,
+  // #1037 (the cut of 2026-09-25): REPOINTED v3 -> v4 — the producer half of #990's per-line
+  // source citation. The text channel is asked which numbered region it read each statement line
+  // from, and the body resolves that index back to the region's own page and
+  // `clara.document_regions.locator` before the payload is built, so a bank line a person is
+  // asked to match can finally say where it was read from. Like the v2 -> v3 repoint and unlike
+  // v1 -> v2, this one carries NO coupled migration and NO deploy-order obligation: the verb
+  // (`clara.persist_statement_facts_v2`) is unchanged and migration 0291 widened what it accepts
+  // on 2026-09-20, long before this image. A rollback to v3 is fail-closed for free — a v3
+  // payload simply states no citation, which is the state every line is in today.
+  // statementFacts_v3 stays exported and frozen.
+  statementFacts: statementFacts_v4,
   // F-A2 openers ①②: REPOINTED v1 -> v2. Unlike PR-4's statementFacts hold-back, this repoint is
   // the intended act — `llm_witness` tasks are minted by a router literal this window's DB
   // migration moves to `:v2` in the same ceremony, and the frozen behaviour WAITS (never
@@ -810,6 +838,12 @@ export const workflowsByName: Readonly<Record<string, (input: any) => Promise<un
 export { statementFacts_v1 };
 export { statementFacts_v2 };
 export { statementFacts_v3 };
+// #1037 ADDS `statementFacts_v4` and repoints `statementFacts:` at it. statementFacts_v3 stops
+// being the pointer and must stay EXPORTED — policy (c). Its parks are the ordinary kind, and a
+// run resuming into the frozen v3 body after the cutover is the expected case: it must find its
+// own body and the SAME `__claraStatementWitnessServices` bundle v4 reads, which is why v4 reuses
+// v2's services slot rather than minting a second one.
+export { statementFacts_v4 };
 // F-A2 openers ①②: witnessFacts_v1 stops being the `witnessFacts:` pointer and must stay
 // EXPORTED — policy (c). The `llm_witness` lane's parks are the deployment-window kind (the
 // behaviour WAITS on an engine-stamp mismatch rather than failing), so a run still resuming into
@@ -953,6 +987,11 @@ export { chatTurn_v20 };
 // and the pinned v21 body is exported too so the rollback preflight can use the same uniform
 // census for every version.
 export { chatTurn_v21 };
+// #985 (the 2026-09-25 cut phase) repointed `chatTurn:` v21 -> v22. v21 remains exported by policy
+// (c) — it is the rollback target and the body any run parked on a v21 clarify hook resumes into
+// at cutover — and the pinned v22 body is exported too so the rollback preflight can use the same
+// uniform census for every version.
+export { chatTurn_v22 };
 // #629 repointed `claraWork:` v1 -> v2. v1 remains exported by policy (c) — it is the rollback
 // target and the body any Work parked on a v1 clarify hook resumes into at cutover — and the
 // pinned v2 body is exported too so the rollback preflight can use the same uniform census for
@@ -970,6 +1009,7 @@ export { claraWork_v4 };
 // cutover — and the pinned v5 body is exported too so the rollback preflight can use the same
 // uniform census for every version.
 export { claraWork_v5 };
+export { claraWork_v6 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
@@ -1054,17 +1094,20 @@ export const workflowBodies: readonly string[] = Object.freeze([
   "chatTurn_v19",
   "chatTurn_v20",
   "chatTurn_v21",
+  "chatTurn_v22",
   "claraWork_v1",
   "claraWork_v2",
   "claraWork_v3",
   "claraWork_v4",
   "claraWork_v5",
+  "claraWork_v6",
   "documentIngest_v1",
   "documentIngest_v2",
   "invoiceFacts_v1",
   "statementFacts_v1",
   "statementFacts_v2",
   "statementFacts_v3",
+  "statementFacts_v4",
   "witnessFacts_v1",
   "witnessFacts_v2",
   "witnessFacts_v3",
@@ -1098,11 +1141,11 @@ export const workflowBodies: readonly string[] = Object.freeze([
  *  preflight has to enumerate. */
 export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
   closeExample: "closeExampleV1",
-  chatTurn: "chatTurn_v21",
-  claraWork: "claraWork_v5",
+  chatTurn: "chatTurn_v22",
+  claraWork: "claraWork_v6",
   documentIngest: "documentIngest_v2",
   invoiceFacts: "invoiceFacts_v1",
-  statementFacts: "statementFacts_v3",
+  statementFacts: "statementFacts_v4",
   witnessFacts: "witnessFacts_v3",
   payrollFacts: "payrollFacts_v1",
   agreementFacts: "agreementFacts_v1",

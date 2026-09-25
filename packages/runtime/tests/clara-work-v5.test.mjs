@@ -664,10 +664,19 @@ test("v5.trace: the drift row a RESUME can write is inside the scheme — the se
     "a resume with no next segment settles rather than spending a read whose row would land on the settle's seq");
 });
 
-test("v5.registry: claraWork is pinned at v5, and v1..v4 stay exported and rostered (policy (c))", () => {
-  assert.equal(registry.workflowPins.claraWork, "claraWork_v5");
-  assert.equal(registry.workflows.claraWork, registry.claraWork_v5);
-  assert.ok(registry.workflowBodies.includes("claraWork_v5"));
+test("v5.registry: v5 is a RETAINED body now, still exported and rostered, and so are v1..v4 (policy (c))", () => {
+  // THIS CELL MOVED AT THE 2026-09-25 CUT PHASE (#1030), and the move is the point rather than an
+  // edit of convenience. It used to assert `workflowPins.claraWork === "claraWork_v5"` as a bare
+  // string literal — the exact shape the version-cutover file's own header records biting CI
+  // silently ("this test used to HARDCODE the concrete 'newest' literal, which went stale the
+  // moment a later PR repointed the class"). What a SUPERSEDED version's own suite should assert
+  // is not that it is newest, which stops being true, but that it is still THERE, which must never
+  // stop being true: a parked v5 run resumes into v5's body, and the boot census refuses to start
+  // the world database-wide if it is missing. `tests/clara-work-v6.test.mjs` owns the pin.
+  assert.notEqual(registry.workflowPins.claraWork, "claraWork_v5",
+    "v5 is no longer the pin — #1030 repointed claraWork to v6");
+  assert.equal(typeof registry.claraWork_v5, "function", "…and v5 is still exported for parked runs");
+  assert.ok(registry.workflowBodies.includes("claraWork_v5"), "…and still in the provenance roster");
   for (const body of ["claraWork_v1", "claraWork_v2", "claraWork_v3", "claraWork_v4"]) {
     assert.equal(typeof registry[body], "function", `${body} is still exported — a parked run resumes into its own body`);
     assert.ok(registry.workflowBodies.includes(body), `${body} is still in the provenance roster`);

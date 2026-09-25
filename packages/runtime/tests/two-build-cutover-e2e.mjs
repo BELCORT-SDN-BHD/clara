@@ -114,11 +114,34 @@
 // pair is derived exactly as claraWork's is, and it carries NO version literal: a later v19 -> v20
 // repoint needs no edit in this file.
 
+// THREE LEGS SINCE #1037, STILL ONE LAW. The statementFacts leg that follows the chat one measures
+// the same cutover on the lane that has NO human in it at all: no Work row, no question, no
+// clarification. Its body is claim -> two model reads -> one persist, so the only thing that can
+// hold a statementFacts run open across a process boundary is a read that has not come back — and
+// that is exactly what the leg uses. The scripted model HOLDS the text channel (tests/
+// two-build-serve.mjs, `CLARA_STMT_DRILL_ANSWER`) so the run sits mid-step on the predecessor
+// body; build A3 is stopped, the answer is written, and build B's engine REDELIVERS that step to
+// a process that answers it. MEASURED on this rig before the leg was written: SIGTERM with the
+// step in flight exits in 37ms (graphile-worker's `gracefulShutdownAbortTimeout` is 5s and the
+// abort is never reached), and the successor process resumes and settles the run 2.2s after it is
+// ready. The two OTHER shapes were measured and rejected, and the numbers are recorded here so
+// nobody re-derives them: a `statementWitnessWait` retry is NOT a park (DEFAULT_STEP_MAX_RETRIES
+// is 3 and `getHandlerErrorRetryAfterSeconds` backs off 1s/2s/4s, so the whole window is ~7s —
+// shorter than one image boot), and a SIGKILL is not one either (it leaves the queue row locked).
+//
+// AND THE LEG DOES NOT STOP AT THE PARK. Once the parked v3 run has settled INSIDE build B, the
+// leg admits a SECOND statement, which build B starts on its OWN pin — the claraWork leg's W1/W2
+// shape, applied here. The two statements then say the two halves of #990 out loud on real rows:
+// the predecessor's lines persist UNCITED (v3's line schema carries no region), the successor's
+// carry a page and the region's own locator. That is #1037's AC1 measured in a World rather than
+// at the behaviour seam.
+
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { availableParallelism } from "node:os";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { availableParallelism, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
 import { ephemeralPort } from "./ephemeral-port.mjs";
@@ -157,6 +180,30 @@ const runtimeServe = fileURLToPath(new URL("../scripts/serve.mjs", import.meta.u
 const runtimeBundle = fileURLToPath(new URL("../.output/server/index.mjs", import.meta.url));
 const FETCH_TIMEOUT_MS = 15000;
 
+// #1037 — THE statementFacts LEG'S OWN PER-RUN DIRECTORIES, named before anything spawns because
+// `childEnv` hands them to every image. All three are per-run (wave-3's rule: no test may depend on
+// a directory an earlier run left), and the `finally` removes them.
+//   · STMT_ROOT/storage  the local canonical store `lib/storage.mjs` reads under RELAY_TEST_MODE.
+//     The leg writes the statement's bytes there itself, so the vision channel downloads and
+//     hash-verifies REAL bytes through the real `downloadCanonical` rather than a stub.
+//   · STMT_ROOT/answer.json  the scripted statement answer. Its ABSENCE is the park (see the
+//     header); the drill writes it only once build A3 is stopped.
+//   · STMT_ROOT/held  the marker the scripted model touches the moment it starts holding, which is
+//     how this file knows the run is genuinely INSIDE the text read rather than merely queued.
+const STMT_ROOT = join(tmpdir(), `clara-tb-stmt-${randomUUID().slice(0, 12)}`);
+const STMT_STORAGE_DIR = join(STMT_ROOT, "storage");
+const STMT_ANSWER_PATH = join(STMT_ROOT, "answer.json");
+const STMT_HELD_PATH = join(STMT_ROOT, "held");
+const STMT_SPOOL_DIR = join(STMT_ROOT, "spool");
+/** The statement's canonical bytes. Content is irrelevant to a scripted model — what matters is
+ *  that `downloadCanonical` verifies their digest against the document row, so the leg seeds the
+ *  document with the sha of exactly these bytes. */
+const STMT_PDF_BYTES = Buffer.from("%PDF-1.7\n% clara two-build statementFacts cutover drill\n%%EOF\n", "utf8");
+/** The digest the document row is seeded with, so `downloadCanonical`'s verification is real. */
+const STMT_PDF_SHA256 = createHash("sha256").update(STMT_PDF_BYTES).digest("hex");
+mkdirSync(STMT_STORAGE_DIR, { recursive: true });
+mkdirSync(STMT_SPOOL_DIR, { recursive: true });
+
 const WATCHDOG_MS = 15 * 60 * 1000;
 setTimeout(() => {
   console.error(`\nTWO-BUILD CUTOVER E2E: WATCHDOG — exceeded ${WATCHDOG_MS}ms; forcing exit(1) (a genuine hang)`);
@@ -186,6 +233,19 @@ function childEnv(port, serveTarget) {
     // Far past the test window: B's reconciler must never re-enqueue A's parked Work onto the
     // successor mid-drill (version-cutover-e2e:92's own reason, same knob).
     CLARA_RECONCILE_GRACE: "30 minutes",
+    // #1037 — the statementFacts leg's four knobs, handed to EVERY image because the leg's whole
+    // point is that build A3 and build B behave identically given the same world.
+    //   · CLARA_DOC_EGRESS_APPROVED: `claimStatementFactsTaskStep` passes it to
+    //     `clara.claim_document_processing_task`; without it a statement task claims `held_egress`
+    //     and no run is ever minted. It reaches only the DOCUMENT lanes' claim door.
+    //   · CLARA_TEST_STORAGE_DIR / CLARA_SPOOL_DIR: per-run, never a path an earlier run left, and
+    //     never the off-Windows default `/data/spool` an unprivileged runner cannot create.
+    //   · CLARA_STMT_DRILL_ANSWER / CLARA_STMT_DRILL_HELD: the scripted model's park, see the header.
+    CLARA_DOC_EGRESS_APPROVED: "1",
+    CLARA_TEST_STORAGE_DIR: STMT_STORAGE_DIR,
+    CLARA_SPOOL_DIR: STMT_SPOOL_DIR,
+    CLARA_STMT_DRILL_ANSWER: STMT_ANSWER_PATH,
+    CLARA_STMT_DRILL_HELD: STMT_HELD_PATH,
   });
   delete base.CLARA_WORK_TEST_FAULT;
   delete base.CLARA_CTL_LEASE_SECONDS;
@@ -416,6 +476,18 @@ async function main() {
   const cp = chatProbe.rows[0] ?? {};
   const chatSupported = Boolean(cp.open_fn) && Boolean(cp.answer_fn);
 
+  // #1037 — and the statementFacts leg's own door, read at the same place and for the same reason.
+  // A database without 0291's widened persist verb, without the published region numbering, or
+  // without the document-task claim door cannot run this leg at all; every other leg still stands.
+  const stmtProbe = await rig.rootQuery(`
+    select to_regprocedure('clara.persist_statement_facts_v2(uuid,jsonb)') is not null as persist_fn,
+           to_regprocedure('clara.witness_citation_regions(uuid)') is not null as regions_fn,
+           to_regprocedure('clara.claim_document_processing_task(uuid,text,boolean)') is not null as claim_fn,
+           to_regclass('clara.bank_statement_lines') is not null as lines_tbl
+  `);
+  const sp = stmtProbe.rows[0] ?? {};
+  const stmtSupported = Boolean(sp.persist_fn) && Boolean(sp.regions_fn) && Boolean(sp.claim_fn) && Boolean(sp.lines_tbl);
+
   const query = (sql, params) => rig.rootQuery(sql, params);
 
   // ==========================================================================
@@ -638,6 +710,11 @@ async function main() {
   // #794 — the chatTurn leg's own predecessor image and its own parked turn, declared out here so
   // the catch's log dump and the finally's kill + cleanup cover them on every exit path.
   let imageA2 = null;
+  // #1037 — the statementFacts leg's own predecessor image and its two document tasks, declared
+  // out here so the catch's log dump and the finally's kill + cleanup cover them on every path.
+  let imageA3 = null;
+  let stmtParkedTask = null;
+  let stmtSuccessorTask = null;
   let chatTask = null;
   let w1 = null;
   let w2 = null;
@@ -1205,13 +1282,255 @@ async function main() {
         imageB = null;
       }
     }
+
+    // =========================================================================
+    // #1037 — THE statementFacts LEG. The same cutover law on the lane with no human in it.
+    // =========================================================================
+    // WHY IT IS A THIRD LEG AND NOT A THIRD FILE: the chatTurn leg's own answer, unchanged. The
+    // bundle gate, the inventory gate, the boot-line waits, the stop-before-spawn sequencing and
+    // the per-exit cleanup are the DRILL, not one class's drill.
+    //
+    // WHAT IS DIFFERENT, AND IT IS THE WHOLE REASON THIS LEG EXISTS. statementFacts has no human
+    // in it: no `clara.accounting_work` row, no typed Work question, no chat clarification, and
+    // therefore no interruption a drill can park on. What it has instead is a paid model read, so:
+    //   · the pair comes from `deriveVersionPair(registrySrc, "statementFacts")` and the image is
+    //     built with `className: "statementFacts"` and its OWN scratch-image `name`;
+    //   · the park is a HELD MODEL CALL — the scripted text channel does not return until the
+    //     drill writes its answer file, which it does only after build A3 is stopped;
+    //   · the resume is the ENGINE's own redelivery of that step to the successor process, not a
+    //     human answering a door;
+    //   · and the "stayed bound to the body it started under" proof is the run's OWN body
+    //     identifier plus build B's `/api/build-info` roster, as in the chat leg — statementFacts
+    //     mints no bundle either.
+    //
+    // NO VERSION LITERAL APPEARS BELOW. Every identifier asserted on is computed from the derived
+    // pair, so a later v4 -> v5 repoint needs no edit here.
+    {
+      if (!stmtSupported) {
+        console.log("[tb-e2e] statementFacts leg SKIPPED — 0291's persist verb, the published region numbering or the document-task claim door are not on this database");
+      } else {
+        const sfx = await import("./statement-facts-v4-fixtures.mjs");
+        // The ENGINE STAMP IS IMPORTED, NEVER SPELLED: `persist_statement_facts_v2` reads
+        // `engine_id` off the task row and the frozen behaviour refuses to egress under a stamp
+        // that does not name the model this image calls, so a literal here would be a second copy
+        // of the one fact that pairing exists to keep single.
+        const { STATEMENT_WITNESS_ENGINE_SNAPSHOT } = await import("../workflows/statementFacts.v2.services.mjs");
+        const stmtEngineId = STATEMENT_WITNESS_ENGINE_SNAPSHOT.engineId;
+
+        const readDocTask = (id) =>
+          rig
+            .rootQuery("select id, status, error_code, workflow_run_id from clara.document_processing_tasks where id = $1", [id])
+            .then((r) => r.rows[0] ?? null);
+        async function pollDocTask(taskId, pred, label, deadlineMs = 120000) {
+          const end = Date.now() + deadlineMs;
+          let last = null;
+          while (Date.now() < end) {
+            last = await readDocTask(taskId);
+            if (last && pred(last)) return last;
+            await sleep(500);
+          }
+          throw new Error(`pollDocTask timeout (${label}); last=${JSON.stringify(last)}`);
+        }
+        const statementLines = (documentId) =>
+          rig
+            .rootQuery(
+              `select l.line_no, l.citation_extraction_id, l.citation_page, l.citation_region
+                 from clara.bank_statement_lines l
+                 join clara.bank_statements st on st.id = l.statement_id
+                where st.document_id = $1
+                order by l.line_no`,
+              [documentId],
+            )
+            .then((r) => r.rows);
+        /** The canonical bytes, at the local address `lib/storage.mjs` reads under RELAY_TEST_MODE.
+         *  Written by the DRILL rather than injected, so the vision channel runs the real
+         *  `downloadCanonical` — stream, digest and all — against a real file. */
+        const putCanonicalBytes = (storagePath) => {
+          const objectPath = join(STMT_STORAGE_DIR, ...storagePath.split("/"));
+          mkdirSync(dirname(objectPath), { recursive: true });
+          writeFileSync(objectPath, STMT_PDF_BYTES);
+          return objectPath;
+        };
+        /** The scripted answer for ONE situation: the fixtures' own worked example, with each line
+         *  naming the region index the estate PUBLISHED for the region that row was seeded from.
+         *  `idxForLine` reads that numbering back out of `clara.witness_citation_regions`, which
+         *  numbers by `row_number() over (order by id)` over UUIDs — so it is not the insertion
+         *  order and a cell that resolves it is measuring something. */
+        const scriptedAnswerFor = (situation) => JSON.stringify({
+          header: sfx.workedHeader(situation.account.digits),
+          lines: sfx.WORKED_STATEMENT.lines.map((line, i) => ({ ...line, region_idx: situation.idxForLine(i) })),
+        }, null, 2);
+        async function pollHeld(label, deadlineMs = 120000) {
+          const end = Date.now() + deadlineMs;
+          while (Date.now() < end) {
+            if (existsSync(STMT_HELD_PATH)) return;
+            await sleep(250);
+          }
+          throw new Error(`the scripted statement channel never reported holding (${label}); no marker at ${STMT_HELD_PATH}`);
+        }
+
+        // BUILD A3 — the statementFacts predecessor image. Built, not simulated, exactly as the
+        // other two are: the scratch copy rewrites `statementFacts:` in registry.ts and nothing else.
+        const builtStmt = await buildPreviousVersionImage({ name: "previous-stmt", className: "statementFacts", log: (m) => console.log(m) });
+        const pairS = builtStmt.pair;
+        console.log(
+          `[tb-e2e] statementFacts pair derived from registry.ts: ${pairS.previous} (build A3) -> ${pairS.pinned} (build B)`
+            + `${builtStmt.reused ? " [REUSED scratch artifact]" : ` [built in ${(builtStmt.buildMs / 1000).toFixed(1)}s]`}`,
+        );
+
+        // STATIC PROOF, off the ARTIFACTS, that A3 is a genuine rollback target for this class.
+        const bodiesA3 = supportedBodiesFromBundle(readFileSync(builtStmt.serverEntry, "utf8"));
+        assert.ok(bodiesA3.includes(pairS.previous), `build A3's bundle registers ${pairS.previous}`);
+        assert.equal(bodiesA3.includes(pairS.pinned), false, `build A3's bundle does NOT register ${pairS.pinned}`);
+        assert.ok(bodiesB.includes(pairS.previous), `build B STILL registers ${pairS.previous} (policy (c))`);
+        assert.ok(bodiesB.includes(pairS.pinned), `build B registers ${pairS.pinned}`);
+        assert.equal(bodiesB.length, bodiesA3.length + 1, "A3 and B differ by EXACTLY one body");
+        console.log(`[tb-e2e] artifacts: A3 carries ${bodiesA3.length} bodies (no ${pairS.pinned}), B carries ${bodiesB.length}`);
+
+        imageA3 = spawnImage("A3", await ephemeralPort(), builtStmt.serveScript);
+        await waitReady(imageA3);
+        await waitBooted(imageA3);
+        assert.ok(imageA3.state.serving, "build A3 emitted the provenance boot line");
+        assert.match(
+          imageA3.state.serving,
+          new RegExp(`statementFacts=${pairS.previous}\\b`),
+          `build A3's boot line pins statementFacts to ${pairS.previous} (got: ${imageA3.state.serving})`,
+        );
+        assert.equal(
+          new RegExp(`statementFacts=${pairS.pinned}\\b`).test(imageA3.state.serving),
+          false,
+          "build A3's boot line does NOT name the successor as its pin",
+        );
+        console.log(`[tb-e2e] A3 ready: ${imageA3.state.serving}`);
+
+        // --- S1: a bank statement ADMITTED under the predecessor image, parked mid-read --------
+        const s1 = await sfx.buildStatementSituation("tb-stmt-a", { engineId: stmtEngineId, taskStatus: "queued", sha256: STMT_PDF_SHA256 });
+        stmtParkedTask = { taskId: s1.taskId };
+        putCanonicalBytes(s1.storagePath);
+
+        const boundS1 = await pollDocTask(s1.taskId, (t) => Boolean(t.workflow_run_id), "the statement task binds a run inside build A3");
+        const runS1 = await readRun(boundS1.workflow_run_id);
+        assert.equal(
+          bodyIdentifierOf(runS1.name),
+          pairS.previous,
+          `the statement's run bound ${pairS.previous}, derived from the run ROW (got ${runS1.name})`,
+        );
+        // THE PARK IS REACHED, NOT ASSUMED. The marker is written by the scripted model itself, at
+        // the moment it starts holding — so this is evidence that the run is INSIDE the text read,
+        // not merely that a row somewhere says 'running'.
+        await pollHeld("build A3 holds the text channel");
+        const parkedS1 = await readDocTask(s1.taskId);
+        assert.equal(parkedS1.status, "running", "the parked statement task is claimed and running, not queued and not settled");
+        assert.equal(parkedS1.error_code ?? null, null, "…and it carries no error code: this is a park, not a failure");
+        const runS1Parked = await readRun(boundS1.workflow_run_id);
+        assert.equal(
+          ["completed", "failed", "cancelled"].includes(runS1Parked.status),
+          false,
+          `the run is NON-TERMINAL while the read is held (got ${runS1Parked.status})`,
+        );
+        console.log(`[tb-e2e] S1 parked on ${pairS.previous} (text channel held, run ${runS1.name})`);
+
+        // --- PREFLIGHT while the statement is parked on the predecessor ------
+        const stmtFwd = await preflight({ query, supported: bodiesB });
+        assert.ok(
+          stmtFwd.outside.every((row) => row.body !== pairS.previous),
+          `a target that carries ${pairS.previous} strands nothing of this leg's (got ${JSON.stringify(stmtFwd.outside)})`,
+        );
+        const stmtBack = await preflight({ query, supported: bodiesB.filter((b) => b !== pairS.previous) });
+        assert.ok(
+          stmtBack.outside.some((row) => row.body === pairS.previous),
+          `a target WITHOUT ${pairS.previous} is refused BY THIS PARKED STATEMENT and names the body (got ${JSON.stringify(stmtBack.outside)})`,
+        );
+        console.log(`[tb-e2e] preflight: a target without ${pairS.previous} is refused by the parked statement, naming it`);
+
+        // --- STOP A3. One leader at a time, the same sequencing law. ---------
+        imageA3.child.kill("SIGTERM");
+        await waitExit(imageA3.child);
+        console.log(`[tb-e2e] build A3 stopped (exit ${JSON.stringify(imageA3.state.exitInfo)}) — the statement is parked mid-read on a body no running process now carries`);
+        const runS1AfterStop = await readRun(boundS1.workflow_run_id);
+        assert.equal(
+          ["completed", "failed", "cancelled"].includes(runS1AfterStop.status),
+          false,
+          `stopping the predecessor did not settle the run (got ${runS1AfterStop.status}) — it is the successor that must finish it`,
+        );
+
+        // THE ANSWER IS WRITTEN ONLY NOW. Before this line no process can finish this read; after
+        // it, the next process to be handed the step can.
+        writeFileSync(STMT_ANSWER_PATH, scriptedAnswerFor(s1));
+
+        // --- BUILD B AGAIN. The successor image, which RETAINS the predecessor body. ----
+        imageB = spawnImage("B-stmt", await ephemeralPort(), runtimeServe);
+        await waitReady(imageB);
+        await waitBooted(imageB, { banners: [prevBundleId, pinnedBundleId] });
+        assert.match(imageB.state.serving, new RegExp(`statementFacts=${pairS.pinned}\\b`), `build B pins statementFacts to ${pairS.pinned}`);
+        const infoS = await api(imageB.port, "GET", "/api/build-info", undefined, await mint(s1.owner));
+        assert.equal(infoS.status, 200, "build-info answers a scoped session");
+        assert.equal(infoS.body.pins.statementFacts, pairS.pinned, `build B's /api/build-info pins statementFacts = ${pairS.pinned}`);
+        assert.ok(infoS.body.bodies.includes(pairS.previous), "…and its roster STILL carries the RETAINED predecessor body — which is why the parked statement is not stranded");
+        console.log(`[tb-e2e] B ready for the statement leg: pins.statementFacts=${infoS.body.pins.statementFacts}, roster carries ${pairS.previous}`);
+
+        // --- S1 RESUMES on its ORIGINAL body, inside build B -----------------
+        const doneS1 = await pollDocTask(s1.taskId, (t) => ["done", "failed"].includes(t.status), "the parked statement settles inside build B", 180000);
+        assert.equal(doneS1.status, "done", `the parked statement completed (got ${doneS1.status}/${doneS1.error_code})`);
+        const runS1After = await pollRun(
+          boundS1.workflow_run_id,
+          (r) => ["completed", "failed", "cancelled"].includes(r.status),
+          "the statement's run reaches a terminal status",
+        );
+        assert.equal(runS1After.name, runS1.name, "PIN: the run NAME is invariant across the resume — it never migrated to the successor");
+        assert.equal(bodyIdentifierOf(runS1After.name), pairS.previous, `…and it is still ${pairS.previous}`);
+        assert.equal(runS1After.status, "completed", `the run itself completed (got ${runS1After.status})`);
+
+        // AND THE PREDECESSOR'S OWN BEHAVIOUR CAME WITH IT. #990's three-state face says a line the
+        // producer could not cite states its absence; v3's line schema carries no region at all, so
+        // every line this resumed run wrote is uncited — inside an image whose pin would have cited.
+        const linesS1 = await statementLines(s1.documentId);
+        assert.equal(linesS1.length, sfx.WORKED_STATEMENT.lines.length, `the resumed run persisted all ${sfx.WORKED_STATEMENT.lines.length} rows`);
+        assert.ok(
+          linesS1.every((l) => l.citation_page === null && l.citation_region === null && l.citation_extraction_id === null),
+          `${pairS.previous} states NO citation on any line, inside an image pinned to ${pairS.pinned} (got ${JSON.stringify(linesS1)})`,
+        );
+        console.log(`[tb-e2e] RESUME S1: settled on ${pairS.previous} inside build B (run name invariant), ${linesS1.length} lines, none cited`);
+
+        // --- S2: a statement ADMITTED INSIDE BUILD B, which starts it on ITS OWN pin ----------
+        // The claraWork leg's W2, on this lane. S1 is terminal before the answer file is rewritten,
+        // so exactly one statement is ever in flight against it.
+        const s2 = await sfx.buildStatementSituation("tb-stmt-b", { engineId: stmtEngineId, taskStatus: "queued", sha256: STMT_PDF_SHA256 });
+        stmtSuccessorTask = { taskId: s2.taskId };
+        putCanonicalBytes(s2.storagePath);
+        writeFileSync(STMT_ANSWER_PATH, scriptedAnswerFor(s2));
+
+        const boundS2 = await pollDocTask(s2.taskId, (t) => Boolean(t.workflow_run_id), "the second statement binds a run inside build B");
+        const runS2 = await readRun(boundS2.workflow_run_id);
+        assert.equal(bodyIdentifierOf(runS2.name), pairS.pinned, `a statement admitted inside build B binds ${pairS.pinned} (got ${runS2.name})`);
+        const doneS2 = await pollDocTask(s2.taskId, (t) => ["done", "failed"].includes(t.status), "the successor's own statement settles", 180000);
+        assert.equal(doneS2.status, "done", `the successor's statement completed (got ${doneS2.status}/${doneS2.error_code})`);
+
+        // #1037's OWN ACCEPTANCE, measured on real rows in a real World: every line the successor
+        // produced carries the page AND the region — and the region is the `clara.document_regions`
+        // locator the viewer renders, read back from the row the reader was pointed at.
+        const linesS2 = await statementLines(s2.documentId);
+        assert.equal(linesS2.length, sfx.WORKED_STATEMENT.lines.length, `the successor persisted all ${sfx.WORKED_STATEMENT.lines.length} rows`);
+        for (const [i, line] of linesS2.entries()) {
+          const locator = await sfx.readRegionLocator(s2.regionIds[i]);
+          assert.equal(Number(line.citation_page), i + 1, `line ${i + 1} cites page ${i + 1} — the page the seeded region's own locator carries (got ${line.citation_page})`);
+          assert.deepEqual(line.citation_region, locator, `line ${i + 1}'s stored region IS the clara.document_regions locator, value for value`);
+          assert.ok(line.citation_extraction_id, `line ${i + 1} carries the reader's own extraction id`);
+        }
+        console.log(`[tb-e2e] S2: ${linesS2.length} lines admitted inside build B on ${pairS.pinned}, every one citing its page and the region's own locator`);
+
+        imageB.child.kill("SIGTERM");
+        await waitExit(imageB.child);
+        imageB = null;
+      }
+    }
   } catch (err) {
     // THE FAILING IMAGE'S OWN LOG, printed once, before the cleanup below kills it (wave-3).
     // Every assertion in this file is about what a RUNTIME PROCESS did, and the first v2 -> v3
     // re-run failed on `W1 completed (got failed/internal)` with no way to see WHY from this
     // file's output — the child's stdout was captured into `state.stdout` and then discarded.
     // A drill whose failure cannot be read is a drill someone will re-run rather than diagnose.
-    for (const img of [imageA, imageA2, imageB]) {
+    for (const img of [imageA, imageA2, imageA3, imageB]) {
       if (!img) continue;
       const tail = (img.state.stdout ?? "").split("\n").slice(-40).join("\n");
       const errTail = (img.state.stderr ?? "").split("\n").slice(-20).join("\n");
@@ -1222,7 +1541,7 @@ async function main() {
   } finally {
     // Kill any image still up FIRST: a running engine would re-create what the cleanup below
     // settles.
-    for (const img of [imageA, imageA2, imageB]) {
+    for (const img of [imageA, imageA2, imageA3, imageB]) {
       if (img && !img.state.exited) {
         img.child.kill("SIGKILL");
         await waitExit(img.child).catch(() => {});
@@ -1250,6 +1569,33 @@ async function main() {
         .rootQuery("update clara.agent_tasks set status = 'cancelled' where id = $1 and status in ('queued','running','awaiting_input')", [w.task_id])
         .catch(() => {});
     }
+    // #1037 — the statementFacts leg's own rows, on exactly the terms above: an interrupted leg
+    // leaves a non-terminal run of a RETAINED body behind, which is the state the inventory gate
+    // refuses the NEXT run on. A document task is SETTLED rather than deleted (the same reason its
+    // Work sibling is), and the two failure codes are the ones
+    // `ck_processing_task_binding_f_a1` admits for a bound and an unbound row respectively.
+    for (const t of [stmtParkedTask, stmtSuccessorTask].filter(Boolean)) {
+      await rig
+        .rootQuery(
+          `update workflow.workflow_runs set status = 'cancelled'
+             where status not in ('completed','failed','cancelled')
+               and id = (select workflow_run_id from clara.document_processing_tasks where id = $1)`,
+          [t.taskId],
+        )
+        .catch(() => {});
+      await rig
+        .rootQuery(
+          "update clara.document_processing_tasks set status='failed', error_code='engine_lost', finished_at=now() where id = $1 and status = 'running'",
+          [t.taskId],
+        )
+        .catch(() => {});
+      await rig
+        .rootQuery(
+          "update clara.document_processing_tasks set status='failed', error_code='attempt_cap', finished_at=now() where id = $1 and status in ('queued','held_egress')",
+          [t.taskId],
+        )
+        .catch(() => {});
+    }
     await rig.endPool().catch(() => {});
     // L06-850-B, fix round 1: the chatTurn scratch build (`chatBuildPromise`, started in the
     // background above) may STILL BE RUNNING here — a failure in the claraWork leg, before this
@@ -1263,6 +1609,13 @@ async function main() {
     // this finally's job is cleanup, not a second verdict on the background build — THEN remove
     // the tree, itself guarded so a cleanup failure can never mask the real result either.
     if (chatBuildPromise) await chatBuildPromise.catch(() => {});
+    // The statement leg's per-run directories, always, whatever CLARA_TWO_BUILD_REUSE says: they
+    // are this run's own scratch, never a reusable build artifact.
+    try {
+      rmSync(STMT_ROOT, { recursive: true, force: true });
+    } catch (cleanupErr) {
+      console.error(`[tb-e2e] removing ${STMT_ROOT} failed during cleanup, IGNORED (the real result above stands): ${cleanupErr?.message ?? cleanupErr}`);
+    }
     if (process.env.CLARA_TWO_BUILD_REUSE !== "1") {
       try {
         removeScratchTree();

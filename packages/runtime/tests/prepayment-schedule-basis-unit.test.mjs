@@ -78,10 +78,16 @@ test("schema.shape — a non-uuid source entry, a blank account code and a blank
 // 2 · The refusal mirror.
 // ==============================================================================================
 
-test("mirror.tokens — every token the mirror and the message map name is one migration 0223 actually raises", () => {
-  // The five prepayment tokens are 0140's OWN spellings, carried through 0223's door verbatim
+test("mirror.tokens — every token the mirror and the message map name is one a DOOR actually raises", () => {
+  // The eleven prepayment tokens are 0140's OWN spellings, carried through 0223's door verbatim
   // rather than re-invented — which is the whole reason this module has a token table at all.
-  assert.deepEqual(Object.values(mod.PREPAYMENT_REFUSAL).sort(), [
+  //
+  // THE THREE THE OBO TWIN ADDS (#1135 / #915's successor contract, 2026-09-25) ARE NOT 0223's,
+  // and they are listed separately so that stays visible. `clara.create_prepayment_schedule_for`
+  // (0307) is the door the chat lane reaches, and it carries a role floor and an actor the human
+  // door does not: `authority_lost` and `insufficient_role` are CLR04 about the PERSON the turn
+  // acts for, and `invalid_author` is CLR10 about the caller's own wiring and is never shown.
+  const fromMigration0223 = [
     "authority_ref_unresolved",
     "client_inactive",
     "client_not_found",
@@ -93,7 +99,16 @@ test("mirror.tokens — every token the mirror and the message map name is one m
     "prepayment_target_ineligible",
     "prepayment_target_underivable",
     "prepayment_term_underivable",
-  ]);
+  ];
+  const fromTheOboTwin = ["authority_lost", "insufficient_role", "invalid_author"];
+  assert.deepEqual(
+    Object.values(mod.PREPAYMENT_REFUSAL).sort(),
+    [...fromMigration0223, ...fromTheOboTwin].sort(),
+  );
+  // and every one of the fourteen has a sentence of its own
+  for (const token of Object.values(mod.PREPAYMENT_REFUSAL)) {
+    assert.match(mod.prepaymentRefusalMessage(token, {}), /\S/, token);
+  }
 });
 
 test("mirror.accepts — the mirror refuses NOTHING the database would accept: a well-shaped input passes it", () => {

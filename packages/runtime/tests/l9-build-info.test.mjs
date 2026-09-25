@@ -248,6 +248,11 @@ test("CB-035: the route is mounted under /api and takes the same authenticate ga
   // WAVE 2026-09-18 — FIVE identities now, PINNED FIRST. Same reason, one version on: v5 is what
   // `workflows.claraWork` dispatches and v4…v1 are still carried for runs parked on their hooks.
   assert.match(src, /import \{ claraWorkBundleIdentityV5 \} from "\.\.\/workflows\/claraWork\.v5\.bundle\.js"/, "the route imports the v5 bundle identity");
+  // CUT PHASE 2026-09-25 (#1030) — SIX identities now, PINNED FIRST. Same reason, one version on:
+  // v6 is what `workflows.claraWork` dispatches and v5…v1 are still carried for runs parked on
+  // their hooks. This census GROWS at every cut by design; that is what makes a forgotten identity
+  // a red cell rather than a payload an operator cannot trust.
+  assert.match(src, /import \{ claraWorkBundleIdentityV6 \} from "\.\.\/workflows\/claraWork\.v6\.bundle\.js"/, "the route imports the v6 bundle identity");
   // THE ARRAY, READ AS AN ORDERED LIST RATHER THAN AS A LITERAL STRING. The previous form pinned
   // the exact one-line spelling, so it reds on a REFORMAT as loudly as on a missing bundle — and
   // this cut's addition pushed the line past the width limit, which is how that was found. What
@@ -260,8 +265,8 @@ test("CB-035: the route is mounted under /api and takes the same authenticate ga
   const identities = [...bundlesArg.matchAll(/claraWorkBundleIdentity(V\d+)?\(\)/g)].map((m) => m[1] ?? "V1");
   assert.deepEqual(
     identities,
-    ["V5", "V4", "V3", "V2", "V1"],
-    "...and passes all FIVE into the payload, NEWEST FIRST, so one read answers which bundles this image serves",
+    ["V6", "V5", "V4", "V3", "V2", "V1"],
+    "...and passes all SIX into the payload, NEWEST FIRST, so one read answers which bundles this image serves",
   );
   // #637 — the SAME import-here-pass-in shape for the registry's provenance exports. Without
   // these two the payload could name the bundles but not the BODIES, and a rollback preflight

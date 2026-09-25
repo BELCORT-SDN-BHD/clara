@@ -143,31 +143,36 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   // property that makes a tuple invalidate itself. The spread itself is the belt's own counter
   // bag — `chatClarifyResumed/Expired/Landed/ProbeFailed/SettleFailed`, five numbers — the same
   // shape every sibling carries, and it can no more reach a parts array than they can.
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...chatClarify","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...expiry","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...tasks","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...autodraftTasks","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentTasks","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentIntakes","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...intakeRecovery","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...spool","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...sst","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...lint","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...fa","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...chatClarify","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...expiry","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...tasks","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...autodraftTasks","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentTasks","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...documentIntakes","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...intakeRecovery","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...spool","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...sst","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...lint","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...fa","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
   // #640 RE-FINGERPRINTED the fifteen entries above and below: `runReconcilerSweep`'s summary
   // statement gained `...plans` (the accounting-plan occurrence belt), so the STATEMENT sha moved
   // for every spread inside it. Each spread itself is unchanged — a per-lane result bag folded
   // into one sweep summary, reviewed at its own original landing — and re-pinning rather than
   // widening keeps the ledger's property: a tuple invalidates itself when its statement changes.
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...plans","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...wake","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...work","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...plans","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...wake","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...work","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
   // #636 — the intake-batch cancellation belt joins the SAME reviewed return statement. Adding a
   // spread to it re-fingerprints every sibling tuple above (the fingerprint is the sha of the
   // whole normalised statement), which is why this block moved in one piece rather than gaining
   // a line: the spread itself is the belt's own counters, the same shape every sibling carries.
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...batchCancels","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
-  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...prune","2655816978bebb8d78ce07cddb7f3c33fc9124c4c53969d9532d17630c30d2a7","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...batchCancels","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
+  // #1030 — the source-correction re-derivation belt joins the SAME reviewed return statement,
+  // and adding a spread to it re-fingerprints every sibling tuple above: the fingerprint is the
+  // sha of the whole normalised statement. The spread itself is the belt's own counters, the
+  // same shape every sibling carries, reviewed at its own landing.
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...sourceCorrections","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
+  ["packages/runtime/lib/reconciler.mjs","runReconcilerSweep","...prune","ac6a414c29cad3147d36cf45fb19d4e2b1ab0d78754e33aba1b98581bfc2aa84","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...parseUrlTarget(process.env.DATABASE_URL)","b7fac4efda9fec1f95de524d660835ef17527255af69ad9dd7265e7ba2ba9af3","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...parseUrlTarget(process.env.WORKFLOW_POSTGRES_URL)","d0fce5da9b74af277287fa27a5f72d05e08862412c14ba9094b890c334abad93","0"],
   ["packages/runtime/lib/relay.mjs","assertNoTargetSplit","...pg","314c243f644ce3eb9f984091d1f53d513440baeaf360b08bd57dd99785a6a2e6","0"],
@@ -352,6 +357,17 @@ const REVIEWED_OBJECT_SPREAD_SITES = [
   ["packages/runtime/workflows/statementFacts.v3.header.mjs","deriveStatementPeriod","...asIs","27d26f3548b1ae65af183a256c1496cacab289385e3e54ce0ad1cada467c4b5e","0"],
   ["packages/runtime/workflows/statementFacts.v3.header.mjs","deriveStatementPeriod","...asIs","2fe599f351fe67e04dd8becfba4ad76336d52dc6575f28a0f24bad1f0f823253","0"],
   ["packages/runtime/workflows/statementFacts.v3.header.mjs","normalizeStatementHeaderV3","...source","e11871d6f19f8ecdc74e388c15feb9f0489a28d77c7a25eb18cd33f72728e614","0"],
+  // statementFacts_v4 (#1037 — the producer half of #990's per-line source citation). The two
+  // behaviour sites are the v2/v3 statements carried over UNCHANGED: their fingerprints are
+  // byte-identical to the v2 and v3 rows above, which IS the evidence that the metered-channel
+  // wrapper did not move in this version. The third is new and is the whole of what v4 adds — a
+  // merge that copies one writer line and sets `page` and `region` on the copy. It assigns no
+  // `type` and constructs no Clara part: this closure emits no `parts[]` entry at all, it builds
+  // a jsonb payload for `clara.persist_statement_facts_v2`. No `.parts.ts` is owed and the web
+  // parts census is untouched (CUT-PLAN section 2.6), because no wire kind is added.
+  ["packages/runtime/workflows/statementFacts.v4.behavior.mjs","withMeteredStatementChannel","...(out.usage ?? {})","eb1f116bd1e79af670968f3ac7d4aa7a81fc29a8475d9b136a3ab0fbc23c06c9","0"],
+  ["packages/runtime/workflows/statementFacts.v4.behavior.mjs","withMeteredStatementChannel","...out","6d340dfea25133a71c60f9fb625992d27930b6f9eb8abf205fee061488bb59cd","0"],
+  ["packages/runtime/workflows/statementFacts.v4.citations.mjs","attachStatementLineCitations","...line","a53b3368779f4e06362aa1f80c05981ade3dbddb5e5e6f638b7458c0ed7ce867","0"],
   ["packages/runtime/workflows/witnessFacts.v1.behavior.mjs","withMeteredChannel","...(out.usage ?? {})","eb1f116bd1e79af670968f3ac7d4aa7a81fc29a8475d9b136a3ab0fbc23c06c9","0"],
   ["packages/runtime/workflows/witnessFacts.v1.behavior.mjs","withMeteredChannel","...out","6d340dfea25133a71c60f9fb625992d27930b6f9eb8abf205fee061488bb59cd","0"],
   ["packages/runtime/workflows/witnessFacts.v1.prompts.mjs","normalizeAnswer","...answer","d61b0936253c4b3c18a86fe85ab81b1b922063a2a7944a751ea72dc5c76980bf","0"],
@@ -423,6 +439,18 @@ const REVIEWED_NON_PART_LITERAL_SITES = [
   ["packages/runtime/workflows/chatTurn.v21.ts","chatTurn_v21","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
   ["packages/runtime/workflows/chatTurn.v21.ts","chatTurn_v21","type: \"tool-result\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
   ["packages/runtime/workflows/chatTurn.v21.ts","chatTurn_v21","type: \"json\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
+  // chatTurn_v22 (the 2026-09-25 cut phase, #985). IDENTICAL in kind to v18's, v19's, v20's and
+  // v21's three sites, and ALL THREE FINGERPRINTS ARE AGAIN BYTE-IDENTICAL TO v19's, v20's AND
+  // v21's — which is the ledger, rather than a reviewer's eye, establishing that this cut carried
+  // the park/resume statements over unchanged rather than rewriting them. `tool-call`,
+  // `tool-result` and `json` are the AI SDK's OWN message-content discriminants, not Clara
+  // transcript part kinds; they are constructed here to replay the parked clarify call and to feed
+  // the human's answer back to the model as that tool's result. v22 adds NO transcript part kind
+  // at all — its one new tool, `read_opening_source`, mints no card and its result rides v10's
+  // generic `tool_result` promotion.
+  ["packages/runtime/workflows/chatTurn.v22.ts","chatTurn_v22","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
+  ["packages/runtime/workflows/chatTurn.v22.ts","chatTurn_v22","type: \"tool-result\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
+  ["packages/runtime/workflows/chatTurn.v22.ts","chatTurn_v22","type: \"json\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
   ["packages/runtime/workflows/claraWork.v1.ts","claraWork_v1","type: \"tool-result\"","949cfa52033fb6adf9605ce405396ddd472391484c772120b41d70e51bbcf6b6","0"],
   ["packages/runtime/workflows/claraWork.v1.ts","claraWork_v1","type: \"json\"","949cfa52033fb6adf9605ce405396ddd472391484c772120b41d70e51bbcf6b6","0"],
   // #629 — claraWork_v2's resume message. IDENTICAL in kind to v1's two sites above: `tool-result`
@@ -463,6 +491,13 @@ const REVIEWED_NON_PART_LITERAL_SITES = [
   // comments carry no version number, are the control that shows the ledger behaving as intended.
   ["packages/runtime/workflows/claraWork.v5.ts","claraWork_v5","type: \"tool-result\"","fbe951846aee44f34798a4eb11e4f4e00df981e1e900169359642bad31049db9","0"],
   ["packages/runtime/workflows/claraWork.v5.ts","claraWork_v5","type: \"json\"","fbe951846aee44f34798a4eb11e4f4e00df981e1e900169359642bad31049db9","0"],
+  // claraWork_v6 (cut phase 2026-09-25, #1030). IDENTICAL in kind to every row above it, and the
+  // FINGERPRINT IS BYTE-EQUAL TO v5's — which is the ledger saying something true rather than a
+  // copied constant. v6's resume statement is v5's, comments included: this cut adds a PARK BEFORE
+  // the loop (the confirmation a source-correction successor owes) and changes nothing about how a
+  // human's answer is fed back to the model. v6 adds NO transcript part kind at all.
+  ["packages/runtime/workflows/claraWork.v6.ts","claraWork_v6","type: \"tool-result\"","fbe951846aee44f34798a4eb11e4f4e00df981e1e900169359642bad31049db9","0"],
+  ["packages/runtime/workflows/claraWork.v6.ts","claraWork_v6","type: \"json\"","fbe951846aee44f34798a4eb11e4f4e00df981e1e900169359642bad31049db9","0"],
   ["packages/runtime/workflows/chatTurn.v2.ts","chatTurn_v2","type: \"tool-result\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v2.ts","chatTurn_v2","type: \"json\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v3.ts","chatTurn_v3","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
