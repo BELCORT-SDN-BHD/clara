@@ -243,7 +243,18 @@ export type AccrualCreated = {
 /** Every accrual of one client, optionally windowed on `effective_from`. A malformed client id
  *  never reaches PostgREST (the `lib/client-id.ts` guard `lib/work/reads.ts` states in full): on a
  *  `uuid` argument it is a 400 `22P02`, which throws and lands on the route's error boundary
- *  instead of this page's own not-found state. */
+ *  instead of this page's own not-found state.
+ *
+ *  THE SIDE FILTER IS SERVER-SIDE AND DELIBERATELY NOT SENT YET (#1075, migration 0334).
+ *  `clara.list_accrual_adjustments` now takes a fourth argument, `p_side text default null`
+ *  (`expense` | `revenue`), which narrows the rows in the database. This caller still sends only
+ *  `{p_client, p_from, p_to}` and `components/accruals/accruals-list.tsx` still narrows the fully
+ *  read page in the browser, because without pagination both return the same rows and a refetch
+ *  per keystroke on the filter would be worse. #1075's AC2 — "the register's side filter control
+ *  uses the server-side parameter ONCE PAGINATION EXISTS, rather than filtering a fully-read page
+ *  client-side" — is therefore still OWED, and it is owed HERE: whoever adds pagination to this
+ *  register adds `p_side` to this call and deletes the client-side narrowing beside it. Recorded
+ *  in code rather than only in a ticket report (spec review 2026-09-25, SPEC-03). */
 export async function loadAccruals(
   clientId: string,
   window: { from?: string | null; to?: string | null } = {},
