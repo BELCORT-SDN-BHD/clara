@@ -404,6 +404,7 @@ lib/documents/intake.test.ts
 lib/documents/kind-label.test.ts
 lib/documents/loaders.test.ts
 lib/documents/open-in-new-tab.test.ts
+lib/documents/payroll-posting-state.test.ts
 lib/documents/pdf-worker-asset.test.ts
 lib/documents/reads.test.ts
 lib/documents/receipts.test.ts
