@@ -127,6 +127,41 @@ Three rules the budgets do not replace:
 - **Never spend a budget where a condition will do.** Wait for the state — `expect.poll` on the element that must become `document.activeElement`, on the animation count, on the row that must appear — not for a number of milliseconds. Use [`settleForScan`](helpers.ts) before every `AxeBuilder.analyze()` and [`ensureRealFocus`](helpers.ts) before the first key press after any navigation.
 - **Read a lone red as timing only when the budget says so.** A cell that exceeds a budget sized like the table above has stalled; it is not evidence that the host was busy.
 
+### The B4 focus-landing instant-read flake (#1141)
+
+`work-question-walk.spec.ts`'s B4 cell asserts that answering the Needs-you `work_question` row
+inline moves focus to the section heading once the row leaves, rather than dropping it on `<body>`.
+The PRODUCTION behaviour was already correct (`work-question-affordance.tsx`'s `focusAfterRowReload`
+— reload first, focus second, landed for #629) — the CELL was the defect: it read
+`document.activeElement` with a single unwaited `page.evaluate` immediately after
+`expect(row).toHaveCount(0, ...)`, rather than waiting for the state. `nextPaint()` (one
+`requestAnimationFrame` plus one macrotask) runs AFTER the row's unmount commits, so there is a real,
+if usually short, tick during which `document.activeElement` is transiently `<body>` (the browser's
+own behaviour when a focused descendant is removed from the DOM) before focus lands on the heading —
+exactly the window an instant read can catch. Measured (the ticket's own evidence): red once in each
+of three whole-suite runs across two gates (riders wave 4 gate B, the cut-phase gate), green on every
+other run and on every isolated re-run.
+
+The fix is the rule two bullets up, applied: the instant read became
+`expect.poll(async () => page.evaluate(() => document.activeElement?.tagName ?? "NONE"), { timeout:
+15_000 }).toBe("H2")`. A widened timeout on an instant read would NOT have been a fix — it would
+still read whatever tag `document.activeElement` holds at one arbitrary instant, just later. Only
+waiting for the SETTLED state closes the race.
+
+**Reproduction, honestly reported.** CDP `Emulation.setCPUThrottlingRate` (armed only around the
+"submit the answer" step, to widen `nextPaint()`'s own window without paying the multiplier on the
+whole walk) was tried at rate 6 (5 runs) and rate 20 (1 run, this host, 2026-09-25): the OLD
+instant-read shape did not catch the race in any of those 6 attempts (rate 50 across the WHOLE walk
+crashed the renderer instead of usefully widening anything — too aggressive to be informative). This
+is consistent with the ticket's own "once in three whole-suite runs" rate: genuinely rare, and not
+reliably forced by a single host's synthetic throttle within a bounded session. The property the new
+cell exists to catch was instead proven directly (the vacuity control the work order requires for a
+test-only ticket): `restoreFocusAfterRow`'s final `landmark.focus()` call was temporarily dropped: the
+SAME poll-based B4 cell then failed with `Timeout 15000ms exceeded while waiting on the predicate`
+(the poll never sees `"H2"`), proving the new assertion actually discriminates a real regression
+rather than passing vacuously; the subject was restored byte-for-byte immediately after
+(`git diff` empty) and the cell green again.
+
 ## Coverage map
 
 The checked-in suite currently contains 54 specs. The table below describes 28 of them; the remaining 26 have no row yet and are named under [Specs with no coverage-map row](#specs-with-no-coverage-map-row) beneath it — so neither number here contradicts what a reader can count in the table or on disk. Writing the missing descriptions is deliberately outside [#1019](https://github.com/BELCORT-SDN-BHD/clara/issues/1019), whose Out of scope is "rewriting or auditing the individual per-spec description text in the coverage-map table"; it is carried as that ticket's follow-up.
