@@ -37,22 +37,43 @@ import {
   confirmRentPlan, receiptsUnder, opk1150, caught, detailOf, spendReviseKey,
   nestedPlanCensus, partitionProblems, LANE_OF_SUFFIX, PLAN_DOORS,
   callConfirmCore, callRevisionCore, receiptsLike, confirmRentPlanFor, confirmationAuditVia,
+  bodyOf, planRow, planCreateAudit, setClientStatus, callOboPlanCore, createPrepaymentScheduleFor,
+  basis,
 } from "./plan-reservation-namespace-fixtures.mjs";
 
 const ACCRUAL_TZ = "Asia/Kuala_Lumpur";
 
 let ready = false;
 let lane = false;
+let applied = false;
 
+// FRONTIER-GATED on the `plan_reservation_namespace_obo_fold$` stable stem, the
+// revenue-recognition-plan-op-key idiom: a package-wide sweep preloads this file's pre-integration
+// gate module and skips LOUDLY on a chain below 0364; a FOCUSED run sets nothing and FAILS,
+// because a skip is not evidence.
 before(async () => {
   ready = await ensureReady();
-  if (ready) lane = await tenancyLanePresent();
+  if (!ready) return;
+  lane = await tenancyLanePresent();
+  applied = await planNamespaceApplied();
+  if (!applied && process.env[PLAN_NS_GATE] !== "1") {
+    throw new Error(
+      `#1150 premise: no migration matching /${PLAN_NS_STEM}/ is applied to this database and `
+      + `${PLAN_NS_GATE} is unset -- this is a FOCUSED run and must fail loudly, not skip. Apply `
+      + "0364_plan_reservation_namespace_obo_fold.sql, or preload "
+      + "./tests/plan-reservation-namespace-preintegration-gate.mjs for an estate sweep against a "
+      + "pre-0364 chain.");
+  }
 });
 
 after(async () => { await endPool(); });
 
 function unready(t) {
   if (!ready) { t.skip("rig not ready"); return true; }
+  if (!applied) {
+    t.skip("0364_plan_reservation_namespace_obo_fold is not applied -- probed at the live ledger");
+    return true;
+  }
   if (!lane) { t.skip("0353_tenancy_agent_twins_obo_confirmations is not applied"); return true; }
   return false;
 }
@@ -386,4 +407,248 @@ async (t) => {
   assert.ok(obo.plan_id, "the on-behalf-of entrance stopped confirming");
   assert.equal(await confirmationAuditVia(obo.plan_id), "confirm_tenancy_rent_plan_for",
     "the on-behalf-of lane's confirmation no longer carries its own `via`");
+});
+
+// ===========================================================================================
+// AC4 / AC5 — THE THIRD ON-BEHALF-OF PLAN STEP BECOMES A CALLER OF THE FIRST.
+//
+// `clara._tenancy_plan_core` (0353) was a third snapshot of the on-behalf-of plan-creation step,
+// beside `clara._obo_plan_core` (0338) and `clara._accrual_plan_core` (0331). The estate paid for
+// that twice: ADV-L08-01 found a client-status wall its siblings had and it did not, and the sweep
+// wave's integration merge had to fold its hand-copied authority wall. It is now a caller.
+//
+// The one wall that stays is the CLIENT-STATUS wall, above the delegation — it is the tenancy
+// lane's, not the shared body's, and moving it into `clara._obo_plan_core` would refuse acts the
+// prepayment and deferred-revenue on-behalf-of lanes admit today.
+// ===========================================================================================
+
+const OBO_PLAN_STEP =
+  "clara._obo_plan_core(text,uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)";
+const TENANCY_PLAN_STEP =
+  "clara._tenancy_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)";
+
+test("p1150.obo.fold_parity — the tenancy plan step is a CALLER of clara._obo_plan_core with no "
+  + "computation of its own, it keeps the client-status wall at its own position, and both "
+  + "entrances still admit and refuse exactly what they did",
+async (t) => {
+  if (unready(t)) return;
+
+  // 1 — THE DELEGATE, structurally: it names the body that holds the computation and holds no
+  //     rung, no plan row and no overlap advisory of its own. The shape
+  //     `plan-overlap-template-arm-retired.test.mjs` (T.5) already makes of 0353's thin revision
+  //     delegate, made here of the step this file folds.
+  const step = await bodyOf(TENANCY_PLAN_STEP);
+  assert.ok(step, `${TENANCY_PLAN_STEP} is absent`);
+  assert.match(step.src, /clara\._obo_plan_core\(/,
+    "the tenancy plan step does not delegate to the body that holds the computation");
+  assert.doesNotMatch(step.src, /pg_advisory_xact_lock|insert\s+into\s+clara\.accounting_plan/,
+    "the tenancy plan step still holds a rung or writes a plan row of its own");
+  assert.match(step.src, /client_inactive/,
+    "the tenancy plan step has lost the client-status wall ADV-L08-01 put there");
+
+  // …AND THE SHARED BODY DID NOT SWALLOW THAT WALL. The prepayment and deferred-revenue
+  // on-behalf-of lanes do not carry a client-status wall, and giving them one here would refuse
+  // acts they admit today — a widening this ticket has no ruling for.
+  const shared = await bodyOf(OBO_PLAN_STEP);
+  assert.doesNotMatch(shared.src, /client_inactive/,
+    "clara._obo_plan_core has gained the tenancy lane's client-status wall");
+
+  // 2 — THE CLIENT-STATUS WALL STILL ANSWERS, ON BOTH ENTRANCES, IDENTICALLY.
+  const scene = await namespaceScene("fold");
+  const live = await tenancyLaneIn(scene, "fold-live");
+  for (const status of ["archived", "onboarding"]) {
+    await setClientStatus(live.client, status);
+    const h = await caught(() => confirmRentPlan(scene.bob, {
+      client: live.client, document: live.document, opKey: opk1150(`fold-h-${status}`) }));
+    const o = await caught(() => confirmRentPlanFor({
+      client: live.client, author: scene.bob, document: live.document,
+      opKey: opk1150(`fold-o-${status}`) }));
+    assert.ok(h && o, `${status}: one of the two entrances admitted a non-active client`);
+    assert.equal(o.code, h.code, `${status}: the sqlstates differ`);
+    assert.equal(o.message, h.message, `${status}: the sentences differ`);
+    assert.deepEqual(detailOf(o), detailOf(h), `${status}: the typed details differ`);
+    assert.equal(detailOf(h).reason, "client_inactive");
+    assert.match(h.message, /client is not active -- no new accounting plan/,
+      `${status}: the sentence is not clara.create_accounting_plan's own`);
+  }
+  await setClientStatus(live.client, "active");
+
+  // 3 — AND IT IS STILL AT THE PLAN STEP'S OWN POSITION, not at the entrance: a tenancy with
+  //     NOTHING recorded is answered by the DRAFT wall on both lanes, even for an archived client.
+  const bare = await tenancyLaneIn(scene, "fold-bare", { recordTerms: false });
+  await setClientStatus(bare.client, "archived");
+  const hBare = await caught(() => confirmRentPlan(scene.bob, {
+    client: bare.client, document: bare.document, opKey: opk1150("fold-bare-h") }));
+  const oBare = await caught(() => confirmRentPlanFor({
+    client: bare.client, author: scene.bob, document: bare.document,
+    opKey: opk1150("fold-bare-o") }));
+  assert.ok(hBare && oBare, "one of the two entrances admitted an archived client with no terms");
+  assert.equal(detailOf(hBare).reason, "terms_incomplete",
+    "the human door no longer answers the draft wall first -- this cell's premise moved");
+  assert.equal(oBare.code, hBare.code);
+  assert.equal(oBare.message, hBare.message);
+  assert.deepEqual(detailOf(oBare), detailOf(hBare),
+    "the on-behalf-of twin reports the client's status where the human door reports missing terms");
+
+  // 4 — AND THE REPLAY. The status wall sits BELOW clara._reserve_op on both lanes, so a
+  //     confirmation a person already made replays to its stored receipt after the client is
+  //     archived. An entrance-level copy of the wall would refuse the replay instead.
+  for (const [label, confirm] of [
+    ["human", (s, k) => confirmRentPlan(scene.bob, { client: s.client, document: s.document, opKey: k })],
+    ["obo", (s, k) => confirmRentPlanFor({ client: s.client, author: scene.bob, document: s.document, opKey: k })],
+  ]) {
+    const s = await tenancyLaneIn(scene, `fold-replay-${label}`);
+    const key = opk1150(`fold-replay-${label}`);
+    const first = await confirm(s, key);
+    await setClientStatus(s.client, "archived");
+    assert.deepEqual(await confirm(s, key), first,
+      `${label}: replaying a confirmation the person already made stopped returning its receipt `
+      + "once the client was archived");
+  }
+
+  // 5 — WHAT THE ON-BEHALF-OF LANE WRITES IS UNCHANGED, read at the rows rather than off the door.
+  const ok = await tenancyLaneIn(scene, "fold-ok");
+  const made = await confirmRentPlanFor({
+    client: ok.client, author: scene.bob, document: ok.document, opKey: opk1150("fold-ok") });
+  assert.ok(made.plan_id, "the on-behalf-of entrance stopped confirming");
+  const row = await planRow(made.plan_id);
+  assert.equal(row.kind, "recurring_journal");
+  assert.equal(row.status, "active");
+  assert.equal(row.authority_kind, "explicit_instruction");
+  assert.equal(row.authority_ref.kind, "contract_confirmation");
+  assert.equal(row.authorised_by, scene.bob, "the plan is no longer authorised by the NAMED human");
+  assert.equal(row.created_by, scene.bob);
+  assert.equal(row.current_revision, 1);
+  const audit = await planCreateAudit(made.plan_id);
+  assert.equal(audit.via, "confirm_tenancy_rent_plan_for",
+    "0193's own audit row no longer says which entrance created the plan");
+  assert.equal(audit.kind, "recurring_journal");
+
+  // 6 — THE SHARED BODY'S KIND SET IS STILL CLOSED, driven at the body (no door takes a kind).
+  const acc = await accrualLaneIn(scene, "fold-kind");
+  const span = await pastSpan(2);
+  const badKind = await caught(() => callOboPlanCore({
+    kind: "a_kind_nobody_minted", firm: scene.firm, client: acc.client, author: scene.bob,
+    authorityRef: acc.authorityRef, from: span.from, to: span.to,
+    basis: basis({ postingDate: span.from, memo: "p1150 kind probe" }) }));
+  assert.ok(badKind, "clara._obo_plan_core admitted a kind nobody minted");
+  assert.equal(badKind.code, "CLR10");
+  assert.equal(detailOf(badKind).reason, "plan_kind_unsupported");
+  assert.equal(detailOf(badKind).kind, "a_kind_nobody_minted");
+
+  // 7 — AND THE LANE THAT ALREADY USED THE SHARED BODY IS UNTOUCHED BY THE WIDENING: the
+  //     prepayment on-behalf-of twin still configures, on its own least-privileged runtime
+  //     connection, and 0193's audit row still names ITS entrance.
+  const prepaid = await createPrepaymentScheduleFor({
+    client: scene.client, author: scene.bob, sourceEntry: scene.entry,
+    expenseAccount: scene.target, authorityRef: scene.authorityRef,
+    opKey: opk1150("fold-prepay-obo") });
+  assert.ok(prepaid.schedule_id, "the prepayment on-behalf-of twin stopped configuring");
+  const prepaidAudit = await planCreateAudit(prepaid.plan_id);
+  assert.equal(prepaidAudit.via, "create_prepayment_schedule_for",
+    "the prepayment on-behalf-of lane's plan no longer names its own entrance");
+  assert.equal(prepaidAudit.kind, "amortisation_schedule");
+});
+
+// ===========================================================================================
+// THE STANDING GUARD OVER THE PLAN STEP, CARRIED FORWARD FROM #1137.
+//
+// 0353's fix round added `p1137.obo.plan_step_parity` for ADV-L08-02 — a refusal the HUMAN plan
+// step raises must either be raised by the on-behalf-of plan step too, or be on a named roster
+// that says why it cannot be reached. Its own comment said it would go "until clara._obo_plan_core
+// absorbs `recurring_journal` and this body becomes a two-line caller of it", and #1150's brief
+// says the same: "`p1137.obo.plan_step_parity` becomes unnecessary and goes with it".
+//
+// IT IS NOT UNNECESSARY, AND THAT IS WORTH WRITING DOWN RATHER THAN QUIETLY LOSING. The brief's
+// reason is "the parity that cell measures becomes exact by construction, because both entrances
+// reach the same body". Measured, they do not: the HUMAN entrance still reaches
+// `clara.create_accounting_plan` (0193) and the on-behalf-of entrance now reaches
+// `clara._obo_plan_core`. The fold makes the OBO lane's plan step TWO bodies instead of one; it
+// does not merge the two lanes. A wall a later ticket adds to 0193's door would still be missed by
+// the machine lane, which is exactly what ADV-L08-01 was.
+//
+// So the cell MOVES here rather than dying: same claim, re-aimed at the two bodies that now hold
+// the OBO lane's plan step. The OLD cell is removed from tenancy-agent-twins.test.mjs, where it
+// named `clara._tenancy_plan_core` alone and would have read an empty body.
+// ===========================================================================================
+
+const PLAN_DOOR =
+  "clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)";
+const PLAN_WALL = "clara._assert_plan_authority(text,jsonb,uuid,uuid)";
+
+/** Why a refusal `clara.create_accounting_plan` raises is NOT in the on-behalf-of lane's plan
+ *  step. Every entry is a wall taken ABOVE that step on BOTH lanes, or an argument the step does
+ *  not take. A STALE entry — a token the human door no longer raises — is a red too, so the roster
+ *  cannot quietly outlive its reason.
+ *
+ *  #1150 [0364]: `plan_kind_unsupported` LEFT this roster. 0353's version excused it with "the
+ *  kind is the literal 'recurring_journal' in this step, never an argument"; after the fold the
+ *  step takes the kind as its first argument and raises that very token, so the excuse is gone and
+ *  the guard is real. */
+const PLAN_STEP_NOT_REACHED = {
+  client_not_found:
+    "clara._confirm_tenancy_rent_plan_core walls the client to the caller's firm above BOTH lanes "
+    + "(CLR11 'client is not in your firm'), so neither plan step can be entered with a client "
+    + "outside it -- driven in p1137.obo.refusals_match case 9 and p1137.obo.authority",
+  invalid_op_key:
+    "this step takes no op key of its own: the confirmation's own key covers the whole act and is "
+    + "checked FIRST on both entrances -- driven in p1137.obo.authority case 1",
+  operation_in_flight:
+    "clara.create_accounting_plan's own reservation under `<key>:tnplan`; the on-behalf-of step "
+    + "takes no reservation at all, and the outer clara._reserve_op on the confirmation's key sits "
+    + "above both lanes -- driven in p1137.obo.one_op_key_namespace and p1150.cross_lane.create",
+};
+
+const REASON_TOKENS = /(?:"reason"\s*:\s*"([a-z_]+)")|(?:'reason'\s*,\s*'([a-z_]+)')/g;
+const reasonsOf = (src) => {
+  const out = new Set();
+  for (const m of src.matchAll(REASON_TOKENS)) out.add(m[1] ?? m[2]);
+  return out;
+};
+
+test("p1150.obo.wall_census — every refusal the HUMAN plan door raises is either raised by the "
+  + "on-behalf-of lane's plan step or named as unreachable, and both still resolve authority "
+  + "through the ONE shared wall",
+async (t) => {
+  if (unready(t)) return;
+
+  const human = reasonsOf((await bodyOf(PLAN_DOOR)).src);
+  const lane = new Set([
+    ...reasonsOf((await bodyOf(OBO_PLAN_STEP)).src),
+    ...reasonsOf((await bodyOf(TENANCY_PLAN_STEP)).src),
+  ]);
+  assert.ok(human.size > 0, "clara.create_accounting_plan raises no typed refusal at all");
+
+  const unguarded = [...human].filter((r) => !lane.has(r) && !(r in PLAN_STEP_NOT_REACHED)).sort();
+  assert.deepEqual(unguarded, [],
+    `clara.create_accounting_plan refuses ${unguarded.join(", ")} and the on-behalf-of lane's plan `
+    + "step does not -- either copy the wall into clara._tenancy_plan_core (if it is the tenancy "
+    + "lane's alone) or clara._obo_plan_core (if every on-behalf-of lane owes it), or add it to "
+    + "PLAN_STEP_NOT_REACHED with the reason it cannot be reached (ADV-L08-01 was exactly this, "
+    + "for client_inactive)");
+  const stale = Object.keys(PLAN_STEP_NOT_REACHED).filter((r) => !human.has(r)).sort();
+  assert.deepEqual(stale, [],
+    `PLAN_STEP_NOT_REACHED still excuses ${stale.join(", ")}, which clara.create_accounting_plan no `
+    + "longer raises -- the roster has outlived its reason");
+  assert.ok(lane.has("client_inactive"),
+    "the on-behalf-of lane's plan step has lost the client-status wall ADV-L08-01 put there");
+  assert.ok(lane.has("plan_kind_unsupported"),
+    "the shared step no longer closes its kind set -- PLAN_STEP_NOT_REACHED would need it back");
+
+  // …AND THE SHARED AUTHORITY RESOLUTION, whose refusal token is a VARIABLE and so invisible to
+  // the census above: both the human door and the on-behalf-of step must still resolve the cited
+  // instruction through #1051's ONE wall rather than merely checking its shape, and that wall must
+  // itself resolve through #977's one definition, so the hop is a fold and not a second copy.
+  for (const sig of [PLAN_DOOR, OBO_PLAN_STEP]) {
+    assert.match((await bodyOf(sig)).src, /clara\._assert_plan_authority\(/,
+      `${sig} no longer resolves its authority through clara._assert_plan_authority (#1051, 0330)`);
+  }
+  assert.match((await bodyOf(PLAN_WALL)).src, /clara\._authority_ref_refusal\(/,
+    "#1051's shared plan wall does not resolve through clara._authority_ref_refusal (#977, 0250)");
+  // The tenancy step reaches the wall THROUGH the shared body now, and names neither itself —
+  // which is the fold, and is what #1051's own census (p1051.wall.one_definition) requires of it.
+  const delegate = (await bodyOf(TENANCY_PLAN_STEP)).src;
+  assert.doesNotMatch(delegate, /clara\._assert_plan_authority\(|clara\._authority_ref_refusal\(/,
+    "the tenancy plan step still reaches the authority wall itself -- after the fold the shared "
+    + "body does that, and a second reach is the drift #1051 exists to close");
 });

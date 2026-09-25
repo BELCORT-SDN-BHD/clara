@@ -10447,3 +10447,95 @@ cell went red first against a deliberately broken map, and green again once 0361
 detects its own marker and returns without touching the body. The prestate admits exactly two
 pre-images per recut body — the sha measured on this lane's rig, or a body already carrying this
 file's own `0361` attribution — so a redo is admitted and real drift refuses by name.
+
+## 0364 — one nested reservation namespace per lane, and one on-behalf-of plan body (#1150, riders closing wave, lane L2)
+
+[0364_plan_reservation_namespace_obo_fold.sql](migrations/0364_plan_reservation_namespace_obo_fold.sql)
+takes the two halves #1077 and #1137 each left open: candidate D16 (`clara._reserve_op`'s shared
+`:plan` namespace, #1077's own follow-up 1) and candidate D17 (the estate's THIRD on-behalf-of
+plan-creation body, 0353's follow-up 1). They are one file because they rewrite the same family.
+
+**What 0336 left.** `clara._reserve_op`
+([0004_governed_fns.sql](migrations/0004_governed_fns.sql):47) keys an operation receipt on
+`(firm_id, fn, op_key)` — on the **firm**, not the client — and a door that nests another door
+hands it a derived key. 0336 (#1077) moved the deferred-revenue lane onto `:rrplan` / `:rrend` and
+deliberately stopped there, which left three bodies outside that pair deriving `<key>:plan`:
+`clara.create_accrual_adjustment` and `clara._confirm_tenancy_rent_plan_core` under
+`create_accounting_plan`, and `clara.correct_accrual_adjustment` under `revise_accounting_plan`,
+beside the prepayment lane's own two. One operation key spent on two of them reserved the same row
+with different arguments and was answered `clara._reserve_op`'s own untyped `CLR10 op_key reused
+with different args`, which names neither lane. Measured before this file: a prepayment schedule
+and then an accrual adjustment under one key raised exactly that.
+
+| lane | nested suffixes | set by |
+|---|---|---|
+| prepayment | `:plan`, `:end` | 0193/0223 — **unchanged**, so every key already spent keeps its meaning |
+| deferred revenue | `:rrplan`, `:rrend` | [0336](migrations/0336_revenue_recognition_plan_op_key.sql) (#1077) |
+| accrual | `:acplan`, `:acrev` | **this file** |
+| tenancy | `:tnplan`, `:revise` | **this file** (`:revise` is 0353's, unmoved and unshared) |
+
+**Nothing is backfilled, and nothing needs to be.** 0336's own reasoning: a receipt records an act
+that happened. A genuine retry never reaches the nested call at all, because each lane's OUTER
+reservation on its own door short-circuits the whole body — driven per lane in
+`p1150.idempotent.per_lane`.
+
+| § | object | what it is |
+|---|---|---|
+| A | `clara.create_accrual_adjustment` | 0222's body verbatim; the derived key becomes `:acplan` |
+| B | `clara.correct_accrual_adjustment` | 0284's body verbatim; `:acrev`, and #936's typed `plan_op_key_conflict` names the key it really derives |
+| C | `clara._confirm_tenancy_rent_plan_core` | 0353's body verbatim; `:tnplan` on the HUMAN branch, plus the closed lane set |
+| D | `clara._confirm_tenancy_rent_plan_revision_core` | 0353's body verbatim; the closed lane set |
+| E | `clara._obo_plan_core` | 0338's body verbatim; the closed kind set admits `recurring_journal` and stamps its entrance |
+| F | `clara._tenancy_plan_core` | **replaced**: its own client-status wall, then a call to §E |
+
+**§F is the fold 0353's follow-up 1 asked for.** `clara._tenancy_plan_core` was a third snapshot of
+the on-behalf-of plan-creation step, beside `clara._obo_plan_core`
+([0338](migrations/0338_prepayment_close_standing_instruction.sql)) and `clara._accrual_plan_core`
+([0331](migrations/0331_accrual_plan_authority_wall.sql)). The estate paid for that duplication
+twice: ADV-L08-01 found a client-status wall its siblings carried and it did not, and the sweep
+wave's integration merge had to fold its hand-copied authority wall onto
+`clara._assert_plan_authority`. It is now a caller, the shape `clara._prepayment_plan_core` has had
+since #941.
+
+**The one wall that stays where it is.** ADV-L08-01's client-status check remains in
+`clara._tenancy_plan_core`, ABOVE the delegation, because it is the **tenancy lane's** and not the
+shared body's: the prepayment and deferred-revenue on-behalf-of lanes do not carry it (measured on
+the live catalog), and moving it into `clara._obo_plan_core` would refuse acts they admit today.
+Keeping it above the delegation keeps its position in the ladder unchanged, which is what its own
+fix round measured — an archived client with no terms recorded is still answered `terms_incomplete`
+by both entrances, and a confirmation the person already made still replays after the client is
+archived. `p1150.obo.fold_parity` drives both, and `p1137.obo.refusals_match` (0353's own) is green
+unchanged.
+
+**One difference, disclosed rather than left to be found.** `clara._obo_plan_core` answers
+`authority_kind = 'standing_instruction'` with its own arm (0338 §E) where `clara._tenancy_plan_core`
+sent every kind to `clara._assert_plan_authority`, which refuses that kind `invalid_authority_kind`.
+No caller can reach the difference: `clara._confirm_tenancy_rent_plan_core` passes the literal
+`'explicit_instruction'`, the body is ungranted (`clara_fn_owner` only) and nothing else calls it.
+
+**The closed lane set** (ADV-L08-05, declined in the sweep wave's lane L8 because the cores were not
+then being rewritten). `p_lane` is a `text` argument of both tenancy confirmation cores. In the
+confirmation core it chooses the plan step and the branch tests for `obo`, so an unknown lane took
+the JWT path and failed closed on CLR04. In the **revision** core there is no lane branch at all —
+`p_lane` decides only the `via` its audit row carries — so an unknown lane stamped the HUMAN `via`
+on an act no person took. Both now refuse `CLR10 invalid_lane` in their first statement, above the
+op-key wall, because an unknown lane is a programming error in the estate's own code rather than a
+caller's mistake.
+
+**What this file does NOT do.** It does not type `clara._reserve_op`'s reuse raise (every governed
+door rides that primitive; #1077's follow-up 2 owns it). It reads, moves and deletes no
+`clara.op_receipts` row. It mints no name, so it owes `tests/rig-meta.mjs` no cohort entry, and it
+mints no database role. And it leaves the **within-lane** sharing 0336 also left standing:
+`clara._prepayment_schedule_core` and `clara.replace_prepayment_schedule` both derive `:plan`, and
+`clara._revenue_recognition_core` and `clara.replace_revenue_recognition_schedule` both derive
+`:rrplan`, so one key spent on a lane's create door and again on its replace door still collides
+inside that lane. That is one lane's own namespace rather than two lanes sharing one, which is the
+partition 0336 chose and this file follows; it is recorded as a follow-up rather than swept in.
+
+**The census is the guard.** `p1150.namespace.census`
+(`tests/plan-reservation-namespace.test.mjs`) discovers every `p_op_key || ':x'` derivation in the
+`clara` schema, works out which call encloses it, keeps the ones handed to a plan door — dropping
+`:approve`, `:match`, `:settle`, `:post`, `:draft`, `:resolve`, `:assess`,
+`:add_client_identifier` and `:file_document_write`, which belong to the bank, payroll, fixed-asset
+and document families — and asserts the partition. No roster of bodies is written down anywhere;
+the only hand-written thing is which lane each suffix belongs to.

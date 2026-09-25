@@ -18,7 +18,6 @@ import assert from "node:assert/strict";
 import {
   rootQuery, humanQuery, roleQuery, namedCall, upsertAccount, createClient, ROLES,
 } from "./rig-fixtures.mjs";
-import { opk } from "./rig-helpers.mjs";
 import { prepaymentScene, createPrepaymentSchedule } from "./prepayment-schedule-fixtures.mjs";
 import { freshAccrualClient, accrual, createAccrualAdjustment } from "./accrual-adjustments-fixtures.mjs";
 import { correctAccrualAdjustment } from "./accrual-correction-fixtures.mjs";
@@ -315,7 +314,7 @@ export async function accrualLaneIn(scene, tag) {
 
 /** A tenancy of the scene's firm, read through #948's OWN lane — the router, the claim and the
  *  persist door — so every term is a term the landed lane banked. Nothing is hand-inserted. */
-export async function tenancyLaneIn(scene, tag) {
+export async function tenancyLaneIn(scene, tag, { recordTerms = true } = {}) {
   const client = await createClient(scene.alice, {
     name: `p1150-ten-${tag}-${Date.now()}`, opKey: opk1150(`ten-client-${tag}`) });
   for (const a of TENANCY_CHART) {
@@ -362,14 +361,33 @@ export async function tenancyLaneIn(scene, tag) {
     `mandatory setup: the tenancy read settled (got ${JSON.stringify(receipt)})`);
 
   // THE TERMS A PERSON RECORDED, verbatim off what Clara proposed — the confirmation's own premise.
-  const proposal = (await humanQuery(scene.alice,
-    namedCall("propose_contract_terms", [{ name: "p_document" }]), [doc.documentId])).rows[0].result;
-  await humanQuery(scene.alice,
-    namedCall("record_contract_terms", [
-      { name: "p_client" }, { name: "p_document" }, { name: "p_terms" }, { name: "p_op_key" }]),
-    [client, doc.documentId, JSON.stringify(proposal.proposed.map((p) => ({ ...p }))),
-      opk1150("terms")]);
+  // `recordTerms: false` leaves the tenancy with nothing recorded at all, which is the shape the
+  // DRAFT wall is measured on: it sits above the plan step on BOTH lanes.
+  if (recordTerms) {
+    const proposal = (await humanQuery(scene.alice,
+      namedCall("propose_contract_terms", [{ name: "p_document" }]), [doc.documentId])).rows[0].result;
+    await humanQuery(scene.alice,
+      namedCall("record_contract_terms", [
+        { name: "p_client" }, { name: "p_document" }, { name: "p_terms" }, { name: "p_op_key" }]),
+      [client, doc.documentId, JSON.stringify(proposal.proposed.map((p) => ({ ...p }))),
+        opk1150("terms")]);
+  }
   return { client, document: doc.documentId };
+}
+
+/** `clara._obo_plan_core`, called directly. Its closed KIND set is reachable from no door — all
+ *  three callers pass a literal — so, like the lane set, it is driven at the body the ticket
+ *  names. Ungranted, so the rig's superuser connection is the only caller that can reach it. */
+export async function callOboPlanCore({ kind, firm, client, author, authorityRef, from, to, basis: b }) {
+  const r = await rootQuery(
+    `select clara._obo_plan_core(
+       p_kind => $1::text, p_firm => $2::uuid, p_client => $3::uuid, p_author => $4::uuid,
+       p_purpose => 'p1150 kind probe', p_authority_kind => 'explicit_instruction',
+       p_authority_ref => $5::jsonb, p_frequency => 'monthly', p_day_rule => 'day_of_month',
+       p_day_of_month => 1, p_timezone => 'Asia/Kuala_Lumpur', p_effective_from => $6::date,
+       p_effective_to => $7::date, p_basis => $8::jsonb) as result`,
+    [kind, firm, client, author, JSON.stringify(authorityRef), from, to, JSON.stringify(b)]);
+  return r.rows[0].result;
 }
 
 // ===========================================================================================
@@ -494,4 +512,7 @@ export async function planCreateAudit(planId) {
   return r.rows[0] ?? null;
 }
 
+export { setClientStatus } from "./accounting-plans-fixtures.mjs";
+export { createPrepaymentScheduleFor } from "./prepayment-schedule-obo-fixtures.mjs";
+export { basis };
 export { createPrepaymentSchedule, createAccrualAdjustment, correctAccrualAdjustment, accrual, randomUUID, assert };

@@ -798,141 +798,25 @@ test("p1137.obo.refusals_match — every shared refusal answers the SAME sqlstat
   assert.equal(foreign.message, "client is not in your firm");
 });
 
-// #1137 [fix round, ADV-L08-02] THE STANDING GUARD OVER THE PLAN STEP. ADV-L08-01 was a rule the
-// human lane's plan step carried and the OBO lane's copy did not, and the report that shipped it
-// said the refusals matched. A comment cannot stop that happening again; a cell can. Until
-// clara._obo_plan_core absorbs `recurring_journal` and this body becomes a two-line caller of it
-// (README section 0353, follow-up 1, sequenced after #1051 and #1080), the two bodies are compared
-// HERE, every run, in the ONE direction that failed: a refusal the HUMAN plan step raises must
-// either be raised by the OBO plan step too, or be on a named roster that says why it cannot be
-// reached.
-const PLAN_DOOR =
-  "clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)";
-const OBO_PLAN_STEP =
-  "clara._tenancy_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)";
-
-/** Why a refusal clara.create_accounting_plan raises is NOT in the OBO lane's plan step. Every
- *  entry is a wall taken ABOVE this step on BOTH lanes, or an argument this step does not take.
- *  A stale entry -- a token the human door no longer raises -- is a red here too, so the roster
- *  cannot quietly outlive its reason. */
-const PLAN_STEP_NOT_REACHED = {
-  client_not_found:
-    "clara._confirm_tenancy_rent_plan_core walls the client to the caller's firm above BOTH lanes "
-    + "(CLR11 'client is not in your firm'), so neither plan step can be entered with a client "
-    + "outside it -- driven in p1137.obo.refusals_match case 9 and p1137.obo.authority",
-  invalid_op_key:
-    "this step takes no op key of its own: the confirmation's own key covers the whole act and is "
-    + "checked FIRST on both entrances -- driven in p1137.obo.authority case 1",
-  operation_in_flight:
-    "clara.create_accounting_plan's own reservation under `<key>:plan`; the OBO step takes no "
-    + "reservation at all, and the outer clara._reserve_op on the confirmation's key sits above "
-    + "both lanes -- driven in p1137.obo.one_op_key_namespace",
-  plan_kind_unsupported:
-    "the kind is the literal 'recurring_journal' in this step, never an argument",
-};
-
-const REASON_TOKENS = /(?:"reason"\s*:\s*"([a-z_]+)")|(?:'reason'\s*,\s*'([a-z_]+)')/g;
-const reasonsOf = (src) => {
-  const out = new Set();
-  for (const m of src.matchAll(REASON_TOKENS)) out.add(m[1] ?? m[2]);
-  return out;
-};
-const bodyOf = async (sig) => {
-  const r = await rootQuery("select p.prosrc from pg_proc p where p.oid = to_regprocedure($1)", [sig]);
-  assert.ok(r.rows[0]?.prosrc, `${sig} is absent`);
-  return r.rows[0].prosrc;
-};
-
-test("p1137.obo.plan_step_parity -- every refusal the HUMAN plan step raises is either raised by "
-  + "the OBO plan step or named as unreachable; and the client-status wall sits at that door's own "
-  + "position, not above the walls that precede it", async (t) => {
-  if (unready(t)) return;
-
-  // 1 -- THE CENSUS. Structural by necessity: the point is to catch a wall added to
-  //      clara.create_accounting_plan by a LATER lane, which no behavioural cell written today can
-  //      drive. (WORK-ORDER rule 4: a catalog census is this repo's own documented shape for that.)
-  const human = reasonsOf(await bodyOf(PLAN_DOOR));
-  const obo = reasonsOf(await bodyOf(OBO_PLAN_STEP));
-  assert.ok(human.size > 0, "clara.create_accounting_plan raises no typed refusal at all");
-  const unguarded = [...human].filter((r) => !obo.has(r) && !(r in PLAN_STEP_NOT_REACHED)).sort();
-  assert.deepEqual(unguarded, [],
-    `clara.create_accounting_plan refuses ${unguarded.join(", ")} and the OBO lane's plan step does `
-    + "not -- either copy the wall into clara._tenancy_plan_core or add it to PLAN_STEP_NOT_REACHED "
-    + "with the reason it cannot be reached (ADV-L08-01 was exactly this, for client_inactive)");
-  const stale = Object.keys(PLAN_STEP_NOT_REACHED).filter((r) => !human.has(r)).sort();
-  assert.deepEqual(stale, [],
-    `PLAN_STEP_NOT_REACHED still excuses ${stale.join(", ")}, which clara.create_accounting_plan no `
-    + "longer raises -- the roster has outlived its reason");
-  assert.ok(obo.has("client_inactive"),
-    "the OBO lane's plan step has lost the client-status wall ADV-L08-01 put there");
-
-  // 2 -- ...AND THE SHARED AUTHORITY RESOLUTION, whose refusal token is a VARIABLE and so invisible
-  //      to the census above: both bodies must still resolve the cited instruction through #977's
-  //      ONE definition rather than merely checking its shape.
-  //
-  //      RECUT AT INTEGRATION (riders sweep wave, L1's 0330 against this lane). This asked both
-  //      bodies to NAME clara._authority_ref_refusal. That is how the plan door reached it before
-  //      #1051; after 0330 the door reaches it through the shared clara._assert_plan_authority and
-  //      names it nowhere, and 0353's own plan step was recut at integration to do the same,
-  //      because #1051's census refuses any body that both calls the predicate and keeps a copy of
-  //      the wall. So the REACH is what this cell follows, measured off the catalog rather than
-  //      pinned: the shared predicate where it is live, the definition itself where it is not.
-  //      The claim is unchanged and is now stronger, because both bodies must reach the SAME hop.
-  const planWallLive = (await rootQuery(
-    "select to_regprocedure('clara._assert_plan_authority(text,jsonb,uuid,uuid)') is not null as ok"))
-    .rows[0].ok;
-  const reach = planWallLive
-    ? /clara\._assert_plan_authority\(/
-    : /clara\._authority_ref_refusal\(/;
-  for (const sig of [PLAN_DOOR, OBO_PLAN_STEP]) {
-    assert.match(await bodyOf(sig), reach,
-      `${sig} no longer resolves its authority through ${planWallLive
-        ? "clara._assert_plan_authority (#1051, 0330), the one wall both plan doors share"
-        : "clara._authority_ref_refusal (#977, 0250)"}`);
-  }
-  if (planWallLive) {
-    // ...and the predicate is itself a reader of the one definition, so the hop is a fold and not
-    // a second copy. The same two-step #977's own battery makes.
-    assert.match(
-      await bodyOf("clara._assert_plan_authority(text,jsonb,uuid,uuid)"),
-      /clara\._authority_ref_refusal\(/,
-      "#1051's shared plan wall does not resolve through clara._authority_ref_refusal");
-  }
-
-  // 3 -- THE POSITION, driven rather than read. The wall belongs where
-  //      clara.create_accounting_plan has it -- inside the plan step -- and NOT at the OBO
-  //      entrance: a tenancy with nothing recorded is answered by the DRAFT wall on the human lane,
-  //      so the twin must answer that too rather than reporting the client's status first.
-  const bare = await tenancyFor(ALICE(), { framework: "MPERS" });   // no terms recorded at all
-  await setClientStatus(bare.client, "archived");
-  const hBare = await caught(() => confirmPlan(BOB(), { client: bare.client, document: bare.doc.documentId }));
-  const oBare = await caught(() => confirmFor({ client: bare.client, author: BOB(), document: bare.doc.documentId }));
-  assert.ok(hBare && oBare, "one of the two entrances admitted an archived client with no terms");
-  assert.equal(detailOf(hBare).reason, "terms_incomplete",
-    "the human door no longer answers the draft wall first -- this cell's premise moved");
-  assert.equal(oBare.code, hBare.code);
-  assert.equal(oBare.message, hBare.message);
-  assert.deepEqual(detailOf(oBare), detailOf(hBare),
-    "the OBO twin reports the client's status where the human door reports the missing terms");
-
-  // 4 -- ...AND THE REPLAY. The status wall sits BELOW clara._reserve_op on both lanes, so a
-  //      confirmation a person already made replays to its stored receipt even after the client has
-  //      been archived. An entrance-level copy of the wall would refuse the replay instead.
-  for (const [label, confirm] of [
-    ["human", (scene, opKey) => confirmPlan(BOB(), { client: scene.client, document: scene.doc.documentId, opKey })],
-    ["obo", (scene, opKey) => confirmFor({ client: scene.client, author: BOB(), document: scene.doc.documentId, opKey })],
-  ]) {
-    const scene = await tenancyFor(ALICE(), { framework: "MPERS" });
-    await recordProposed(ALICE(), scene.client, scene.doc.documentId);
-    const key = opk1137(`replay-${label}`);
-    const first = await confirm(scene, key);
-    await setClientStatus(scene.client, "archived");
-    const again = await confirm(scene, key);
-    assert.deepEqual(again, first,
-      `${label}: replaying a confirmation the person already made stopped returning its receipt `
-      + "once the client was archived");
-  }
-});
+// #1137 [fix round, ADV-L08-02] THE STANDING GUARD OVER THE PLAN STEP -- MOVED BY #1150 [0364].
+//
+// This is where `p1137.obo.plan_step_parity` stood: a census that every refusal
+// `clara.create_accounting_plan` raises is either raised by the on-behalf-of lane's plan step too
+// or named as unreachable, plus three arms driving the client-status wall's POSITION and the
+// REPLAY through it. It named `clara._tenancy_plan_core` as that step.
+//
+// 0364 (#1150) folds `clara._tenancy_plan_core` into `clara._obo_plan_core`: the tenancy step is
+// now a thin delegate carrying only ADV-L08-01's own client-status wall, so a census aimed at it
+// alone would read three refusal tokens where there are eight. The claim did NOT stop being worth
+// making -- the human entrance still reaches 0193's door and the machine entrance still reaches a
+// different body, which is the gap ADV-L08-01 fell into -- so the cell moved rather than dying:
+//
+//   * the census, re-aimed at the TWO bodies that now hold the on-behalf-of plan step, is
+//     `p1150.obo.wall_census` in tests/plan-reservation-namespace.test.mjs;
+//   * the wall's position, the draft-wall order and the replay-after-archive arms are
+//     `p1150.obo.fold_parity` in the same file, driven on both entrances exactly as here.
+//
+// `p1137.obo.refusals_match` above is untouched and is the fold's real regression proof.
 
 test("p1137.obo.authority — the named human's standing is re-checked LIVE, and a refusal leaks nothing and writes nothing", async (t) => {
   if (unready(t)) return;
