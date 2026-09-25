@@ -846,3 +846,109 @@ test("p1067.empty an advance application that states an allocation list and allo
   assert.equal(detail.field, "claim.advance_allocations");
   assert.equal(detail.constraint, "at_least_one");
 });
+
+test("p1067.tellapart the empty list, the list that does not add up and the claim that names no advance at all are THREE refusals a reader can tell apart", async (t) => {
+  if (await gateAlloc(t) || await gateEmpty(t)) return;
+  const client = await allocClient("emptytell");
+  // Two real advances, 40,000 and 30,000 sen, against the rig claim's 60,500 total.
+  const advA = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const advB = (await seedAdvance(ALICE(), BOB(), { client, cents: 30000, issueDate: "2026-02-01" })).advance;
+  const bare = () => claim({
+    settlement: SETTLEMENT.advance,
+    advanceAccountCode: SECHART.advance,
+    payableAccountCode: null,
+  });
+
+  // (1) THE LIST IS PRESENT AND ALLOCATES NOTHING. Before 0339 this was the refusal at (3): the
+  // submission said "here are my allocations: none" and was answered "name an advance".
+  const empty = bare();
+  empty.advance_allocations = [];
+  const one = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: empty }), "tellapart/empty");
+
+  // (2) THE LIST DOES NOT ADD UP: 40,000 + 20,000 = 60,000 against 60,500.
+  const short = bare();
+  short.advance_id = advA.id;
+  short.advance_allocations = [
+    { advance_id: advA.id, amount_cents: 40000 },
+    { advance_id: advB.id, amount_cents: 20000 },
+  ];
+  const two = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: short }), "tellapart/sum");
+
+  // (3) NO LIST AND NO ADVANCE AT ALL — 0301's own WD-R10 refusal, at its own field, unmoved.
+  const none = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: bare() }), "tellapart/none");
+
+  assert.deepEqual(
+    [one, two, none].map((r) => [r.detail.field, r.detail.constraint]),
+    [
+      ["claim.advance_allocations", "at_least_one"],
+      ["claim.advance_allocations", "exact_sum"],
+      ["claim.advance_id", "present"],
+    ],
+    "tellapart: one reason, three named constraints, two fields",
+  );
+  assert.equal(Number(two.detail.allocated_cents), 60000);
+  assert.equal(Number(two.detail.amount_cents), 60500);
+  assert.equal(one.detail.allocated_cents, undefined,
+    "tellapart: the empty-list refusal states no sum, because there is nothing to add up");
+});
+
+test("p1067.settlement an empty allocation list is refused on a REIMBURSEMENT and on an ALREADY-SETTLED claim too, because the rule is the key's own shape", async (t) => {
+  if (await gateAlloc(t) || await gateEmpty(t)) return;
+  const client = await allocClient("emptysettle");
+  // Neither settlement discharges anything, so neither may carry an allocation list at all —
+  // 0301 says so and refuses a NON-EMPTY one. An EMPTY one used to be ADMITTED, because the rule
+  // that refuses it is itself asked under `v_listed`: the key travelled, meant nothing, and the
+  // claim posted. Nothing about the claim's own accounting is wrong here, which is exactly why
+  // only a rule about the KEY catches it.
+  const reimbursement = claim({ settlement: SETTLEMENT.reimbursement });
+  reimbursement.advance_allocations = [];
+  const one = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: reimbursement }),
+    "settlement/reimbursement");
+
+  const settled = claim({ settlement: SETTLEMENT.settled, payableAccountCode: null });
+  settled.advance_allocations = [];
+  const two = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: settled }),
+    "settlement/already_settled");
+
+  for (const [label, r] of [["reimbursement", one], ["already_settled", two]]) {
+    assert.equal(r.detail.field, "claim.advance_allocations", `${label}: at the list's own field`);
+    assert.equal(r.detail.constraint, "at_least_one", `${label}: under the list's own new word`);
+  }
+});
+
+test("p1067.absent a claim carrying NO allocations key, and one carrying JSON null under it, are both still admitted and still read back as a ONE-element list", async (t) => {
+  if (await gateAlloc(t) || await gateEmpty(t)) return;
+  const client = await allocClient("emptyabsent");
+  // #1067 AC3: the single-advance shape every claim written before 0301 carries is untouched. The
+  // JSON-null arm is the boundary of the new rule rather than a feature: 0221's type rule admits
+  // `null` under this key as "absent" (it lists 'null' beside 'array'), and 0339 refuses an
+  // ARRAY of zero members, not an absent list. 200,000 sen outstanding carries both 60,500 claims.
+  const adv = (await seedAdvance(ALICE(), BOB(), { client, cents: 200000, issueDate: "2026-01-10" })).advance;
+  const bare = () => claim({
+    settlement: SETTLEMENT.advance,
+    advanceAccountCode: SECHART.advance,
+    advanceId: adv.id,
+    payableAccountCode: null,
+  });
+
+  const noKey = await admitStaffExpenseClaimWork({ client, author: ALICE(), claim: bare() });
+  const withNull = bare();
+  withNull.advance_allocations = null;
+  const jsonNull = await admitStaffExpenseClaimWork({ client, author: ALICE(), claim: withNull });
+
+  for (const [label, admitted] of [["no key", noKey], ["json null", jsonNull]]) {
+    const stored = await getStaffExpenseClaim(ALICE(), admitted.claim_id);
+    assert.deepEqual(
+      stored.advance_allocations.map((x) => [x.advance_id, Number(x.amount_cents)]),
+      [[adv.id, 60500]],
+      `${label}: the single-advance shape still stores its ONE-element confirmed list`,
+    );
+    assert.equal((await claimRow(admitted.claim_id)).advance_id, adv.id,
+      `${label}: …and the claim row's own advance is that head`);
+  }
+});

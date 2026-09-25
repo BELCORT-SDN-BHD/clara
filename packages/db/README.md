@@ -7318,3 +7318,13 @@ only the recut pin; the ten non-regression pins are checked on both branches. Th
 branch ran through `pnpm db:migrate` (`#1067 prestate: clean (FIRST apply)`), and was additionally
 re-proved by hand inside a rolled-back transaction with 0301's own body restored, so the sha branch
 the redo can never take was seen to pass on its own.
+
+**The vacuity control.** With 0301's body put back on the lane database byte for byte (live sha
+`e439346cbf68a267b143aa2fe03c5285acd7eed3f769b0c0c6a0c31c38aae04a`), the three behaviour cells fail
+and the AC3 pin stays green: `p1067.empty` and `p1067.settlement` report "the call SUCCEEDED (no
+error)", and `p1067.tellapart` reports the empty list answering `claim.advance_id` / `present` —
+byte-identical to the claim that named no advance at all, which is the conflation AC2 names. The
+recut was then restored through the supported redo mode
+(`CLARA_MIGRATION_REDO=0339_staff_expense_claim_empty_allocation`), post-image sha
+`5c55fc8d860bc74c4fd721a81442b4ea19ed66240ef3d20386efd53e2a2cd294`, and a second redo over that
+post-image exercised the prestate's REDO branch (`clean (REDO apply)`).
