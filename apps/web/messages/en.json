@@ -1789,7 +1789,8 @@
     },
     "origin": {
       "label": "Staff expense claim",
-      "value": "{claimant} \u00b7 {settlement}"
+      "value": "{claimant} \u00b7 {settlement}",
+      "allocationCount": "settles {count, plural, one {# advance} other {# advances}}"
     },
     "history": {
       "heading": "Staff expense claims",
