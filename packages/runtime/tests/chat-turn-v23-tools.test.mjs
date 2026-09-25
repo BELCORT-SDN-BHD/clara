@@ -326,6 +326,20 @@ test("v23.roster: every tool name reaches the map from the module that DECLARES 
   // and the names are the DECLARED constants rather than string literals in the map
   assert.match(src, /\[READ_PAYROLL_POSTING_STATE_TOOL\]: tool\(\{/);
   assert.match(src, /\[CONFIRM_TENANCY_RENT_PLAN_REVISION_TOOL\]: tool\(\{/);
+  // …and every declared constant is a key the built map actually carries, so a rename in either
+  // declaring module cannot leave the roster naming a tool the model is never handed.
+  const built = Object.keys(v23Tools.buildToolsV23(CTX, MODEL, 0));
+  for (const name of [
+    v23Reads.READ_PAYROLL_POSTING_STATE_TOOL,
+    v23Reads.READ_PAYROLL_SETTLEMENT_STATE_TOOL,
+    v23Reads.READ_AGREEMENT_TERMS_TOOL,
+    v23Tenancy.READ_TENANCY_TERMS_TOOL,
+    v23Tenancy.READ_RENT_SETTLEMENT_CANDIDATES_TOOL,
+    v23Tenancy.CONFIRM_TENANCY_RENT_PLAN_TOOL,
+    v23Tenancy.CONFIRM_TENANCY_RENT_PLAN_REVISION_TOOL,
+  ]) {
+    assert.ok(built.includes(name), `${name} is declared and handed to the model`);
+  }
 });
 
 // ---------------------------------------------------------------------------
