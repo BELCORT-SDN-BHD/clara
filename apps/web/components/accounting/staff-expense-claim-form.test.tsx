@@ -777,6 +777,86 @@ test("ticket 931 deleting a line of a CONFIRMED split never restates the survivi
 });
 
 // ---------------------------------------------------------------------------------------------
+// #1068 — EMPTYING THE LIST DOWN TO NOTHING (the row's own "×", the one act ticket 931's own
+// editor allows and never floors at one) used to leave `validateClaimDraft`'s synthesised
+// "advance required" issue addressed to field id "advanceId" with nothing in the DOM carrying it:
+// the empty state rendered only an "Add allocation" button, unaddressed. A refusal that focuses
+// nothing is a refusal a preparer has to hunt for (this file's own header, seven things).
+// ---------------------------------------------------------------------------------------------
+
+test("ticket 1068 emptying the whole allocation list and submitting focuses a REAL, visible control", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");   // one item, RM 480.00, claimant 1190 — one open row
+
+  let calls = 0;
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => staffAdvanceSummary([advanceRow({})]),
+    submit: async () => { calls += 1; return { kind: "denied" }; },
+  }));
+  try {
+    await h.settle();
+    const removeLabel = messages.StaffAdvances.allocationsEditor.removeAllocation;
+    const removes = findAll(h.container, (n) => attrOf(n, "aria-label") === removeLabel);
+    assert.equal(removes.length, 1, "the one row has its own remove button, like every row");
+    await h.fireEvent(removes[0]!, "click");
+    await h.settle();
+
+    // THE LIST IS NOW EMPTY: no <select> named "advanceId" is on the page any more.
+    assert.equal(h.find((n) => attrOf(n, "id") === F("advanceId") && n.tagName === "SELECT"), null,
+      "the row-0 chooser is gone — this is the state the ticket names");
+
+    await submitForm(h);
+    assert.equal(calls, 0, "nothing is sent while no advance is named");
+    assert.match(h.text(), new RegExp(messages.StaffExpenseClaim.issues.advanceRequired),
+      "the error text is still shown — this form never went silent about WHY it refused");
+
+    const focused = focusedId();
+    assert.equal(focused, F("advanceId"),
+      "the field id validateClaimDraft addresses still takes focus, even with the row gone");
+    const node = h.find((n) => attrOf(n, "id") === focused);
+    assert.ok(node, "…and that id now names a REAL, rendered node, not a stale one");
+    assert.equal(node.tagName, "BUTTON", "…specifically the list's own add-a-row affordance");
+    assert.equal(attrOf(node, "disabled"), null, "…which is enabled, so the focus actually lands");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1068 the SAME empty-list focus holds when the claim never had an open advance to begin with", async () => {
+  // A claimant who removes their one open advance's row is one path to empty; a claimant who
+  // starts the arm with NO open advances at all (the sibling test above this ticket's block,
+  // "a claimant with NO open advance…") is answered by the placeholder-only chooser staying in the
+  // DOM — that case already passes. This cell is the OTHER way an empty list is reached: no
+  // candidates AND the row removed, so both empty-state affordances (the "no outstanding" line and
+  // the add button) are what the page actually offers.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => staffAdvanceSummary([]),
+    submit: async () => ({ kind: "denied" }),
+  }));
+  try {
+    await h.settle();
+    const removeLabel = messages.StaffAdvances.allocationsEditor.removeAllocation;
+    const remove = h.find((n) => attrOf(n, "aria-label") === removeLabel);
+    assert.ok(remove, "even a chooser with nothing to pick still has its own row and remove button");
+    await h.fireEvent(remove, "click");
+    await h.settle();
+
+    await submitForm(h);
+    const focused = focusedId();
+    assert.equal(focused, F("advanceId"));
+    const node = h.find((n) => attrOf(n, "id") === focused);
+    assert.ok(node, "focus still lands on a real node with nothing outstanding to offer either");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
 // #1052 — WHICH ENROLMENT AN OFFERED ADVANCE CAME FROM. The owner's ruling of 2026-09-24 on #931
 // admits an advance that is the claimant's by LABEL rather than by their own enrolment, on the
 // condition that "the allocation editor shows, beside each such advance, the enrolment it came
