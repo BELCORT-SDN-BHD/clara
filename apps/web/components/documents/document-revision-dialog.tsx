@@ -59,6 +59,37 @@ export function isRevisableFieldPath(path: string | null): path is string {
   return path !== null && REVISABLE_FIELD_PATHS.includes(path);
 }
 
+/** #1056 — the PAYROLL lane's closed set. It is `clara._revisable_payroll_run_field`'s eleven
+ *  run-level questions (migration 0344), re-stated here for the same one purpose the invoice list
+ *  above serves: deciding which rows get a control. Nothing below the run level, because nothing
+ *  below the run level is ever persisted — `clara.persist_payroll_facts` sums the per-employee
+ *  quotes and discards them, so there is no region to revise and no prior value to replace. */
+export const REVISABLE_PAYROLL_RUN_PATHS: readonly string[] = [
+  "payroll.run.period", "payroll.run.gross_pay",
+  "payroll.run.epf_employee", "payroll.run.epf_employer",
+  "payroll.run.socso_employee", "payroll.run.socso_employer",
+  "payroll.run.eis_employee", "payroll.run.eis_employer",
+  "payroll.run.pcb", "payroll.run.hrdf_levy", "payroll.run.net_pay",
+];
+
+export type RevisableFactLane = "invoice" | "payroll";
+
+/** #1056 — which fact chain a revision of this path would land in, mirroring
+ *  `clara._revisable_fact_lane` (migration 0344). `null` means no chain in the estate can carry
+ *  it, which is the door's `field_path_not_revisable`.
+ *
+ *  THE LANE IS NOT COSMETIC HERE. A revision QUOTES a source version and the door refuses CLR19
+ *  when it has moved, and the two chains are counted separately: a payroll summary carries no
+ *  invoice reading at all, so `facts_version` reads 0 on it. A control that quoted the wrong
+ *  chain's number would refuse every single time. The DB is still the arbiter — this mirror never
+ *  suppresses a refusal and never admits a write. */
+export function revisableFactLane(path: string | null): RevisableFactLane | null {
+  if (path === null) return null;
+  if (REVISABLE_FIELD_PATHS.includes(path)) return "invoice";
+  if (REVISABLE_PAYROLL_RUN_PATHS.includes(path)) return "payroll";
+  return null;
+}
+
 type StaleFace = { attempted: string; observed: number; current: number };
 
 export function DocumentRevisionDialog({
