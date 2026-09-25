@@ -128,7 +128,17 @@ test("G5(b): prosrc asserts — pack v4 keys carried + wiki LAST, queue CoR keys
   assert.ok(pack.includes("sst_registration_watch"), "v3 key CARRIED: sst_registration_watch");
   assert.ok(pack.includes("surface_and_request_professional_review_only"), "v3 key CARRIED: the framing literal");
   assert.ok(pack.indexOf("'wiki'") > pack.indexOf("sst_registration_watch"), "the wiki block is APPENDED LAST");
-  const queue = await fnSource("list_review_queue");
+  // THE QUEUE'S CONTENT OF RECORD MOVED ONCE, AND ONLY ONCE. #1136's 0352 splits the read into an
+  // ungranted core that takes the caller's firm as an argument plus two thin audited wrappers (the
+  // human door and the model lane's clara.wake_list_review_queue), so from that migration on the
+  // three markers this cell greps live in `_list_review_queue_core` rather than in the door. 0352's
+  // own §TAIL proves the move is byte-for-byte by reversing its three anchored edits and hashing
+  // back to the door's pre-split body; this cell keeps asserting the markers wherever the
+  // computation actually is, which is the claim it has always been making.
+  const queueSplit = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["agent_read_twins_payroll_agreement$"])).rows[0].n > 0;
+  const queue = await fnSource(queueSplit ? "_list_review_queue_core" : "list_review_queue");
   assert.ok(queue.includes("lint_finding"), "queue CoR: the lint_rows CTE");
   assert.ok(queue.includes("finding_id"), "queue CoR: the null-defaulted finding_id column");
   assert.ok(/status\s*=\s*'active'/.test(queue), "queue CoR: the WB-R1 guard predicate");
