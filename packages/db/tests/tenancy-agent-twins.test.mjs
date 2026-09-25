@@ -1242,3 +1242,43 @@ test("p1137.reads.read_only — all six model-lane reads answer inside a READ ON
   assert.equal(after.ops, before.ops, "a model-lane read wrote an operation receipt");
   assert.equal(after.aud, before.aud, "a model-lane read wrote an audit row");
 });
+
+test("p1137.reads.model_lane_floor — the model lane is never wider than the human door: a below-bookkeeper credential cannot be minted at all, and a standing one goes inert the moment the person's membership does", async (t) => {
+  if (unready(t)) return;
+  const { client, doc } = await tenancyFor(ALICE(), { framework: "MPERS" });
+  await recordProposed(ALICE(), client, doc.documentId);
+
+  // 1 — CAROL is a VIEWER of firm A, and the four document reads are viewer-floored in the HUMAN
+  //     lane: she reads them herself. She cannot be the person a chat credential acts for, because
+  //     clara.mint_wake_credential refuses a below-bookkeeper on_behalf_of outright. So on those
+  //     four doors the model lane is STRICTLY NARROWER than the human door — which is the claim
+  //     0353's header makes, driven here rather than argued.
+  assert.ok(await humanRead("get_contract_terms", CAROL(), doc.documentId),
+    "mandatory setup: the viewer reads the human door");
+  const refused = await caught(() => chatCredential(FIRM_A(), CAROL()));
+  assert.ok(refused, "a credential was minted on behalf of a viewer");
+  assert.equal(refused.code, "CLR10");
+  assert.equal(detailOf(refused).reason, "authority_lost");
+
+  // 2 — AND A STANDING CREDENTIAL IS RE-VALIDATED ON EVERY USE. Bob's credential works; his
+  //     membership is then withdrawn through the estate's own door; the SAME secret goes inert
+  //     mid-conversation rather than outliving his authority.
+  const { secret } = await chatCredential();
+  assert.ok(await wakeRead("wake_get_contract_terms", secret, doc.documentId),
+    "mandatory setup: the bookkeeper's own credential reads");
+  await deactivateMember(ALICE(), { firm: FIRM_A(), user: BOB() });
+  try {
+    await assertRaises("CLR03", () => wakeRead("wake_get_contract_terms", secret, doc.documentId),
+      "a credential whose person has left the firm");
+    await assertRaises("CLR03", () => wakeRead("wake_get_rent_settlement_candidates", secret, client, CLIENT_SPECS),
+      "…on the client-scoped reads too");
+  } finally {
+    await reactivateMember({ firm: FIRM_A(), user: BOB() });
+  }
+  // The positive control is a FRESH credential, not the old secret: clara.remove_member revokes a
+  // departing person's outstanding credentials outright, which is a second wall and not this cell's
+  // subject. What this proves is that nothing but the person's standing was ever being measured.
+  const back = await chatCredential();
+  assert.ok(await wakeRead("wake_get_contract_terms", back.secret, doc.documentId),
+    "…and the lane reads again once the membership is back");
+});
