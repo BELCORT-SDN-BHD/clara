@@ -616,6 +616,10 @@ _Avoid_: Rollback points as a substitute for it; "nothing looked busy" as a drai
 An image's own declaration that it understands what one door RETURNS after a migration changed it — carried as a literal in the built artifact, so a rollback decision is a measurement of the target image rather than a list of image tags somebody keeps by hand. A marker names behaviour that exists in the image, not a build date: the marker and the code that handles the new answer stand or fall together. The rule that a given marker is REQUIRED lives with the migration frontier, not with the image, because an image built before the rule existed carries neither and that is precisely the state the rule has to detect.
 _Avoid_: A version number, a build sha or an image tag as a substitute; a marker for a change an older image reads correctly; a marker kept after the behaviour it names was removed.
 
+**Declared ahead of its rule**:
+The legal, temporary state of a runtime contract marker that a build carries before the migration frontier requires it — the roster entry exists, but no rollback yet refuses an image for lacking it. A marker left in that state is not itself a defect, but a roster entry nobody ever adds the rule for is a silent gap, so the state must be named explicitly (an id listed as an exception) rather than left to be inferred from the rule table's silence.
+_Avoid_: Treating an un-ruled marker as forgotten without checking the exception list; treating the exception list as proof the rule was considered and rejected rather than merely not yet written.
+
 **Operation receipt**:
 The record that one logical operation identity committed its business effect: which run and bundle produced it, which human authority it acted for, and which objects it created. At most one committed receipt exists per logical operation identity; a replay returns it and a changed payload under that identity is refused.
 _Avoid_: A chat message claiming completion; a task status; a second effect.

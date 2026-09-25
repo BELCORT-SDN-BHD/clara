@@ -852,6 +852,17 @@ Adding a rule is one row in `FRONTIER_RULES`, and adding a marker is one entry i
 instead of lying to a preflight, and `tests/rollback-preflight.test.mjs` fails any rule that names
 a migration the chain does not contain.
 
+The two rosters can drift apart in one direction with nothing catching it: a marker can be minted
+in `RUNTIME_CONTRACTS` before the migration that will require it lands a row in `FRONTIER_RULES` —
+deliberately legal, because a contract can ship ahead of the migration that makes reading it
+mandatory — but nothing reminded anyone a rule might still be owed, and a roster entry could sit
+forever with no rule ever added (#1129). `contractsMissingFrontierRule` (`lib/rollback-preflight.mjs`)
+is the guard: it names every `RUNTIME_CONTRACTS` entry with neither a `FRONTIER_RULES` row nor a
+listed exception in `CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE`, and
+`tests/rollback-preflight.test.mjs` fails by name the moment one exists. Today's roster is fully
+ruled, so the exception list is empty; adding a contract ahead of its rule on purpose means adding
+its id there, with a reason, not leaving the guard red.
+
 ### The release runbook's step 9, since #1035
 
 Every wave's release runbook has a **step 9 — rollback preflight demonstration, READ ONLY**. Before

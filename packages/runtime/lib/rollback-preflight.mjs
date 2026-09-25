@@ -228,6 +228,49 @@ export function frontierRuleViolations(frontierVersion, carried = {}, rules = FR
 }
 
 /**
+ * CONTRACT IDS THIS IMAGE DECLARES BEFORE THE MIGRATION THAT WILL REQUIRE THEM HAS A RULE — the
+ * deliberate, temporary state `lib/runtime-contracts.mjs`'s own rule 3 already allows: a contract
+ * can ship in `RUNTIME_CONTRACTS` before the migration that makes reading it mandatory lands a row
+ * in `FRONTIER_RULES`. Listing an id here is the record that the gap is INTENDED right now — an id
+ * that is neither ruled nor listed here is one `contractsMissingFrontierRule` (#1129) refuses to
+ * pass over in silence.
+ */
+export const CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE = Object.freeze([]);
+
+/**
+ * THE OTHER DIRECTION OF THE SAME TABLE (#1129, a follow-up from #1035's own report). Once the
+ * `FRONTIER_RULES` row lands, `frontierRuleViolations` catches it naming a contract this image
+ * never declares. Nothing before this caught the reverse: `RUNTIME_CONTRACTS` growing an entry
+ * whose migration NEVER gets a rule — legal on its own (an unruled contract refuses nobody, so it
+ * is not itself a defect), but silent, and a roster entry that was meant to get a rule eventually
+ * could sit forever with nothing reminding anyone it still owed one.
+ *
+ * A contract id comes back from this function when its roster entry has NEITHER a `FRONTIER_RULES`
+ * row naming it in `requiresContracts` NOR an entry in `exceptions`. The check does not require the
+ * SAME migration number on both sides — only that some rule, at some frontier, will eventually
+ * refuse an image that does not carry the marker; which migration a contract's rule lands at is the
+ * cutover's own choice, not a constraint this guard enforces.
+ *
+ * THIS MODULE DOES NOT IMPORT `RUNTIME_CONTRACTS` ITSELF, for the same boundary reason the rule
+ * table above keeps its ids bare rather than prefixed: `lib/rollback-preflight.mjs` ships inside the
+ * runtime bundle (`plugins/startWorld.ts` imports its boot census), and a roster this module pulled
+ * in on its own would ship there too, unused, rather than staying the caller's own choice of which
+ * roster to compare. The caller (a test, a lint step) passes `RUNTIME_CONTRACTS` in.
+ *
+ * @param {ReadonlyArray<{id:string}>} contracts the runtime-contract roster to check (typically
+ *        `RUNTIME_CONTRACTS` from `lib/runtime-contracts.mjs`)
+ * @param {ReadonlyArray<{requiresContracts?:ReadonlyArray<string>}>} [rules]
+ * @param {ReadonlyArray<string>} [exceptions]
+ * @returns {string[]} ids with neither a rule nor a listed exception, in roster order
+ */
+export function contractsMissingFrontierRule(contracts, rules = FRONTIER_RULES, exceptions = CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE) {
+  if (!Array.isArray(contracts)) throw new TypeError("contractsMissingFrontierRule needs a `contracts` array");
+  const ruled = new Set(rules.flatMap((r) => r.requiresContracts ?? []));
+  const excepted = new Set(exceptions);
+  return contracts.filter((c) => !ruled.has(c.id) && !excepted.has(c.id)).map((c) => c.id);
+}
+
+/**
  * ONE DESCRIPTION OF ONE VIOLATION — the reason it is refused under, the thing the applied schema
  * requires, the verb by which an image has it, and what the target does not do with it.
  *
