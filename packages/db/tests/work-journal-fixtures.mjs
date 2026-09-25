@@ -112,9 +112,17 @@ export const REASON = {
   closedPeriod: "write_into_closed_period",
 };
 
+// The estate keeps its errcode catalog in TWO places and this is the smaller one: the roster of
+// codes this battery and the lanes that re-export it assert on. `rig-helpers.mjs`'s own `CLR` is
+// the fuller list (CLR01-CLR12 plus #1114's CLR44) and the two must agree about what a code MEANS;
+// #1114's whole finding is that a code carrying two meanings is a code nothing can branch on.
 export const CLR = {
   wake: "CLR03", authz: "CLR04", balance: "CLR07", immutable: "CLR08",
   badRequest: "CLR10", notFound: "CLR11", conflict: "CLR13", period: "CLR19",
+  // #1114 [0335] — a caller-contract violation: a `clara_runtime`-only door handed a null its own
+  // caller's contract guarantees. Never rendered. SEPARATE from `badRequest` so a handler reading
+  // the code alone cannot swallow a real refusal or surface an internal fault.
+  callerContract: "CLR44",
 };
 
 /** The chart this battery posts against. Codes are distinct from `rig-fixtures`' own COA so a

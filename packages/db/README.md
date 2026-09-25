@@ -7263,3 +7263,99 @@ PARTIAL signal rather than guessing. Both branches were exercised on the lane da
 APPLY through `pnpm db:migrate` (with all four recut pins checked), and the REDO branch through
 `CLARA_MIGRATION_REDO=0318_knowledge_fye_pair_applicability` after the promotion door was put back
 at its pre-image for `kp.14`'s vacuity control.
+
+## 0335 — one errcode meant two things, and one of them was never meant to be seen (#1114, riders sweep wave, lane 02)
+
+`CLR10` is this estate's `bad-request`. [0002_foundation.sql](migrations/0002_foundation.sql) line
+42 says so in one line — "CLR10 bad-request · CLR11 not-found-in-your-firm" — and 5293 raises across
+the migration set have used it since, almost every one of them a refusal a surface is expected to
+render. Two families of raise did not belong in that set, and #1114 is the ticket that noticed:
+
+| raise | what it is | who sees it |
+|---|---|---|
+| `prepayment_source_unfit` / axis `prepaid_account_not_enrolled`, and its deferred-revenue twin `deferred_revenue_source_unfit` / `deferred_account_not_enrolled` | the roster said no. It carries `reason_text`, the account code, `remedy` = `clara.enrol_prepayment_account` and `panel` = `client_registers_prepayment_accounts` | a bookkeeper. `apps/web/lib/prepayments/schedule.ts:27` and `apps/web/lib/deferred-revenue/schedule.ts:16` already render it |
+| `invalid_author` on the two on-behalf-of twins; `prepayment_read_scope_required` and `revenue_recognition_read_scope_required` on the two machine-lane reads | a `clara_runtime`-only door was handed a null its own caller's contract guarantees | **nobody.** The wave-4 successor contracts say it in as many words: "an internal wiring error, never shown: the successor always has the actor" (`reports/wave4-lane04-ticket915.md:359`, and `:389` for the read), carried into `CUT-PLAN.md:210` and `:215` |
+
+Both raised `CLR10`, so a log line, a retry policy or a generic handler that branched on the code
+alone could swallow the first as an internal fault or surface the second as a refusal. That is the
+whole defect.
+
+### The new code, and why the move goes this way
+
+    CLR10  — a bad request a surface may render. Unchanged, everywhere.
+    CLR44  — a CALLER-CONTRACT VIOLATION. A clara_runtime-only door was handed a null its own
+             caller's contract guarantees. Never rendered; there is no sentence to show and no
+             remedy to offer.
+
+Moving the renderable half instead would have meant re-coding thousands of raises **and** would have
+left the never-shown half on `CLR10` beside them, so the ticket's own test — "any code path that
+branches on the error code first … cannot accidentally treat a real, actionable refusal as an
+internal error to be swallowed, or vice versa" — would still have failed. Moving the never-shown
+half is four raises and it PARTITIONS the two meanings. Nothing about a reason, an axis, a field or
+a sentence changed; only the SQLSTATE. The web is untouched, because both surfaces key on `reason`
+and `axis` and neither of the four moved refusals is reachable from a browser at all.
+
+### The audit (#1114 AC2), and its population
+
+There is **no errcode catalog file** in this estate. `CLR10`'s meaning lives in 0002's header
+comment and in this README's prose; the code-side catalogs are `packages/db/tests/rig-helpers.mjs`
+(`CLR01`–`CLR12`, now plus `callerContract`) and a smaller one in
+`packages/db/tests/work-journal-fixtures.mjs`. Both now carry `CLR44` with the same meaning, which
+is the "entry, or a correction, so each code carries one meaning" the ticket asks for.
+
+The audit was a grep of **every** `CLR10` raise in `packages/db/migrations`, read by reason token,
+cross-checked against the live catalog: 626 live `clara` bodies raise `CLR10`, under 468 distinct
+reason tokens. Against that population the question was not "is this refusal user-facing?" (almost
+all of them are) but "does the estate's own prose say this one is never shown?" Exactly two prose
+sites do, naming three tokens, and all three are moved here. `invalid_op_key` deliberately **stays**
+on `CLR10`: human doors all over the estate raise it for a person's own malformed call, so it is not
+a caller-contract class.
+
+**The rule for a future raise.** A refusal goes on `CLR44` only when the door is machine-lane only
+**and** the argument is one the calling program's own contract guarantees. Everything a person can
+cause stays on `CLR10`. `packages/db/tests/refusal-errcode-partition.test.mjs` holds the partition:
+`CLR44` is raised by exactly four bodies and carries exactly three reason tokens, so a fifth site or
+a fourth token fails by name rather than quietly re-creating the collision.
+
+### What 0335 recuts, and what it refuses to touch
+
+Four `create or replace function` statements — `clara.create_prepayment_schedule_for`,
+`clara.create_revenue_recognition_schedule_for`, `clara.read_prepayment_source_for` and
+`clara.read_revenue_recognition_source_for` — each VERBATIM from its live cut (0307 §D, 0308 §E2 and
+0317's two reads) except the one SQLSTATE and the comment that explains it. The tail re-measures each
+payload and sentence, so "byte-identical except the code" is asserted rather than promised.
+
+It does **not** touch `clara._prepayment_schedule_core` or `clara._revenue_recognition_core`. The
+renderable refusals live there and keep `CLR10`; both cores are pinned EXACTLY in the prestate and
+the tail asserts neither has learned `CLR44`. That leaves the two bodies the next ticket in this lane
+(#1077) recuts exactly as 0317 wrote them.
+
+It mints no function, no relation, no grant and no role. `create or replace function` preserves an
+ACL, and the tail re-measures all four: `clara_runtime` holds EXECUTE, and `clara_authenticated`,
+`clara_agent_ro`, both wake roles and PUBLIC hold none.
+
+**The prestate pins**, measured live on the lane database (`clara_l05`, 309 files, max
+`0318_knowledge_fye_pair_applicability`) rather than copied from an older header:
+
+| body | pre-image `sha256(prosrc)` |
+|---|---|
+| `clara.create_prepayment_schedule_for(uuid,uuid,uuid,text,text,text,jsonb,text)` | `230db25c762adb1283f5d96f9334f797cf5b30ef54b7a8395a39cf111770f98a` |
+| `clara.create_revenue_recognition_schedule_for(uuid,uuid,uuid,text,text,text,jsonb,text,text)` | `2344bc09dddbe5f38a324ad3ac2ef22ceb28b5940b4521b4421ae8ac73cfbe5e` |
+| `clara.read_prepayment_source_for(uuid,uuid,uuid)` | `6c7ed11e97a7001ee24eedf53d53d2b61cb0e2c9539ef040e22201b6a99e84c7` |
+| `clara.read_revenue_recognition_source_for(uuid,uuid,uuid)` | `9701ddda2a73f4f635ca32e356403ad27dd2aed91a1c0fbfbd4992b84ebc1753` |
+| `clara._prepayment_schedule_core(…)` — must NOT move | `87fc7e25d9e872e593d7c1c1e6fd6afb2a6373a25b868d711c62f99d73fef79a` |
+| `clara._revenue_recognition_core(…)` — must NOT move | `28bc14e93fc61863b76ae40a47fd30c1d40a30940a9c7997c38c1862a62290dd` |
+
+Each recut body admits exactly two pre-images of its own — its pinned sha, or a body already
+carrying this file's `0335` attribution — so a redo is admitted and real drift still refuses by name.
+The prestate also asserts `CLR44` is raised by nothing outside these four before the file runs, and
+that both roster refusals are in the cores rather than in a door.
+
+**Redo-safe by construction (#957).** Every statement is `create or replace function`. Both branches
+were exercised on the lane database: the FIRST APPLY through `pnpm db:migrate` (prestate reported
+`4 FIRST, 0 REDO`), and the REDO branch through `CLARA_MIGRATION_REDO=0335_internal_refusal_errcode`
+five times during the vertical-slice loop and the vacuity controls (`3 FIRST, 1 REDO` → `2 FIRST,
+2 REDO` → `1 FIRST, 3 REDO` → `0 FIRST, 4 REDO`, and twice more with a door or the core put back at
+its pre-image by hand). Every redo landed on the same checksum
+`439962ebd877cc5376dbda790fdf75d0b4f2fbee63f431863331924ffd063f11`, from BOTH pre-images, which is
+what "safe over its own effects" has to mean.
