@@ -465,14 +465,29 @@ alias looked like an integer, and `stripe_session_id` / `trace_id` / `run_id` �
 list is now a short closed list that
 `collation-pin-portability.test.mjs` re-measures against the live catalog.
 
-**The live proof.** `tests/collation-pin-portability.test.mjs` re-measures, on whatever server the
-suite runs on: it builds a comparator (the real glibc `en_US.UTF-8` where the OS has the locale,
-otherwise an ICU `ka-shifted` collation), makes it prove it reorders 0295's own pair, and then
-orders each recorded site's live value set under both `C` and that comparator. Where a site's
+**The live proof, taken on BOTH collations.** `tests/collation-pin-portability.test.mjs`
+re-measures, on whatever server the suite runs on: it builds a comparator (the real glibc
+`en_US.UTF-8` where the OS has the locale, otherwise an ICU `ka-shifted` collation), makes it prove
+it reorders 0295's own pair, and then orders each recorded site's live value set under both `C` and
+that comparator. Where a site's
 subject no longer exists at the head of the chain — 0038's four document CHECK censuses were
 renamed by a later migration, and a tail runs against the schema at its OWN point in the chain —
 the battery instead re-orders the **array verdict the migration carries in its own text**, read
 back out of the file by the scanner rather than hand-copied. 33 such verdicts are proved today.
+
+Both legs have now been run, which is what #1047's own AC2 and AC4 ask for and what the estate had
+never had:
+
+| leg | cluster | result |
+|---|---|---|
+| `C.UTF-8` | the lane rig, rebuilt from scratch by the #867 recipe | 313/313 applied `0001` → `0350`; a second `migrate` reports 0 new and no drift; the batteries green with an ICU `ka-shifted` comparator |
+| **glibc `en_US.UTF-8`** | a disposable cluster stood up for the purpose (`pg_createcluster … --locale=en_US.UTF-8`), used and dropped | **313/313 applied from scratch**, then `collation-pin-portability` + `collation-pin-scan` 21/21 green with the REAL `provider = libc, locale = 'en_US.UTF-8'` comparator — measured: it creates, and it reorders 0295's pair (`taxation` before `tax_liabilities`) while `C` does not |
+
+The second row is the stronger of the two, and not only because the locale is the named one. On
+that cluster the DATABASE default IS `en_US.UTF-8`, so the battery's "this server's default
+ordering already differs from C" control was itself taken under glibc and still passed at every
+recorded site — i.e. every ordering the estate pins is identical under `C` and under the collation
+CI and hosted Supabase actually run. A rig whose default is `C.UTF-8` cannot say that.
 
 **Portable today, fragile by construction.** The orderings the estate pins do not move — but the
 name space they draw on does. Measured on the lane rig at 309 migrations:
