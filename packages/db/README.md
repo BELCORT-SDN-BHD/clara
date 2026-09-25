@@ -7303,6 +7303,17 @@ exists to remove. Named in `clara._knowledge_assert_fye_pair`'s own body, in 031
 the lane's fix report; a follow-up belongs on the CLIENT-ROW door, where both records can move
 together.
 
+**Pinned by kp.15 (#1096, riders sweep wave, lane 07).** The disclosure above landed with 0318;
+no cell anywhere drove month 2 day 29 and asserted the accepted outcome until #1096. `kp.15` in
+`knowledge-onboarding-promotion.test.mjs` commits a plan with `fye => 2, fye_day => 29` beside an
+unrelated key and asserts ALL THREE keys promote — nothing withheld, day 29 live in Knowledge at
+the value captured — the mirror image of `kp.14`'s day-31 refusal. Vacuity control run on the lane
+database: the calendar check's `v_day > 29` bumped to `v_day >= 29` (deliberately refusing day 29
+too), `kp.15` seen RED for the right reason (`financial_year_end_day` withheld with CLR37) while
+every other cell in the file stayed green, then the body restored byte-for-byte from this file's
+own §A text and the restore verified by `sha256(prosrc)` equality with the pre-break measurement.
+No migration: the ticket adds a pinning test over already-disclosed, already-shipped behaviour.
+
 **How the three pasted bodies are proved.** 0318 re-cuts three whole bodies statically (no
 `pg_get_functiondef` splice, so no new entry in `apps/web/tests/firm-scope-db-pins.corpus.ts` is
 owed — the file contains no dynamic SQL at all). Each pasted body is the LIVE pre-image plus
