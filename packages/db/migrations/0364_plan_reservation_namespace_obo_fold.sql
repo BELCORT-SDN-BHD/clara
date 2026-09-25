@@ -111,7 +111,9 @@ declare
     ['clara.correct_accrual_adjustment(uuid,jsonb,text)',
      '6a59591a6211acdb6975c7dcfe1dc5c2b3334a8d68ad4281635e7d38ac19fdfa'],
     ['clara._confirm_tenancy_rent_plan_core(uuid,uuid,text,uuid,uuid,text,text,text,text)',
-     'e8a65796245bd331a72c7f92c6b882737f45e4f1be12c35739f5ea430265ef29']
+     'e8a65796245bd331a72c7f92c6b882737f45e4f1be12c35739f5ea430265ef29'],
+    ['clara._confirm_tenancy_rent_plan_revision_core(uuid,uuid,text,uuid,uuid,text,text)',
+     '5fe080568b2cf3ae0e5258af244340789e376d2060e6695ff08fc99b8c15a2d4']
   ];
   -- …AND THE NEIGHBOURS THIS FILE READS AND DOES NOT EDIT.
   --
@@ -554,6 +556,20 @@ declare
   v_draft jsonb; v_tr jsonb; v_plan jsonb; v_refusal jsonb; v_existing record;
   v_judgement text; v_confirmation uuid; v_purpose text; v_created jsonb;
 begin
+  -- #1150 [0364]: THE LANE IS A CLOSED SET (ADV-L08-05, declined in the riders sweep wave's lane
+  -- L8 with the reason that this core was not then being rewritten; it is being rewritten here).
+  -- FIRST, above every other wall: an unknown lane is a programming error in the estate's own
+  -- code, not a caller's mistake, and answering `invalid_op_key` to it would send a reader after
+  -- the wrong argument. Unreachable from either entrance -- both pass a literal, which is why
+  -- this raise has no behavioural consequence today and why it is worth having: the branch below tests for `obo` and
+  -- fails CLOSED on anything else (CLR04 `no authenticated actor`, because a runtime connection
+  -- carries no JWT for clara.create_accounting_plan to read), which is safe but answers a question
+  -- nobody asked.
+  if p_lane is null or p_lane not in ('human', 'obo') then
+    raise exception 'clara._confirm_tenancy_rent_plan_core: unknown lane %', coalesce(p_lane, '(null)')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','invalid_lane','field','lane','lane',p_lane)::text;
+  end if;
   if p_op_key is null or btrim(p_op_key) = '' then
     raise exception 'confirming a rent plan requires its idempotency key' using errcode='CLR10',
       detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
@@ -753,6 +769,140 @@ begin
       'treatment', v_tr, 'professional_judgement', v_judgement));
 end $c0364_c$;
 
+-- =====================================================================================
+-- §D — clara._confirm_tenancy_rent_plan_revision_core — THE CLOSED LANE SET.
+--
+-- 0353's own body, verbatim from the live catalog, with ONE hunk: the lane wall. This core has no
+-- lane BRANCH at all — `p_lane` decides only which `via` its audit row carries — so an unknown
+-- lane stamped the HUMAN `via` on an act no person took. Its own nested reservation (`:revise`,
+-- handed to `clara._revise_accounting_plan_core`) is the tenancy lane's and is derived by this
+-- body alone, so it does not move; the census cell is what keeps that true.
+-- =====================================================================================
+CREATE OR REPLACE FUNCTION clara._confirm_tenancy_rent_plan_revision_core(p_firm uuid, p_actor uuid, p_lane text, p_client uuid, p_document uuid, p_judgement text, p_op_key text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $c0364_d$
+declare
+  c record; v_dedupe jsonb; v_firm uuid; v_state jsonb; v_tr jsonb; v_rev jsonb;
+  v_judgement text; v_confirmation uuid; v_plan record; v_result jsonb;
+begin
+  -- #1150 [0364]: THE LANE IS A CLOSED SET (ADV-L08-05, declined in the riders sweep wave's lane
+  -- L8 with the reason that this core was not then being rewritten; it is being rewritten here).
+  -- FIRST, above every other wall: an unknown lane is a programming error in the estate's own
+  -- code, not a caller's mistake, and answering `invalid_op_key` to it would send a reader after
+  -- the wrong argument. Unreachable from either entrance -- both pass a literal, which is why
+  -- this raise has no behavioural consequence today and why it is worth having: this core has no lane branch at all -- `p_lane`
+  -- decides only the `via` its audit row carries, so an unknown lane would stamp the HUMAN `via`
+  -- on an act no person took, silently.
+  if p_lane is null or p_lane not in ('human', 'obo') then
+    raise exception 'clara._confirm_tenancy_rent_plan_revision_core: unknown lane %', coalesce(p_lane, '(null)')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','invalid_lane','field','lane','lane',p_lane)::text;
+  end if;
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'revising a rent plan requires its idempotency key' using errcode='CLR10',
+      detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
+  end if;
+  -- #1137 [0353]: the BOOKKEEPER floor and the caller's identity are resolved ABOVE this core --
+  -- by the human door through clara._human_ctx, and by the OBO twin through a LIVE re-check of the
+  -- named author's own membership of this firm. The firm and the actor they resolved arrive as
+  -- this function's first two arguments; every line below is the human door's own, byte for byte.
+  select p_firm as firm, p_actor as actor into c;
+  select cl.firm_id into v_firm from clara.clients cl where cl.id = p_client;
+  if v_firm is null or v_firm <> c.firm then
+    raise exception 'client is not in your firm' using errcode='CLR11';
+  end if;
+  if not exists (select 1 from clara.document_filings f
+                  where f.document_id = p_document and f.client_id = p_client
+                    and f.firm_id = c.firm and f.retired_at is null) then
+    raise exception 'document % is not a live filing of this client', p_document using errcode='CLR11';
+  end if;
+
+  v_judgement := nullif(btrim(coalesce(p_judgement,'')),'');
+
+  v_dedupe := clara._reserve_op(c.firm, 'confirm_tenancy_rent_plan_revision', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'document', p_document,
+      'judgement', v_judgement)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
+
+  v_state := clara._tenancy_escalation_state(p_document);
+  if (v_state->>'pending')::boolean is not true then
+    raise exception 'there is no escalation to confirm on this tenancy (%)', coalesce(v_state->>'reason','none')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason', coalesce(v_state->>'reason','no_escalation_recorded'),
+          'plan_id', v_state->>'plan_id')::text;
+  end if;
+
+  v_tr := clara._tenancy_lease_treatment(p_client, p_document);
+  -- A STEPPED RENT ALWAYS ASKS, so this wall is reached on every ordinary escalation. It is the
+  -- same wall the first confirmation carries and it quotes the same body's own question.
+  if (v_tr->>'drafts')::boolean is not true and v_judgement is null then
+    raise exception '%', v_tr->>'question'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','professional_judgement_required',
+          'treatment_reason', v_tr->>'reason', 'standard', v_tr->>'standard')::text;
+  end if;
+
+  select * into v_plan from clara._tenancy_rent_plan(p_document);
+  v_rev := v_state->'proposed_revision';
+
+  v_confirmation := gen_random_uuid();
+  insert into clara.contract_plan_confirmations(id, firm_id, client_id, document_id, kind,
+      monthly_rent_cents, rent_account_code, payable_account_code, term_start, term_end,
+      treatment, professional_judgement, confirmed_by)
+    values (v_confirmation, c.firm, p_client, p_document, 'rent_plan_revision',
+      (v_state->>'new_cents')::bigint,
+      v_plan.rent_account_code, v_plan.payable_account_code,
+      (v_rev->>'effective_from')::date, v_plan.term_end,
+      v_tr, v_judgement, c.actor);
+
+  -- THE PLAN LANE'S OWN DOOR, called rather than re-implemented.
+  -- #1137 [0353]: the SAME body for both lanes, and no branch at all.
+  -- clara.revise_accounting_plan (0193) is now a thin delegate over
+  -- clara._revise_accounting_plan_core, which takes the caller's firm and actor as arguments
+  -- instead of reading a JWT -- so the OBO lane revises through exactly the body the human lane
+  -- revises through, and the human entrance is unchanged. Calling the core directly also skips one
+  -- redundant clara._human_ctx read: the floor was already taken by whichever entrance resolved c.
+  v_result := clara._revise_accounting_plan_core(
+    p_firm => c.firm, p_actor => c.actor,
+    p_plan => v_plan.plan_id,
+    p_frequency => v_rev->>'frequency',
+    p_day_rule => v_rev->>'day_rule',
+    p_day_of_month => nullif(v_rev->>'day_of_month','')::int,
+    p_timezone => v_rev->>'timezone',
+    p_effective_from => (v_rev->>'effective_from')::date,
+    p_effective_to => (v_rev->>'effective_to')::date,
+    p_basis => v_rev->'basis',
+    p_reversal_day_rule => null,
+    p_op_key => p_op_key || ':revise');
+
+  -- #1137 [0353]: the LANE travels on the audit row, exactly as 0222, 0307 and 0308 stamp `via`
+  -- on theirs -- so a reader can tell a confirmation taken in a conversation from one taken on the
+  -- Contract page without joining anything. The ACTOR is the named person either way: that is what
+  -- an on-behalf-of act means, and clara.contract_plan_confirmations.confirmed_by says so too.
+  perform clara._audit(c.firm, c.actor, null, null, 'confirm_tenancy_rent_plan_revision', null,
+    jsonb_build_object('via', case p_lane when 'obo' then 'confirm_tenancy_rent_plan_revision_for' else 'confirm_tenancy_rent_plan_revision' end,
+      'client', p_client, 'document', p_document,
+      'confirmation', v_confirmation, 'plan', v_plan.plan_id,
+      'revision', v_result->>'revision',
+      'from_cents', v_state->>'current_cents', 'to_cents', v_state->>'new_cents',
+      'judgement_given', v_judgement is not null));
+
+  return clara._finish_op(c.firm, 'confirm_tenancy_rent_plan_revision', p_op_key,
+    jsonb_build_object('document_id', p_document, 'client_id', p_client,
+      'confirmation_id', v_confirmation,
+      'plan_id', v_plan.plan_id, 'revision', (v_result->>'revision')::int,
+      'revision_id', v_result->>'revision_id',
+      'from_cents', (v_state->>'current_cents')::bigint,
+      'to_cents', (v_state->>'new_cents')::bigint,
+      'effective_from', v_rev->>'effective_from',
+      'treatment', v_tr, 'professional_judgement', v_judgement));
+end $c0364_d$;
+
 reset role;
 
 -- =====================================================================================
@@ -818,12 +968,13 @@ begin
      and p.oid::regprocedure::text = ANY (array[
        'clara.create_accrual_adjustment(uuid,text,jsonb,jsonb,text,text,integer,text,date,date,text)',
        'clara.correct_accrual_adjustment(uuid,jsonb,text)',
-       'clara._confirm_tenancy_rent_plan_core(uuid,uuid,text,uuid,uuid,text,text,text,text)'])
+       'clara._confirm_tenancy_rent_plan_core(uuid,uuid,text,uuid,uuid,text,text,text,text)',
+       'clara._confirm_tenancy_rent_plan_revision_core(uuid,uuid,text,uuid,uuid,text,text)'])
      and p.prosecdef and p.provolatile = 'v'
      and p.proowner::regrole::text = 'clara_fn_owner'
      and array_to_string(p.proconfig, ',') = 'search_path=clara, pg_temp';
-  if v_n <> 3 then
-    raise exception '0364 tail: % of the 3 recut bodies keep their posture (owner, secdef, volatile, search_path)', v_n
+  if v_n <> 4 then
+    raise exception '0364 tail: % of the 4 recut bodies keep their posture (owner, secdef, volatile, search_path)', v_n
       using errcode='CLR10';
   end if;
 
@@ -836,5 +987,22 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '0364 tail OK -- the accrual and tenancy lanes hold namespaces of their own and the prepayment lane keeps :plan';
+  -- 6 · BOTH TENANCY CONFIRMATION CORES CLOSE THEIR LANE SET, and each does it in its FIRST
+  --     statement, above the op-key wall that used to be first. Read structurally here and DRIVEN
+  --     in `p1150.lane.closed_set`, which also proves nothing is written by a refused lane.
+  for v_i in 1 .. 2 loop
+    v_sig := (array[
+      'clara._confirm_tenancy_rent_plan_core(uuid,uuid,text,uuid,uuid,text,text,text,text)',
+      'clara._confirm_tenancy_rent_plan_revision_core(uuid,uuid,text,uuid,uuid,text,text)'])[v_i];
+    select p.prosrc into v_src from pg_proc p where p.oid = v_sig::regprocedure;
+    if position('p_lane not in (''human'', ''obo'')' in v_src) = 0 then
+      raise exception '0364 tail: % does not close its lane set', v_sig using errcode='CLR10';
+    end if;
+    if position('p_lane not in (''human'', ''obo'')' in v_src) > position('p_op_key is null' in v_src) then
+      raise exception '0364 tail: %''s lane wall sits BELOW its op-key wall -- an unknown lane would be answered invalid_op_key', v_sig
+        using errcode='CLR10';
+    end if;
+  end loop;
+
+  raise notice '0364 tail OK -- the accrual and tenancy lanes hold namespaces of their own, the prepayment lane keeps :plan, and both tenancy cores close their lane set';
 end $c0364_tail$;

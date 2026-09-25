@@ -418,6 +418,41 @@ export async function spendReviseKey(sub, { client, authorityRef, span, opKey })
   return plan.plan_id;
 }
 
+/**
+ * THE TWO CONFIRMATION CORES, called directly. `p_lane` decides which plan step runs and which
+ * `via` the audit row carries, and BOTH entrances of each core pass a literal — so an unknown lane
+ * is reachable from no door, which is exactly why the wall is a fail-closed guard rather than a
+ * person's refusal. The cores are ungranted (`clara_fn_owner` only), so the one caller that can
+ * reach them at all is the rig's own superuser connection. The ticket names the cores as the seam
+ * (AC6); there is no public interface that takes a lane.
+ */
+export async function callConfirmCore({ firm, actor, lane, client, document, opKey }) {
+  const r = await rootQuery(
+    `select clara._confirm_tenancy_rent_plan_core(
+       p_firm => $1::uuid, p_actor => $2::uuid, p_lane => $3::text, p_client => $4::uuid,
+       p_document => $5::uuid, p_rent_account => null, p_payable_account => null,
+       p_judgement => null, p_op_key => $6::text) as result`,
+    [firm, actor, lane, client, document, opKey]);
+  return r.rows[0].result;
+}
+
+export async function callRevisionCore({ firm, actor, lane, client, document, opKey }) {
+  const r = await rootQuery(
+    `select clara._confirm_tenancy_rent_plan_revision_core(
+       p_firm => $1::uuid, p_actor => $2::uuid, p_lane => $3::text, p_client => $4::uuid,
+       p_document => $5::uuid, p_judgement => null, p_op_key => $6::text) as result`,
+    [firm, actor, lane, client, document, opKey]);
+  return r.rows[0].result;
+}
+
+/** Every receipt whose key STARTS with a prefix — "a refusal wrote nothing, not even a hold". */
+export async function receiptsLike(firm, prefix) {
+  const r = await rootQuery(
+    `select fn, op_key from clara.op_receipts where firm_id = $1 and op_key like $2 order by fn, op_key`,
+    [firm, `${prefix}%`]);
+  return r.rows;
+}
+
 export async function caught(fn) {
   try { await fn(); return null; } catch (e) { return e; }
 }
@@ -432,10 +467,27 @@ export async function planRow(planId) {
   return r.rows[0] ?? null;
 }
 
-/** The audit row 0193's verb writes, so a cell can read the `via` an entrance stamped. */
-export async function planAuditVia(planId) {
+/**
+ * The `via` the TENANCY CONFIRMATION's own audit row carries for a plan — the stamp 0353 puts on
+ * both lanes, so a reader can tell a confirmation taken in a conversation from one taken on the
+ * Contract page without joining anything.
+ */
+export async function confirmationAuditVia(planId) {
   const r = await rootQuery(
-    `select args ->> 'via' as via, args ->> 'kind' as kind
+    `select args ->> 'via' as via from clara.audit_log
+      where fn = 'confirm_tenancy_rent_plan' and args ->> 'plan' = $1
+      order by at desc limit 1`, [planId]);
+  return r.rows[0]?.via ?? null;
+}
+
+/**
+ * The `via` and `kind` 0193's OWN verb carries for a plan. The HUMAN lane reaches that verb through
+ * `clara.create_accounting_plan`, which stamps no `via` at all; the ON-BEHALF-OF plan step stamps
+ * its entrance's. That difference is the one the fold must not lose.
+ */
+export async function planCreateAudit(planId) {
+  const r = await rootQuery(
+    `select args ->> 'via' as via, args ->> 'kind' as kind, args ->> 'op_key' as op_key
        from clara.audit_log
       where fn = 'create_accounting_plan' and args ->> 'plan' = $1
       order by at desc limit 1`, [planId]);

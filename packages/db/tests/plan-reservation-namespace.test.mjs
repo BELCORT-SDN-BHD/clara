@@ -36,6 +36,7 @@ import {
   createPrepaymentSchedule, createAccrualAdjustment, correctAccrualAdjustment, accrual,
   confirmRentPlan, receiptsUnder, opk1150, caught, detailOf, spendReviseKey,
   nestedPlanCensus, partitionProblems, LANE_OF_SUFFIX, PLAN_DOORS,
+  callConfirmCore, callRevisionCore, receiptsLike, confirmRentPlanFor, confirmationAuditVia,
 } from "./plan-reservation-namespace-fixtures.mjs";
 
 const ACCRUAL_TZ = "Asia/Kuala_Lumpur";
@@ -326,4 +327,63 @@ async (t) => {
     "the census does not notice a suffix no lane declares");
   // …and the decoys really were the only difference: the live estate is still clean.
   assert.deepEqual(partitionProblems(rows), [], "the vacuity control left the census reading dirty");
+});
+
+// ===========================================================================================
+// AC6 — `p_lane` IS A CLOSED SET IN BOTH CONFIRMATION CORES.
+//
+// ADV-L08-05, declined in the sweep wave's lane L8 with the reason that the core was not being
+// rewritten. It is being rewritten here. The harm an unknown lane does is not hypothetical in the
+// REVISION core: `p_lane` there decides nothing but the `via` the audit row carries, so an unknown
+// lane stamps the HUMAN `via` on an act no person took, silently. In the confirmation core it
+// decides which plan step runs, and the branch tests for `obo`, so an unknown lane took the JWT
+// path and failed closed on CLR04 — safe, but answering a question nobody asked.
+// ===========================================================================================
+
+test("p1150.lane.closed_set — both tenancy confirmation cores refuse a lane outside {human, obo} "
+  + "by name, above every other wall, and write nothing; and both real lanes are still admitted",
+async (t) => {
+  if (unready(t)) return;
+  const scene = await namespaceScene("lane");
+  const ten = await tenancyLaneIn(scene, "lane");
+
+  for (const [label, call] of [["confirmation", callConfirmCore], ["revision", callRevisionCore]]) {
+    for (const lane of ["human ", "HUMAN", "chat", "", null]) {
+      const key = opk1150(`lane-${label}`);
+      const err = await caught(() => call({
+        firm: scene.firm, actor: scene.bob, lane, client: ten.client,
+        document: ten.document, opKey: key }));
+      assert.ok(err, `${label}: the core admitted the lane ${JSON.stringify(lane)}`);
+      assert.equal(err.code, "CLR10", `${label}/${JSON.stringify(lane)}: wrong sqlstate`);
+      assert.equal(detailOf(err).reason, "invalid_lane",
+        `${label}/${JSON.stringify(lane)}: the refusal is not typed`);
+      assert.equal(detailOf(err).field, "lane");
+      assert.deepEqual(await receiptsLike(scene.firm, key), [],
+        `${label}/${JSON.stringify(lane)}: a refused lane left a reservation behind`);
+    }
+    // …AND IT IS ABOVE THE OP-KEY WALL, which is the first thing either core checked before this.
+    // An unknown lane is a programming error, and answering `invalid_op_key` to it would send a
+    // caller after the wrong argument.
+    const both = await caught(() => call({
+      firm: scene.firm, actor: scene.bob, lane: "chat", client: ten.client,
+      document: ten.document, opKey: "   " }));
+    assert.equal(detailOf(both).reason, "invalid_lane",
+      `${label}: with BOTH the lane and the op key wrong, the core answers the op key`);
+  }
+
+  // BOTH REAL LANES ARE STILL ADMITTED, end to end through their own public entrances, and each
+  // stamps its own `via` on 0193's audit row.
+  const human = await confirmRentPlan(scene.bob, {
+    client: ten.client, document: ten.document, opKey: opk1150("lane-human") });
+  assert.ok(human.plan_id, "the human entrance stopped confirming");
+  assert.equal(await confirmationAuditVia(human.plan_id), "confirm_tenancy_rent_plan",
+    "the human lane's confirmation no longer carries its own `via`");
+
+  const other = await tenancyLaneIn(scene, "lane-obo");
+  const obo = await confirmRentPlanFor({
+    client: other.client, author: scene.bob, document: other.document,
+    opKey: opk1150("lane-obo") });
+  assert.ok(obo.plan_id, "the on-behalf-of entrance stopped confirming");
+  assert.equal(await confirmationAuditVia(obo.plan_id), "confirm_tenancy_rent_plan_for",
+    "the on-behalf-of lane's confirmation no longer carries its own `via`");
 });
