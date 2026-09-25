@@ -1303,8 +1303,13 @@ test("p655.grants the ONE door is clara_runtime's, the read is the human's, the 
   // is right there and still wrong on the door), one records that a warned person went ahead and
   // one reads that record back. The pin is frontier-tolerant, like every roster here: on a chain
   // below 0275 the four are absent and the set is 0225's own pair.
+  // `distinct` since 0323 (#1135's cut-phase fix round): `probe_trade_invoice_duplicates_for`
+  // now has TWO overloads -- the four-argument door chatTurn_v21's parked runs call, and the
+  // five-argument twin carrying the intent key so a recording is not its own look-alike. This
+  // roster is about which public NAMES this lane exposes, and an arity is not a new name; 0323's
+  // own TAIL is where the two overloads and their single clara_runtime grant are counted.
   const doors = (await rootQuery(
-    `select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    `select distinct p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
       where n.nspname='clara' and p.proname like '%trade_invoice%' and p.proname not like '\\_%'
       order by 1`)).rows.map((r) => r.proname);
   const expected = ["admit_trade_invoice_work", "get_trade_invoice"];

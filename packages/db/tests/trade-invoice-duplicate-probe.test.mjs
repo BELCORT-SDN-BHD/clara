@@ -298,12 +298,21 @@ test("p1007.probe.is_a_read the probe writes nothing and holds no row lock -- pr
   // (1) THE CATALOG REASON. All four bodies are `stable`, which is what makes a write inside them
   // impossible rather than merely absent, and `security definer` with the pinned search_path.
   const posture = (await rootQuery(
-    `select p.proname, p.provolatile, p.prosecdef
+    `select p.oid::regprocedure::text as sig, p.proname, p.provolatile, p.prosecdef
        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname='clara' and p.proname in ('probe_trade_invoice_duplicates',
         '_trade_invoice_probe_core','_trade_invoice_duplicate_matches')
-      order by p.proname`)).rows;
-  assert.equal(posture.length, 3, "p1007.probe.is_a_read: the three probe bodies exist");
+      order by p.oid::regprocedure::text`)).rows;
+  // FOUR BODIES UNDER THREE NAMES since 0323 (#1135's cut-phase fix round): the narrowing core
+  // `clara._trade_invoice_probe_core(uuid,text,jsonb,text)` is a SIBLING of the three-argument one,
+  // so this count moved from three to four and every posture assertion below simply covers it too.
+  // A literal census grows at every cut, and this is that growth, recorded rather than loosened.
+  assert.deepEqual(posture.map((r) => r.sig), [
+    "clara._trade_invoice_duplicate_matches(uuid,text,uuid,text,date,bigint)",
+    "clara._trade_invoice_probe_core(uuid,text,jsonb)",
+    "clara._trade_invoice_probe_core(uuid,text,jsonb,text)",
+    "clara.probe_trade_invoice_duplicates(uuid,text,jsonb)",
+  ], "p1007.probe.is_a_read: the four probe bodies exist, by signature");
   for (const row of posture) {
     assert.equal(row.provolatile, "s",
       `p1007.probe.is_a_read: clara.${row.proname} is STABLE, so PostgreSQL refuses any write inside it`);
