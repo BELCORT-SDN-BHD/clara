@@ -14,14 +14,21 @@ _Avoid_: A mandatory file attachment; a claim that every user statement is indep
 
 <!-- #977 -->
 **Authorising instruction**:
-The recorded instruction a governed act cites as its authority — an Accounting work, or one turn of
-a Clara conversation. It is admitted only when it is PROVED to come from a person rather than from a
+The recorded instruction a governed act cites as its authority — an Accounting work, one turn of
+a Clara conversation, or (#949) a named person's confirmation of a rent plan on the tenancy lane.
+It is admitted only when it is PROVED to come from a person rather than from a
 process: a Work is proof as it stands, because a Work can never exist without naming who initiated
 it; a conversation turn is proof only when it is a turn taken through the chat ingress AND that
-ingress named a firm member as its author. A run the workspace started for itself — a wake, an
-autodraft, a close preparation, an agent run over a Work — is not an instruction, even when it
-names the person it was started for. "There is no such record here" and "that record is not a
-person's instruction" are two different refusals, and each says which it is.
+ingress named a firm member as its author; a rent-plan confirmation is proof as it stands, for the
+Work's own reason — the row cannot exist without naming who confirmed it. A run the workspace
+started for itself — a wake, an autodraft, a close preparation, an agent run over a Work — is not
+an instruction, even when it names the person it was started for. "There is no such record here"
+and "that record is not a person's instruction" are two different refusals, and each says which it
+is.
+
+Since #1051 the plan lane states the admitted set ONCE, in one predicate both plan doors call,
+rather than in a copy per door: the two doors had drifted apart before, and a claim that one was a
+verbatim copy of the other outlived the copy it described.
 
 What is proved is the AUTHOR the ingress recorded, not the keystroke: the rule reads the task's
 kind and its author, and the chat ingress admits an author only as an active member of the firm.
