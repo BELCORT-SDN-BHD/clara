@@ -478,3 +478,73 @@ export function proposalSourceRef(
   if (proposal !== null) ref.proposal = proposal;
   return ref;
 }
+
+// =========================================================================================
+// #1090 — THE `client_knowledge` GROUND, FED. Migration 0345 catalogues the `depreciation_policy`
+// knowledge key `deriveFaParticularsProposal` already ranks and tests; this is the ONE mapping
+// its brief still owes: `clara.knowledge_records` rows for that key -> `FaProposalKnowledgeNote[]`.
+//
+// THE READ ITSELF IS NOT HERE, on purpose, for the SAME reason the header above gives for the rest
+// of this file: "the reads that gather its facts are the successor workflow's own step". That
+// step (`loadFaProposalInputsStepV6` or its successor) does not exist in this repository —
+// `packages/runtime/workflows/claraWork.v6.impl.ts` is absent — and lives inside a frozen-workflow
+// closure this ticket must never create or edit. The exact SQL that produces the rows this mapper
+// consumes is stated in this ticket's report (successor contract) rather than executed here:
+//
+//   select id, applies_when, value from clara.knowledge_records
+//    where client_id = $1::uuid and knowledge_key = 'depreciation_policy' and state = 'live'
+//
+// run under the SAME OBO read credential v4's own register read mints (`clara_agent_ro`, RLS
+// `p_knowledge_records_agent`, `firm_id = clara.wake_firm()` — 0192:611-612, unmodified), with the
+// client additionally pinned in the WHERE clause exactly as v4 pins the asset's own client.
+//
+// SCOPING: a client-wide note is captured with `applies_when = {}` (`assetAccount: null` here); an
+// account-scoped note is captured with `applies_when = {"asset_account_code": "<code>"}` — the
+// convention migration 0345's own catalog description states. `speaksFor` (above) already treats
+// `assetAccount: null` as an account like any other, so this mapper does no ranking of its own.
+//
+// TOLERANT BY CONSTRUCTION, never thrown on: the catalog validates `depreciation_policy` no more
+// strictly than "an object" (`shape_only`), so a captured `value` missing a field, carrying the
+// wrong type, or naming a method `congruent()` does not recognise is not this mapper's business to
+// refuse — `congruent()` already drops a driver set it cannot use, the same rule an incongruent
+// SIBLING already lives by (see `fromSiblings` above). A field this mapper cannot read maps to
+// `null` (or, for `label`, the empty string) rather than raising, so one malformed knowledge row
+// among several cannot take a well-formed one down with it.
+
+/** One `clara.knowledge_records` row for the `depreciation_policy` key, exactly as the SQL above
+ *  returns it — the raw shape a future step hands this mapper, with no reshaping in between. */
+export type DepreciationPolicyKnowledgeRow = {
+  id: string;
+  applies_when: unknown;
+  value: unknown;
+};
+
+function asPlainObject(value: unknown): Record<string, unknown> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/** `clara.knowledge_records` rows for `depreciation_policy` -> `FaProposalKnowledgeNote[]`, in
+ *  the SAME order the rows arrived (this module ranks and de-duplicates nothing — `deriveFa
+ *  ParticularsProposal`'s own `agreedOn`/`speaksFor` already do, over every note it is handed). */
+export function mapDepreciationKnowledgeRows(
+  rows: readonly DepreciationPolicyKnowledgeRow[],
+): FaProposalKnowledgeNote[] {
+  const notes: FaProposalKnowledgeNote[] = [];
+  for (const row of rows) {
+    const value = asPlainObject(row.value);
+    if (value === null) continue; // shape_only still means "an object": anything else grounds nothing.
+    const appliesWhen = asPlainObject(row.applies_when) ?? {};
+    const rawAccount = appliesWhen.asset_account_code;
+    const rawLabel = value.label;
+    notes.push({
+      recordId: typeof row.id === "string" ? row.id : null,
+      assetAccount: typeof rawAccount === "string" && rawAccount !== "" ? rawAccount : null,
+      label: typeof rawLabel === "string" ? rawLabel : "",
+      method: typeof value.method === "string" ? (value.method as FaMethod | string) : null,
+      usefulLifeMonths: typeof value.useful_life_months === "number" ? value.useful_life_months : null,
+      rateBps: typeof value.rate_bps === "number" ? value.rate_bps : null,
+    });
+  }
+  return notes;
+}

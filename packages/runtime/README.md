@@ -1146,9 +1146,19 @@ derivation, PURE (every fact is passed in) and tested on its own by
   `clara.agent_interruptions.source_ref` is constrained to "null or an object" and nothing more
   (0180:183), so this needs **no migration**; `packages/db/tests/fa-particulars-proposal.test.mjs`
   drives that on a live database rather than reading it off the file.
-* The **knowledge ground is wired and unfed** on this frontier: `clara.knowledge_keys` is a closed,
-  code-populated catalogue and none of its fourteen keys is about depreciation, so no recorded
-  record can state one until a key is catalogued (a migration #933 does not own).
+* The **knowledge ground is now CATALOGUED** (#1090, migration `0345_depreciation_policy_
+  knowledge_key.sql`): `depreciation_policy` (`kind = assertion`, `authority_bearing = true` — the
+  `customer_identity_policy` precedent, deliberately NOT `kind = policy`, which would have made it
+  unconditionally firm-eligible by 0220's own blanket admit) joins the catalogue, capturable at
+  CLIENT scope only through the existing `clara.capture_knowledge` door, and only from an ASSERTED
+  source. `mapDepreciationKnowledgeRows` (same file) maps a captured row's `value`/`applies_when`
+  onto `FaProposalKnowledgeNote` — an account-scoped note is captured with `applies_when =
+  {"asset_account_code": "<code>"}`, a client-wide one with `{}` — and is driven end to end,
+  capture through derivation, by `packages/db/tests/depreciation-policy-knowledge.test.mjs`. The
+  READ itself (the SQL a step would run under the SAME OBO `clara_agent_ro` credential v4's own
+  register read mints) is still not wired into any workflow step — see the successor contract
+  below — so the ground is catalogued and mapped, but a captured note does not yet reach a live
+  proposal in production; #1090's own report carries the successor-contract addition in full.
 
 The block is consumed by `apps/web/lib/registers/fa-particulars-proposal.ts` on all three answering
 surfaces. `claraWork_v6` is the cut that puts it on the wire; until then the derivation ships

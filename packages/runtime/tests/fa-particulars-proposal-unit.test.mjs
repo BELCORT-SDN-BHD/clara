@@ -471,3 +471,65 @@ test("p933.reason.a_sibling_ground_claims_the_DRIVERS it read, never 'the same' 
   assert.match(proposal.reason, /a nil residual, which is this firm's default/,
     "and the residual is stated as the default it is");
 });
+
+// =========================================================================================
+// #1090 — `mapDepreciationKnowledgeRows`: `clara.knowledge_records` rows (migration 0345's new
+// `depreciation_policy` key) -> `FaProposalKnowledgeNote[]`. The RANKING this note feeds is
+// already proven above (`p933.core.a_recorded_depreciation_note_outranks_the_account's_own_
+// retired_policy` runs it alongside an agreeing sibling and shows client_knowledge still wins);
+// what is new here is the READ-SHAPE MAPPING itself, driven as a pure function exactly like the
+// rest of this file.
+
+test("p1090.map.happy_path — a well-formed row maps field for field, from an independent expected literal", () => {
+  const notes = p.mapDepreciationKnowledgeRows([
+    { id: "rec-1", applies_when: { asset_account_code: "1500" },
+      value: { method: "straight_line", useful_life_months: 96, rate_bps: null, label: "Plant, 8 years" } },
+  ]);
+  assert.deepEqual(notes, [
+    { recordId: "rec-1", assetAccount: "1500", label: "Plant, 8 years",
+      method: "straight_line", usefulLifeMonths: 96, rateBps: null },
+  ]);
+});
+
+test("p1090.map.client_wide_when_applies_when_is_empty — an empty applies_when (the client-wide capture) maps assetAccount to null, never an empty string", () => {
+  const [note] = p.mapDepreciationKnowledgeRows([
+    { id: "rec-2", applies_when: {}, value: { method: "reducing_balance", useful_life_months: 60, rate_bps: 2000 } },
+  ]);
+  assert.equal(note.assetAccount, null);
+  assert.equal(note.method, "reducing_balance");
+  assert.equal(note.usefulLifeMonths, 60);
+  assert.equal(note.rateBps, 2000);
+});
+
+test("p1090.map.missing_fields_become_null_or_empty_label, never undefined", () => {
+  const [note] = p.mapDepreciationKnowledgeRows([{ id: "rec-3", applies_when: {}, value: {} }]);
+  assert.deepEqual(note, {
+    recordId: "rec-3", assetAccount: null, label: "", method: null, usefulLifeMonths: null, rateBps: null,
+  });
+});
+
+test("p1090.map.a_malformed_value_is_DROPPED, never thrown — the catalog validates 'an object' alone (shape_only), so anything narrower is this mapper's own problem to tolerate", () => {
+  const notes = p.mapDepreciationKnowledgeRows([
+    { id: "bad-null", applies_when: {}, value: null },
+    { id: "bad-string", applies_when: {}, value: "not an object" },
+    { id: "bad-array", applies_when: {}, value: ["not", "an", "object"] },
+    { id: "good", applies_when: {}, value: { method: "none" } },
+  ]);
+  assert.deepEqual(notes.map((n) => n.recordId), ["good"],
+    "every malformed row is silently dropped and the well-formed one still comes through");
+});
+
+test("p1090.map.a_malformed_applies_when_reads_as_client-wide, never thrown", () => {
+  const [note] = p.mapDepreciationKnowledgeRows([
+    { id: "rec-4", applies_when: "not an object", value: { method: "none" } },
+  ]);
+  assert.equal(note.assetAccount, null);
+});
+
+test("p1090.map.order_is_preserved_and_nothing_is_ranked_here — ranking is deriveFaParticularsProposal's own job, over every note it is handed", () => {
+  const notes = p.mapDepreciationKnowledgeRows([
+    { id: "first", applies_when: {}, value: { method: "straight_line", useful_life_months: 24 } },
+    { id: "second", applies_when: {}, value: { method: "straight_line", useful_life_months: 48 } },
+  ]);
+  assert.deepEqual(notes.map((n) => n.recordId), ["first", "second"]);
+});
