@@ -7616,3 +7616,69 @@ NOT-chosen path, confirmed still not taken) is folded into the grounding cell it
 **Gate:** `tests/admit-autodraft-task-outcome-disclosure.test.mjs`, frontier-gated on the stable
 stem `admit_autodraft_task_outcome_disclosure$` with
 `tests/admit-autodraft-task-outcome-disclosure-preintegration-gate.mjs`.
+
+## 0350 — `via_wake_kind` is NOT renamed; the posting-lane widening is disclosed instead (#1058, riders sweep wave, lane 07)
+
+**The naming drift, in plain words.** `clara.entry_post_receipts.via_wake_kind` was minted by F-A2
+(`packages/db/migrations/0106_f_a2_posting_core.sql:494-517`) admitting only two values,
+`autodraft` and `interactive` — both genuine wake-credential kinds. `0121_f_a3_pr1b_agent_limb.sql`
+later widened the same CHECK to admit a third, `bank_agent`, alongside `wake_credentials`' own two
+CHECKs gaining the identical disjunct in the same file — still a wake-credential kind, not a
+naming drift. The drift is in the two widenings after that:
+`0297_payroll_summary_posting.sql:870-873` (#946) added `payroll_facts` and
+`0299_agreement_contract_acquisition.sql:2626-2629` (#948) added `contract_facts` — and NEITHER
+names a wake credential at all. Each names the POSTING LANE that authorised the receipt: a payroll
+run and an agreement acquisition each wake no model and hold no wake credential, yet the column
+that records "which wake authorised this post" now also carries their lane names. A reader who
+trusts the column's own name reads it as an exhaustive list of wake kinds and misses that two of
+its five live values are something else entirely.
+
+**Two candidate fixes, and why this file takes the disclosure one.** #1058's own Agent Brief asks
+for a rename: the column (and every reader/writer across the codebase) renamed to a name that does
+not imply "wake kind only". The owner's ruling on the ticket (2026-09-24, "Ruling applied under
+the owner's delegation of 2026-09-23 (riders sweep wave, SWEEP-PLAN.md)") refuses the rename and
+this lane's own scan agrees (SWEEP-PLAN.md, the #1058 row of "Owner questions, with a recommended
+ruling"): `via_wake_kind` appears across roughly 118 source files and in nine frozen workflow files
+under `packages/runtime/workflows/` (`autoDraft.v9.usage.ts`, `bankAgent.v1.usage.ts`,
+`chatTurn.v13.post.ts`, `chatTurn.v13.usage.ts`, `chatTurn.v14.usage.ts`,
+`chatTurn.v15.freeform.ts`, `chatTurn.v15.infra.ts`, `chatTurn.v15.usage.ts`,
+`closePrep.v1.usage.ts`). THREE of those nine carry PROSE about this exact column
+(`chatTurn.v13.post.ts:22-23`, `chatTurn.v15.freeform.ts:203`, `chatTurn.v15.infra.ts:106`) that a
+rename would strand as a description of a column that no longer exists under that name — a frozen
+workflow body is never edited (`node scripts/check-frozen-workflows.mjs` must show no manifest
+diff). TWO more (`bankAgent.v1.usage.ts:120`, `closePrep.v1.usage.ts:91`) build SQL naming a
+DIFFERENT door's own parameter, `p_via_wake_kind` on `clara.record_agent_usage_event`
+(`0110_f_a9_llm_usage_reshape.sql:365-370`), which must keep its own spelling for the same reason.
+This file adds a catalog `comment on column` to `clara.entry_post_receipts.via_wake_kind` and this
+README section; it never renames the column, its CHECK constraint or any reader or writer, both
+pinned in the prestate and re-measured byte-for-byte in the tail.
+
+**Where the live vocabulary actually comes from.** `entry_post_receipts_via_wake_kind_check`
+admits `autodraft`, `interactive`, `bank_agent`, `payroll_facts`, `contract_facts` — the first
+three are genuine wake-credential kinds, the last two (`payroll_facts`, `contract_facts`) are
+posting-lane names, not wake credentials at all. The catalog comment this file adds names both.
+
+**What this file does not change**, pinned in the prestate and re-measured in the tail:
+`clara.entry_post_receipts.via_wake_kind` keeps its name, its type (`text`) and its ordinal
+position; `entry_post_receipts_via_wake_kind_check` is byte-identical before and after — no new
+admitted value, none removed; the table's Annex E.1 column count stays 14. This file mints no new
+function, table or other catalog name, so it owes no `packages/db/tests/rig-meta.mjs` cohort
+entry.
+
+**Redo-safe by construction (#957).** `comment on column ... is '...'` always sets the comment
+fresh, so the prestate's only two sane states are "no comment yet" (FIRST) or "already carries
+exactly this file's own comment, verbatim" (REDO) — any OTHER non-null comment is a foreign
+comment this file refuses to clobber, CLR10.
+
+**Acceptance criteria, each with its own cell in
+`tests/entry-post-receipts-via-wake-kind-disclosure.test.mjs`.** The chosen path (comment +
+README, naming the widening and refusing the rename):
+`p1058.comment.discloses_the_lane_widening_and_the_no_rename_ruling` and
+`p1058.readme.section_discloses_the_lane_widening_and_the_no_rename_ruling`. The ticket's own
+AC3 ("existing data and its meaning are unchanged; this is [documentation], not a schema or
+behaviour change"), driven against the live catalog rather than read off this file's own prose:
+`p1058.catalog.column_not_renamed_and_check_enumeration_unchanged`.
+
+**Gate:** `tests/entry-post-receipts-via-wake-kind-disclosure.test.mjs`, frontier-gated on the
+stable stem `via_wake_kind_lane_disclosure$` with
+`tests/entry-post-receipts-via-wake-kind-disclosure-preintegration-gate.mjs`.
