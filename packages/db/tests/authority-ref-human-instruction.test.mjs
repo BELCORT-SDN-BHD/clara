@@ -256,6 +256,40 @@ test("p977.definition.one both doors REACH clara._authority_ref_refusal — the 
     + "integer,text,date,date,jsonb)";
   const oboTwinLive = (await rootQuery(
     "select to_regprocedure($1) is not null as ok", [OBO_TWIN_SIG])).rows[0].ok;
+  // THE FOURTH READER, AND WHY IT IS ONE (riders sweep wave, #1137/0353). The owner's ruling of
+  // 2026-09-25 on #1137 lets Clara confirm a TENANCY rent plan on a named bookkeeper's behalf from
+  // the conversation, and that confirmation ends in a plan — so it needs a plan step for the same
+  // reason #915's and #941's did: `clara.create_accounting_plan` resolves its actor through
+  // `clara._human_ctx` -> `clara.jwt_sub()`, which a `clara_runtime` connection cannot satisfy.
+  // `clara._tenancy_plan_core` is `clara._obo_plan_core`'s body with the kind fixed to
+  // `recurring_journal`, and it READS the shared definition rather than carrying an inline copy —
+  // which is #977's rule holding on one more machine lane, not escaping it. 0353's own
+  // `p1137.obo.refusals_match` (tenancy-agent-twins.test.mjs) MEASURES the copy: seven shared
+  // refusals driven through BOTH entrances and compared on sqlstate, sentence and typed detail.
+  //
+  // …and AT INTEGRATION IT STOPPED BEING A READER, which is why it is not on the roster below.
+  // This lane was cut from the cut head, which carries no 0330, so 0353 pasted 0300's authority
+  // block into that step under the comment "THE AUTHORITY SHAPE, verbatim from
+  // clara.create_accounting_plan" — a FOURTH hand-written copy of the wall #1051 exists to fold,
+  // and the only one that would have been left standing. 0353's own note says the step "belongs in
+  // clara._obo_plan_core … and is separate only because lane L1 of the same wave recuts that body",
+  // and names the follow-up that merges them. THE MERGE IS WHERE THAT FOLLOW-UP LANDED: the
+  // integration recut points the step at `clara._assert_plan_authority`, exactly as 0330 pointed
+  // the two plan doors and 0331 the accrual core. It had to, because #1051's own census refuses any
+  // body that both calls the predicate and keeps a copy of the wall's sentence.
+  //
+  // So the step now reaches the definition through the shared predicate rather than by naming it,
+  // and this cell asserts THAT rather than listing it: below, a live tenancy step must NOT be a
+  // reader. Nothing it admits or refuses moved — 0353's own `p1137.obo.refusals_match` drives seven
+  // shared refusals through BOTH entrances and compares sqlstate, sentence and typed detail, and
+  // that parity is now exact by construction, because both entrances reach the same body.
+  //
+  // MEASURED, never assumed, on the same terms as the twin above: the roster stays an EXACT closed
+  // world, and a reader this cell does not name still reds it.
+  const TENANCY_STEP_SIG = "clara._tenancy_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,"
+    + "integer,text,date,date,jsonb)";
+  const tenancyStepLive = (await rootQuery(
+    "select to_regprocedure($1) is not null as ok", [TENANCY_STEP_SIG])).rows[0].ok;
   const readers = bodies.rows
     .filter((r) => r.proname !== "_authority_ref_refusal" && r.prosrc.includes(REFUSAL_CALL))
     .map((r) => r.proname);
@@ -295,6 +329,21 @@ test("p977.definition.one both doors REACH clara._authority_ref_refusal — the 
     + "counted at #1051's shared wall once that is live, and counted again in its own right once "
     + "#1050's standing-instruction kind gives it a reference of its own to resolve — read the "
     + "one definition");
+
+  // AND THE TENANCY STEP IS NOT ONE, which is the integration recut's own claim, asserted here
+  // rather than left to the roster's silence: a body that quietly went back to naming the
+  // definition would otherwise only show up as a roster mismatch with no reason attached.
+  if (tenancyStepLive) {
+    const step = bodies.rows.find((r) => r.proname === "_tenancy_plan_core");
+    assert.ok(step, "the tenancy plan step resolves but is not in the catalog census");
+    assert.ok(!step.prosrc.includes(REFUSAL_CALL),
+      "clara._tenancy_plan_core names clara._authority_ref_refusal again -- 0353's integration "
+      + "recut onto #1051's shared predicate was lost");
+    assert.ok(step.prosrc.includes(PLAN_WALL_CALL),
+      "clara._tenancy_plan_core does not reach #1051's shared plan-authority wall at all");
+    assert.ok(!normalizeSrc(step.prosrc).includes(INLINE_CHAT_LANE_EXISTENCE),
+      "clara._tenancy_plan_core carries an inline chat-lane existence test of its own");
+  }
 });
 
 // ===========================================================================================

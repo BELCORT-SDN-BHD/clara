@@ -417,9 +417,12 @@ const PAYROLL_COMPLETENESS_0343_COHORT = [...PAYROLL_COMPLETENESS_0343_HUMAN_FNS
 //   the migration's own prestate says so rather than silently pinning a stale sha.
 // #1061 END
 // #949 [0300] the tenancy contract-terms + recurring rent-plan lane, riders wave 4 lane 01. TEN
-// clara_authenticated doors and NOT ONE machine-lane grant: this lane is a person's lane end to
-// end — a person records the terms Clara read, a person confirms the plan, a person accepts the
-// settlement, a person confirms the revision. Three READS at the viewer floor
+// clara_authenticated doors and NOT ONE machine-lane grant on any of these ten names — that is
+// still literally true after #1137 [0353], which opens the model lane through EIGHT NEW NAMES
+// beside them (TENANCY_AGENT_TWINS_0353_* below) rather than by widening one of these. A person
+// still records the terms Clara read, a person still accepts the settlement, and a person still
+// confirms the plan and its revision: the two OBO twins name that person in an argument and
+// re-check their standing live. Three READS at the viewer floor
 // (get_contract_terms, propose_contract_terms, get_tenancy_rent_plan_draft,
 // get_tenancy_escalation_revision) and the rest at bookkeeper+, each floor enforced in the body.
 // The twelve internals this file mints (_contract_terms_row_json, _contract_term_rank,
@@ -3103,6 +3106,83 @@ export const CLIENT_FINANCIAL_PACK_WAKE_0320_COHORT = [
   ...CLIENT_FINANCIAL_PACK_WAKE_0320_AGENT_FNS, ...CLIENT_FINANCIAL_PACK_WAKE_0320_UNGRANTED_FNS,
 ];
 // #1000 END
+// #1136 [0352, the model lane's entrance to the payroll and agreement reads] — its OWN cohort,
+// bimodal on the same terms 0320's is, and the SECOND and THIRD wake wrappers clara_agent_ro has
+// ever held.
+//
+//   WHY THERE ARE TWO DOORS FOR THREE TOOLS. Three wave-4 successor contracts were blocked on
+//   `clara_authenticated`-only reads (CUT-PLAN.md §1.4, class C): `read_payroll_posting_state`
+//   (#946) and `read_agreement_terms` (#948) both read clara.list_review_queue — the first for its
+//   `payroll_posting_blocked` row, the second for its `agreement_posting_blocked` row — and
+//   `read_payroll_settlement_state` (#947) reads clara.get_payroll_settlement_candidates. One wake
+//   door per HUMAN DOOR is therefore the whole delta; a third door would have been a second
+//   projection of a verdict whose sentence is the point (0299:2600).
+//
+//   WHAT clara_agent_ro DID NOT GAIN. The HUMAN doors: 0011:4210-4213 asserts that this role must
+//   NOT hold clara.list_review_queue, and 0352's own tail re-reads that after it applies.
+//   clara._agreement_posting_verdict: granted to nobody by 0299 and still granted to nobody.
+//   clara.settle_payroll_net_pay: an ACT, and this ticket bought reads — a person accepts a
+//   candidate on the bank surface or in Needs you, never in a conversation.
+const AGENT_READ_TWINS_0352_AGENT_FNS = [
+  "wake_get_payroll_settlement_candidates", "wake_list_review_queue",
+];
+//   …and the two UNGRANTED cores both pairs of entrances run. Each is its read's OWN body with the
+//   caller's firm lifted into an argument (0352's tail proves that by reversing the surgery and
+//   hashing), granted to NOBODY and reached only from a definer door — the one-ungranted-core law,
+//   0004:6-12. Listed here so `cohortFailures` reports a HALF-applied 0352 rather than a silently
+//   narrower boundary.
+const AGENT_READ_TWINS_0352_UNGRANTED_FNS = [
+  "_payroll_settlement_candidates_core", "_list_review_queue_core",
+];
+export const AGENT_READ_TWINS_0352_COHORT = [
+  ...AGENT_READ_TWINS_0352_AGENT_FNS, ...AGENT_READ_TWINS_0352_UNGRANTED_FNS,
+];
+// #1136 END
+// #1137 [0353, the model lane's entrance to the tenancy lane] — its own cohort, bimodal on the
+// same terms 0320's and 0352's are, and the FIRST lane in the estate that opens BOTH a read lane
+// and an on-behalf-of ACT lane onto one family of human doors in one file.
+//
+//   WHY IT EXISTS. #949's successor contract names four chat tools whose ten doors are
+//   clara_authenticated only (cohort TENANCY_RENT_0300_HUMAN_FNS below, ten names and still zero
+//   machine-lane grants). CUT-PLAN.md §1.4 entries C4-C7 deferred all four and asked the owner
+//   whether Clara may CONFIRM a rent plan on a bookkeeper's behalf; the ruling of 2026-09-25 on
+//   #1137 says yes, in #915's OBO shape — the person still confirms and the act is recorded as
+//   theirs.
+//
+//   THE SIX READS — clara_agent_ro only, the FOURTH through NINTH wake wrappers that role has ever
+//   held, on exactly 0320's and 0352's terms: each is a READ, each runs inside the read pool's
+//   read-only transaction, and each carries one `interactive` allowlist row on top of the EXECUTE.
+const TENANCY_AGENT_TWINS_0353_AGENT_FNS = [
+  "wake_get_contract_terms", "wake_get_tenancy_rent_plan_draft", "wake_propose_contract_terms",
+  "wake_get_tenancy_escalation_revision", "wake_get_rent_settlement_candidates",
+  "wake_get_tenancy_deposit_coding",
+];
+//   THE TWO ACTS — clara_runtime only, NEW NAMES rather than widened grants, the same lane
+//   clara.create_prepayment_schedule_for (0307) and clara.create_accrual_adjustment_for (0222) sit
+//   in: the initiating human is named in an ARGUMENT and re-checked LIVE against this firm's
+//   memberships. The agent read role and all four wake roles gain ZERO on them — a read role that
+//   could confirm a rent plan would be the agent deciding what it is allowed to do — and no
+//   wake_fn_allowlist row exists for either, because they are runtime doors, not wake doors.
+const TENANCY_AGENT_TWINS_0353_RUNTIME_FNS = [
+  "confirm_tenancy_rent_plan_for", "confirm_tenancy_rent_plan_revision_for",
+];
+//   …and the TEN UNGRANTED bodies behind them: eight cores that are their human door's own body
+//   with the caller's firm (and, for the two confirmations, the caller's identity and lane) lifted
+//   into arguments, 0193's revision body under the same treatment, and the OBO lane's own plan
+//   step. Each is granted to NOBODY and reached only from a definer door — the one-ungranted-core
+//   law, 0004:6-12. Listed here so `cohortFailures` reports a HALF-applied 0353 rather than a
+//   silently narrower boundary.
+const TENANCY_AGENT_TWINS_0353_UNGRANTED_FNS = [
+  "_get_contract_terms_core", "_get_tenancy_rent_plan_draft_core", "_propose_contract_terms_core",
+  "_get_tenancy_escalation_revision_core", "_get_rent_settlement_candidates_core",
+  "_get_tenancy_deposit_coding_core", "_confirm_tenancy_rent_plan_core",
+  "_confirm_tenancy_rent_plan_revision_core", "_revise_accounting_plan_core", "_tenancy_plan_core",
+];
+export const TENANCY_AGENT_TWINS_0353_COHORT = [
+  ...TENANCY_AGENT_TWINS_0353_AGENT_FNS, ...TENANCY_AGENT_TWINS_0353_RUNTIME_FNS,
+  ...TENANCY_AGENT_TWINS_0353_UNGRANTED_FNS,
+];
+// #1137 END
 // #635 [0233, the firm's real legal, commercial and model-usage state] — its own cohort, and
 // the FIRST on this roster that deliberately is NOT "wholly absent" before its migration.
 //
@@ -3957,7 +4037,19 @@ export const ALLOWED = {
     // says a read-only role is the narrower home for it. The KIND gate sits on top of the EXECUTE
     // exactly as it does for the bank and close families: one `interactive` allowlist row, so a
     // credential of any other kind is refused by assert_wake_allowed even holding this grant.
-    ...CLIENT_FINANCIAL_PACK_WAKE_0320_AGENT_FNS]),
+    ...CLIENT_FINANCIAL_PACK_WAKE_0320_AGENT_FNS,
+    // #1136 [0352] the SECOND and THIRD wake wrappers this role holds, on the same terms as
+    // 0320's: each is a READ, each runs inside the read pool's read-only transaction, and each
+    // carries one `interactive` allowlist row on top of the EXECUTE. The HUMAN doors they front
+    // (clara.list_review_queue, clara.get_payroll_settlement_candidates) stay absent from this
+    // roster, which is what 0011:4210-4213 asks for.
+    ...AGENT_READ_TWINS_0352_AGENT_FNS,
+    // #1137 [0353] the FOURTH through NINTH wake wrappers this role holds, on the same terms as
+    // 0320's and 0352's: six READS onto the tenancy lane, each inside the read pool's read-only
+    // transaction, each with one `interactive` allowlist row on top of the EXECUTE. The ten HUMAN
+    // doors they front (TENANCY_RENT_0300_HUMAN_FNS) stay absent from this roster, and the two
+    // ACT twins 0353 also mints are clara_runtime's, never this role's.
+    ...TENANCY_AGENT_TWINS_0353_AGENT_FNS]),
   [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...BINDING_PROPOSAL_PR1_WAKE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS, ...F_A5B_PR1_WAKE_FNS, ...CARD1_SEAM_WAKE_FNS,
     // [Wave-F Track A, F-A5b card 1] wake_compose_metric_preview_v2 -- 'interactive' ONLY,
     // permanently (CD-16), beside its untouched v1 twin in AUTHORING_0077_WAKE_FNS.
@@ -4155,6 +4247,11 @@ export const ALLOWED = {
     // human whose membership the door re-checks LIVE. Declared here so any wider grant FAILS the
     // matrix.
     ...DEFERRED_REVENUE_0308_RUNTIME_FNS,
+    // [#1137, 0353] the TWO tenancy confirmation OBO twins -- clara_runtime ONLY, the same lane
+    // and the same shape as 0307's and 0308's pairs above, acting OBO a named human whose
+    // membership the door re-checks LIVE. Declared here so any wider grant FAILS the matrix: the
+    // agent read role and all four wake roles must hold ZERO on an act.
+    ...TENANCY_AGENT_TWINS_0353_RUNTIME_FNS,
     // [#636, 0229] the intake-batch write doors and the cancellation sweep — clara_runtime ONLY,
     // the same lane clara.create_document_intake sits in. The sweep is the pool's ONLY way to see
     // a cancelling parent: it holds no SELECT on clara.intake_batches and none on
@@ -4678,6 +4775,24 @@ export async function grantMatrixFailures() {
   if (packWakeLive.length !== 0) {
     failures.push(...cohortFailures("#1000 0320 client financial-pack model-lane entrance",
       CLIENT_FINANCIAL_PACK_WAKE_0320_COHORT, liveNames));
+  }
+  // #1136 [0352] — bimodal on the same terms as 0320's above: wholly present once 0352 applies,
+  // wholly absent before it. A PARTIAL cohort here means a wake door exists without the core it
+  // delegates to, or the reverse — a half-applied lane, which cohortFailures() fails by design,
+  // and which 0352's own §0 refuses to apply over.
+  const agentTwinsLive = AGENT_READ_TWINS_0352_COHORT.filter((n) => liveNames.has(n));
+  if (agentTwinsLive.length !== 0) {
+    failures.push(...cohortFailures("#1136 0352 payroll and agreement model-lane entrances",
+      AGENT_READ_TWINS_0352_COHORT, liveNames));
+  }
+  // #1137 [0353] — bimodal on the same terms as 0352's above: wholly present once 0353 applies,
+  // wholly absent before it. A PARTIAL cohort here means a wake read or an OBO act exists without
+  // the core it delegates to, or the reverse — a half-applied lane, which cohortFailures() fails
+  // by design, and which 0353's own §0 refuses to apply over.
+  const tenancyTwinsLive = TENANCY_AGENT_TWINS_0353_COHORT.filter((n) => liveNames.has(n));
+  if (tenancyTwinsLive.length !== 0) {
+    failures.push(...cohortFailures("#1137 0353 tenancy model-lane reads and on-behalf-of confirmations",
+      TENANCY_AGENT_TWINS_0353_COHORT, liveNames));
   }
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
   // race, not a narrower boundary (see the block where the roster is declared).

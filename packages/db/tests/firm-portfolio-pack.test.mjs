@@ -791,6 +791,17 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
   // recuts nothing". Gated on 0343's own STEM, never on a number, for the reason every
   // generation above carries.
   const sweepWitnessQueueSplice = await migrationApplied("payroll_completeness_witness$");
+  // RIDERS SWEEP WAVE, LANE L8. #1136's 0352 is the first generation of this body that is not a
+  // SPLICE but a SPLIT: the computation moves, byte for byte, into the ungranted
+  // clara._list_review_queue_core(uuid,jsonb,jsonb,integer), which takes the caller's firm as an
+  // argument, and clara.list_review_queue becomes a thin VIEWER-floored delegate onto it so the
+  // model lane can reach the same body through clara.wake_list_review_queue. The body this cell
+  // has watched since 0231 did not change — it MOVED — and 0352's own §TAIL proves exactly that by
+  // reversing its three anchored edits on the committed core and hashing the result back to
+  // `d5456ecc…`, the sha this cell carried for the previous generation. So this generation pins
+  // BOTH halves: the delegate, and the core that now holds the computation, so a later edit to the
+  // body is still a red here rather than an unwatched change.
+  const queueSplitForAgentLane = await migrationApplied("agent_read_twins_payroll_agreement$");
   const activityRecut = await migrationApplied("^0264_");
   const workListWidened = await migrationApplied("^0267_");
   // RIDERS SWEEP WAVE (S) INTEGRATION, the work-list side of the same collision. Lane L3's #1069
@@ -801,8 +812,14 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
   const sweepAllocationCount = await migrationApplied("work_claim_allocation_count$");
   const workListSig = workListWidened ? "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int,timestamptz,timestamptz)" : "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int)";
   const PINS = {
+    ...(queueSplitForAgentLane
+      ? { "clara._list_review_queue_core(uuid,jsonb,jsonb,int)":
+            "5eae4caaf6a17eb4441c2079b31b71674b541334264fa5c01cd4544645542591" }
+      : {}),
     "clara.list_review_queue(jsonb,jsonb,int)":
-      sweepWitnessQueueSplice
+      queueSplitForAgentLane
+        ? "PENDING_0352_ON_THE_INTEGRATED_CHAIN"
+        : sweepWitnessQueueSplice
         ? "ae0ee7e6bded5c7b9e3e1d5397e793522465adbee0ae789235d965a05abf9784"
         : wave4AccrualQueueSplices
         ? "d5456eccb945decd9f61bba6194543d0528ee5f052776d6fdc20cf9fa0226b6b"
@@ -836,7 +853,9 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
       `${sig} DRIFTED — 0231 recuts nothing, and only #974's (0260), #840/#861's (0262/0264), `
       + "#880/#905's (0266/0267), ticket 1012's (0288), riders wave 4 lane 01's "
       + "(0297/0298/0299/0300), riders wave 4 lane 03's (0302/0304) and the riders sweep wave's "
-      + "(0341 for the work list, 0343 for the queue) own named recuts are tolerated");
+      + "(0341 for the work list, 0343 for the queue, and #1136's 0352 SPLIT, which moves the "
+      + "queue body into clara._list_review_queue_core and pins both halves) own named recuts "
+      + "are tolerated");
   }
   const secdef = await rootQuery(
     "select (select prosecdef from pg_proc where oid = 'clara.list_review_queue(jsonb,jsonb,int)'::regprocedure) as q, "

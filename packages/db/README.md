@@ -10114,6 +10114,201 @@ too), `kp.15` seen RED for the right reason (`financial_year_end_day` withheld w
 every other cell in the file stayed green, then the body restored byte-for-byte from this file's
 own §A text and the restore verified by `sha256(prosrc)` equality with the pre-break measurement.
 No migration: the ticket adds a pinning test over already-disclosed, already-shipped behaviour.
+## 0352 — one body, two entrances, twice: the model lane reaches the payroll and agreement reads (#1136, riders sweep wave, lane L8)
+
+Three successor contracts written by riders wave 4 named doors the chat lane could not reach, and
+the cut phase deferred all three rather than ship tools that can only refuse
+(`docs/plan/active/riders-2026-09-20/CUT-PLAN.md` §1.4, class C):
+`read_payroll_posting_state` (#946) and `read_agreement_terms` (#948) read
+`clara.list_review_queue`, and `read_payroll_settlement_state` (#947) reads
+`clara.get_payroll_settlement_candidates`. Both reads resolve their caller through
+`clara._human_ctx`, which reads the JWT; the chat lane runs on pooled credentials that carry no
+`request.jwt.claims` at all (`packages/runtime/lib/pools.mjs`), so granting either door to
+`clara_agent_ro` would have bought a door answering CLR04 on every call.
+
+This file applies #1000's [0320] shape to both reads at once. Each read's computation moves into
+ONE ungranted core that takes the caller's FIRM as an argument
+(`clara._payroll_settlement_candidates_core(p_firm, p_client)`,
+`clara._list_review_queue_core(p_firm, p_scope, p_cursor, p_limit)`); each human door keeps its
+signature, its envelope, its refusal codes and its ACL and becomes that core's own thin audited
+wrapper; and two new audited wrappers — `clara.wake_get_payroll_settlement_candidates` and
+`clara.wake_list_review_queue`, EXECUTE to `clara_agent_ro` alone with one
+`clara.wake_fn_allowlist` row each for the `interactive` kind — are the model lane's doors.
+
+**Two doors serve three tools, and that is the point.** `read_payroll_posting_state` and
+`read_agreement_terms` both read the review queue, the first for its `payroll_posting_blocked` row
+and the second for its `agreement_posting_blocked` row. Each row carries its GATE'S OWN SENTENCE:
+0299's own header says it in words — "`clara._post_agreement_acquisition` acts on it and
+`clara.list_review_queue` DERIVES its `agreement_posting_blocked` row from it, so the decision the
+lane took and the sentence a person reads are the same body and cannot drift". A third, chat-only
+projection of either verdict would have been a second place for those words to drift, and the words
+are the whole of what #946 and #948 ask a tool to report. `clara._agreement_posting_verdict(uuid)`
+stays granted to NOBODY, exactly as 0299 left it, and the tail re-reads that after applying.
+
+**Neither core is hand-retyped, and neither is built at run time.** Each core's body is the live
+body with a closed roster of anchored substitutions applied, WRITTEN OUT in §A and §D as ordinary
+SQL, so a reader and the migration lexer both see exactly what is installed. The pin sits on both
+sides of the apply: §0 applies the surgery to the LIVE pre-image and refuses unless the result
+hashes to the body embedded below it, and §TAIL re-reads the COMMITTED core, pins the same value,
+and REVERSES the surgery to assert it hashes back to the pre-image — so "the rows did not change"
+is a checked fact about the live catalog. The settlement read takes two substitutions (the
+`declare c record;` + bookkeeper-floor opener, and `cl.firm_id = c.firm`); the queue takes three
+(the `declare` opener, the viewer-floor line, and every `c.firm`, at a MEASURED count of 23 on this
+frontier rather than a remembered one, because eleven migrations have spliced that body and a
+twelfth arm would bring its own firm predicate). The anchors, the forward derivation and the
+reversal live in ten `clara.__t1136_*` helper functions created at the top of the file's own
+transaction and dropped in §Z, so §0 and §TAIL cannot drift apart and nothing outside the migration
+can ever call them.
+
+**What it buys the machine side, in full:** two EXECUTEs and two allowlist rows. Not one relation
+grant, not one policy, no act. `clara.settle_payroll_net_pay` is untouched and still
+`clara_authenticated`-only — #947's own report refused to propose an accept-via-chat tool, because
+a person accepts a candidate on the bank surface or in Needs you where every candidate is visible
+side by side. `0011:4210-4213`'s assertion that `clara_agent_ro` must NOT hold
+`clara.list_review_queue` is still literally true and the tail proves it role by role.
+
+**The floors.** Human: VIEWER for the queue, BOOKKEEPER for the settlement read, both through
+`clara._human_ctx`, the estate's one floor body, raising the same three CLR04s the inline calls
+raised. Model: BOOKKEEPER+, and not by this file's choice — `clara.mint_wake_credential` refuses a
+below-bookkeeper `on_behalf_of` (CLR10 `authority_lost`) and `clara.wake_context` re-validates the
+standing on every use, so a demotion mid-conversation makes an outstanding credential inert.
+
+**Redo (#957).** Redo-safe by construction: every object is a `create or replace`, the two
+allowlist rows are `on conflict do nothing`, and each split RECOVERS its pre-image before it
+splices — from the human door on a fresh apply, and by REVERSING the committed core on a redo — so
+the pin is asserted on both paths rather than only on the one `CLARA_MIGRATION_REDO` takes. §0 also
+refuses a HALF-applied file (one core present, one absent) by name rather than completing it.
+
+## 0353 — the model lane reaches the tenancy lane: six read twins and two on-behalf-of confirmations (#1137, riders sweep wave, lane L8)
+
+#949's successor contract (`reports/wave4-lane01-ticket949.md`) named four chat tools —
+`read_tenancy_terms`, `read_rent_settlement_candidates`, `confirm_tenancy_rent_plan` and
+`confirm_tenancy_rent_plan_revision` — whose doors are all `clara_authenticated` only. The cut phase
+deferred all four (`docs/plan/active/riders-2026-09-20/CUT-PLAN.md` §1.4, class C, entries C4-C7)
+and asked for an owner ruling on the two CONFIRMATIONS, because they are acts a person takes. The
+owner-delegated ruling of 2026-09-25 on #1137 answers it: **yes, Clara may confirm a tenancy rent
+plan on a bookkeeper's behalf from the conversation, as an OBO twin in #915's shape — the person
+still confirms and the act is recorded as theirs.**
+
+This file is that ruling's database half, and it applies two established shapes at once.
+
+**The six READS take #1000's [0320] / #1136's [0352] shape.** Each read's computation moves into ONE
+ungranted core that takes the caller's FIRM as an argument
+(`clara._get_contract_terms_core`, `clara._get_tenancy_rent_plan_draft_core`,
+`clara._propose_contract_terms_core`, `clara._get_tenancy_escalation_revision_core`,
+`clara._get_rent_settlement_candidates_core`, `clara._get_tenancy_deposit_coding_core`); each human
+door keeps its signature, its envelope, its refusal codes, its floor and its ACL and becomes that
+core's own thin audited wrapper; and six new audited wrappers — `clara.wake_*`, EXECUTE to
+`clara_agent_ro` alone with one `clara.wake_fn_allowlist` row each for the `interactive` kind — are
+the model lane's doors.
+
+**The two CONFIRMATIONS take #915's [0307] shape.** Each confirmation's body moves into ONE
+ungranted core that takes the firm, the ACTOR and the LANE as arguments
+(`clara._confirm_tenancy_rent_plan_core`, `clara._confirm_tenancy_rent_plan_revision_core`); the
+human door keeps its JWT read and passes `lane => 'human'`; and
+`clara.confirm_tenancy_rent_plan_for` / `clara.confirm_tenancy_rent_plan_revision_for` — EXECUTE to
+`clara_runtime` alone — name the initiating human in an ARGUMENT and re-check that person's
+membership LIVE (no membership answers exactly as an unknown client does; a deactivated member gets
+`authority_lost`; below bookkeeper gets `insufficient_role`). Every rule that is not about WHO is
+calling lives in the core, so "the twin's refusal vocabulary matches the human door's for every
+shared rule" is a fact rather than a promise.
+
+**Why `clara.revise_accounting_plan` is in this file at all.** The escalation's confirmation ENDS in
+a plan revision, and that door resolves its caller through `clara._plan_door_ctx` → `clara._human_ctx`
+→ `clara.jwt_sub()`. The alternative to splitting it was a machine-side copy of 8.7 kB of
+concurrency-critical logic — two advisory rungs, a row lock, a re-read under it, the alignment wall,
+the catch-up wall — and a second copy of that is a second place for a posting race to be forgotten.
+So `clara._revise_accounting_plan_core(p_firm, p_actor, …)` is 0193's own body with the actor ladder
+lifted out, and `clara.revise_accounting_plan` is a thin delegate over it whose op-key wall still
+runs FIRST and whose floor and firm wall are still `clara._plan_door_ctx`'s.
+
+**The one duplication this file knowingly adds, and the follow-up that removes it.**
+`clara._tenancy_plan_core` is the plan-creation step the OBO confirmation takes, because
+`clara.create_accounting_plan` needs a JWT. It is `clara._obo_plan_core`'s (0308) body with the kind
+fixed to `recurring_journal`, and it BELONGS in `clara._obo_plan_core` as a two-line widening of
+that body's closed kind set. It is separate only because lane L1 of the riders sweep wave recuts
+`clara._obo_plan_core` in the same wave (#1051, then #1080), and the sweep's grouping rule is that
+no database body is written in one lane and written or pinned in another — a second recut of one
+body in one wave collides at integration, and a prestate pinned to a sha another lane is about to
+change refuses the migration for a change that is not a defect. **Follow-up: once #1051 and #1080
+have landed, widen `clara._obo_plan_core`'s kind set to admit `recurring_journal` with
+`via = 'confirm_tenancy_rent_plan_for'`, and reduce `clara._tenancy_plan_core` to a caller of it.**
+For the same reason this file's prestate deliberately does NOT pin
+`clara.create_accounting_plan`, `clara._obo_plan_core`, `clara._accrual_plan_core` or
+`clara._authority_ref_refusal`.
+
+**What that duplication already cost, and the guard that now stands over it.** The first cut of this
+file left `clara.create_accounting_plan`'s CLIENT-STATUS wall out of `clara._tenancy_plan_core`, on
+a premise that was not true — the confirmation core above resolves the client's FIRM and the
+caller's identity, but it never reads `clara.clients.status`. Driven on the rig, the OBO entrance
+confirmed a rent plan for an `archived` or `onboarding` client that the Contract page refuses with
+CLR10 `client is not active -- no new accounting plan` (`client_inactive`); `onboarding` is the live
+case, because that is the state a tenancy is filed in during setup. Nothing posted either way —
+`clara._plan_admit_occurrence` and `clara.wake_due_plan_occurrences` both re-read the status — but
+the rows written would have held the `rent_plan_already_confirmed` and `payable_account_in_use`
+walls against the person's own confirmation once the client was activated. §F now carries the wall,
+verbatim and at that door's own position in the ladder: NOT at the `_for` entrance, where 0307 puts
+its own copy, because 0307's core is SHARED by both entrances and has nowhere else to put it while
+this body is the OBO lane's private stand-in for `clara.create_accounting_plan`. An entrance-level
+copy would sit above `clara._reserve_op` and above every draft wall — answering `client_inactive`
+where the human door answers `terms_incomplete`, and refusing the REPLAY of a confirmation the
+person already made. Both orders are driven in `tests/tenancy-agent-twins.test.mjs`
+(`p1137.obo.refusals_match` case 8, `p1137.obo.plan_step_parity` arms 3 and 4).
+
+Until the follow-up above lands, the standing guard is a cell rather than a comment:
+`p1137.obo.plan_step_parity` compares the two plan bodies' refusal vocabularies on every run, and a
+refusal `clara.create_accounting_plan` raises that `clara._tenancy_plan_core` does not must be on a
+named roster saying which wall above BOTH lanes makes it unreachable. `clara._tenancy_plan_core` is
+also on `plan-overlap-template-arm-retired.test.mjs`'s (T.4) roster now, beside the estate's three
+other plan writers, so the #929 client rung and the self-excluding overlap advisory are watched
+there too.
+
+**The REVISION pair is not affected and must not be "fixed" to match.** Both revision entrances go
+through `clara._revise_accounting_plan_core`, ONE body with no lane branch at all, and
+`clara.revise_accounting_plan` carries no client-status wall — so neither entrance refuses a
+non-active client (driven: `p1137.revision.client_status_parity`, both plans at revision 2 for an
+`archived` client). Adding the wall to `clara.confirm_tenancy_rent_plan_revision_for` alone would
+CREATE a divergence rather than close one. Whether the plan lane should refuse a revision for an
+archived client at all is 0193's question and a person's judgement, and it is carried as a
+follow-up rather than answered by a twin.
+
+**What the machine side bought, and nothing else.** Eight EXECUTEs on eight NEW names and six
+allowlist rows for one wake kind. No human door's ACL moved; the ten names of
+`TENANCY_RENT_0300_HUMAN_FNS` still hold zero machine-lane grants, and the tail asserts that role by
+role. `clara.settle_rent_payable` (accepting a candidate bank line) and
+`clara.record_contract_terms` (recording what the page says) gain NO twin: a settlement with two
+candidate lines of the same amount is adjudicated where a person can see both, and recording a term
+is the person's own reading of the page.
+
+**The surgery, and how a reader checks it.** Nine bodies are recut and not one is hand-retyped.
+Eight of the nine share ONE anchor — the `c := clara._human_ctx(clara.role_rank('<floor>'));` line
+every 0300 door opens with — replaced by a comment and `select p_firm as firm into c;` (the reads)
+or `select p_firm as firm, p_actor as actor into c;` (the confirmations). The replacement ASSIGNS
+THE SAME RECORD VARIABLE the human door assigned, so no second substitution is needed and every
+other line of every core is the human door's own text byte for byte. Three bodies carry one further
+anchor each, and each is a LANE question and nothing else: the confirmation's plan step (human →
+`clara.create_accounting_plan`, OBO → `clara._tenancy_plan_core`), the revision's plan step (both
+lanes → `clara._revise_accounting_plan_core`, so there is no branch), and
+`clara.revise_accounting_plan`'s own actor ladder. Both confirmations also stamp the lane on their
+audit row (`via`), exactly as 0222, 0307 and 0308 stamp theirs — the only observable change to a
+human entrance in this file, and it is additive.
+
+Each core is installed as PLAIN SQL with its body written out, and the derivation is pinned on BOTH
+sides of the apply: §0 applies the surgery to the LIVE pre-image and refuses unless the result
+hashes to the body embedded below it, and §TAIL re-reads the COMMITTED core, pins the same value and
+REVERSES the surgery back to the pre-image's own sha.
+
+**The client-pin arm differs by shape, and both arms fail CLOSED.** The two client-scoped reads
+compare the credential's pin against the argument, as the bank wrappers do. The four
+document-scoped reads take no client, and resolving a document's client in order to compare it
+would be an existence surface of its own — so they REFUSE a pinned credential outright. Both are
+dormant today: the one allowlisted kind, `interactive`, is client-less by construction.
+
+**Redo (#957).** Redo-safe by construction: every object is a `create or replace`, the six allowlist
+rows are `on conflict do nothing`, and each split RECOVERS its pre-image before it splices — from
+the human door on a fresh apply, and by REVERSING the committed core on a redo — so the pin is
+asserted on both paths rather than only on the one `CLARA_MIGRATION_REDO` takes. §0 also refuses a
+HALF-applied file by name rather than completing it.
 ## 0360 — the two sentences a payroll correction leaves behind (#1056 fix round, riders sweep wave, lane 05)
 
 `0360_payroll_correction_sentences.sql` changes no wall, no verdict, no rung, no grant, no table

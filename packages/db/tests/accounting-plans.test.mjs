@@ -713,8 +713,17 @@ test("p640.revision.end_race — an ENDED plan cannot gain a fresh live revision
 
   // THE LOCK IS WHAT MAKES IT A RACE ANSWER RATHER THAN A LUCKY ONE: the refusal is decided on a
   // re-read taken UNDER the plan row lock, which the body's own text is asserted to do.
+  //
+  // #1137 [0353] SPLIT this door: the computation moved, byte for byte, into
+  // clara._revise_accounting_plan_core(p_firm, p_actor, …) so the tenancy lane's on-behalf-of
+  // escalation confirmation revises through the SAME body a person does, and
+  // clara.revise_accounting_plan became a thin delegate over it. The claim below is about the
+  // COMPUTATION, so it is read where the computation is — the core once it exists, the door
+  // before that. 0353's own §0 and §TAIL prove the move is byte for byte by reversing it.
   const src = await rootQuery(
-    "select prosrc from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' and p.proname='revise_accounting_plan'");
+    `select prosrc from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='clara' and p.proname in ('_revise_accounting_plan_core','revise_accounting_plan')
+      order by (p.proname = '_revise_accounting_plan_core') desc limit 1`);
   const body = src.rows[0].prosrc;
   const lockAt = body.indexOf("for update");
   const endTestAfterLock = body.indexOf("plan_ended", lockAt);
