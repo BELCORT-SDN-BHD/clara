@@ -383,7 +383,7 @@ test("646 · with the affordance, a revisable path gets a control and an unrevis
       region({ id: "r1", field_path: "invoice.total", monetary_cents: 105000 }),
       region({ id: "r2", field_path: "statement.closing_balance", text_content: "RM 12.00" }),
     ],
-    revise: { documentId: "d1", factsVersion: 2, busy: false, onRevised: () => {} },
+    revise: { documentId: "d1", factsVersion: 2, payrollFactsVersion: null, busy: false, onRevised: () => {} },
   })));
   try {
     for (let i = 0; i < 4; i++) await h.settle();
@@ -478,4 +478,134 @@ test("885 · ONE Work, and every sentence agrees with itself", async () => {
   } finally {
     await h.unmount();
   }
+});
+
+// =============================================================================================
+// #1056 — THE PAYROLL LANE'S OWN REVISE CONTROL.
+//
+// A payroll fact rendered here had no working control: every payroll path fell through the
+// invoice-only predicate and the row said "Read-only", so a bookkeeper who could see that the
+// reader had taken the gross wrong had nothing to press. Migration 0344 gave
+// `clara.revise_document_fact` a payroll lane; these cells are its face.
+//
+// THE VERSION IS PER LANE, and that is the half a reader would not guess. A revision QUOTES the
+// facts version and the door refuses CLR19 when it has moved — but a payroll summary carries NO
+// invoice reading, so `facts_version` is 0 on it and a payroll row quoted against that number
+// would refuse every time. `clara.list_source_revisions` publishes both, and this table picks the
+// one belonging to the row's own lane.
+//
+// The version cells DRIVE the control and read the number off the opened dialog, because a claim
+// about which version a surface quotes is only worth what pressing the button proves. The dialog
+// PORTALS, so they use `document.body` and the container-adoption idiom
+// `document-revision-dialog.test.tsx` established for the same primitive.
+// =============================================================================================
+
+type Node1056 = { tagName?: string; childNodes?: Node1056[]; getAttribute?: (k: string) => string | null };
+
+function findIn1056(root: Node1056, predicate: (n: Node1056) => boolean): Node1056 | null {
+  if (predicate(root)) return root;
+  for (const c of root.childNodes ?? []) {
+    const found = findIn1056(c, predicate);
+    if (found) return found;
+  }
+  return null;
+}
+
+function reviseTriggers(container: unknown): Node1056[] {
+  const found: Node1056[] = [];
+  const collect = (n: Node1056) => {
+    if (n.tagName === "BUTTON" && /^Revise$/.test(textOf(n as never))) found.push(n);
+    for (const c of n.childNodes ?? []) collect(c);
+  };
+  collect(container as Node1056);
+  return found;
+}
+
+function docBody(): Node1056 {
+  return (globalThis as unknown as { document: { body: Node1056 } }).document.body;
+}
+
+/** Mount the table, open the one Revise control, and return the source version the dialog quotes. */
+async function quotedSourceVersion(
+  facts: EvidenceRegion[],
+  revise: { documentId: string; factsVersion: number; payrollFactsVersion: number | null;
+            busy: boolean; onRevised: () => void },
+): Promise<string> {
+  const h = await renderComponent(App(createElement(DocumentFactsTable, { facts, revise })));
+  const b = docBody();
+  (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const triggers = reviseTriggers(h.container);
+    assert.equal(triggers.length, 1, "control: exactly one Revise trigger on this fixture");
+    await h.fireEvent(triggers[0] as never, "click");
+    await settleUntil(
+      h,
+      () => findIn1056(b, (n) => n.getAttribute?.("data-testid") === "revise-observed-version") !== null,
+      "the revision dialog opening",
+    );
+    const node = findIn1056(b, (n) => n.getAttribute?.("data-testid") === "revise-observed-version");
+    return textOf(node as never);
+  } finally {
+    await h.unmount();
+    const bodyEl = b as unknown as { removeChild: (c: unknown) => void; childNodes?: unknown[] };
+    if (bodyEl.childNodes?.includes(h.container)) bodyEl.removeChild(h.container);
+  }
+}
+
+test("1056 · a payroll run question gets a control; a per-employee cell does not", async () => {
+  const h = await renderComponent(App(createElement(DocumentFactsTable, {
+    facts: [
+      region({ id: "r1", field_path: "payroll.run.gross_pay", monetary_cents: 500000 }),
+      // Nothing below the run level is ever persisted (0296 step 7 strips the per-employee
+      // quotes), so there is no prior value a revision could replace.
+      region({ id: "r2", field_path: "payroll.row.gross_pay", monetary_cents: 300000 }),
+    ],
+    // A payroll summary as `clara.list_source_revisions` actually answers for one: no invoice
+    // reading at all, and one payroll reading on file.
+    revise: {
+      documentId: "d1", factsVersion: 0, payrollFactsVersion: 1, busy: false, onRevised: () => {},
+    },
+  })));
+  try {
+    for (let i = 0; i < 4; i++) await h.settle();
+    assert.equal(reviseTriggers(h.container).length, 1,
+      "exactly one control, on exactly the row the door admits");
+    assert.match(h.text(), /Read-only/, "and the per-employee row says so");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("1056 · a payroll fact whose chain the read could not report offers no control", async () => {
+  const h = await renderComponent(App(createElement(DocumentFactsTable, {
+    facts: [region({ id: "r1", field_path: "payroll.run.gross_pay", monetary_cents: 500000 })],
+    // A server below the 0344 frontier answers `clara.list_source_revisions` without the payroll
+    // keys at all, so the caller has no number to hand over. An affordance whose door would refuse
+    // is worse than no affordance — the same rule the role gate above follows.
+    revise: {
+      documentId: "d1", factsVersion: 0, payrollFactsVersion: null, busy: false, onRevised: () => {},
+    },
+  })));
+  try {
+    for (let i = 0; i < 4; i++) await h.settle();
+    assert.equal(reviseTriggers(h.container).length, 0, "no control where there is no version to quote");
+    assert.match(h.text(), /Read-only/, "the row says read-only rather than offering a control that cannot work");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("1056 · a payroll revision quotes the PAYROLL facts version, and an invoice revision the invoice one", async () => {
+  const both = { documentId: "d1", factsVersion: 3, payrollFactsVersion: 7, busy: false, onRevised: () => {} };
+  assert.equal(
+    await quotedSourceVersion([region({ id: "r1", field_path: "payroll.run.net_pay", monetary_cents: 425570 })], both),
+    "7",
+    "a payroll row is written against the payroll chain",
+  );
+  assert.equal(
+    await quotedSourceVersion([region({ id: "r1", field_path: "invoice.total", monetary_cents: 105000 })], both),
+    "3",
+    "…and an invoice row against the invoice chain, on the very same document",
+  );
 });

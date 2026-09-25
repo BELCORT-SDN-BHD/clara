@@ -3564,6 +3564,33 @@ export const FIRM_STANDING_INSTRUCTION_0338_COHORT = [
 ];
 // #1050 END
 
+// #1056 [0344, the payroll lane of the human fact door] — its own cohort, the same "wholly present
+// or wholly absent" reason 0217's and 0317's carry: the `db-slice-frontiers` matrix runs this
+// package against databases pinned at earlier frontiers where 0296/0297 have applied and 0344 has
+// not.
+//
+//   THE WHOLE COHORT IS UNGRANTED, and that is the boundary claim. 0344 adds no door and widens no
+//   grant: it gives `clara.revise_document_fact` — already on
+//   DOCUMENT_SOURCE_REVISION_0217_HUMAN_FNS, and deliberately NOT listed a second time here — a
+//   payroll lane, and every helper that lane needs is reached from inside that one definer body.
+//   A grant on any of them would be a second, unwalled way into the payroll facts chain from
+//   outside the door that carries the agent wall and the bookkeeper floor.
+//
+//   ALL FIVE ARE LISTED, not the two the first cut named (fix round, STD-1 / ADV-L05-07,
+//   2026-09-25). What this array actually does is the PARTIAL-FRONTIER detector: `cohortFailures`
+//   asks that the five be wholly present or wholly absent, so a database carrying some of 0344's
+//   names and not the others is named as such. The grant guard is a different body —
+//   `grantMatrixFailures` walks the LIVE clara catalogue and holds every function not in ALLOWED
+//   to no grant at all, listed here or not — and the first cut's own comment claimed the list did
+//   that job. It does not; it is the frontier detector, and it is now complete, matching 0217's
+//   precedent above, which lists all four of ITS new ungranted helpers.
+const PAYROLL_FACT_REVISION_0344_UNGRANTED_FNS = [
+  "_revisable_payroll_run_field", "_revisable_fact_lane", "_payroll_source_observation",
+  "_payroll_state_with_human_fact", "_document_live_posted_entry",
+];
+export const PAYROLL_FACT_REVISION_0344_COHORT = [...PAYROLL_FACT_REVISION_0344_UNGRANTED_FNS];
+// #1056 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -4592,6 +4619,13 @@ export async function grantMatrixFailures() {
   if (standingLive.length !== 0) {
     failures.push(...cohortFailures("#1050 0338 firm standing instruction",
       FIRM_STANDING_INSTRUCTION_0338_COHORT, liveNames));
+  }
+  // #1056 [0344] -- bimodal, same reasoning as 0317's above: wholly present once 0344 applies,
+  // wholly absent before it.
+  const payrollRevisionLive = PAYROLL_FACT_REVISION_0344_COHORT.filter((n) => liveNames.has(n));
+  if (payrollRevisionLive.length !== 0) {
+    failures.push(...cohortFailures("#1056 0344 payroll fact revision",
+      PAYROLL_FACT_REVISION_0344_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));

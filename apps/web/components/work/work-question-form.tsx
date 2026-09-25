@@ -95,7 +95,7 @@ import {
 } from "@/lib/work/question-fields";
 import { formatCents } from "@/lib/bank/money";
 import {
-  proposalAnswerDraft, readFaParticularsProposal,
+  proposalAnswerDraft, proposalDepartures, readFaParticularsProposal,
 } from "@/lib/registers/fa-particulars-proposal";
 import type { WorkAnswerValue, WorkQuestionAccount } from "@/lib/work/questions";
 
@@ -836,7 +836,15 @@ function formatFieldValue(field: WorkQuestionField, value: unknown): string {
 }
 
 /** The ACCEPTED record: who, when, which version, and the exact values. This is what replaces the
- *  form — a persistent outcome, never a toast. */
+ *  form — a persistent outcome, never a toast.
+ *
+ *  #1093 ITEM 3 — "CLARA PROPOSED, WHO CONFIRMED". A settled fixed-asset particulars question
+ *  still carries its proposal beside its answer on the ONE record (`p933.wire.answerable`, driven
+ *  on a live database), so a reviewer who opens it later can see whether and how a proposal was
+ *  departed from — `proposalDepartures` is that comparison, and it renders nothing at all for
+ *  every OTHER question kind (no proposal) and for a field confirmed exactly as proposed (no
+ *  departure). This is deliberately the ONLY place that wiring lives: `AcceptedAnswer` is the one
+ *  settled-record renderer this form uses on B3/B4/B6 alike (this file's own header). */
 function AcceptedAnswer({
   record,
   fields,
@@ -848,6 +856,7 @@ function AcceptedAnswer({
 }) {
   const t = useTranslations("WorkQuestion");
   const answer = record.answer ?? {};
+  const departures = proposalDepartures(fields, readFaParticularsProposal(record.source_ref), record.answer);
   return (
     <div className="flex flex-col gap-2" data-testid="work-question-accepted">
       <StateBanner tone="info" silent={silent}>{t("accepted")}</StateBanner>
@@ -858,6 +867,11 @@ function AcceptedAnswer({
             <dd className="wrap-anywhere text-foreground" data-testid={`work-question-accepted-${field.key}`}>
               {formatFieldValue(field, answer[field.key])}
             </dd>
+            {field.key in departures ? (
+              <dd className="wrap-anywhere text-xs text-secondary-ink" data-testid={`work-question-proposed-${field.key}`}>
+                {t("proposedWas", { value: formatFieldValue(field, departures[field.key]!) })}
+              </dd>
+            ) : null}
           </div>
         ))}
         {typeof answer.note === "string" && answer.note !== "" ? (

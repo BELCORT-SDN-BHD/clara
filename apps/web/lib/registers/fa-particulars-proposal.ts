@@ -124,10 +124,10 @@ export function readFaParticularsProposal(
  */
 type PendingQuestionRow = { id: string; source_ref: Record<string, unknown> | null };
 
-/** How many of a client's pending questions are read before the asset's own is looked for. A
- *  client parks at most a handful at a time (`clara.open_work_question` admits ONE pending
- *  question per Work), and a bound is what keeps a surface's convenience read from becoming a
- *  page-sized one. */
+/** The `limit` on the server-filtered read — a bound on rows that already match this asset's own
+ *  `source_ref->>asset_id` and `source_ref->>kind` (#1093), not a scan over the client's whole
+ *  pending roster. `clara.open_work_question` admits at most ONE pending question per Work, so
+ *  this bounds a data anomaly rather than the ordinary case, which is 0 or 1 rows. */
 const PENDING_QUESTION_SCAN = 50;
 
 /**
@@ -139,6 +139,19 @@ const PENDING_QUESTION_SCAN = 50;
  * and no question id at all (`lib/firm/needs-you.ts`), and the register's own read says nothing
  * about Work. So the parked question is found by its `source_ref`, under the caller's own
  * firm-scoped policy.
+ *
+ * THE FILTER IS SERVER-SIDE, ON `source_ref->>asset_id` AND `source_ref->>kind` TOGETHER — never
+ * a client-side scan over the client's whole pending roster (#1093 AC1). PostgREST's jsonb-path
+ * filter syntax on a query-string key (`col->>key=eq.value`) is lawful here — the PREDICATE is
+ * measured against a live database by `p933.read.by_asset` (`packages/db/tests/fa-particulars-
+ * proposal.test.mjs`), which runs BOTH paths together as a raw SQL `where` under the human role
+ * and carries the control showing the `kind` half really excludes. What that cell does NOT
+ * measure, and nothing in this repository does, is the WIRE: no test drives this query string
+ * through a real PostgREST (STD-2 / ADV-L05-03, 2026-09-25). That gap is why the loop below keeps
+ * its identity belt. Filtering `kind` ALONGSIDE `asset_id` (#1093 item 2)
+ * closes a narrower gap the asset-id-alone filter would still have: a pending question of some
+ * OTHER kind that happens to carry the same `asset_id` key in an unrelated part of its own
+ * `source_ref` must never be read as this asset's fixed-asset particulars proposal.
  *
  * IT NEVER THROWS, AND THAT IS THE POINT. A proposal is a convenience laid over a form that works
  * without it. A read that fails, a client with nothing parked and a question carrying no block all
@@ -152,7 +165,12 @@ export async function loadAssetParticularsProposal(
   try {
     const rows = await getRows<PendingQuestionRow>("agent_interruptions", {
       select: "id,source_ref",
-      filters: { status: "eq.pending", client_id: `eq.${clientId}` },
+      filters: {
+        status: "eq.pending",
+        client_id: `eq.${clientId}`,
+        "source_ref->>asset_id": `eq.${assetId}`,
+        "source_ref->>kind": "eq.fixed_asset",
+      },
       order: "created_at.desc",
       limit: PENDING_QUESTION_SCAN,
       session,
@@ -163,10 +181,20 @@ export async function loadAssetParticularsProposal(
     // pre-fill that threw would leave a person unable to complete particulars AT ALL, which is a
     // far worse outcome than not seeing a suggestion.
     if (!Array.isArray(rows)) return null;
+    // THE BELT, AND WHY IT SURVIVED THE SERVER-SIDE FILTER (adversarial ADV-L05-03, 2026-09-25).
+    // The filter above is this app's FIRST jsonb-path filter key, and nothing here drives it
+    // against a real PostgREST — the db battery proves the predicate is lawful SQL and the unit
+    // cell proves the query string is built, which leaves the wire hop between them unproven. A
+    // server that does not understand `source_ref->>asset_id` answers with the client's whole
+    // pending roster instead of an error, and this reader swallows errors by design, so WITHOUT
+    // this check a wire regression would pre-fill ANOTHER asset's drivers under a sentence naming
+    // this one, silently. With it, an ignored filter degrades to the client-side scan this read
+    // used before #1093 — slower, never wrong. It is defence in depth, not the identity rule:
+    // the filter above is what makes the ordinary read one row rather than fifty.
     for (const row of rows) {
-      const ref = row?.source_ref;
-      if (!isObject(ref)) continue;
-      if (ref.asset_id !== assetId) continue;
+      const ref = row.source_ref;
+      if (ref === null || typeof ref !== "object" || Array.isArray(ref)) continue;
+      if (ref.kind !== "fixed_asset" || ref.asset_id !== assetId) continue;
       const proposal = readFaParticularsProposal(ref);
       if (proposal !== null) return proposal;
     }
@@ -252,4 +280,43 @@ export function proposalAnswerDraft(
     draft[field.key] = field.kind === "money" ? v : String(v);
   }
   return draft;
+}
+
+/**
+ * WHICH DECLARED FIELDS DID THE CONFIRMED ANSWER DEPART FROM, AND WHAT DID CLARA PROPOSE INSTEAD —
+ * the read #1093 item 3 asks for: "the proposal and the person's answer both survive on the same
+ * database row" (`p933.wire.answerable`, driven on a live database — the settled question's own
+ * `source_ref.proposal` stands unedited beside its `answer`), so a reviewer can be shown, per
+ * field, whether and how a proposal was departed from.
+ *
+ * THE COMPARISON REUSES `proposalAnswerDraft` RATHER THAN RE-DERIVING IT. Comparing the typed
+ * proposal directly against the stored answer would be comparing two different grammars — a
+ * `text`-declared driver's proposed `60` against its confirmed `"60"` — and `!==` would call every
+ * field a departure. `proposalAnswerDraft` has already restated the proposal in the ANSWER DOOR's
+ * own spelling, so this is apples to apples: `String(proposed) !== String(confirmed)`.
+ *
+ * A FIELD THE PROPOSAL NEVER GROUNDED IS NEVER A DEPARTURE, even when the person's answer supplies
+ * one — there is nothing proposed to have departed FROM. Likewise a field the ANSWER never
+ * mentions (an optional field left blank, which `clara._assert_work_answer` stores as absent) is
+ * not flagged: this function reports a value the person confirmed DIFFERENTLY, never a value they
+ * simply did not restate.
+ *
+ * NEVER THROWS: an `answer` that is not an object (a settled record read before `answer_work_
+ * question` returns it, or a malformed body) reads as no departures, the same tolerant posture
+ * every other read in this module keeps.
+ */
+export function proposalDepartures(
+  fields: readonly DeclaredField[],
+  proposal: FaParticularsProposal | null,
+  answer: Record<string, unknown> | null | undefined,
+): Record<string, string | number> {
+  const departures: Record<string, string | number> = {};
+  if (!isObject(answer)) return departures;
+  const proposed = proposalAnswerDraft(fields, proposal);
+  for (const [key, proposedValue] of Object.entries(proposed)) {
+    const confirmedValue = answer[key];
+    if (confirmedValue === undefined || confirmedValue === null) continue;
+    if (String(confirmedValue) !== String(proposedValue)) departures[key] = proposedValue;
+  }
+  return departures;
 }

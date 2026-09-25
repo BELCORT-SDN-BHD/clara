@@ -6366,6 +6366,7 @@
     "leavePendingHelp": "You do not have to guess. Leaving this pending keeps the question open for whoever can answer it.",
     "accepted": "Your answer was accepted and this Work will continue with it.",
     "answeredBy": "Answered by a {role} at {at} · question {version}",
+    "proposedWas": "Clara proposed {value}",
     "draftKept": "What you had typed",
     "denied": "You can no longer answer this question.",
     "failed": "We could not tell whether your answer was recorded. Sending it again is safe — it will not be recorded twice.",

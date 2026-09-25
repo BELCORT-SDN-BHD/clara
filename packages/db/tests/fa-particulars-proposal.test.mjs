@@ -177,6 +177,29 @@ test("p933.read.by_asset the two register-side entrances find the proposal from 
     `select id from clara.agent_interruptions
       where status = 'pending' and source_ref->>'asset_id' = $1`, [asset.id]);
   assert.equal(narrow.rows.length, 1, "by_asset: a jsonb-path filter on source_ref is admitted to the human role");
+
+  // AND THE TWO-PATH FORM #1093 ACTUALLY SHIPS — `source_ref->>'asset_id'` AND `source_ref->>'kind'`
+  // TOGETHER, which is what `apps/web/lib/registers/fa-particulars-proposal.ts` sends. Driven here
+  // because the standards axis (STD-2, 2026-09-25) found the web comment citing THIS cell for a
+  // predicate this cell did not run: the asset-id half was measured, the pair was not.
+  const pair = await humanQuery(w.users.bob,
+    `select id from clara.agent_interruptions
+      where status = 'pending' and client_id = $1
+        and source_ref->>'asset_id' = $2 and source_ref->>'kind' = 'fixed_asset'`,
+    [client, asset.id]);
+  assert.equal(pair.rows.length, 1,
+    "by_asset: BOTH jsonb-path filters together are admitted to the human role, and they select this asset's own question");
+  assert.equal(pair.rows[0].id, opened.question_id);
+
+  // THE CONTROL THAT KEEPS THE PAIR FROM BEING VACUOUS: the kind half really does exclude. Asked
+  // for a kind #639 never mints, the same statement returns nothing rather than the same row.
+  const wrongKind = await humanQuery(w.users.bob,
+    `select id from clara.agent_interruptions
+      where status = 'pending' and client_id = $1
+        and source_ref->>'asset_id' = $2 and source_ref->>'kind' = 'tenancy_rent_plan'`,
+    [client, asset.id]);
+  assert.equal(wrongKind.rows.length, 0,
+    "by_asset: the kind half of the filter is load-bearing, not decoration");
 });
 
 test("p933.read.firm_walled a person of ANOTHER firm reads nothing for the same asset id — no proposal and no existence oracle", async (t) => {

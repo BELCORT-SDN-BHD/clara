@@ -17,7 +17,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  loadAssetParticularsProposal, particularsFromProposal, proposalAnswerDraft, readFaParticularsProposal,
+  loadAssetParticularsProposal, particularsFromProposal, proposalAnswerDraft, proposalDepartures,
+  readFaParticularsProposal,
 } from "./fa-particulars-proposal";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -127,22 +128,28 @@ test("readFaParticularsProposal: a long description is read WHOLE — the partic
 // `p933.read.by_asset` and `p933.read.firm_walled` drive on a live database.
 // ------------------------------------------------------------------------------------------
 
-test("loadAssetParticularsProposal: reads the client's PENDING work questions and returns the block for this asset", async () => {
-  const { impl, urls } = captureRead([
-    { id: "q-other", source_ref: { kind: "fixed_asset", asset_id: "other", proposal: { ...WIRE, useful_life_months: 120 } } },
-    { id: "q-mine", source_ref: sourceRef() },
-  ]);
+test("loadAssetParticularsProposal: filters source_ref->>asset_id and source_ref->>kind SERVER-SIDE (#1093 AC1) — the query, not a client-side scan, is what proves it is this asset's own", async () => {
+  // The mock returns exactly what a real PostgREST filtered on these two params would: the one row
+  // this asset's own kind-and-id match. A sibling question's block is never even fetched, which is
+  // the point — `p933.read.by_asset`'s own "AND THE NARROWER SERVER-SIDE FORM IS LAWFUL TOO" cell
+  // (packages/db/tests/fa-particulars-proposal.test.mjs) is what proves the estate admits this.
+  const { impl, urls } = captureRead([{ id: "q-mine", source_ref: sourceRef() }]);
   await withMockedFetch(impl, async () => {
     const p = await loadAssetParticularsProposal(fakeSession("tok"), {
       clientId: "c1", assetId: "11111111-1111-4111-8111-111111111111",
     });
     assert.ok(p, "the asset's own parked question is the one that is read");
-    assert.equal(p.useful_life_months, 60, "…and never a sibling question's block");
+    assert.equal(p.useful_life_months, 60);
   });
   assert.equal(urls.length, 1, "one read, not one per row");
   assert.match(urls[0]!, /agent_interruptions/);
   assert.match(urls[0]!, /status=eq\.pending/, "a settled question is not a proposal anybody can still confirm");
   assert.match(urls[0]!, /client_id=eq\.c1/, "scoped to the client the surface is on");
+  assert.match(urls[0]!, /source_ref-%3E%3Easset_id=eq\.11111111-1111-4111-8111-111111111111/,
+    "AC1: the jsonb-path filter on source_ref->>asset_id is sent, replacing the old JS scan over up to 50 rows");
+  assert.match(urls[0]!, /source_ref-%3E%3Ekind=eq\.fixed_asset/,
+    "AC1/#2: kind is filtered ALONGSIDE asset id — a question of a different kind carrying the same "
+    + "asset_id in an unrelated field must not match");
 });
 
 test("loadAssetParticularsProposal: no parked question means no proposal, and a refused read means no proposal either — never a thrown page", async () => {
@@ -245,4 +252,122 @@ test("proposalAnswerDraft: a field the question did not declare is never pre-fil
   assert.deepEqual(draft, { method: "straight_line" },
     "the question's own declared fields bound the fill — a key outside them is one the answer door refuses");
   assert.deepEqual(proposalAnswerDraft(fields, null), {});
+});
+
+// ------------------------------------------------------------------------------------------
+// #1093 ITEM 3 — WHICH FIELDS DID THE CONFIRMED ANSWER DEPART FROM. `proposalAnswerDraft` already
+// restates the proposal in the ANSWER DOOR's own spelling (a `text` driver as a string, `money` as
+// an integer), so comparing against the stored `answer` this way is apples to apples: a proposed
+// 60 compares against a confirmed "60", never against the number 60 itself.
+// ------------------------------------------------------------------------------------------
+
+const FA_FIELDS = [
+  { key: "method", label: "Depreciation method", kind: "choice", required: true,
+    options: [{ value: "straight_line", label: "Straight line" }, { value: "reducing_balance", label: "Reducing balance" }, { value: "none", label: "Not depreciated" }] },
+  { key: "useful_life_months", label: "Useful life (months)", kind: "text", required: false },
+  { key: "rate_bps", label: "Annual rate (basis points)", kind: "text", required: false },
+  { key: "residual_cents", label: "Residual value", kind: "money", required: false },
+  { key: "start_date", label: "In-service date", kind: "date", required: true },
+  { key: "description", label: "Asset description", kind: "text", required: false },
+];
+
+test("proposalDepartures: a confirmed answer that matches the proposal field for field has no departures", () => {
+  const proposal = readFaParticularsProposal(sourceRef());
+  // The db battery's own p933.wire.answerable fixture, answered EXACTLY as proposed.
+  const confirmed = {
+    method: "straight_line", useful_life_months: "60", residual_cents: 0,
+    start_date: "2026-08-15", description: "Air compressor, workshop bay 2",
+  };
+  assert.deepEqual(proposalDepartures(FA_FIELDS, proposal, confirmed), {});
+});
+
+test("proposalDepartures: a field the person changed comes back holding what CLARA proposed, in the answer door's own spelling", () => {
+  const proposal = readFaParticularsProposal(sourceRef());
+  // p933.wire.answerable's own fixture: the proposal says 60 months and a nil residual; the person
+  // answered 84 months and a real residual — the ruling (#883) is that the APPLIED value is theirs.
+  const confirmed = {
+    method: "straight_line", useful_life_months: "84", residual_cents: 150_000,
+    start_date: "2026-08-15", description: "Air compressor, workshop bay 2",
+  };
+  assert.deepEqual(proposalDepartures(FA_FIELDS, proposal, confirmed), {
+    useful_life_months: "60", residual_cents: 0,
+  }, "departures: exactly the two fields the person changed, each holding the PROPOSED value — never the confirmed one");
+});
+
+test("proposalDepartures: no proposal at all means no departures — there is nothing to have departed from", () => {
+  const confirmed = { method: "straight_line", start_date: "2026-08-15" };
+  assert.deepEqual(proposalDepartures(FA_FIELDS, null, confirmed), {});
+});
+
+test("proposalDepartures: a field the proposal never grounded is never flagged, even when the person supplied a value there", () => {
+  // WIRE's own rate_bps is null (straight_line grounds no rate) — the person's reducing_balance
+  // answer supplying one is not a DEPARTURE from a proposal that never proposed anything for it.
+  const proposal = readFaParticularsProposal(sourceRef());
+  const confirmed = {
+    method: "reducing_balance", useful_life_months: "60", rate_bps: "500", residual_cents: 0,
+    start_date: "2026-08-15", description: "Air compressor, workshop bay 2",
+  };
+  const departures = proposalDepartures(FA_FIELDS, proposal, confirmed);
+  assert.ok(!("rate_bps" in departures), "an ungrounded field is never in the departure set");
+  assert.deepEqual(departures, { method: "straight_line" }, "…but a field the proposal DID ground, method here, still is");
+});
+
+test("proposalDepartures: an answer that is not an object (or absent) reads as no departures — never a throw", () => {
+  const proposal = readFaParticularsProposal(sourceRef());
+  assert.deepEqual(proposalDepartures(FA_FIELDS, proposal, null), {});
+  assert.deepEqual(proposalDepartures(FA_FIELDS, proposal, undefined), {});
+});
+
+// ------------------------------------------------------------------------------------------
+// THE WIRE BELT (adversarial ADV-L05-03, 2026-09-25). AC1's server-side filter is the FIRST
+// jsonb-path filter key this app sends, and nothing in this repository drives it against a real
+// PostgREST: the db battery proves the PREDICATE is lawful SQL, the cell above proves the query
+// STRING is built, and between those two sits an unproven wire hop. The failure mode is silent by
+// construction — this reader catches everything and answers `null` — so a filter a server ignores
+// would hand the form ANOTHER asset's drivers under a sentence naming this one, with nothing red
+// anywhere. The two cells below are the belt that makes an ignored filter a no-op instead.
+// ------------------------------------------------------------------------------------------
+
+test("loadAssetParticularsProposal: a server that IGNORES the jsonb-path filters never yields another asset's proposal (ADV-L05-03)", async () => {
+  // The mock answers as a PostgREST that did not understand `source_ref->>asset_id` would: the
+  // client's whole pending roster, newest first, with a SIBLING asset's question at the head.
+  const mine = "11111111-1111-4111-8111-111111111111";
+  const sibling = "99999999-9999-4999-8999-999999999999";
+  const { impl } = captureRead([
+    { id: "q-sibling", source_ref: { kind: "fixed_asset", asset_id: sibling, proposal: { ...WIRE, useful_life_months: 24 } } },
+    { id: "q-mine", source_ref: sourceRef() },
+  ]);
+  await withMockedFetch(impl, async () => {
+    const p = await loadAssetParticularsProposal(fakeSession("tok"), { clientId: "c1", assetId: mine });
+    assert.ok(p, "this asset's own question is still found");
+    assert.equal(p.useful_life_months, 60,
+      "the sibling's 24 months is NOT what pre-fills this asset's form: an ignored server filter degrades to the old client-side scan, never to a wrong-row read");
+  });
+
+  // AND WHEN ONLY THE SIBLING IS RETURNED, the answer is `null` — the ordinary empty form — rather
+  // than the sibling's drivers.
+  const { impl: onlyOther } = captureRead([
+    { id: "q-sibling", source_ref: { kind: "fixed_asset", asset_id: sibling, proposal: WIRE } },
+  ]);
+  await withMockedFetch(onlyOther, async () => {
+    assert.equal(
+      await loadAssetParticularsProposal(fakeSession("tok"), { clientId: "c1", assetId: mine }),
+      null,
+      "no question of this asset's own means no proposal");
+  });
+});
+
+test("loadAssetParticularsProposal: a question of ANOTHER kind carrying the same asset_id is not read as this asset's particulars proposal (ADV-L05-03)", async () => {
+  const mine = "11111111-1111-4111-8111-111111111111";
+  const { impl } = captureRead([
+    // A #639-shaped block on a question whose OWN kind is something else entirely. The block reads
+    // perfectly well; what disqualifies it is the kind, which is the filter's other half.
+    { id: "q-other-kind", source_ref: { kind: "tenancy_rent_plan", asset_id: mine, proposal: { ...WIRE, useful_life_months: 24 } } },
+  ]);
+  await withMockedFetch(impl, async () => {
+    assert.equal(
+      await loadAssetParticularsProposal(fakeSession("tok"), { clientId: "c1", assetId: mine }),
+      null,
+      "kind is half the identity: a block on a question of another kind grounds nothing here");
+  });
 });

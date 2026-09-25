@@ -1085,8 +1085,10 @@ line she derived them from. It travels inside the dependent particulars question
 answering entrance, and it is never applied on its own — a person confirms it or edits it, and what
 is recorded is what they confirmed, under their name. A driver is proposed only where a ground
 exists: the enrolment's own rule (an enrolment with no accumulated-depreciation account admits "not
-depreciated" and nothing else), a recorded note about this client, the account's own retired policy,
-or the account's other completed assets WHERE THEY AGREE. A ground speaks for a row only when its
+depreciated" and nothing else), a recorded note about this client, the account's own retired policy
+WHILE THAT IS STILL ITS LAST WORD, or the account's other completed assets WHERE THEY AGREE. A
+retired policy that a newer LIVE policy supersedes grounds nothing: the live one is what the person
+now says about the account, and a row born under it is born complete with no question at all. A ground speaks for a row only when its
 own account IS that row's account, on every one of those grounds alike; and grounds of one kind that
 disagree ground nothing, whether they are two assets or two recorded notes. Where nothing grounds a
 method the proposal says so and leaves it empty; only the two facts that are not estimates — the
@@ -1094,7 +1096,8 @@ acquisition's posting date and a nil residual — are always proposed, and the r
 default rather than a value read off whatever ground supplied the method.
 _Avoid_: A useful life inferred from an asset's name or class; a method picked between two of the
 account's own assets — or two of the client's own recorded notes — that disagree; a ground borrowed
-from an account that is not this row's; a residual taken from the ground the method came from; a
+from an account that is not this row's; a retired policy proposed while a newer live one supersedes
+it; a residual taken from the ground the method came from; a
 proposal applied without a person; a value a surface repaired into a plausible one; treating the
 reason line as the question's own reason (that says why Clara is asking; this says where the values
 came from).

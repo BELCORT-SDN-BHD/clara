@@ -9189,6 +9189,441 @@ questions (the prompt stanza and its wire shape are a successor contract in
 posts from a printed headcount today.** The database half is deliberately built first: a frozen
 workflow's successor is cheap to ship against a door that already exists, and expensive the other
 way round.
+## 0344 — a person corrects a misread payroll fact through the document Revise control (#1056, riders sweep wave, lane 05)
+
+`0344_payroll_fact_revision.sql` gives `clara.revise_document_fact` a **second lane** rather than
+a second door. #945 (0296) taught the estate to read a payroll summary and #946 (0297) to post one
+unattended; neither gave a person a way to correct a figure the reader took wrong. The one human
+fact door was invoice-shaped end to end — its field wall is `clara._revisable_invoice_field`, its
+observation counts `invoice_facts` extractions, and the extraction it appends is an `invoice_facts`
+row — so `payroll.run.gross_pay` passed the canonical grammar and was then refused
+`field_path_not_revisable`.
+
+**What a payroll correction does, and where it lands.** The correction appends a new
+`payroll_text_facts` extraction under `clara-fact-human:v1`, carrying the other ten questions
+forward as regions and the corrected one as the person typed it, at `engine_confidence = 1`. The
+envelope carries the corrected `payroll_state` — which is the key `clara._payroll_posting_verdict`
+reads (0297:597) — plus `payroll.channel = 'human'` and the same human provenance keys the invoice
+lane writes. Nothing lands in the invoice chain, because an `invoice_facts` row here would be
+invisible to the gate: that is the "silent desynchronization" the ticket forbids, arriving by the
+quietest possible road.
+
+**The accounting answer to the ticket's own question** — "whether a correction re-runs the posting
+verdict or is blocked once posted" — is BOTH, because they are two different runs.
+
+* **An unposted run.** The correction moves the reading. The gate is `stable` and derived from the
+  newest payroll pair banked for the document, so asking it again answers about the corrected
+  figures — the Needs-you row `payroll_posting_blocked` included, which is why that row clears
+  itself when the block does. **Nothing posts.** The unattended post is reachable from
+  `clara.persist_payroll_facts` alone (0297 §G's splice) and this lane "deliberately has no 'post
+  it anyway' door, because nothing in this lane is posted on a guess"
+  (`apps/web/components/firm/needs-you-affordances.tsx:128-130`). A correction corrects the
+  READING; it is not an instruction to post.
+* **An already-posted run.** Refused, by name: `CLR10` / `payroll_run_already_posted`, carrying the
+  entry's id, status, posting date and memo, and saying in words to reverse that entry first. A
+  posted entry is corrected by reversing it and booking the corrected one, never by editing the
+  evidence underneath it while it stands — and the posted entry pins the very extraction it was
+  drafted from (`flags->'payroll_run'->>'extraction_id'`, 0297:960), so admitting the revision
+  would leave approved books citing a superseded reading with nothing anywhere saying so. It is the
+  same family as the live-bank-statement pin this door has carried since 0217:602, and the estate
+  already supports the act that clears it: `clara.reverse_entry` makes
+  `clara._document_posting_entry` answer NULL, the correction is then admitted, and the month
+  re-opens exactly as 0297:697 already says a reversal does.
+
+The pin is **payroll-only**. The invoice lane has never carried a posted-entry wall and #1056 rules
+on the payroll lane; widening the invoice lane here would be a behaviour change nobody asked for to
+a door two other batteries pin.
+
+**What a human declaration makes of the fact state.**
+`clara._payroll_state_with_human_fact(jsonb, text, text, bigint)` replaces the VERDICT on the one
+question and nothing else: `state` becomes `established`, `printed_cents` the declared figure (NULL
+for `payroll.run.period`, the one non-monetary question), `printed_raw` the declared rendering,
+`basis` the new vocabulary member `human_declared`, and `reason` null. `state_version` stays `v1`
+because `clara._payroll_entry_plan` refuses any other value (0297:415) and a corrected run that
+made the whole gate unreadable would be worse than the defect; the provenance is disclosed instead
+in a top-level, sorted `human_declared` array that a machine-produced state never carries.
+
+It **carries unchanged** `computed_cents`, both channel quotes, and the whole `rows` object. That
+last carry is load-bearing: rungs 3 and 4 of the gate read `rows.contested`, `rows.unbalanced` and
+`rows.unchecked` directly (0297:607-634), so a run whose quoted employee rows disagree or fail
+their own gross-minus-deductions identity **stays blocked** however many run-level figures a person
+declares. A person cannot clear a row problem from the run line, and this body does not let them
+appear to. `clara.evaluate_payroll_run_state_v1` is neither called nor touched: it is a registered,
+frozen closure (0296 §D.1) and it takes the two full channel envelopes, whose per-employee quotes
+were stripped and discarded at read time by construction (0296 step 7).
+
+**Two bounds on a declared payroll figure**, and together they keep every figure the door admits
+inside the window the frozen evaluator could itself have read, so a declared figure and a
+machine-read one are always comparable: `payroll_value_negative` (no run-level payroll question is
+ever negative on a payslip, and a negative one would flip the side of the leg
+`clara._payroll_entry_plan` draws from it) and `payroll_value_out_of_range` (0296's own
+normalisation admits at most thirteen integer digits and two decimals — 999,999,999,999,999 cents —
+while the shared `clara._normalize_invoice_cents` carries no such bound). One shape still reads
+differently in the two rules and is admitted here: a rendering padded with leading zeros past
+thirteen digits, which this door reads to the cents its digits state and 0296's regex would have
+called unreadable. It is recorded rather than closed, because closing it would mean a fourth copy
+of a normalisation rule the estate already keeps two of, deliberately (0296's own header says why).
+
+**Versioning.** On the payroll lane the appended extraction's `version_n` counts across the KIND,
+not across `clara-fact-human:v1`. `clara._payroll_posting_verdict` picks the reading it judges by
+`version_n desc, extracted_at desc` (0297:599): a human row reusing the machine's own number would
+have to win a tie-break on the clock instead of winning outright. The four-column unique on
+`clara.document_extractions` is (document, engine, version_n, kind), so a higher number under a
+different engine collides with nothing. `clara._payroll_source_observation` repeats the gate's
+ordering verbatim for the same reason — the door must never revise one reading while the gate
+judges another — and its `facts_version` is a COUNT of done `payroll_text_facts` rows, not a
+`version_n`, for 0217:433's reason restated in this lane's terms.
+
+**The lineage read.** `clara.list_source_revisions` gains `payroll_facts_version` and
+`current_payroll_facts_extraction_id` BESIDE the three invoice keys, which keep their exact meanings
+and values. The surface takes the version a revision must quote from this read, and a payroll row
+quoted against the invoice chain's `facts_version` would refuse `CLR19` against 0 every time. The
+lineage array itself is untouched: a payroll correction is a `fact` revision in
+`clara.document_fact_revisions` like any other, which is what makes it auditable the same way an
+invoice fact revision is.
+
+**What this file does NOT do.** It does not re-post and it mints no Needs-you row kind — clearing a
+block does not post the run, and a run whose block a person has cleared is not surfaced as
+"waiting". That gap is not new: `payroll-summary-posting.test.mjs`'s own S2 cell already records
+that "a run blocked by a missing account reads READY the moment the chart gains it" with nothing
+posting it, and a re-post path is a separate decision about who may ask for an unattended post a
+second time. It is filed as a follow-up rather than built here.
+
+**No new granted name.** The five helpers (`_revisable_payroll_run_field`, `_revisable_fact_lane`,
+`_payroll_source_observation`, `_payroll_state_with_human_fact`, `_document_live_posted_entry`) are
+reached from a definer body alone and the tail proves it role by role; the two recut doors keep
+their signatures, owners, volatility, DEFINER-ness, `search_path` and ACLs, which the tail also
+re-reads from the committed catalog.
+
+**Redo-safe by construction (#957).** Every statement is `create or replace function`. The prestate
+detects its own redo by ONE signal — either recut body already carrying the `#1056` marker — and
+refuses a body at neither its pinned pre-image nor this file's post-image. Both branches were
+exercised on the lane database: the FIRST-APPLY branch through `pnpm db:migrate` against the pinned
+pre-images, and the REDO branch through `CLARA_MIGRATION_REDO=0344_payroll_fact_revision` across
+five successive fix rounds. The file recuts three bodies statically and contains no dynamic SQL at
+all, so no entry in `apps/web/tests/firm-scope-db-pins.corpus.ts` is owed.
+
+### 0344, corrections from the fix round (2026-09-25)
+
+An applied migration is immutable and `CLARA_MIGRATION_REDO` only ever takes the highest applied
+version, which 0345 and 0346 now sit above. Every correction below therefore lands here, in this
+file's own section, and never in `0344_payroll_fact_revision.sql`. Each was measured on `clara_l03`
+on the date given.
+
+**The Needs-you row does NOT clear itself when the block clears — it changes its sentence, and the
+sentence then names an act that discards the correction.** The claim above ("the Needs-you row
+`payroll_posting_blocked` included, which is why that row clears itself when the block does",
+repeating 0297:1129) is true of the road 0297 built and false of the one 0344 opens. Measured in the
+live body of `clara.list_review_queue`: the payroll arm's WHERE asks only that a done
+`payroll_text_facts` row exists and that the filing carries no live draft or approved entry — it
+never asks the verdict. On 0297's own road the two move together, because a block that clears
+inside `clara.persist_payroll_facts` posts the entry in the same transaction and the entry is what
+retires the row. On 0344's road nothing posts, so the row stands and merely swaps in the verdict's
+`ready` sentence: *"Payroll run <month> is ready to post but no entry exists yet — re-file the
+payslip to post it."* (0297:776-778). Re-filing creates a NEW document whose extraction chain does
+not carry the correction, so the person is told to do the one thing that throws their correction
+away. **What is true:** a correction re-derives the verdict, the reason text changes, and the row
+stands until an entry exists. The re-post gap named under "What this file does NOT do" is therefore
+not merely a missing convenience: it is the reason this sentence has no honest remedy to offer, and
+it is carried as a follow-up with the sentence named beside it.
+
+**The recut door's serialisation comment is wider than the estate.** It says the revision is
+"serialised against every other writer of this document's reading" on the `clara.documents` row.
+Measured: `clara.revise_document_fact` and `clara.persist_invoice_facts` both take that row `for
+update`; **`clara.persist_payroll_facts` takes no lock at all**, and neither does
+`clara._post_payroll_run`. What is true is narrower and worth stating in full, because it is a
+reachability argument and not a lock: a payroll document is read exactly once
+(`clara._enqueue_invoice_facts_core` short-circuits `already_completed` on a done
+`payroll_text_facts` row), nothing posts outside that single transaction, and so there is no second
+payroll writer to race today. The moment anyone adds a payroll re-read or a "post it now" door,
+that argument lapses and the payroll writer needs the same `for update` this door takes.
+
+**The already-posted refusal probes more than its own words claim.**
+`clara._document_live_posted_entry(p_document)` is `clara._document_posting_entry(client, document)`
+per live filing (0182:578-590), which answers with a live `entry_evidence_links` row OR any
+approved, un-reversed `journal_entries` row bound to the document — with no payroll qualification.
+The raise nonetheless says "this payroll run is already posted as entry %". A payroll summary cited
+as evidence on an ordinary manual journal therefore refuses every payroll fact revision on that
+document and names an entry that is not the payroll acquisition. The probe itself is the invoice
+lane's own, and keeping one probe for both lanes is the right shape; it is the sentence that
+overstates what was found.
+
+**Two declared supersets, recorded so they are not read as criteria.** (a) The document facts table
+offers the Revise control for every run-level payroll path whenever a payroll facts version exists,
+not only for paths that are not `established` — the table's row shape carries no fact state, and a
+figure both channels misread is `established` and still wrong. (b) `document-detail.tsx` now takes
+the payroll facts version for the existing facts-version note on a payroll-only document, which no
+acceptance criterion asked for; without it that note reads "source version 0" under a table of
+payroll figures.
+
+## 0345 — a depreciation-policy knowledge key, so the fixed-asset proposal's `client_knowledge` ground can fire (#1090, riders sweep wave, lane 05)
+
+`0345_depreciation_policy_knowledge_key.sql` adds ONE row to `clara.knowledge_keys`:
+`depreciation_policy`. #933 ("the depreciation-particulars proposal rides `source_ref`, and needs
+no migration", above) built and tested `deriveFaParticularsProposal`'s `client_knowledge` ground in
+full — ranked above the account's own retired policy and its completed siblings — but left it
+"wired and unfed": the catalogue held fourteen keys and none was about depreciation, so no person
+could ever record the note the ground reads. This file is the whole of what was owed: the catalogue
+entry.
+Nothing else needed a migration — `clara._knowledge_assert_value`'s `shape_only` label already
+admits an arbitrary object, `clara.capture_knowledge` already exists, and
+`clara.knowledge_records`'s own `applies_when` (a generic jsonb object of scalar equality
+conditions since 0192) already carries the account scoping the note needs, with no new column.
+
+**The catalog choice this file measured, not assumed, and got wrong on its first draft.** A
+depreciation policy reads like "a decision about how the books are prepared" — 0192's own
+definition of `kind = 'policy'` — but `clara._tf_knowledge_firm_eligibility` (0220, unmodified)
+admits `kind in ('preference','policy')` at firm scope UNCONDITIONALLY, with no regard for
+`clara.knowledge_key_firm_eligibility` at all. A `policy`-kind draft of this row, measured live on
+the lane database, let a firm-scope capture of `depreciation_policy` succeed with no eligibility
+row naming it — a feature this ticket's brief never asked for (it names a CLIENT's recorded note
+only) and, worse, a DARK one: the successor's read is client-pinned and would never surface a
+firm-scope row, so a captured firm default would sit accepted and permanently unread. The fix is
+the `customer_identity_policy` precedent instead: `kind = 'assertion'` with `authority_bearing =
+true`, which still forces "asserted trust only" (`user_statement` / `interview` /
+`registry_lookup`, never `document_extraction` or `model_inference`) at the door's own explicit
+check and at `_tf_knowledge_authority`'s trigger belt — TWO of the three belts 0192's own header
+names for an authority-bearing key of any kind other than `policy` — while leaving the
+firm-eligibility wall live, so an unseeded `depreciation_policy` is refused
+`knowledge_scope_not_firm_defaultable` exactly as a plain client-identity fact is.
+`packages/db/tests/knowledge-firm-defaults.test.mjs`'s `p654.eligibility.admits_by_kind` cell —
+which drives EVERY non-admitted catalog key through the real firm-scope door — moves from ten
+refused keys to eleven in this same commit, for the same reason its own comment already gives for
+0240's `financial_year_end_day`.
+
+**Because `clara.knowledge_keys` is append-only for every role, including `clara_fn_owner`** (no
+escape hatch — `_tf_append_only` raises unconditionally), the wrong first draft could not be healed
+by a redo of this file's SQL: a redo detects an incompatible previously-landed row and refuses,
+rather than repairing it. The lane database was returned to a clean prestate by disabling the two
+append-only triggers (`knowledge_keys` and, for the test rows that already referenced the wrong
+row, `knowledge_records`) as an out-of-band rig operation on this disposable database, deleting the
+wrongly-shaped rows, re-enabling both triggers, and then running `CLARA_MIGRATION_REDO=
+0345_depreciation_policy_knowledge_key` to apply the corrected file. A from-scratch chain only ever
+sees this file's one, correct, first apply.
+
+**The read and the mapping this ticket's brief also asks for** ("the code path that loads inputs
+for the proposal derivation should read a client's recorded depreciation note … and map its value
+onto `FaProposalKnowledgeNote`") are NOT a migration and are not wired into any workflow step:
+`loadFaProposalInputsStepV6` does not exist (`claraWork.v6.impl.ts` is absent; `registry.ts` still
+resolves `claraWork_v5`), and that step lives inside a frozen-workflow closure this lane must never
+create. `mapDepreciationKnowledgeRows` (`packages/runtime/lib/fa-proposal-grounds.ts`) is the
+pure mapping, built and tested; the SQL a step would run under the SAME OBO `clara_agent_ro`
+credential v4's own register read mints is stated in this ticket's report as a successor-contract
+addition, and `packages/db/tests/depreciation-policy-knowledge.test.mjs` drives capture -> that
+exact read -> the mapper -> `deriveFaParticularsProposal` end to end on a live database, proving a
+recorded note outranks a disagreeing account-siblings ground for the same asset.
+
+**No plan-item-map row.** `depreciation_policy` is recorded directly through `clara.capture_
+knowledge`, never promoted from a committed onboarding answer — the same posture
+`banking_arrangement`, `customer_identity_policy` and `trade_nature` already carry (measured live:
+none of the three holds a `clara.knowledge_plan_item_map` row either).
+
+### 0345, corrections from the fix round (2026-09-25)
+
+**The read now carries the note's effective window, and it is code rather than prose.** The
+successor-contract read stated above asked `state = 'live'` and nothing more. A knowledge record's
+`state` does not move when its effective window simply closes — nothing supersedes it — so a note
+captured for 2024 alone was still `live` in 2026 and grounded a 2026 proposal under the deriver's
+present-tense sentence (driven on `clara_l03` inside a rolled-back transaction, 2026-09-25). The
+statement now lives in ONE place, `FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL`
+(`packages/runtime/lib/fa-proposal-grounds.ts`), takes the calendar day as `$2` (null = today
+in MYT) and carries the SAME window terms `clara.retrieve_knowledge` computes `in_effect` from
+(0230:361-362). It DROPS where that door MARKS, on purpose: that door hands a model a marked
+record so the model can say "this expired", while this ground feeds a deterministic deriver with no
+vocabulary for an expired note. Cells `dk.08` and `dk.09` drive the window both ways and measure
+why the step does not call `clara.retrieve_knowledge` itself — `clara_agent_ro` holds EXECUTE
+neither on it nor on `clara.record_work_knowledge_read`, so the step reads the relation directly
+and leaves NO work-knowledge-read receipt for `clara.work_knowledge_drift` to find.
+
+**The statements and mappers moved out of the deriver's own file, which is deploy-locked on
+`main`.** `frozen-workflows.json` at `061a6992b` carries
+`packages/runtime/lib/fa-particulars-proposal.ts` with `deployed: true` and the sha this lane was
+cut at; the lane's own manifest has no such entry, because the cut phase minted it after the
+branch. #1090 and #1092 had appended their statement and mapper to that very file, which at
+integration is a changed deploy-locked body -- the one thing the freeze exists to stop. They now
+live in `packages/runtime/lib/fa-proposal-grounds.ts`, a new module that imports the deriver's
+types and nothing else, and the deriver's file is byte-identical to `main` again
+(sha256 `49d583fc…07cd51c3`, re-measured).
+
+**"`registry.ts` still resolves `claraWork_v5`" was true of this lane's base and is false of what
+this merges into.** `main` at `061a6992b` (the cut phase, PR #1140) carries
+`packages/runtime/workflows/claraWork.v6.impl.ts`, its `loadFaProposalInputsStepV6` and the
+registry entry `claraWork: claraWork_v6`. The step is in `frozen-workflows.json` there and is
+allocated to lane L8 by `SWEEP-PLAN.md`'s shared-files table, so this lane still writes no workflow
+code — but the successor contract is now addressed to a step that EXISTS, and it names the three
+comments in that file this lane makes false. It is stated in
+`docs/plan/active/riders-2026-09-20/reports/waveS-lane05-fix.md`.
+
+**The `knowledge_keys` census pins an equality on an append-only catalogue** (§0 raises unless
+fourteen other rows exist, §Z unless fifteen exist in total). No other lane of this wave touches
+that relation, so the hazard is not live; if a later round ever recuts this file, the weaker `>= 14`
+plus the exactly-one-`depreciation_policy` assertion the tail already carries buys the same
+protection without breaking on any migration numbered below 0345.
+
+**An owner line is owed when #1090 closes.** `kind = 'assertion'` + `authority_bearing = true`
+makes `clara._knowledge_floor('depreciation_policy','client')` answer `admin`, while the BINDING
+door this note merely advises on — `clara.set_fa_depreciation_policy` (#932) — floors at
+`bookkeeper`. The lower-stakes advisory act therefore costs more authority than the higher-stakes
+binding one. The choice was forced (a `policy`-kind key would have been unconditionally
+firm-eligible), but if bookkeepers are the people who record a client's depreciation note, this
+ground will rarely be fed.
+
+## 0346 — the runtime read credential reaches a retired default depreciation policy (#1092, riders sweep wave, lane 05)
+
+`0346_fa_retired_policy_agent_read.sql` adds ONE row-level-security policy (`p_fadp_agent`) and ONE
+table-level `grant select` on `clara.fa_account_depreciation_policies` for `clara_agent_ro`, and
+nothing else: no function, no column, no index, no door, and no widening of any other role.
+
+**The gap.** #933 built `deriveFaParticularsProposal`'s `retired_account_policy` ground — ranked
+below `client_knowledge` (fed by 0345) and above `account_siblings` — but the rows it reads live in
+`clara.fa_account_depreciation_policies` (#932, 0277 §A), whose only read policy was `p_fadp_human`
+for `clara_authenticated`. Measured live before this file: `clara_agent_ro`, `clara_runtime` and
+every wake role held zero privilege on the relation, so the ground could never fire and the
+proposal fell through to the siblings every time.
+
+**Why `clara_agent_ro` and not `clara_runtime`.** A workflow step reads under the run's own OBO READ
+credential: `readScoped` checks out of the read pool, whose group role is `clara_agent_ro`
+(`packages/runtime/lib/pools.mjs:101`). That is the same credential
+`loadPendingFixedAssetStepV4` already reads `clara.fixed_assets` with, under `p_fixed_assets_agent`.
+`clara_runtime` is the unscoped service identity and carries no firm; it is deliberately left with
+nothing here.
+
+**Why the predicate is plain tenancy and not "retired rows only", which was this file's first
+draft.** The ticket's title says "retired depreciation policies", and `... and not active` would
+have been the tighter wall. It was rejected for a measured reason. `clara.set_fa_depreciation_policy`
+is version-forward, so an account can hold a RETIRED version 1 underneath a LIVE version 2; a
+register row that was already pending when version 2 landed still opens a question, and proposing
+from the retired version 1 while a live version 2 says something else would put a SUPERSEDED human
+judgement on a form under Clara's own sentence. The read therefore carries a
+`not exists (… where q.active)` guard (`FA_RETIRED_ACCOUNT_POLICY_SQL`,
+`packages/runtime/lib/fa-proposal-grounds.ts`). Under a retired-only RLS wall that sub-select
+would see nothing and ALWAYS pass — the guard would be vacuous under the very credential that runs
+it, which is worse than a slightly wider read. `packages/db/tests/fa-retired-policy-agent-read.test.mjs`
+(`fp.read`) drives both arms and carries the vacuity control that shows the guard, not luck, is what
+suppresses the superseded row.
+
+**What that widening costs, measured.** `clara_agent_ro` already holds table-level SELECT on
+`clara.fixed_assets` under `p_fixed_assets_agent`, and that register carries the same five drivers
+per ASSET (`depreciation_method`, `useful_life_months`, `depreciation_rate_bps`, `residual_cents`,
+`cost_cents`). A per-account DEFAULT of those drivers is the account-level statement of what this
+credential can already read row by row, not a new class of data. The shape is the estate's own: all
+52 policies `clara_agent_ro` holds today are plain tenancy predicates, and the only column-level
+grant anywhere in this estate is an UPDATE pair on `clara.wake_intents` — so a column-level SELECT
+grant would have been a novel mechanism with no precedent and a silent-by-default failure mode for
+every column added later.
+
+**What stays shut, and is asserted rather than assumed** (§Z): SELECT and only SELECT for
+`clara_agent_ro` (INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER each named and refused);
+`clara_runtime`, the three wake roles, `clara_freeform_ro` and PUBLIC each named and holding
+nothing; `p_fadp_human` unmoved; and both write doors
+(`clara.set_fa_depreciation_policy`, `clara.retire_fa_depreciation_policy`) still
+`clara_authenticated`-only. The firm wall itself cannot be proven from inside the migration
+(`clara.wake_firm()` needs a minted credential), so `fp.wall` drives it under a real credential with
+a second firm's credential as the control.
+
+**Prestate pins** (measured live on `clara_l03`, chain 0001..0345, after this lane's #1056 and
+#1090): `clara.wake_firm()` `76311c51…cbfabc`, `clara.set_fa_depreciation_policy(…)`
+`11f0aa0a…20b67d`, `clara.retire_fa_depreciation_policy(…)` `f75d3f25…ac8c05e`,
+`clara._tf_fa_acquisition_birth()` `a584e946…5395b69c`, `clara._fa_on_approve(uuid)`
+`412fd7a0…5faf643b`. The last two are pinned because this file's "a LIVE policy is never a proposal
+ground" reasoning IS those two 0292-recut bodies. No function is recut; the tail re-measures all
+five.
+
+### 0346, corrections from the fix round (2026-09-25)
+
+**"All 52 policies `clara_agent_ro` holds today are plain tenancy predicates" is not what the
+catalogue says.** Re-measured live on `clara_l03` after this file applied: 53 policies name
+`clara_agent_ro`, and they group as 37 × `(firm_id = clara.wake_firm())` (this file's `p_fadp_agent`
+is one of them, so 36 of the 52 before it), 7 × `((firm_id is null) or (firm_id =
+clara.wake_firm()))` — firm-nullable defaults — 6 × `true`, 1 × `(id = clara.wake_firm())`
+(`clara.firms`), 1 × `clara.shares_my_firm_wake(id)` (`clara.users`) and 1 EXISTS join through
+`clara.onboarding_plans`. The six unconditional ones are catalogue reads: `clara.event_types`,
+`clara.knowledge_keys`, `clara.knowledge_plan_item_map`, `clara.taxonomy_active`,
+`clara.taxonomy_versions`, `clara.trigger_taxonomy`. The count was right and the characterisation
+was not, and that sentence is the whole argument for a table-level grant rather than a narrower
+wall — so the corrected form is: **36 of the 52 carry the same plain tenancy predicate this file
+uses, and the rest are catalogue reads, firm-nullable defaults and three one-off firm identities.**
+The conclusion is unchanged; the argument now matches the estate.
+
+**What the firm knowingly accepts.** `clara_agent_ro` can now SELECT EVERY depreciation-policy row
+of every client of the firm, LIVE rows included, not only retired ones, and at table level, so the
+free-text columns (`reason`, `created_by`, `retired_by`, `retired_reason`) are reachable even
+though `FA_RETIRED_ACCOUNT_POLICY_SQL` selects five driver columns and no commentary. The narrower
+alternative was rejected for a measured reason (a retired-only wall makes the read's own
+supersession guard vacuous under the very credential that runs it), and no column-level SELECT
+grant exists anywhere in this estate to copy. This is a knowing acceptance and belongs in the
+integration record as one, not as an implementation detail: it is a runtime credential reaching a
+client's tax-depreciation judgements. `FA_RETIRED_ACCOUNT_POLICY_SQL` stays the statement's one
+home so no later reader starts selecting the commentary columns by accident.
+## 0360 — the two sentences a payroll correction leaves behind (#1056 fix round, riders sweep wave, lane 05)
+
+`0360_payroll_correction_sentences.sql` changes no wall, no verdict, no rung, no grant, no table
+and no signature. It recuts two bodies through the 0146/0260/0297 splice idiom and changes exactly
+one string in each, plus one disclosed key. Its number comes from the sweep wave's overflow block,
+assigned by the orchestrator; it exists because 0344 is applied and immutable and
+`CLARA_MIGRATION_REDO` only ever takes the highest applied version, which 0345 and 0346 sit above.
+
+**The ready sentence (ADV-L05-01).** After a correction a blocked run reads `ready`, nothing posts
+it, and the Needs-you row does not clear — `clara.list_review_queue`'s payroll arm never asks the
+verdict, so it stands and swaps in the verdict's `ready` sentence, which said *"re-file the payslip
+to post it"*. Re-filing creates a NEW document whose extraction chain does not carry the
+correction: the estate was telling a person, in its own words, to do the one act that discards the
+work they had just done. `clara._payroll_posting_verdict` now branches its `ready` arm on whether
+the reading carries a human declaration (0344's top-level `human_declared`, which a machine-
+produced state never has). A corrected reading is told that nothing will post it, that re-filing
+reads the page afresh without the correction, and to book the month by hand — an act the same
+person can perform, since `clara.draft_entry` and `clara.approve_entry` are both
+`clara_authenticated` doors, which §Z re-measures. Every other reading keeps 0297's sentence to the
+byte, and the battery drives BOTH roads: a corrected run, and a reversed clean run (machine-ready,
+nobody declared anything), whose sentence is asserted as an exact string.
+
+**Why the correction still does not post.** Posting it would need a SECOND posting arm:
+`clara._post_payroll_run` writes `clara.entry_post_receipts` with `approval_arm =
+'payroll_unattended'` and a rationale whose own words are "posted unattended from a payroll summary
+whose two readings agreed" — false of a run a person declared a figure on. Who may cause an
+approved journal entry with no second reading behind it is an accounting decision for the owner,
+not a fix round's to invent. It stays the follow-up 0344's section names, now with this sentence
+beside it.
+
+**The already-standing-entry refusal (SPEC-1056-A).** The payroll lane's pin asks
+`clara._document_live_posted_entry`, i.e. `clara._document_posting_entry` per live filing: a live
+`entry_evidence_links` row (that arm tests no status of its own) or any approved, un-reversed
+`journal_entries` row bound to the document — no payroll qualification anywhere in it. The refusal
+nonetheless said "this payroll run is already posted as entry %". The probe is deliberately KEPT —
+anything the estate derived from this reading must come down first, which is 0217's
+`live_bank_statement_present` rule — and the sentence is corrected to the umbrella the probe
+measures, with the reason code renamed to `live_entry_present` (0217's own naming) and a new
+`is_payroll_run` key in the detail so a surface can say which of the two it found. ONE remedy is
+named because one is what exists: measured, both writers of `clara.entry_evidence_links` only ever
+create a link for an entry already posted (`clara.attach_entry_evidence` refuses a draft in those
+words — driven by a cell; `clara._record_journal_entry_core` writes its link inside the posting
+transaction), and `t_entry_evidence_release` releases every live link the moment `reversed_by` is
+set, so reversing the entry clears both arms.
+
+**Prestate pins** (measured live on `clara_l03`, chain 0001..0346, after this lane's #1056 / #1090
+/ #1092): `clara._payroll_posting_verdict(uuid)`
+`23c644b7b4ad11cee43c1e02acb2599733cb1000a808d108a5519d4b3a0a4df0` →
+`895ff7689cc048e6c96889425621189441ea5dfbc8c9fd555a13ac8d515470fc`, and
+`clara.revise_document_fact(uuid,text,jsonb,int,text,text)`
+`a6858d3e88bfca79d9a0f527a0d511db3702d53ca5612d796a05255fa1927fb8` →
+`75a6c30f4059e547573589bb25ebe275891e8e9a6efa556bb947b3df9a5ef549`. `clara.list_review_queue` is
+pinned by STRUCTURE, not by sha: six other files splice it and its sha moves for reasons that have
+nothing to do with this one, so the prestate asserts the payroll arm still renders the verdict's
+own sentence and nothing else about it.
+
+**Both branches exercised on the lane database.** FIRST-APPLY through `pnpm --filter @clara/db
+migrate` against the pinned pre-images, and REDO through
+`CLARA_MIGRATION_REDO=0360_payroll_correction_sentences`, which reports both splices as no-ops and
+still re-reads every tail assertion from the committed catalog. A redo cannot heal an edit INSIDE
+a spliced string (its marker is already live, so the splice no-ops): the two bodies were restored
+to their pinned pre-images by re-running 0297's and 0344's own `create or replace function`
+statements as `clara_fn_owner` — an out-of-band rig operation on a disposable database, the hand
+procedure #957 replaced — and the redo then took its FIRST branch, which is also the branch a
+from-scratch chain takes.
+
+**It mints no name**, so `packages/db/tests/rig-meta.mjs` gains no cohort entry; it is a
+dynamic-SQL file, so `apps/web/tests/firm-scope-db-pins.corpus.ts` gains one reviewed barrier
+entry, in file-sorted order (wave 4, rule 7 / sweep rule (d)).
 ## 0361 — one map of "which door releases this claim", and the carry-down stops naming one that cannot (#1078 fix round, riders sweep wave, lane 02)
 
 [0361_reservation_release_advice.sql](migrations/0361_reservation_release_advice.sql) closes the
