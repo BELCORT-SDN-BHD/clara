@@ -37,8 +37,17 @@ import {
 } from "./payroll-fact-revision-fixtures.mjs";
 
 const STEM = "payroll_fact_revision$";
+// #1056's FIX ROUND (0360_payroll_correction_sentences.sql) renames this door's posted-entry
+// refusal to what its probe actually measures and corrects its sentence. Both files ship on the
+// same branch, so this battery can meet either frontier: at 0344 alone the refusal is
+// `payroll_run_already_posted`, and once 0360 is applied it is `live_entry_present`. The cell
+// below asserts ONE exact name per frontier rather than tolerating both -- a tolerant assertion
+// would stop noticing a rename nobody meant. The sentence and the new `is_payroll_run` key are
+// 0360's own battery's subject (payroll-correction-sentence.test.mjs), not this file's.
+const FIX_STEM = "payroll_correction_sentences$";
 
 let live = false;
+let sentencesFixed = false;
 let world = null;
 
 before(async () => {
@@ -55,6 +64,9 @@ before(async () => {
       + "for an estate sweep against a chain that predates it.");
   }
   live = true;
+  sentencesFixed = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [FIX_STEM]))
+    .rows[0].n > 0;
   world = await buildWorld();
 });
 
@@ -503,7 +515,7 @@ test("S6 · a payroll run that is already posted refuses the correction, and nam
     (e) => {
       const r = refusal(e);
       assert.equal(r.code, "CLR10");
-      assert.equal(r.reason, "payroll_run_already_posted",
+      assert.equal(r.reason, sentencesFixed ? "live_entry_present" : "payroll_run_already_posted",
         "the refusal is NAMED, so a surface can say what to do instead of showing a generic wall");
       assert.equal(r.detail.entry_id, posted[0].id, "…and it points at the entry standing on the reading");
       assert.equal(r.detail.status, "approved");

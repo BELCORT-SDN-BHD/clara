@@ -7620,3 +7620,72 @@ grant exists anywhere in this estate to copy. This is a knowing acceptance and b
 integration record as one, not as an implementation detail: it is a runtime credential reaching a
 client's tax-depreciation judgements. `FA_RETIRED_ACCOUNT_POLICY_SQL` stays the statement's one
 home so no later reader starts selecting the commentary columns by accident.
+## 0360 — the two sentences a payroll correction leaves behind (#1056 fix round, riders sweep wave, lane 05)
+
+`0360_payroll_correction_sentences.sql` changes no wall, no verdict, no rung, no grant, no table
+and no signature. It recuts two bodies through the 0146/0260/0297 splice idiom and changes exactly
+one string in each, plus one disclosed key. Its number comes from the sweep wave's overflow block,
+assigned by the orchestrator; it exists because 0344 is applied and immutable and
+`CLARA_MIGRATION_REDO` only ever takes the highest applied version, which 0345 and 0346 sit above.
+
+**The ready sentence (ADV-L05-01).** After a correction a blocked run reads `ready`, nothing posts
+it, and the Needs-you row does not clear — `clara.list_review_queue`'s payroll arm never asks the
+verdict, so it stands and swaps in the verdict's `ready` sentence, which said *"re-file the payslip
+to post it"*. Re-filing creates a NEW document whose extraction chain does not carry the
+correction: the estate was telling a person, in its own words, to do the one act that discards the
+work they had just done. `clara._payroll_posting_verdict` now branches its `ready` arm on whether
+the reading carries a human declaration (0344's top-level `human_declared`, which a machine-
+produced state never has). A corrected reading is told that nothing will post it, that re-filing
+reads the page afresh without the correction, and to book the month by hand — an act the same
+person can perform, since `clara.draft_entry` and `clara.approve_entry` are both
+`clara_authenticated` doors, which §Z re-measures. Every other reading keeps 0297's sentence to the
+byte, and the battery drives BOTH roads: a corrected run, and a reversed clean run (machine-ready,
+nobody declared anything), whose sentence is asserted as an exact string.
+
+**Why the correction still does not post.** Posting it would need a SECOND posting arm:
+`clara._post_payroll_run` writes `clara.entry_post_receipts` with `approval_arm =
+'payroll_unattended'` and a rationale whose own words are "posted unattended from a payroll summary
+whose two readings agreed" — false of a run a person declared a figure on. Who may cause an
+approved journal entry with no second reading behind it is an accounting decision for the owner,
+not a fix round's to invent. It stays the follow-up 0344's section names, now with this sentence
+beside it.
+
+**The already-standing-entry refusal (SPEC-1056-A).** The payroll lane's pin asks
+`clara._document_live_posted_entry`, i.e. `clara._document_posting_entry` per live filing: a live
+`entry_evidence_links` row (that arm tests no status of its own) or any approved, un-reversed
+`journal_entries` row bound to the document — no payroll qualification anywhere in it. The refusal
+nonetheless said "this payroll run is already posted as entry %". The probe is deliberately KEPT —
+anything the estate derived from this reading must come down first, which is 0217's
+`live_bank_statement_present` rule — and the sentence is corrected to the umbrella the probe
+measures, with the reason code renamed to `live_entry_present` (0217's own naming) and a new
+`is_payroll_run` key in the detail so a surface can say which of the two it found. ONE remedy is
+named because one is what exists: measured, both writers of `clara.entry_evidence_links` only ever
+create a link for an entry already posted (`clara.attach_entry_evidence` refuses a draft in those
+words — driven by a cell; `clara._record_journal_entry_core` writes its link inside the posting
+transaction), and `t_entry_evidence_release` releases every live link the moment `reversed_by` is
+set, so reversing the entry clears both arms.
+
+**Prestate pins** (measured live on `clara_l03`, chain 0001..0346, after this lane's #1056 / #1090
+/ #1092): `clara._payroll_posting_verdict(uuid)`
+`23c644b7b4ad11cee43c1e02acb2599733cb1000a808d108a5519d4b3a0a4df0` →
+`895ff7689cc048e6c96889425621189441ea5dfbc8c9fd555a13ac8d515470fc`, and
+`clara.revise_document_fact(uuid,text,jsonb,int,text,text)`
+`a6858d3e88bfca79d9a0f527a0d511db3702d53ca5612d796a05255fa1927fb8` →
+`75a6c30f4059e547573589bb25ebe275891e8e9a6efa556bb947b3df9a5ef549`. `clara.list_review_queue` is
+pinned by STRUCTURE, not by sha: six other files splice it and its sha moves for reasons that have
+nothing to do with this one, so the prestate asserts the payroll arm still renders the verdict's
+own sentence and nothing else about it.
+
+**Both branches exercised on the lane database.** FIRST-APPLY through `pnpm --filter @clara/db
+migrate` against the pinned pre-images, and REDO through
+`CLARA_MIGRATION_REDO=0360_payroll_correction_sentences`, which reports both splices as no-ops and
+still re-reads every tail assertion from the committed catalog. A redo cannot heal an edit INSIDE
+a spliced string (its marker is already live, so the splice no-ops): the two bodies were restored
+to their pinned pre-images by re-running 0297's and 0344's own `create or replace function`
+statements as `clara_fn_owner` — an out-of-band rig operation on a disposable database, the hand
+procedure #957 replaced — and the redo then took its FIRST branch, which is also the branch a
+from-scratch chain takes.
+
+**It mints no name**, so `packages/db/tests/rig-meta.mjs` gains no cohort entry; it is a
+dynamic-SQL file, so `apps/web/tests/firm-scope-db-pins.corpus.ts` gains one reviewed barrier
+entry, in file-sorted order (wave 4, rule 7 / sweep rule (d)).

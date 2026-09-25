@@ -376,4 +376,15 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "95c8bdd5507710f59fc6d7219be50320c813cc094cf92e980b36a30a745a5857",
     },
   ],
+  // #1056 [0360] (riders sweep wave, lane 05, fix round) — the SAME 0146/0260/0297 splice family,
+  // this time over two bodies that are not the review queue at all: the payroll posting verdict
+  // and the human fact door, each for ONE string.
+  [
+    "0360_payroll_correction_sentences.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splices recut exactly TWO named FUNCTIONS, each read at its own literal regprocedure spelled in this file — clara._payroll_posting_verdict(uuid) (its `ready` sentence becomes a two-armed case keyed on the reading's own `human_declared` array, 0297's original sentence carried into the else arm unchanged) and clara.revise_document_fact(uuid,text,jsonb,int,text,text) (the posted-entry refusal states what the probe measures, renames its reason to live_entry_present and discloses is_payroll_run). Each anchor is a single dollar-quoted literal asserted to occur EXACTLY once before replacing, and so is each replacement — no concatenation chain and no chr() — so every installed statement is reconstructible. Both functions return jsonb, so neither can emit a view definition of any kind, and the file contains no `create view` of any spelling at all, static or spliced, so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) is reachable, by construction rather than by inspection of a rendered string. Each splice detects its own marker in the INSTALLED body and no-ops on a redo, each postcheck re-reads the COMMITTED catalog for owner, ACL, DEFINER-ness, search_path and a MOVED prosrc sha, and the tail re-derives both sentences at exactly one occurrence each, every 0297 rung region and every 0344 region the file must not have disturbed, the payroll-lane guard around the pin, the ungranted verdict and the clara_authenticated-only door. The file creates no table, no policy, no grant, no chart row and no event type: outside the two do-blocks it contains only a prestate and a tail that read the catalog.",
+      sha256: "cc79bbfca9b8f56b4e96e94983a128f10d23a0f1392ef2ce5ea0f8994634abd7",
+    },
+  ],
 ]);
