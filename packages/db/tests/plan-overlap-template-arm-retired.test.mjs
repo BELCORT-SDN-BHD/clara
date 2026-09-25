@@ -81,6 +81,35 @@ const RECUT = [
     sha: "31adc6d4ae74d220b33fc950d164b0a256cafc914b2e1486400db20124939bc5" },
 ];
 
+// #1137 [0353_tenancy_agent_twins_obo_confirmations.sql, riders sweep wave lane L8] SPLITS the
+// revision door. Its body moves, BYTE FOR BYTE, into
+// clara._revise_accounting_plan_core(p_firm, p_actor, …) so the tenancy lane's on-behalf-of
+// escalation confirmation revises through the SAME body a person does, and
+// clara.revise_accounting_plan becomes a thin delegate over it whose op-key wall still runs FIRST
+// and whose floor and firm wall are still clara._plan_door_ctx's.
+//
+// The claims (T.4) makes are about the COMPUTATION — the client rung above any plan row lock, and
+// the advisory called with this door's own plan id — so from that generation on they are checked
+// where the computation is, and the thin delegate is pinned separately. 0353's own §0 and §TAIL
+// prove the move is byte for byte by reversing it and hashing back to 8a6e69ef… above.
+const REVISE_DOOR = "clara.revise_accounting_plan(uuid,text,text,int,text,date,date,jsonb,text,text)";
+const REVISE_SPLIT_STEM = "tenancy_agent_twins_obo_confirmations$";
+const REVISE_SPLIT = {
+  core: {
+    fn: "clara._revise_accounting_plan_core(uuid,uuid,uuid,text,text,int,text,date,date,jsonb,text,text)",
+    sha: "0908c2b7c026fe39bd9b8f3ce7aa3e34b196cb8086300c8c9a665ee17a1f596c",
+  },
+  delegate: { fn: REVISE_DOOR, sha: "94804ddc1dccd444c5bb5294524634db4afea043499eb8746dd7aae16b02ad77" },
+};
+
+/** The bodies that HOLD the computation (T.4), per generation. */
+async function recutRoster() {
+  const split = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [REVISE_SPLIT_STEM])
+  ).rows[0].n > 0;
+  return split ? RECUT.map((s) => (s.fn === REVISE_DOOR ? REVISE_SPLIT.core : s)) : RECUT;
+}
+
 let world = null;
 let ready = false;
 
@@ -331,7 +360,7 @@ test("p929.tail -- outside-in re-proof of 0283's own tail: the template arm is g
   // (T.4) THE THREE RECUT CALLERS: each at the body 0283's own text produces, each taking the
   //       client rung (FIX 2) ABOVE any clara.accounting_plans row lock, each passing its own plan
   //       id to the advisory (FIX 1).
-  for (const sig of RECUT) {
+  for (const sig of await recutRoster()) {
     const c = await rootQuery(
       `select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha, p.prosrc as src
          from pg_proc p where p.oid = to_regprocedure($1)`, [sig.fn]);
@@ -342,11 +371,37 @@ test("p929.tail -- outside-in re-proof of 0283's own tail: the template arm is g
     assert.ok(rung > 0, `${sig.fn} does not take the client rung 203005004`);
     assert.match(src, /clara\._plan_overlap_warning\([^)]*, (?:v_plan|p_plan)\)/,
       `${sig.fn} calls the advisory without passing its own plan id`);
-    const rowLock = src.indexOf("from clara.accounting_plans where id");
+    // #1137 [0353]: measured at the LOCK rather than at any read of clara.accounting_plans. The
+    // revision core opens with a firm-walled RE-RESOLUTION of the plan — the wall
+    // clara._plan_door_ctx applied ABOVE the door before the split, now inside the core because
+    // the OBO entrance has no JWT to resolve it from — and that is an ordinary read which takes no
+    // lock at all. The claim (T.4) makes is, and always was, that the client rung sits above any
+    // plan ROW LOCK; the old substring was a proxy for one, and this is the lock itself. Nothing
+    // else in this roster carries `for update` at all (measured on the live catalog), so no body
+    // that was checked before is skipped now.
+    const rowLock = src.search(/from clara\.accounting_plans where id [^;]*for update/);
     if (rowLock > 0) {
       assert.ok(rung < rowLock,
         `${sig.fn} takes the client rung AFTER locking a clara.accounting_plans row -- 0238's order for this rung is the other way round`);
     }
+  }
+
+  // (T.5) …AND, FROM #1137's GENERATION ON, THE THIN DELEGATE THAT FRONTS THE REVISION CORE. It is
+  //       pinned so a later edit to it is a red here rather than an unwatched change, and it is
+  //       asserted to be a DELEGATE rather than a second copy: it names the core and holds no rung
+  //       and no row lock of its own.
+  if ((await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [REVISE_SPLIT_STEM])
+  ).rows[0].n > 0) {
+    const d = await rootQuery(
+      `select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha, p.prosrc as src
+         from pg_proc p where p.oid = to_regprocedure($1)`, [REVISE_SPLIT.delegate.fn]);
+    assert.equal(d.rows[0].sha, REVISE_SPLIT.delegate.sha,
+      `${REVISE_SPLIT.delegate.fn} is not at the body 0353 writes -- either that migration changed or another ticket recut it`);
+    assert.match(d.rows[0].src, /clara\._revise_accounting_plan_core\(/,
+      "the revision door no longer delegates to the core that holds its computation");
+    assert.doesNotMatch(d.rows[0].src, /pg_advisory_xact_lock|for update/,
+      "the thin delegate has grown a rung or a row lock of its own -- the computation is the core's");
   }
 });
 
