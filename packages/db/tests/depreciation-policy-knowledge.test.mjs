@@ -45,7 +45,7 @@ import { depreciationPolicyKnowledgeCohortApplied, knowledgeWorld } from "./know
 register();
 const proposalLib = await import("../../runtime/lib/fa-particulars-proposal.ts");
 
-const EXPECTED_CELLS = 7; // dk.01 .. dk.07
+const EXPECTED_CELLS = 9; // dk.01 .. dk.09
 let live = false;
 let executed = 0;
 
@@ -96,11 +96,12 @@ const reasonOf = (err) => {
   try { return JSON.parse(err.detail ?? "{}").reason ?? null; } catch { return null; }
 };
 
-// The exact read the successor contract states (this ticket's report): under clara_agent_ro, RLS
-// `p_knowledge_records_agent` (firm_id = clara.wake_firm()), the client additionally pinned here.
-const READ = `select id, applies_when, value from clara.knowledge_records
-  where client_id = $1::uuid and knowledge_key = 'depreciation_policy' and state = 'live'
-  order by recorded_at`;
+// The exact read the successor contract states, imported from its ONE home rather than restated
+// here (fix round, ADV-L05-02, 2026-09-25 — a copy in this file is what let the window-less form
+// pass review twice). Under clara_agent_ro, RLS `p_knowledge_records_agent`
+// (firm_id = clara.wake_firm()), the client pinned as $1 and the calendar day the proposal is
+// being made for as $2 (null = today in MYT).
+const READ = proposalLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL;
 
 cell("dk.01 the catalogue carries depreciation_policy: assertion/object/shape_only, authority-bearing, and an admin+ floor at BOTH scopes from authority_bearing alone", async () => {
   const r = await rootQuery(
@@ -183,7 +184,7 @@ cell("dk.05 the SAME OBO read credential v4's own register read mints (clara_age
     basis: "rig probe for the agent-ro read",
   });
   const cred = await mintWake({ kind: "interactive", firm: w.firm });
-  const mine = await wakeQuery(ROLES.agentRo, cred.secret, READ, [w.clientA]);
+  const mine = await wakeQuery(ROLES.agentRo, cred.secret, READ, [w.clientA, null]);
   assert.equal(mine.rowCount, 1, "the captured row is readable under clara_agent_ro, client-pinned");
   assert.deepEqual(mine.rows[0].applies_when, { asset_account_code: "1500" });
   assert.deepEqual(mine.rows[0].value, { method: "straight_line", useful_life_months: 60 });
@@ -192,7 +193,7 @@ cell("dk.05 the SAME OBO read credential v4's own register read mints (clara_age
   // clara.wake_firm() binds firm_id and clara.knowledge_records has no client-only escape hatch.
   const w2 = await knowledgeWorld("dk5_other");
   const foreignCred = await mintWake({ kind: "interactive", firm: w2.firm });
-  const foreign = await wakeQuery(ROLES.agentRo, foreignCred.secret, READ, [w.clientA]);
+  const foreign = await wakeQuery(ROLES.agentRo, foreignCred.secret, READ, [w.clientA, null]);
   assert.equal(foreign.rowCount, 0, "another firm's wake credential reads nothing for this client");
 });
 
@@ -205,7 +206,7 @@ cell("dk.06 mapDepreciationKnowledgeRows carries the captured row's exact values
     basis: "rig probe for the mapper round trip",
   });
   const cred = await mintWake({ kind: "interactive", firm: w.firm });
-  const rows = await wakeQuery(ROLES.agentRo, cred.secret, READ, [w.clientA]);
+  const rows = await wakeQuery(ROLES.agentRo, cred.secret, READ, [w.clientA, null]);
   assert.equal(rows.rowCount, 1);
   const notes = proposalLib.mapDepreciationKnowledgeRows(rows.rows);
   assert.equal(notes.length, 1);
@@ -227,7 +228,7 @@ cell("dk.07 AC3 — a client's recorded depreciation-policy note, captured and r
     basis: "the client's controller states this account is depreciated over 8 years",
   });
   const cred = await mintWake({ kind: "interactive", firm: w.firm });
-  const rows = await wakeQuery(ROLES.agentRo, cred.secret, READ, [w.clientA]);
+  const rows = await wakeQuery(ROLES.agentRo, cred.secret, READ, [w.clientA, null]);
   const knowledge = proposalLib.mapDepreciationKnowledgeRows(rows.rows);
 
   const asset = {
@@ -254,4 +255,85 @@ cell("dk.07 AC3 — a client's recorded depreciation-policy note, captured and r
   const withoutKnowledge = proposalLib.deriveFaParticularsProposal({ asset, siblings });
   assert.deepEqual(withoutKnowledge.basis, ["account_siblings", "acquisition_date", "firm_default_residual"]);
   assert.equal(withoutKnowledge.useful_life_months, 60);
+});
+
+cell("dk.08 a note whose effective window has CLOSED grounds nothing — the read asks as of a calendar day, and the estate's own windowing is honoured (ADV-L05-02)", async () => {
+  const w = await knowledgeWorld("dk8");
+  // A note a person recorded for ONE year and never renewed. `clara.capture_knowledge` takes the
+  // window; `state` stays 'live' for a windowed row that has simply expired (nothing supersedes
+  // it), so `state = 'live'` alone is NOT the test of whether it still speaks.
+  await capture(w.admin, {
+    client: w.clientA, value: { method: "straight_line", useful_life_months: 24, label: "Interim basis, 2024 only" },
+    appliesWhen: { asset_account_code: "1500" }, opKey: opk("p1090_dk8_windowed"),
+    from: "2024-01-01", to: "2024-12-31",
+    basis: "the controller's interim instruction for the 2024 year only",
+  });
+  const cred = await mintWake({ kind: "interactive", firm: w.firm });
+
+  // THE ROW IS THERE AND STILL 'live' — so the exclusion below is the WINDOW, not a missing row.
+  const unwindowed = await wakeQuery(ROLES.agentRo, cred.secret,
+    `select id, state, to_char(effective_from,'YYYY-MM-DD') as from_day,
+            to_char(effective_to,'YYYY-MM-DD') as to_day
+       from clara.knowledge_records
+      where client_id = $1::uuid and knowledge_key = 'depreciation_policy' and state = 'live'`,
+    [w.clientA]);
+  assert.equal(unwindowed.rowCount, 1, "the windowed note is present and live");
+  assert.equal(unwindowed.rows[0].to_day, "2024-12-31", "…and it carries the window the person gave it");
+
+  // AS OF A DAY AFTER THE WINDOW CLOSED: nothing. A 2026 proposal is not grounded on a 2024 note.
+  const after = await wakeQuery(ROLES.agentRo, cred.secret,
+    proposalLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL, [w.clientA, "2026-09-01"]);
+  assert.equal(after.rowCount, 0,
+    "an expired note grounds nothing: the proposal's own sentence is present tense about what the client's record STATES");
+
+  // AS OF A DAY INSIDE THE WINDOW: the same row comes back. This is the control that makes the
+  // exclusion above the window's doing rather than the statement's.
+  const inside = await wakeQuery(ROLES.agentRo, cred.secret,
+    proposalLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL, [w.clientA, "2024-06-30"]);
+  assert.equal(inside.rowCount, 1, "inside its own window the note reads exactly as before");
+  assert.deepEqual(proposalLib.mapDepreciationKnowledgeRows(inside.rows).map((n) => n.usefulLifeMonths), [24]);
+
+  // AND A NOTE WITH NO WINDOW AT ALL — the ordinary case — is unaffected by either as-of.
+  const w2 = await knowledgeWorld("dk8_open");
+  await capture(w2.admin, {
+    client: w2.clientA, value: { method: "straight_line", useful_life_months: 96 },
+    appliesWhen: { asset_account_code: "1500" }, opKey: opk("p1090_dk8_open"),
+    basis: "a standing instruction with no end date",
+  });
+  const cred2 = await mintWake({ kind: "interactive", firm: w2.firm });
+  for (const asOf of ["2024-06-30", "2026-09-01", null]) {
+    const r = await wakeQuery(ROLES.agentRo, cred2.secret,
+      proposalLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL, [w2.clientA, asOf]);
+    assert.equal(r.rowCount, 1,
+      `an unwindowed note speaks as of ${asOf ?? "the statement's own MYT day (the null default)"}`);
+  }
+
+  // THE NULL DEFAULT IS MYT'S CALENDAR DAY, not the server's — the same expression
+  // clara.retrieve_knowledge defaults p_as_of to (0230:361-362 reads it against
+  // `(now() at time zone 'Asia/Kuala_Lumpur')::date`), so the read cannot drift a day from the
+  // estate's own knowledge window at a UTC midnight boundary. clara._book_today() would have been
+  // the nicer spelling and is ungranted to this credential (dk.09's sibling measurement).
+  const expired = await wakeQuery(ROLES.agentRo, cred.secret,
+    proposalLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL, [w.clientA, null]);
+  assert.equal(expired.rowCount, 0, "with no as-of, the read asks about TODAY in MYT, and the 2024 note is past");
+});
+
+cell("dk.09 the successor step reads the relation directly because clara.retrieve_knowledge is out of the OBO read credential's reach — measured, not assumed (ADV-L05-02)", async () => {
+  // WHY THIS CELL EXISTS. The estate owns a windowing knowledge read already
+  // (clara.retrieve_knowledge, which also writes the work-knowledge-read receipt
+  // clara.work_knowledge_drift depends on). The adversarial lens asked why the successor contract
+  // states a raw SELECT instead. The answer is a grant, and a grant is measurable.
+  const r = await rootQuery(
+    `select has_function_privilege('clara_agent_ro',
+              'clara.retrieve_knowledge(uuid,text,date,text[],integer,uuid)', 'execute') as agent_ro,
+            has_function_privilege('clara_runtime',
+              'clara.retrieve_knowledge(uuid,text,date,text[],integer,uuid)', 'execute') as runtime,
+            has_function_privilege('clara_agent_ro',
+              'clara.record_work_knowledge_read(uuid,text,integer,text,date,text,text[],jsonb,integer,boolean,text,text)', 'execute') as agent_ro_receipt`);
+  assert.equal(r.rows[0].agent_ro, false,
+    "clara_agent_ro — the credential readScoped mints and the successor step reads under — cannot call clara.retrieve_knowledge");
+  assert.equal(r.rows[0].runtime, true,
+    "…it is clara_runtime's door, a DIFFERENT credential with a different wall");
+  assert.equal(r.rows[0].agent_ro_receipt, false,
+    "…and the drift receipt is out of the same credential's reach, which is what the successor contract must say rather than leave a reader to discover");
 });

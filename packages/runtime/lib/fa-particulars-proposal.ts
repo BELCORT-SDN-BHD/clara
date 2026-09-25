@@ -484,19 +484,18 @@ export function proposalSourceRef(
 // knowledge key `deriveFaParticularsProposal` already ranks and tests; this is the ONE mapping
 // its brief still owes: `clara.knowledge_records` rows for that key -> `FaProposalKnowledgeNote[]`.
 //
-// THE READ ITSELF IS NOT HERE, on purpose, for the SAME reason the header above gives for the rest
-// of this file: "the reads that gather its facts are the successor workflow's own step". That
-// step (`loadFaProposalInputsStepV6` or its successor) does not exist in this repository —
-// `packages/runtime/workflows/claraWork.v6.impl.ts` is absent — and lives inside a frozen-workflow
-// closure this ticket must never create or edit. The exact SQL that produces the rows this mapper
-// consumes is stated in this ticket's report (successor contract) rather than executed here:
+// THE STEP THAT RUNS THE READ IS NOT HERE, on purpose, for the SAME reason the header above gives
+// for the rest of this file: "the reads that gather its facts are the successor workflow's own
+// step". That step (`loadFaProposalInputsStepV6` or its successor) is absent from THIS branch and
+// lives inside a frozen-workflow closure this ticket must never create or edit — see the successor
+// contract in `docs/plan/active/riders-2026-09-20/reports/waveS-lane05-fix.md`, which names the
+// exact call site, argument order and the three comments on `main` it makes false.
 //
-//   select id, applies_when, value from clara.knowledge_records
-//    where client_id = $1::uuid and knowledge_key = 'depreciation_policy' and state = 'live'
-//
-// run under the SAME OBO read credential v4's own register read mints (`clara_agent_ro`, RLS
-// `p_knowledge_records_agent`, `firm_id = clara.wake_firm()` — 0192:611-612, unmodified), with the
-// client additionally pinned in the WHERE clause exactly as v4 pins the asset's own client.
+// THE STATEMENT ITSELF IS AN EXPORTED CONSTANT, NOT A COMMENT (fix round, 2026-09-25). It was
+// prose here until the adversarial lens (ADV-L05-02) drove the prose version against a real
+// database and grounded a 2026 proposal on a note whose effective window closed in 2024. A
+// statement nothing executes is a statement nothing can falsify; this one has ONE home, and the db
+// battery drives THIS string under a real `clara_agent_ro` wake credential.
 //
 // SCOPING: a client-wide note is captured with `applies_when = {}` (`assetAccount: null` here); an
 // account-scoped note is captured with `applies_when = {"asset_account_code": "<code>"}` — the
@@ -510,6 +509,58 @@ export function proposalSourceRef(
 // SIBLING already lives by (see `fromSiblings` above). A field this mapper cannot read maps to
 // `null` (or, for `label`, the empty string) rather than raising, so one malformed knowledge row
 // among several cannot take a well-formed one down with it.
+
+/**
+ * THE READ, VERBATIM. `$1` is the client and `$2` the calendar day the proposal is being made for
+ * (`null` means today in MYT). It runs under the SAME OBO read credential v4's own register read
+ * mints (`clara_agent_ro`, RLS `p_knowledge_records_agent`, `firm_id = clara.wake_firm()` —
+ * 0192:611-612, unmodified), with the client additionally pinned in the WHERE clause exactly as v4
+ * pins the asset's own client.
+ *
+ * WHY THE EFFECTIVE WINDOW IS IN THE STATEMENT (fix round, ADV-L05-02, 2026-09-25). A knowledge
+ * record carries `effective_from` / `effective_to`, and `state` does NOT move when a window simply
+ * closes: nothing superseded the record, so an expired note is still `state = 'live'`. Measured on
+ * a live database: a note captured for 2024 only was returned by the window-less form and grounded
+ * a 2026 proposal under this module's own PRESENT-TENSE sentence ("This client's record states
+ * …"), which is a stale authority speaking as a current one. The two terms below are the SAME
+ * expression `clara.retrieve_knowledge` computes `in_effect` from
+ * (`packages/db/migrations/0230_knowledge_retrieval.sql:361-362`: `(effective_from is null or
+ * effective_from <= v_as_of) and (effective_to is null or effective_to >= v_as_of)`), so the
+ * estate has ONE window rule and not two.
+ *
+ * THIS CONSUMER DROPS WHERE `clara.retrieve_knowledge` MARKS, and that difference is deliberate.
+ * That door hands a MODEL a marked record on purpose ("silently dropping it is how a run reasons
+ * without a fact that applies — or, worse, applies one that has expired"): a model can read
+ * `in_effect: false` and say so. This ground feeds `deriveFaParticularsProposal`, which is
+ * deterministic and has no vocabulary for an expired note — every note it is handed speaks in the
+ * present tense — so an out-of-window row must never reach it.
+ *
+ * WHY NOT `clara.retrieve_knowledge` ITSELF, which already windows, states a purpose and writes
+ * the `clara.record_work_knowledge_read` receipt `clara.work_knowledge_drift` depends on: it is
+ * out of this credential's reach. Measured, not assumed — `has_function_privilege` answers false
+ * for `clara_agent_ro` on both that door and the receipt, and true for `clara_runtime`, a
+ * different credential behind a different wall (db battery cell `dk.09`). The successor step
+ * therefore reads the relation directly and leaves NO drift receipt, which the successor contract
+ * states in those words so a reader does not assume one exists.
+ *
+ * WHY THE MYT DAY IS INLINE rather than `clara._book_today()`: that function is ungranted
+ * (`proacl` is `{clara_fn_owner=X/clara_fn_owner}`, measured), so this credential cannot call it.
+ * The expression is the one `clara.retrieve_knowledge` uses for the same default.
+ *
+ * `state = 'live'` NEEDS NO `superseded_at is null` BESIDE IT: the relation's own CHECK
+ * `ck_knowledge_records_state` makes `superseded_at is null` equivalent to
+ * `state in ('live','withdrawn')`, and `withdrawn` is excluded by name.
+ */
+export const FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL = `select r.id, r.applies_when, r.value
+  from clara.knowledge_records r
+ where r.client_id = $1::uuid
+   and r.knowledge_key = 'depreciation_policy'
+   and r.state = 'live'
+   and (r.effective_from is null
+        or r.effective_from <= coalesce($2::date, (now() at time zone 'Asia/Kuala_Lumpur')::date))
+   and (r.effective_to is null
+        or r.effective_to >= coalesce($2::date, (now() at time zone 'Asia/Kuala_Lumpur')::date))
+ order by r.recorded_at`;
 
 /** One `clara.knowledge_records` row for the `depreciation_policy` key, exactly as the SQL above
  *  returns it — the raw shape a future step hands this mapper, with no reshaping in between. */
