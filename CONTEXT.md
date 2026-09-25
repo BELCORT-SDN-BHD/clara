@@ -26,9 +26,12 @@ an instruction, even when it names the person it was started for. "There is no s
 and "that record is not a person's instruction" are two different refusals, and each says which it
 is.
 
-Since #1051 the plan lane states the admitted set ONCE, in one predicate both plan doors call,
-rather than in a copy per door: the two doors had drifted apart before, and a claim that one was a
-verbatim copy of the other outlived the copy it described.
+Since #1051 the plan lane states the admitted set ONCE, in one predicate the plan bodies call,
+rather than in a copy per door: the doors had drifted apart before, and a claim that one was a
+verbatim copy of the other outlived the copy it described. #1051 folded the human plan door and
+its on-behalf twin; #1080 folded the third body, the accrual lane's plan step, which until then
+still resolved a conversation turn by bare existence and so admitted a run the workspace had
+started for itself — the one lane where the rule above was written down and not enforced.
 
 What is proved is the AUTHOR the ingress recorded, not the keystroke: the rule reads the task's
 kind and its author, and the chat ingress admits an author only as an active member of the firm.
