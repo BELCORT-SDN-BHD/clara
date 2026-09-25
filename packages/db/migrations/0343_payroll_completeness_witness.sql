@@ -124,12 +124,12 @@
 --   SectionA  prestate -- the pinned pre-images, measured on this lane database now
 --   SectionB  clara.evaluate_payroll_run_state_v2   -- THE SUCCESSOR EVALUATOR, and its freeze
 --   SectionC  clara._payroll_answers_ok recut       -- two OPTIONAL witness questions
---   SectionD  clara.payroll_completeness_answers    -- what a named person said, and when
---   SectionE  clara._payroll_completeness_answer    -- the reading-bound answer read
---   SectionF  clara._payroll_entry_plan recut       -- a witnessed row sum is a posting basis (AC1)
---   SectionG  clara._payroll_posting_verdict recut  -- the `completeness_witness` rung (AC2, AC3)
---   SectionH  clara._post_payroll_run recut         -- the entry and its receipt name the basis
---   SectionI  clara.persist_payroll_facts splice    -- the lane banks a v2 state
+--   SectionD  clara.persist_payroll_facts splice    -- the lane banks a v2 state
+--   SectionE  clara._payroll_entry_plan recut       -- a witnessed row sum is a posting basis (AC1)
+--   SectionF  clara.payroll_completeness_answers    -- what a named person said, and when
+--   SectionG  clara._payroll_completeness_answer    -- the reading-bound answer read
+--   SectionH  clara._payroll_posting_verdict recut  -- the `completeness_witness` rung (AC2, AC3)
+--   SectionI  clara._post_payroll_run recut         -- the entry and its receipt name the basis
 --   SectionJ  clara.list_review_queue splices       -- row_kind='payroll_completeness_question'
 --   SectionK  clara.answer_payroll_completeness     -- the answer door, and the event it speaks
 --   SectionZ  tail
@@ -2382,3 +2382,209 @@ insert into clara.trigger_taxonomy (version, event_type, decision, note)
     from clara.taxonomy_active a
     cross join (values ('document.payroll_completeness_answered')) e(name)
 on conflict (version, event_type) do nothing;
+
+-- =====================================================================================
+-- SectionZ  TAIL. Everything this file claims to have done, re-derived from the LIVE catalog --
+--     never from its own success text, and never from a variable a section above set.
+-- =====================================================================================
+do $w1048_tail$
+declare
+  v_sha text; v_n int; v_h bytea; v_live bytea; r record; v_code text;
+begin
+  -- 1 · THE FROZEN v1 DID NOT MOVE. Both halves: the body is byte-identical to the prestate's pin,
+  --     and its REGISTERED closure hash still re-derives to what clara.evaluator_versions holds.
+  --     migrate.mjs runs clara.verify_evaluator_freeze() between this body and its commit as well;
+  --     this is the second belt, and it is here because "0343 recuts no frozen body" is the single
+  --     most load-bearing claim in the file.
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara.evaluate_payroll_run_state_v1(jsonb,jsonb)'::regprocedure;
+  if v_sha is distinct from '0b11727c230ff03ec94b758a95e7a2035c5af09d323a6f6da284cdd9d91fc8cd' then
+    raise exception '#1048 tail: clara.evaluate_payroll_run_state_v1 MOVED during this migration (sha %) -- 0343 never recuts it', v_sha
+      using errcode = 'CLR10';
+  end if;
+
+  -- 2 · v2 EXISTS BESIDE IT, IMMUTABLE, UNGRANTED, AND REGISTERED AT VERSION 2 WITH ONE MEMBER.
+  if to_regprocedure('clara.evaluate_payroll_run_state_v2(jsonb,jsonb)') is null then
+    raise exception '#1048 tail: clara.evaluate_payroll_run_state_v2 is absent' using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from pg_proc p
+   where p.oid = 'clara.evaluate_payroll_run_state_v2(jsonb,jsonb)'::regprocedure
+     and p.provolatile = 'i' and not p.prosecdef
+     and p.proowner::regrole::text = 'clara_fn_owner';
+  if v_n <> 1 then
+    raise exception '#1048 tail: clara.evaluate_payroll_run_state_v2 is not an IMMUTABLE, security-invoker, clara_fn_owner body -- the freeze pins a determinism this shape is what makes true'
+      using errcode = 'CLR10';
+  end if;
+  if pg_catalog.has_function_privilege('clara_authenticated','clara.evaluate_payroll_run_state_v2(jsonb,jsonb)','EXECUTE')
+     or pg_catalog.has_function_privilege('clara_agent_ro','clara.evaluate_payroll_run_state_v2(jsonb,jsonb)','EXECUTE')
+     or pg_catalog.has_function_privilege('clara_runtime','clara.evaluate_payroll_run_state_v2(jsonb,jsonb)','EXECUTE') then
+    raise exception '#1048 tail: an application role can EXECUTE the evaluator directly -- it is reached through clara.persist_payroll_facts alone'
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.evaluator_versions
+   where evaluator_name = 'evaluate_payroll_run_state';
+  if v_n <> 2 then
+    raise exception '#1048 tail: clara.evaluator_versions holds % evaluate_payroll_run_state row(s), expected 2 (v1 and this file''s v2)', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.evaluator_version_members m
+    join clara.evaluator_versions ev on ev.id = m.evaluator_version_id
+   where ev.evaluator_name = 'evaluate_payroll_run_state' and ev.version = 2;
+  if v_n <> 1 then
+    raise exception '#1048 tail: v2''s registered closure has % member(s), expected 1 -- an N-member registration is N bodies a later lane could never recut', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  -- 3 · THE FOUR RECUT BODIES CARRY THIS FILE'S MARKER, AND THEIR OWNER AND GRANTS DID NOT MOVE.
+  --     Every one of them was ungranted to every application role before this file and must still
+  --     be: a recut that quietly widened a grant is the one failure a body-sha pin cannot see.
+  for r in select * from (values
+      ('clara._payroll_answers_ok(jsonb,text)'),
+      ('clara._payroll_entry_plan(uuid,jsonb)'),
+      ('clara._payroll_posting_verdict(uuid)'),
+      ('clara._post_payroll_run(uuid)'),
+      ('clara._payroll_completeness_answer(uuid)')
+      ) as t(sig) loop
+    if to_regprocedure(r.sig) is null then
+      raise exception '#1048 tail: % is absent after this file ran', r.sig using errcode = 'CLR10';
+    end if;
+    select count(*)::int into v_n from pg_proc p
+     where p.oid = r.sig::regprocedure and p.proowner::regrole::text = 'clara_fn_owner';
+    if v_n <> 1 then
+      raise exception '#1048 tail: % is not owned by clara_fn_owner', r.sig using errcode = 'CLR10';
+    end if;
+    if pg_catalog.has_function_privilege('clara_authenticated', r.sig, 'EXECUTE')
+       or pg_catalog.has_function_privilege('clara_agent_ro', r.sig, 'EXECUTE')
+       or pg_catalog.has_function_privilege('clara_runtime', r.sig, 'EXECUTE') then
+      raise exception '#1048 tail: an application role gained EXECUTE on the internal % -- these are reached from granted bodies alone', r.sig
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+  if position('#1048' in (select p.prosrc from pg_proc p where p.oid = 'clara._payroll_entry_plan(uuid,jsonb)'::regprocedure)) = 0
+     or position('completeness_witness' in (select p.prosrc from pg_proc p where p.oid = 'clara._payroll_posting_verdict(uuid)'::regprocedure)) = 0
+     or position('posting_basis' in (select p.prosrc from pg_proc p where p.oid = 'clara._post_payroll_run(uuid)'::regprocedure)) = 0
+     or position('payroll.run.employee_count' in (select p.prosrc from pg_proc p where p.oid = 'clara._payroll_answers_ok(jsonb,text)'::regprocedure)) = 0 then
+    raise exception '#1048 tail: one of the four recut bodies does not carry the change this file installs'
+      using errcode = 'CLR10';
+  end if;
+
+  -- 4 · THE TWO SPLICED BODIES CARRY THEIRS, and the queue still projects SEVENTEEN row kinds.
+  if position('evaluate_payroll_run_state_v2' in
+       (select p.prosrc from pg_proc p where p.oid = 'clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)'::regprocedure)) = 0 then
+    raise exception '#1048 tail: clara.persist_payroll_facts does not call the v2 evaluator' using errcode = 'CLR10';
+  end if;
+  v_code := regexp_replace(regexp_replace(
+    pg_get_functiondef('clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure),
+    '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+  select count(*)::int into v_n from (
+    select 1 from regexp_matches(v_code, '''([a-z_]+)''::text row_kind', 'g')) x;
+  if v_n <> 17 then
+    raise exception '#1048 tail: clara.list_review_queue projects % row kinds, expected 17', v_n
+      using errcode = 'CLR10';
+  end if;
+  -- ...and clara_runtime / the agent lanes did NOT gain the queue, which stays clara_authenticated.
+  if pg_catalog.has_function_privilege('clara_agent_ro','clara.list_review_queue(jsonb,jsonb,integer)','EXECUTE')
+     or pg_catalog.has_function_privilege('clara_runtime','clara.list_review_queue(jsonb,jsonb,integer)','EXECUTE') then
+    raise exception '#1048 tail: the review queue gained a non-human executor -- 0011:4210-4213 asserts the opposite'
+      using errcode = 'CLR10';
+  end if;
+
+  -- 5 · THE ANSWER TABLE: owned by clara_fn_owner, RLS enabled AND forced, exactly the two
+  --     policies, both append-only triggers, the reading-bound UNIQUE, SELECT to the human lane
+  --     and NOTHING to the agent lane or to clara_runtime.
+  if to_regclass('clara.payroll_completeness_answers') is null then
+    raise exception '#1048 tail: clara.payroll_completeness_answers is absent' using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from pg_class
+   where oid = 'clara.payroll_completeness_answers'::regclass
+     and relowner::regrole::text = 'clara_fn_owner' and relrowsecurity and relforcerowsecurity;
+  if v_n <> 1 then
+    raise exception '#1048 tail: clara.payroll_completeness_answers is not a clara_fn_owner table with RLS enabled AND forced'
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from pg_policies
+   where schemaname = 'clara' and tablename = 'payroll_completeness_answers';
+  if v_n <> 2 then
+    raise exception '#1048 tail: the answer table carries % policies, expected exactly 2 (owner, human select)', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from pg_trigger
+   where tgrelid = 'clara.payroll_completeness_answers'::regclass and not tgisinternal;
+  if v_n <> 2 then
+    raise exception '#1048 tail: the answer table carries % triggers, expected exactly 2 (immutable, no-truncate)', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from pg_constraint
+   where conrelid = 'clara.payroll_completeness_answers'::regclass and contype = 'u'
+     and pg_get_constraintdef(oid) = 'UNIQUE (extraction_id)';
+  if v_n <> 1 then
+    raise exception '#1048 tail: the answer table has no UNIQUE (extraction_id) -- one answer per READING is the whole integrity of this mechanism'
+      using errcode = 'CLR10';
+  end if;
+  if not pg_catalog.has_table_privilege('clara_authenticated','clara.payroll_completeness_answers','SELECT') then
+    raise exception '#1048 tail: the human lane cannot read the answers it writes' using errcode = 'CLR10';
+  end if;
+  if pg_catalog.has_table_privilege('clara_authenticated','clara.payroll_completeness_answers','INSERT')
+     or pg_catalog.has_table_privilege('clara_authenticated','clara.payroll_completeness_answers','UPDATE')
+     or pg_catalog.has_table_privilege('clara_authenticated','clara.payroll_completeness_answers','DELETE')
+     or pg_catalog.has_table_privilege('clara_agent_ro','clara.payroll_completeness_answers','SELECT')
+     or pg_catalog.has_table_privilege('clara_runtime','clara.payroll_completeness_answers','SELECT') then
+    raise exception '#1048 tail: an application role can write the answers table, or the agent/runtime lane can read it -- the door is the only writer and the judgement is not agent-readable'
+      using errcode = 'CLR10';
+  end if;
+
+  -- 6 · THE DOOR: security definer, clara_fn_owner, clara_authenticated ONLY.
+  if to_regprocedure('clara.answer_payroll_completeness(uuid,text,text,text)') is null then
+    raise exception '#1048 tail: clara.answer_payroll_completeness is absent' using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from pg_proc p
+   where p.oid = 'clara.answer_payroll_completeness(uuid,text,text,text)'::regprocedure
+     and p.prosecdef and p.proowner::regrole::text = 'clara_fn_owner';
+  if v_n <> 1 then
+    raise exception '#1048 tail: the answer door is not a SECURITY DEFINER clara_fn_owner body' using errcode = 'CLR10';
+  end if;
+  if not pg_catalog.has_function_privilege('clara_authenticated','clara.answer_payroll_completeness(uuid,text,text,text)','EXECUTE') then
+    raise exception '#1048 tail: the human lane cannot reach the answer door' using errcode = 'CLR10';
+  end if;
+  if pg_catalog.has_function_privilege('clara_agent_ro','clara.answer_payroll_completeness(uuid,text,text,text)','EXECUTE')
+     or pg_catalog.has_function_privilege('clara_runtime','clara.answer_payroll_completeness(uuid,text,text,text)','EXECUTE')
+     or pg_catalog.has_function_privilege('public','clara.answer_payroll_completeness(uuid,text,text,text)','EXECUTE') then
+    raise exception '#1048 tail: a non-human lane can answer a professional judgement -- the whole point of this door is that a PERSON answers'
+      using errcode = 'CLR10';
+  end if;
+
+  -- 7 · THE EVENT THIS LANE SPEAKS IS REGISTERED AND ROUTED.
+  select count(*)::int into v_n from clara.event_types
+   where name = 'document.payroll_completeness_answered' and client_scoped;
+  if v_n <> 1 then
+    raise exception '#1048 tail: document.payroll_completeness_answered is not registered as a client-scoped event type'
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.trigger_taxonomy t
+    join clara.taxonomy_active a on a.version = t.version
+   where t.event_type = 'document.payroll_completeness_answered' and t.decision = 'ignore';
+  if v_n <> 1 then
+    raise exception '#1048 tail: the new event type has no `ignore` routing at the ACTIVE taxonomy version'
+      using errcode = 'CLR10';
+  end if;
+
+  -- 8 · THE NEIGHBOUR THIS FILE RELIES ON AND DOES NOT TOUCH IS STILL WHERE IT WAS.
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha from pg_proc p
+   where p.oid = 'clara._payroll_period_month(text)'::regprocedure;
+  if v_sha is distinct from '401f76cba102a8eea0be6e9852401bb2f1e469de7298387f857c1a4a1f39b7c1' then
+    raise exception '#1048 tail: clara._payroll_period_month MOVED during this migration (sha %) -- 0343 does not recut it', v_sha
+      using errcode = 'CLR10';
+  end if;
+
+  -- 9 · NO CHART ROW, NO TEMPLATE ROW, NO CAPABILITY ROW. This file reads a page differently; it
+  --     does not change what any account is, and it does not re-derive the registry #1061 (0342)
+  --     just re-derived.
+  select count(*)::int into v_n from clara.document_capabilities where registry_version <> 7;
+  if v_n <> 0 then
+    raise exception '#1048 tail: % capability row(s) sit off version 7 -- this file republishes nothing', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  raise notice '#1048 tail: OK -- v1 frozen and unmoved at its registered closure; v2 minted beside it (IMMUTABLE, ungranted, one registered member at version 2); the four recut internals carry this file''s change and remain ungranted to every application role; persist calls v2; the queue projects 17 row kinds and stays human-only; the answer table is a clara_fn_owner, RLS-forced, append-only table with UNIQUE (extraction_id), readable by the human lane and by nobody else; the door is clara_authenticated-only SECURITY DEFINER; the event type is registered and routed `ignore`; clara._payroll_period_month is unmoved; and no chart, template or capability row was touched.';
+end
+$w1048_tail$;
