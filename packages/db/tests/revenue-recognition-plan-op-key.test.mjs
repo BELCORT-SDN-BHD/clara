@@ -20,7 +20,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  assertDeferredLanePresent, endPool, opk,
+  assertDeferredLanePresent, endPool, opk, CLR, assertRaises, scheduleRowsFor,
+  recognitionScheduleCountFor,
   deferredRevenueScene, createRecognitionSchedule, recordStatedTerm,
   createPrepaymentSchedule, opReceiptsFor,
   replaceRecognitionSchedule, replacePrepaymentSchedule, recordPeriod, monthEndAfter,
@@ -31,7 +32,7 @@ import {
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 2;
+const EXPECTED_CELLS = 3;
 
 before(async () => { ready = await rrPlanOpKeyApplied().catch(() => false); });
 
@@ -179,4 +180,62 @@ async () => {
   // AND THE TWO OUTER RESERVATIONS, which never collided, are still one per door.
   assert.deepEqual((await opReceiptsFor(scene.firm, shared)).map((r) => r.fn).sort(),
     ["replace_prepayment_schedule", "replace_revenue_recognition_schedule"]);
+});
+
+// ===========================================================================================
+// AC3 — NEITHER LANE'S ORDINARY IDEMPOTENCY MOVED.
+//
+// 0336 touches only the key a door DERIVES for the plan door it nests. What a caller experiences as
+// idempotency is the OUTER reservation, which this ticket does not touch — and because that outer
+// reservation short-circuits the whole body, a true retry never reaches the nested call at all.
+// ===========================================================================================
+
+cell("p1077.same_lane.idempotent — on BOTH lanes a retry of the same door with the same key and "
+  + "the same arguments still replays the first answer and writes no second schedule, a retry with "
+  + "different arguments is still refused by the same reuse wall, and the nested reservation is "
+  + "taken exactly once",
+async () => {
+  const scene = await deferredRevenueScene("samelane", {
+    cents: 90000, termMonthsBack: 4, termMonths: 3 });
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#1077 battery: the member said three months when they paid" });
+
+  // ---- THE PREPAYMENT LANE, which 0336 did not recut: the control.
+  const pKey = opk("p1077-pidem");
+  const pArgs = {
+    client: scene.client, sourceEntry: scene.entry, expenseAccount: scene.target,
+    authorityRef: scene.authorityRef, opKey: pKey };
+  const pFirst = await createPrepaymentSchedule(scene.bob, pArgs);
+  const pAgain = await createPrepaymentSchedule(scene.bob, pArgs);
+  assert.deepEqual(pAgain, pFirst, "the retry replays the stored answer rather than deciding again");
+  assert.equal((await scheduleRowsFor(scene.client)).length, 1, "…and wrote no second schedule");
+  await assertRaises(CLR.badRequest,
+    () => createPrepaymentSchedule(scene.bob, { ...pArgs, purpose: "a different decision" }),
+    "the prepayment lane's key reused with different arguments");
+
+  // ---- THE DEFERRED-REVENUE LANE, the one 0336 recut.
+  const dKey = opk("p1077-didem");
+  const dArgs = {
+    client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+    authorityRef: scene.authorityRef, opKey: dKey };
+  const dFirst = await createRecognitionSchedule(scene.bob, dArgs);
+  const dAgain = await createRecognitionSchedule(scene.bob, dArgs);
+  assert.deepEqual(dAgain, dFirst, "the retry replays the stored answer rather than deciding again");
+  assert.equal(await recognitionScheduleCountFor(scene.receipt), 1,
+    "…and wrote no second schedule");
+  // THE SAME UNTYPED CLR10 THE TICKET COMPLAINS ABOUT IS STILL CORRECT HERE, and deliberately so:
+  // this is one door answering its OWN caller's genuine retry-with-different-arguments, not two
+  // lanes meeting on a reservation neither of them named. #1077 puts that raise out of scope.
+  await assertRaises(CLR.badRequest,
+    () => createRecognitionSchedule(scene.bob, { ...dArgs, purpose: "a different decision" }),
+    "the deferred-revenue lane's key reused with different arguments");
+
+  // THE NESTED RESERVATION WAS TAKEN ONCE, by the first call only: the replay short-circuits the
+  // whole body, so it never reaches the plan door at all.
+  assert.equal((await opReceiptsFor(scene.firm, `${dKey}:rrplan`)).length, 1,
+    "one nested reservation for two identical calls");
+  assert.equal((await opReceiptsFor(scene.firm, `${dKey}:plan`)).length, 0,
+    "…and nothing under the prepayment lane's suffix");
 });
