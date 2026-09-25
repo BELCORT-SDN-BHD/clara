@@ -5164,6 +5164,21 @@ reports a run fully unsettled (ignoring every debit) was installed and the batte
 clearing cells, S6's clearing cell), then `CLARA_MIGRATION_REDO` restored the real body and all 17
 passed again.
 
+**S7 (a later fix round) and S8 (#1059) are cells this file's own body never grew for.** Both
+sections are additive test coverage only — NO body in the table above changed for either. S7
+(ADV-01/ADV-04) proves reversing a run's own POSTED CREDIT drops it out of the read without
+disturbing any other run's FIFO share, and that a high-stakes settlement is left a draft for a
+distinct checker. S8 (#1059, "give a wrongly accepted payroll net-pay settlement an explicit
+reopen path") proves the opposite direction — reversing the SETTLEMENT's own DEBIT — end to end:
+`clara.reverse_entry` refuses an entry that still rides a live `bank_matches` row (CLR10
+`live_bank_match_present`) so `clara.unmatch_bank_match` MUST run first; once both general-purpose
+doors have landed, in that order, `_payroll_net_pay_unsettled` counts the run unpaid again (the
+settlement's own debit now carries `reversed_by`; the reversal mirror's own 2040 leg is a CREDIT,
+never counted as a debit — the ADV-01 exclusion already covers it), `get_payroll_settlement_
+candidates` offers the run and its ORIGINAL bank line again, and `clara.bank_matches.status` reads
+`unmatched`. Neither door is new, widened or touched by #1059 — the client surface that composes
+them (apps/web's `PayrollSettlementsSection`) is documented in that component's own file header.
+
 ## #948 — hire-purchase and finance-lease agreements are read, and the acquisition they create is posted (0299)
 
 `0299_agreement_contract_acquisition.sql` does for an agreement contract what 0296 and 0297
