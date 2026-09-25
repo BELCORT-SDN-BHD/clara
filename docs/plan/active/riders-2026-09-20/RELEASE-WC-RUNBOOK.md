@@ -915,48 +915,166 @@ wayfinder session's, not a lane's.
 
 ---
 
-## § RESULTS (as run, ____-__-__, UTC)
+## § RESULTS (as run, 2026-09-25, UTC)
 
 **Authority.** The owner's riders plan of 2026-09-20 (each wave ends with its hosted release and the
 tickets close on hosted evidence), the release-ownership ruling of 2026-09-17, the beta ruling that
 hosted users and data are test data (#826, 2026-09-15), and the standing delegation of 2026-09-23.
+The owner followed the session by status reports and did not object. Beta ruling unchanged.
 
-**Gates 0a.** `main` = RELEASE_SHA = `________`. CI: ____. `check-frozen-workflows` on RELEASE_SHA:
-____ frozen / ____ `"use workflow"` / ____ retired. `registry-view.test.mjs`: ____.
-Web rollback lever confirmed: ____. The two rulings of gate 0a: ____.
+**Gates 0a.** `main` = RELEASE_SHA = `061a6992bca2bef457410f876454d719e766df64` (PR #1140, merge of
+`integration/riders-cut` at `a3c62492c`; the merge commit's tree, `0e7aed02778c76dcfdbc7ae0b2f0c76df32e5dbb`,
+is identical to the PR head's tree). CI on the PR: run 36089560091 FAILURE on the integration head
+`34b125e6f` (six `db-estate` cells red, recorded and fixed in `reports/waveC-ci-reds.md`), run
+36095515251 SUCCESS on the final head `a3c62492c` (`build`, `changes`, `ci`, `db-estate`,
+`db-live-gates`, `db-split-partition-total`, `lint`, `render-drill`, `storage-policy-battery` all
+pass). CI on the merge commit: run 36097505021 SUCCESS on `061a6992b`. `check-frozen-workflows` on
+RELEASE_SHA: **347 frozen file(s) / 60 "use workflow" module(s) / 3 retired**, confirmed both
+pre-window (`reads-pre.log`) and after `--lock-deployed` (`reads-cut-only2.log`, 0 still unlocked).
+`node --test packages/runtime/tests/registry-view.test.mjs` 7/7 (`reports/waveC-gates.md` §4, at the
+tree RELEASE_SHA merges unchanged). Web rollback lever confirmed:
+`57c5dbab-5706-4a8b-a50a-a96fa37f6d97` at 100% before the window. The two rulings of gate 0a: (1)
+0320's SECURITY posture (C1-SPEC-01/std-1) **ACCEPTED**: the SECURITY DEFINER split into an
+ungranted `_core` follows the estate's own `_*_core` containment idiom, and §TAIL (3) reversed the
+three anchored edits on the live body and hashed to 0232's pinned pre-image, confirmed clean in
+`migrate.log`; (2) AC3's Work-walk clause and AC1's A5, A8 and A9 as PARTIAL (#1135) **ACCEPTED**
+with follow-ups filed (#1136, #1137 already open), and `CUT-PLAN.md` §2.4 beats AC2's
+`--lock-deployed` wording, confirmed by running it after step 7 rather than before.
 
-**Step 1.** `fly auth whoami` = ____; machines ____.
+**Step 1.** `fly auth whoami` = `tools@belcort.com`; one machine `48ee715b763048`
+(`sparkling-sky-1252`), started.
 
-**Step 2.** Probe ____ (`probe-wc`) from `refresh-6da02a8d`, World off.
+**Step 2.** Probe `7845743ced5578` (`probe-wC`) created 05:13:19Z, from `refresh-6da02a8d`, World
+off.
 
-**Step 3, pre-window reads (__:__:__Z, `reads-wC.mjs --prod --baseline fp-wC-hosted.json`).**
-Ledger ____. Drift gate ____. Pending set ____. Fingerprint ____ keys, ____ equal, ____ env, ____
-STOP. Body pins ____ of 40, ____ chain-internal. **D-TAIL-REACH: ____.** **D-PROBE-DRIVEN: ____.**
-The other seven hand checks: ____. Version-cut reads: bodies by non-terminal run ____, stranded
-____, successor-body runs ____. Quiescence ____. **Verdict ____.**
+**Step 3, pre-window reads (05:14:13Z–05:14:46Z, `reads-wC.mjs --prod --baseline
+fp-wC-hosted.json`).** Ledger 309 / `0318_knowledge_fye_pair_applicability`, drift gate 309/309,
+pending set exactly the 3 files above the frontier (0320, 0321, 0323), 0 PARSE GAP. Fingerprint vs
+the rig's hosted-frontier baseline: 11355 keys compared, 11339 equal, **16 env lines** (the same
+Supabase-managed role and membership facts waves 2 to 4 met, printed as environment facts, never a
+STOP), 0 STOP. Body-pin ledger: **40 of 40 measurable pins at a value their own file admits, 0
+chain-internal**: unlike wave 4's 53 of 189 unmeasurable, this cut's three files touch three
+disjoint families, so every pin was measurable before the window. **D-TAIL-REACH: ok**:
+`current_user=postgres`, not a superuser, but INHERITS `clara_fn_owner` (MEMBER=true, USAGE=true)
+and holds `clara_agent_ro` membership, so the tails' privileged calls are carried. **D-PROBE-DRIVEN:
+ok**: 0 trade invoices under a keyed Work on hosted, so 0323's driven arm is skipped by notice and
+T1 to T3 stand alone. The other seven hand checks (D-CUT-PREMISE, D-CUT-NEWBORN, D-PACK-ALLOWLIST,
+D-PACK-POSTURE, D-REVISE-GRANT, D-REDERIVE-BACKLOG at 0 receipts / 0 unsettled, D-PROBE-ARITY at 1
+overload today carrying no default): all ok. Version-cut reads: bodies by non-terminal run (none),
+stranded n=0, successor-body runs `chatTurn_v22=0 claraWork_v6=0 statementFacts_v4=0`. Quiescence:
+no F10 holder, no lock on `wake_fn_allowlist`, the `statement_facts running` row the same known
+orphan since 2026-09-19, 0 non-terminal `workflow_runs`, 0 non-terminal `accounting_work`. **Verdict
+CLEAN.**
 
-**Step 3f, backup (__:__:__Z to __:__:__Z).** ____ bytes, globals ____ bytes, sha256 ____.
+**Step 3f, backup (05:15:08Z to 05:16:43Z).** Full dump
+`packages/db/backups/clara-clara-graphile-worker-workflow-workflow-drizzle-2026-09-25T05-15-27-499Z.sql`
+= **221,062,708 bytes**, plus globals
+`clara-globals-2026-09-25T05-16-42-431Z.sql` (**12,809 bytes**). No sha256 is printed by this backup
+script, consistent with wave 4's own record.
 
-**Steps 4 and 5, before the window.** Runtime image `refresh-<sha>` = `sha256:____` (____ MB). Web
-Worker version ____, tag ____, not promoted.
+**Steps 4 and 5, before the window.** Runtime image
+`registry.fly.io/clara-runtime:refresh-061a6992` =
+`sha256:11f5fb843d6bb695a9b010c09ab413725200dccbb86bff6056922b4b37f59975` (265 MB), built from a
+detached checkout at RELEASE_SHA. Web Worker version `3089d906-5bae-48cb-9666-72dff5aa8ef4`, tag
+`refresh-061a6992`, built at `HEAD=061a6992bca2bef457410f876454d719e766df64`, `porcelain=[]`, not
+promoted.
 
-**Step 6, the window.** 6a: ____. 6b: ____. 6c: ____. 6d: branch ____.
+**Step 6, the window.** 6a: `machine stop 48ee715b763048` 05:41:06Z, `stopping` 05:41:10Z, `stopped`
+05:41:16Z. 6b: census through the probe: **CLEAN**, no F10 holder, no lock on `wake_fn_allowlist`,
+the `statement_facts running` row the same known orphan, 0 non-terminal runs, 0 runs on
+`chatTurn_v22` / `claraWork_v6` / `statementFacts_v4`. 6c: `migrate.mjs` through the probe DSN,
+05:41:22Z to 05:41:44Z (**22 s**): **`migrate: 3 new migration(s) applied · 312 total`**, every
+prestate on its FIRST-APPLY branch (11 / 16 / 10 neighbour bodies byte-identical respectively),
+every tail OK (0320's reverse-hash proof; 0321's both recut bodies reverse to their pinned
+pre-images; 0323's driven arm skipped by notice with T1 to T3 standing alone, two siblings born,
+five delegated bodies byte-identical, one new `clara_runtime` EXECUTE), no CLR, no lock wait. 6d:
+ledger **312 / `0323_trade_invoice_probe_self_exclusion`**: branch (iv), drive forward.
 
-**Post reads (__:__:__Z, `reads-wC.mjs --post --prod --baseline fp-wC-upg.json`).** ____
+**Post reads (05:41:44Z–05:41:54Z, `reads-wC.mjs --post --prod --baseline fp-wC-upg.json`).**
+Ledger 309 + 3 = 312 at 0323; all 3 new migrations at their file checksum; drift gate 312/312;
+fingerprint vs the UPGRADED baseline: 11365 keys, 11349 equal, 16 env lines (the same set, nothing
+else). Section (f): 0320's three names each at one `pg_proc` row with the expected posture and ACL
+delta (the core granted to nobody, the model door to `clara_agent_ro` alone, the human door
+unmoved), one allowlist row (`interactive` / `wake_get_client_financial_pack`, `wake_fn_allowlist`
+105 → 106), #660's three doors gained no machine-lane grant; 0321's six new bodies at their exact
+grants, the correcting door's ACL and 0268's two-argument notion untouched, 0 rederivation receipts
+and 0 unsettled backlog; 0323's both siblings born carrying no DEFAULT, the four-argument call still
+resolving, and all five delegated bodies re-measured unchanged (`clara._trade_invoice_probe_core`
+still at `74215b42802317f0aa8c2dc1dea48488a562bc8ee17f1df53a41c8b2b6a7cf56`). Cut-only reads
+05:41:54Z: `bodies=60` boot census, **35 still UNLOCKED** before 11a, successor bodies
+`chatTurn_v22` / `claraWork_v6` / `statementFacts_v4` at 0 non-terminal runs, the rollback-direction
+note recorded. **Verdict CLEAN.**
 
-**Step 7.** Probe destroyed ____. Deploy ____ to ____. `machine start` ____. `/ready` 200 at ____.
-**Outage: ____.** Boot line: ____. `bodies=` ____. Pins: ____. `stranded bodies n=` ____. Bundle
-banners: ____ (expect six). `/ready` pools: ____. First sweep, the re-derivation belt: ____.
+**Step 7.** Probe destroyed 05:42:10Z. `fly deploy --image …@sha256:11f5fb84…` 05:42:14Z to
+05:42:56Z (reached `stopped`); `machine start` 05:42:57Z; `/ready` 200 at 05:43:18Z. **Outage:
+05:41:06Z to 05:43:18Z, 2 min 12 s** (05:41:16Z stopped to 05:43:18Z ready, 2 min 2 s of that without
+a runtime). Boot line: `serving git_sha=061a6992bca2bef457410f876454d719e766df64
+frontier=0323_trade_invoice_probe_self_exclusion(312) bodies=60 pins closeExample=closeExampleV1
+chatTurn=chatTurn_v22 claraWork=claraWork_v6 documentIngest=documentIngest_v2
+invoiceFacts=invoiceFacts_v1 statementFacts=statementFacts_v4 witnessFacts=witnessFacts_v3
+payrollFacts=payrollFacts_v1 agreementFacts=agreementFacts_v1 autoDraft=autoDraft_v10 …`; **THE
+THREE PINS MOVED** as expected, `bodies=60` up from 57; `stranded bodies n=0` (every live run's body
+is carried by this image) BEFORE `durable world started pid=644`; **SIX** `clara-work/v1..v6` bundle
+banners (v6 digest
+`e716d9b046d60052b579d2b6a4f69ce72407393b4ff259a391e479d8f2fca0a5`, matching the merger's measured
+digest); `CONTROL listening`; `LEADER acquired`. `/ready` pools: `runtime`, `read`, `write`,
+`freeform`, `stripe_webhook`, `auth_wall` and `invite_preview` all `ok:true`; `bank` skipped
+(`dsn_not_configured`, expected, unrelated to this cut). First sweep, the re-derivation belt: not
+captured in this window's own log; the pre-window D-REDERIVE-BACKLOG reading (0 receipts, 0
+unsettled) is what the first sweep should confirm, and is recorded here as owed rather than
+measured.
 
-**Step 8.** Promotion ____. Signed-out smoke ____. Signed-in walks, per body: ____.
+**Step 8.** `wrangler versions deploy 3089d906…@100%` 05:43:43Z to 05:43:50Z (previous
+`57c5dbab…`, tag `refresh-6da02a8d`). Signed-out smoke at 05:44:02Z: `/login`, `/favicon.ico`,
+`/icon.png` 200; `/pending`, `/api/build-info`, `/checkout/cancel` 307 to `/login?next=…`;
+`/settings/registrations`, `/admin/registrations` 307 to `/operator`; cross-origin POST
+`/auth/confirm/resend` 403; runtime `/ready` 200, **exact match to the expected roster**.
+Signed-in walks, per body: **NOT done in this window** (no operator browser session); the owner's
+next check is one chat walk and one Work walk per successor body (`chatTurn_v22`, `claraWork_v6`,
+`statementFacts_v4`) in the product, per step 8's table.
 
-**Step 9, rollback preflight demonstration (second probe ____ on `refresh-6da02a8d`, bundle
-streamed over `ssh console`, ____ bytes, sha256 ____ verified, match=____).** Verdict ____ at
-__:__:__Z. Gate (a) ____. Gate (b) ____. Gate (c) ____. Snapshot expires when ____.
+**Step 9, rollback preflight demonstration (second probe `2870e99f35e398` on `refresh-6da02a8d`,
+bundle streamed over `ssh console`, 11,021,838 bytes, sha256
+`0d955f84a3a6217718e59316d9b21f9cca2ee78db10127c80f976a790d133cbb` verified, match=yes).** Probe2
+created 05:45:39Z; reads via probe2 05:46:25Z to 05:46:42Z (`reads-post2.log`, `reads-cut-only2.log`,
+both CLEAN, matching the first post reads and now reading 0 still UNLOCKED after 11a's lock); bundle
+stream and rollback preflight 05:46:42Z to 05:46:59Z. Against target `refresh-6da02a8d` (57 bodies,
+2 door contracts: `fa_parked_run_v1`, `intake_refusal_record_v1`): non-terminal workflow runs 0
+across 0 names, live tasks bound to no run 0. **Gate (a)** (`FRONTIER_RULES` body rules) and **gate
+(b)** (door-contract rules): both satisfied, "the target satisfies every rule the applied schema
+carries" against 0195, 0254 and 0279. **Gate (c)** (the stranded-body census): 0 non-terminal runs
+anywhere, so nothing strands. **Verdict ALLOWED at 05:46:59Z**: every in-flight body is carried by
+the target image. **Snapshot expires when** any of `chatTurn_v22`, `claraWork_v6` or
+`statementFacts_v4` carries a non-terminal run: `refresh-6da02a8d` carries none of the three, so the
+preflight would then refuse it by name, exactly as the four-way table in `waveC-gates.md` §1.4
+demonstrated (reading C: REFUSED `unsupported_body`). Probe2 destroyed 05:47:29Z.
 
-**Step 10.** ____
+**Step 10.** Covered by the post reads above (05:41:44Z–05:41:54Z through the live machine,
+re-confirmed 05:46:25Z–05:46:42Z through probe2): ledger 309 + 3 = 312 at 0323, drift gate over all
+312 applied rows, fingerprint vs the UPGRADED baseline unchanged at 16 env lines and 0 STOP. The one
+reference row that moved across the three: `clara.wake_fn_allowlist` 105 → 106 (`interactive` /
+`wake_get_client_financial_pack`); everything else unchanged. The eight cut-specific questions
+(0320's one body / two entrances, #660's unmoved grants, 0321's six new bodies and their grants, the
+correcting door's kept ACL, the settled-nothing-at-apply backlog at 0/0, 0323's two siblings with no
+default, 0323's five delegated bodies unrecut, and the version-cut run census) all read exactly as
+expected in section (f) of `reads-post.log` and `reads-post2.log`. Quiescence census re-read clean
+both times.
 
-**Step 11.** `--lock-deployed` locked ____ entries (expect 35). Manifest diff ____. Tickets: ____
-closed. Follow-ups filed: ____.
+**Step 11.** `--lock-deployed` run 05:44:21Z: `freeze-lint: locked 35 newly-deployed entr(ies);
+every manifest entry is now deploy-locked`: **35 entries locked, exactly as expected** (this cut's
+25 plus wave 4's 10 never locked). Committed as `204b7c199` on `docs/riders-cut-as-run`. The
+post-lock check (`reads-cut-only2.log`, 05:46:42Z) then reads OK at **347 / 60 / 3** with 0 entries
+still UNLOCKED. Tickets: #985, #1000, #1030, #1037 and #1135 are drafted and verified in
+`scratchpad/release-wC/closures/` (four DONE, one PARTIAL, #1135), pending the orchestrator running
+`post.cjs` with `PR_STRING` and `HOSTED` filled in after this record; not posted or closed within
+this window. Follow-ups filed: none newly filed this window; #1136 and #1137 (the deferred class-C
+successor tickets) were already open before the release and are named in #1135's own closure
+comment.
 
-**Deviations from the draft.** ____
+**Deviations from the draft.** None in the ceremony itself: the migrate ran in 22 s against wave 4's
+1 min 33 s for 21 files, consistent with the gate worker's rehearsal (6 s and 1 s on the two rigs for
+this cut's three files); the pre-window `--cut-only` read printed the 35 unlocked entries exactly as
+expected; and the post-release cut-only read (through probe2, after 11a's lock landed) reads zero
+successor bodies still outstanding, i.e. none still unlocked. The one thing genuinely not done in
+the window, disclosed rather than hidden: step 8's signed-in per-body chat and Work walks, which need
+the owner's own browser session and are the owner's next check.
