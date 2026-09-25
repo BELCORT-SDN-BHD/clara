@@ -202,8 +202,12 @@ cell("p654.eligibility.admits_by_kind — a preference or a policy key is eligib
     "the admitted census moved -- re-measure it and re-print it in 0220's tail");
 
   // EVERY OTHER CATALOG KEY IS REFUSED, one by one, so "fail-closed" is measured rather than
-  // asserted. The ten are the five carried legacy keys plus turnover_band,
-  // financial_year_end_month, financial_year_end_day (#898), sst_regime and mpers_eligibility.
+  // asserted. The eleven are the five carried legacy keys plus turnover_band,
+  // financial_year_end_month, financial_year_end_day (#898), sst_regime, mpers_eligibility and
+  // depreciation_policy (#1090 — kind=assertion + authority_bearing, deliberately NOT
+  // kind=policy/preference, so it is NOT admitted by kind the way accounting_basis and
+  // reporting_framework are above; this cell is the drive that measures the refusal, not merely
+  // migration 0345's own tail asserting the eligibility row is absent).
   //
   // EACH PROBE CARRIES A VALUE THE CATALOG WOULD ACCEPT, derived from `value_shape` /
   // `allowed_values` / `validated_against` rather than a constant: `clara._knowledge_assert_value`
@@ -221,8 +225,8 @@ cell("p654.eligibility.admits_by_kind — a preference or a policy key is eligib
     return "rig";
   };
   const refused = catalog.filter((row) => !admitted.includes(row.knowledge_key));
-  assert.equal(refused.length, 10,
-    `expected 10 refused keys, got ${refused.length}: ${refused.map((x) => x.knowledge_key).join(", ")}`);
+  assert.equal(refused.length, 11,
+    `expected 11 refused keys, got ${refused.length}: ${refused.map((x) => x.knowledge_key).join(", ")}`);
   for (const row of refused) {
     const err = await assertRaises("CLR10", () => capture(w.owner, {
       key: row.knowledge_key, scope: "firm", client: null, value: probeValue(row),

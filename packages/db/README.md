@@ -7377,3 +7377,65 @@ exercised on the lane database: the FIRST-APPLY branch through `pnpm db:migrate`
 pre-images, and the REDO branch through `CLARA_MIGRATION_REDO=0344_payroll_fact_revision` across
 five successive fix rounds. The file recuts three bodies statically and contains no dynamic SQL at
 all, so no entry in `apps/web/tests/firm-scope-db-pins.corpus.ts` is owed.
+
+## 0345 — a depreciation-policy knowledge key, so the fixed-asset proposal's `client_knowledge` ground can fire (#1090, riders sweep wave, lane 05)
+
+`0345_depreciation_policy_knowledge_key.sql` adds ONE row to `clara.knowledge_keys`:
+`depreciation_policy`. #933 ("the depreciation-particulars proposal rides `source_ref`, and needs
+no migration", above) built and tested `deriveFaParticularsProposal`'s `client_knowledge` ground in
+full — ranked above the account's own retired policy and its completed siblings — but left it
+"wired and unfed": the catalogue held fourteen keys and none was about depreciation, so no person
+could ever record the note the ground reads. This file is the whole of what was owed: the catalogue
+entry.
+Nothing else needed a migration — `clara._knowledge_assert_value`'s `shape_only` label already
+admits an arbitrary object, `clara.capture_knowledge` already exists, and
+`clara.knowledge_records`'s own `applies_when` (a generic jsonb object of scalar equality
+conditions since 0192) already carries the account scoping the note needs, with no new column.
+
+**The catalog choice this file measured, not assumed, and got wrong on its first draft.** A
+depreciation policy reads like "a decision about how the books are prepared" — 0192's own
+definition of `kind = 'policy'` — but `clara._tf_knowledge_firm_eligibility` (0220, unmodified)
+admits `kind in ('preference','policy')` at firm scope UNCONDITIONALLY, with no regard for
+`clara.knowledge_key_firm_eligibility` at all. A `policy`-kind draft of this row, measured live on
+the lane database, let a firm-scope capture of `depreciation_policy` succeed with no eligibility
+row naming it — a feature this ticket's brief never asked for (it names a CLIENT's recorded note
+only) and, worse, a DARK one: the successor's read is client-pinned and would never surface a
+firm-scope row, so a captured firm default would sit accepted and permanently unread. The fix is
+the `customer_identity_policy` precedent instead: `kind = 'assertion'` with `authority_bearing =
+true`, which still forces "asserted trust only" (`user_statement` / `interview` /
+`registry_lookup`, never `document_extraction` or `model_inference`) at the door's own explicit
+check and at `_tf_knowledge_authority`'s trigger belt — TWO of the three belts 0192's own header
+names for an authority-bearing key of any kind other than `policy` — while leaving the
+firm-eligibility wall live, so an unseeded `depreciation_policy` is refused
+`knowledge_scope_not_firm_defaultable` exactly as a plain client-identity fact is.
+`packages/db/tests/knowledge-firm-defaults.test.mjs`'s `p654.eligibility.admits_by_kind` cell —
+which drives EVERY non-admitted catalog key through the real firm-scope door — moves from ten
+refused keys to eleven in this same commit, for the same reason its own comment already gives for
+0240's `financial_year_end_day`.
+
+**Because `clara.knowledge_keys` is append-only for every role, including `clara_fn_owner`** (no
+escape hatch — `_tf_append_only` raises unconditionally), the wrong first draft could not be healed
+by a redo of this file's SQL: a redo detects an incompatible previously-landed row and refuses,
+rather than repairing it. The lane database was returned to a clean prestate by disabling the two
+append-only triggers (`knowledge_keys` and, for the test rows that already referenced the wrong
+row, `knowledge_records`) as an out-of-band rig operation on this disposable database, deleting the
+wrongly-shaped rows, re-enabling both triggers, and then running `CLARA_MIGRATION_REDO=
+0345_depreciation_policy_knowledge_key` to apply the corrected file. A from-scratch chain only ever
+sees this file's one, correct, first apply.
+
+**The read and the mapping this ticket's brief also asks for** ("the code path that loads inputs
+for the proposal derivation should read a client's recorded depreciation note … and map its value
+onto `FaProposalKnowledgeNote`") are NOT a migration and are not wired into any workflow step:
+`loadFaProposalInputsStepV6` does not exist (`claraWork.v6.impl.ts` is absent; `registry.ts` still
+resolves `claraWork_v5`), and that step lives inside a frozen-workflow closure this lane must never
+create. `mapDepreciationKnowledgeRows` (`packages/runtime/lib/fa-particulars-proposal.ts`) is the
+pure mapping, built and tested; the SQL a step would run under the SAME OBO `clara_agent_ro`
+credential v4's own register read mints is stated in this ticket's report as a successor-contract
+addition, and `packages/db/tests/depreciation-policy-knowledge.test.mjs` drives capture -> that
+exact read -> the mapper -> `deriveFaParticularsProposal` end to end on a live database, proving a
+recorded note outranks a disagreeing account-siblings ground for the same asset.
+
+**No plan-item-map row.** `depreciation_policy` is recorded directly through `clara.capture_
+knowledge`, never promoted from a committed onboarding answer — the same posture
+`banking_arrangement`, `customer_identity_policy` and `trade_nature` already carry (measured live:
+none of the three holds a `clara.knowledge_plan_item_map` row either).
