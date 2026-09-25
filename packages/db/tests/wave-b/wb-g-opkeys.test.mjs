@@ -132,6 +132,37 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
   const droppedReservation = writers.filter((fn) => !RESERVE_LAW_EXEMPT.has(fn) && !reserving.has(fn));
   assert.equal(droppedReservation.length, 0,
     `granted writers whose bodies no longer invoke _reserve_op (the vanishing-coverage hazard): ${droppedReservation.join(",")}`);
+
+  // ---- THE REVERSE CENSUS [#1099 AC2, fix round] ---------------------------
+  // The sweep above asks "a writer I can SEE — did it drop the discipline?". AC2 asks the
+  // opposite question, and it is the one #1038 actually answered wrongly: a fn that KEEPS the
+  // discipline and loses the GRANT drops out of `writers` entirely, so nothing above ever looks
+  // at it again. `UNGRANTED_RESERVING_FNS` above is a hand-maintained registry, and a registry
+  // alone cannot detect the case it exists for — someone has to remember to add the name. This
+  // is the detector: every WB-family fn whose live body calls `_reserve_op` and that holds
+  // EXECUTE for NEITHER clara_authenticated NOR clara_runtime must be registered (or carry an
+  // audited reserve-law exemption), and is NAMED here otherwise. Both sets are already computed
+  // above, so the detector costs one set difference rather than a second catalog pass.
+  //
+  // Measured on the lane rig at 313 migrations: the set is exactly {create_client}, i.e. the
+  // #1038 case itself and nothing else — so this assertion is a live, non-empty census, not an
+  // empty-set tautology. Vacuity control: with `create_client` removed from
+  // UNGRANTED_RESERVING_FNS the cell fails naming it, and with it restored the cell is green.
+  const ungrantedReserving = [...reserving].filter((fn) => !writers.includes(fn)).sort();
+  assert.ok(
+    ungrantedReserving.length >= 1,
+    "the reverse census reads a non-empty set — create_client at minimum, since #1038 withdrew its human grant " +
+      "while leaving its _reserve_op call in place. An empty set here means the instrument stopped working, " +
+      "not that the hazard went away.",
+  );
+  const unregistered = ungrantedReserving.filter((fn) => !(fn in UNGRANTED_RESERVING_FNS) && !RESERVE_LAW_EXEMPT.has(fn));
+  assert.deepEqual(unregistered, [],
+    `UNGRANTED-BUT-RESERVING writers that no census covers any more: ${unregistered.join(",")}. `
+    + "Each lost its EXECUTE grant to clara_authenticated/clara_runtime while keeping its _reserve_op call, so the "
+    + "grant-derived inventory above can no longer see it and its op-key idempotence is now proved by nothing. "
+    + "This is exactly what #1038 did to create_client and what #1099 exists to stop happening silently: add the "
+    + "name to UNGRANTED_RESERVING_FNS with a DEDICATED cell that drives its hash law (see the G4 supplement "
+    + "below), or to RESERVE_LAW_EXEMPT with the law that replaces it.");
   const derived = writers;
   // ---- fixtures ------------------------------------------------------------
   const oSeed = await onboardingClient(w.users.hana);
