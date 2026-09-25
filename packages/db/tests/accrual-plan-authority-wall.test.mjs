@@ -70,7 +70,7 @@ let world = null;
 let today = null;
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 4;
+const EXPECTED_CELLS = 5;
 
 before(async () => {
   world = await buildWorkWorld();
@@ -370,6 +370,72 @@ async () => {
         "…and the plan's authority is the human's, never the run's");
     }
   }
+});
+
+cell("p1080.accrual.confirmation_cannot_be_self_minted — the parity half cannot become a run's "
+  + "own authority: exactly two bodies write a rent-plan confirmation, both are the tenancy "
+  + "lane's human doors, clara_runtime can reach neither them nor the table, and the row cannot "
+  + "exist without naming who confirmed it",
+async () => {
+  // WHY THIS CELL EXISTS. 0331 lets the ON-BEHALF accrual entrance admit `contract_confirmation`,
+  // a kind it refused before, and a kind list that grows on a `clara_runtime`-only door is
+  // measured against the standing owner ruling that access control is never loosened (spec review
+  // 2026-09-25, SPEC-01). The case for calling it PARITY rather than a widening is that no runtime
+  // connection can MANUFACTURE the row such a plan would cite — it can only act on a row a person
+  // wrote. That case was an argument in 0331's header; here it is a closed-world measurement, so a
+  // later lane that grants one of these paths turns this cell red instead of quietly making the
+  // header false.
+  const CONFIRMATION_DOORS = [
+    "clara.confirm_tenancy_rent_plan(uuid,uuid,text,text,text,text)",
+    "clara.confirm_tenancy_rent_plan_revision(uuid,uuid,text,text)",
+  ];
+
+  // 1 — THE ONLY WRITERS, as a closed world over every clara body rather than a spot check.
+  const writers = (await rootQuery(
+    "select p.oid::regprocedure::text as sig from pg_proc p "
+    + "join pg_namespace n on n.oid = p.pronamespace "
+    + "where n.nspname = 'clara' "
+    + "  and p.prosrc like '%insert into clara.contract_plan_confirmations%' "
+    + "order by p.proname")).rows.map((r) => r.sig);
+  assert.deepEqual(writers, CONFIRMATION_DOORS,
+    "exactly the tenancy lane's own two confirmation doors write clara.contract_plan_confirmations");
+
+  // 2 — AND NO ROLE ON THE MACHINE LANE CAN REACH THEM. `order by` is over `proname`, the
+  //     catalog's own C-ordered name type, so no database collation can change this roster.
+  const MACHINE_ROLES = ["clara_runtime", "clara_agent_ro", "clara_wake_interactive",
+    "clara_wake_proactive", "clara_wake_bank", "clara_wake_filing"];
+  for (const sig of CONFIRMATION_DOORS) {
+    const acl = (await rootQuery(
+      "select has_function_privilege('clara_authenticated', $1::regprocedure, 'execute') as auth, "
+      + "       has_function_privilege('public', $1::regprocedure, 'execute') as pub", [sig])).rows[0];
+    assert.equal(acl.auth, true, `${sig} is the human lane's own door`);
+    assert.equal(acl.pub, false, `${sig} is not public`);
+    for (const role of MACHINE_ROLES) {
+      const r = (await rootQuery(
+        "select case when to_regrole($2) is null then false "
+        + "            else has_function_privilege($2, $1::regprocedure, 'execute') end as ex",
+        [sig, role])).rows[0];
+      assert.equal(r.ex, false, `${role} cannot execute ${sig}`);
+    }
+  }
+
+  // 3 — NOR THE TABLE ITSELF. The doors are SECURITY DEFINER; a direct INSERT is the other way in.
+  for (const role of ["clara_runtime", "clara_authenticated", "clara_agent_ro"]) {
+    const r = (await rootQuery(
+      "select case when to_regrole($1) is null then false else "
+      + "  has_table_privilege($1, 'clara.contract_plan_confirmations', 'insert') end as ins",
+      [role])).rows[0];
+    assert.equal(r.ins, false, `${role} cannot insert into clara.contract_plan_confirmations`);
+  }
+
+  // 4 — AND THE ROW NAMES A PERSON BY CONSTRUCTION. CONTEXT.md's "Authorising instruction" says a
+  //     confirmation "is proof as it stands ... the row cannot exist without naming who confirmed
+  //     it"; that is a NOT NULL, and this reads it rather than repeating it.
+  const notNull = (await rootQuery(
+    "select attnotnull as nn from pg_attribute "
+    + "where attrelid = 'clara.contract_plan_confirmations'::regclass and attname = 'confirmed_by'"
+  )).rows[0].nn;
+  assert.equal(notNull, true, "clara.contract_plan_confirmations.confirmed_by is NOT NULL");
 });
 
 // ===========================================================================================

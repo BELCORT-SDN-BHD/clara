@@ -2132,6 +2132,17 @@ Four `p1080.*` cells:
   the parity half — the human entrance has admitted the kind since 0300 and the on-behalf one
   refused it `authority_ref_invalid`/`kind` until 0331. The confirmation row is planted directly
   and the fixture says so; #949's own confirm door is `tenancy-rent-plan.test.mjs`'s subject.
+* `p1080.accrual.confirmation_cannot_be_self_minted` — the fix round of 2026-09-25 (SPEC-01). 0331
+  lets the ON-BEHALF entrance admit `contract_confirmation`, a kind it refused before, and the case
+  for calling that PARITY rather than a widening is that no machine lane can manufacture the row
+  such a plan would cite. That case was an argument in 0331's header; this cell measures it, as a
+  closed world: exactly two clara bodies insert into `clara.contract_plan_confirmations` and both
+  are the tenancy lane's human doors; `clara_runtime`, `clara_agent_ro` and the four wake roles can
+  execute neither and none of them (nor `clara_authenticated`) can INSERT into the table directly;
+  and `confirmed_by` is NOT NULL, which is what CONTEXT.md means by "the row cannot exist without
+  naming who confirmed it". A later lane that grants one of those paths turns this cell red instead
+  of quietly making the header false. Non-vacuity: with `clara_authenticated` added to the machine
+  roster the cell goes red on the first door.
 * `p1080.wall.one_spelling` — the catalog census, the structural standard for a recut body, and
   the other end of 0250:604's sentence. Across the whole `clara` schema: the wall's sentence lives
   in exactly ONE body (`_assert_plan_authority`), the predicate is called by exactly
