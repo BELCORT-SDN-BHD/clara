@@ -660,10 +660,26 @@ own.** Three gates, and the runbook must say which is demonstrated: (a) `FRONTIE
 rules; (b) `FRONTIER_RULES`' door-contract rules; (c) the stranded-body census. Exit 0 = ALLOWED,
 1 = REFUSED, 2 = could not answer, **and 2 is never read as either of the others.**
 
-**THE EXPECTED VERDICT IS `ALLOWED`, AND IT IS A MEASUREMENT RATHER THAN A PREDICTION.** The cut's
-step 9 expected, and got, a REFUSED the moment a run existed on one of its three successor bodies.
-This wave repoints no pin, and gate C drove the preflight FIVE WAYS at frontier `0361` on a fresh
-cluster to settle what that means (`reports/waveS-gates-C.md` §4).
+**THE EXPECTED READING ON `refresh-061a6992` IS `ALLOWED`, EXIT 0, AND A `REFUSED` HERE IS A STOP.**
+Read that sentence before running the command, because it inverts the cut's. The cut's step 9
+expected, and got, a REFUSED the moment a run existed on one of its three successor bodies, and that
+refusal was the correct answer for a wave that repoints pins. **This wave repoints no frozen pin and
+adds no unlocked manifest entry** (`registry.ts` byte-unchanged, `347 entries / 0 UNLOCKED`, no
+successor body), so the previous image carries every body any run of this build can be parked on and
+declares both door contracts the applied schema requires at `0361`. There is therefore no lawful
+reason for this reading to refuse.
+
+**So if it REFUSES, stop.** Do not roll back, do not re-run it against a different roster to get a
+verdict you like, and do not read it as the cut's expected outcome arriving late. A refusal means one
+of three things, and the CLI names which: a body census refusal (`unsupported_body`) means the image
+serving is not the one this runbook describes, because it exports a body the target does not carry;
+a `frontier_requires_body` or `frontier_requires_contract` refusal means `FRONTIER_RULES` or the
+target's declarations are not what the release was built against; and exit 2 means the preflight
+could not answer at all, which is never read as either of the others. Report the exit code, the
+refusal line verbatim and the bundle's sha256, and take the ruling outside the window.
+
+The expectation is a MEASUREMENT rather than a prediction: gate C drove the preflight FIVE WAYS at
+frontier `0361` on a fresh cluster to settle it (`reports/waveS-gates-C.md` §4).
 
 | # | target | non-terminal runs | verdict | exit |
 |---|---|---|---|---|
@@ -673,8 +689,8 @@ cluster to settle what that means (`reports/waveS-gates-C.md` §4).
 | **D** | the built artifact (60) | `chatTurn_v21`, `claraWork_v5`, `statementFacts_v3` | **ALLOWED** | 0 |
 | **E** | the body-complete roster with **no contracts declared**, the pre-#1035 image | the same three | **REFUSED (frontier_requires_contract)**, naming both rules | 1 |
 
-**Reading A is the one this step must record, and it is quoted verbatim so the window compares
-against text rather than against a summary:**
+**Reading A is the REHEARSAL this step's own reading must match, and it is quoted verbatim so the
+window compares against text rather than against a summary:**
 
 ```
 rollback-preflight: target supports 60 body(ies) and declares 2 door contract(s) — from bundle packages/runtime/.output/server/index.mjs
