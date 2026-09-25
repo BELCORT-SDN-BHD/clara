@@ -147,6 +147,13 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   // `accrualDetailHref` is unreachable from this row today. Its own top-level client segment
   // (apps/web/app/(firm)/clients/[clientId]/accruals/page.tsx), never under `/registers`.
   accrual_bill_conflict: "/accruals",
+  // #1048 (0343) — the documents tab, SHARED with `payroll_posting_blocked` and deliberately so.
+  // The ACT lives on the row itself (this is the one payroll kind with an inline affordance), so
+  // the link is not where the question is answered — it is where a person goes to CHECK the page
+  // before answering it, which is the payslip, on the documents tab. (`?tab=` is not used here for
+  // the same reason #946 gave: the documents tab has no view that selects a single document from
+  // the URL, so naming one would be a link to a view that does not exist.)
+  payroll_completeness_question: "/documents",
 });
 
 /**

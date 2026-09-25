@@ -955,6 +955,22 @@ clears.
 _Avoid_: Posting a partial entry; filling an unprinted line with zero; smoothing an imbalance into
 the rounding account; a stored refusal a person has to dismiss; a model deciding any of it.
 
+**Completeness witness**:
+What makes the employee lines Clara read on a payroll summary stand for the WHOLE run, so their
+column sums may be posted when the page prints no run totals at all. Three things count, and nothing
+else: a printed employee headcount that equals the number of lines read, a printed page count of one
+(the document is not truncated), or a named person's written YES to the question Clara parks
+("this summary prints no total; is this every employee for the month?"). A printed headcount the
+lines CONTRADICT is not a weak witness but a refusal — the reading is then known to be incomplete. A
+person's answer belongs to the READING it was given about, not to the document, so a re-read asks
+again rather than inheriting an older yes, and the line count they affirmed is kept with their
+answer. Where the page prints its own totals the witness is not consulted at all: a printed total
+always wins over a sum.
+_Avoid_: Treating a row sum as a printed total; carrying a yes from one reading to another; posting
+on a headcount that disagrees with the lines; asking a person a question the page already answered;
+reading "is this everyone?" as a yes-or-no flag rather than as a named person's judgement with its
+own evidence.
+
 **Financing agreement**:
 An agreement that creates an asset and a liability on the day it is signed — a hire purchase or a
 finance lease, and nothing else. Which one a document is, is read off the words the page uses for
