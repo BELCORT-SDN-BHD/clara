@@ -7757,10 +7757,53 @@ final redo of the finished file — whose checksum
 (`0ebcab8519dcdb73777f896093dbb2f3dad4e8f473990202b11494280348970d`) is unchanged across two
 consecutive redos.
 
-**Integration seam, named rather than discovered.** `clara._obo_plan_core` is also written by lane
-L1 (#1051, which extracts one shared authority predicate from it and
-`clara.create_accounting_plan`). L1 merges first, so §E must be re-derived from that post-image at
-integration: the edit is additive and self-describing — one more admitted authority kind, one more
-admitted reference kind, and the strict pairing that binds them — and the explicit-instruction
-branch is unchanged, so folding it into an extracted predicate is a mechanical carry rather than a
-re-decision.
+### The integration seam, carried rather than deferred
+
+`clara._obo_plan_core` is written by lane **L1** as well (#1051,
+[0330_plan_authority_wall_predicate.sql](migrations/0330_plan_authority_wall_predicate.sql) §C),
+which extracts the authority wall this file widens into one shared predicate,
+`clara._assert_plan_authority(text, jsonb, uuid, uuid)`, and recuts both plan doors to `perform`
+it. L1 merges first, so on the integrated chain 0330 applies BEFORE 0338 and the pre-image is L1's,
+not 0308's. The first cut of this file pinned only 0308's, which meant it could not apply behind
+0330 at all; and a single unconditional `create or replace` would have silently reverted #1051 on
+the very chain it runs on.
+
+**§E therefore writes the shape it finds.** Which shape that is is decided by a fact about the
+CATALOG — does `clara._assert_plan_authority` exist — not by a marker inside a body, which is the
+wave-3 addendum's own rule and 0238's idiom. §0 pins BOTH pre-images (`2049c1c4…` for 0308 §D,
+`149b4a3d…` for 0330 §C, the latter measured off lane L1's own migration file and equal to the sha
+L1's ticket report records), so a third shape — L1 moving its body again before the merge —
+refuses BY NAME and says what to re-derive.
+
+**The second kind stays OUTSIDE the shared predicate, and that is a decision.**
+`clara._assert_plan_authority` admits exactly one authority kind and is called by the human plan
+door and, after #1080, by the accrual core; folding `standing_instruction` into it would admit the
+firm's blanket delegation at doors the ruling gives it to nobody — which this file's own tail item
+6 refuses. So the twin answers its own kind in its own branch and delegates every other kind,
+unchanged, to the one wall.
+
+**Both branches were measured, not reasoned.** The POST-#1051 branch was driven inside one
+rolled-back transaction on this rig, by the wave-3 recipe: 0330 §A, §B and §C were applied from
+lane L1's own file, then 0338's §0, §E and the whole §TAIL were run VERBATIM. §0 reported
+`clara._obo_plan_core = FIRST(0330/#1051)`, §E took the POST branch, the body it left hashes to
+`697af938…` (exactly the text this file carries), and the tail passed in full. The eight authority
+axes were then driven through `clara._obo_plan_core` on BOTH shapes and answered identically, code
+and `detail` byte for byte: `authority_rule_unsupported`, `invalid_authority_kind`,
+`authority_ref_invalid` on each of `object` / `kind` / `id`, the explicit-with-standing-ref
+pairing, and `authority_ref_unresolved` on both the chat-task and the standing-instruction
+reference.
+
+**Three pins that are no longer shas, and why.** A sha pin is the right instrument for a body no
+other lane of this wave writes; for one another lane DOES write it turns that lane's lawful recut
+into an abort of the whole chain (the sweep plan's own seam rule). `clara.create_accounting_plan`
+(L1's #1051) and `clara._plan_admit_occurrence` (L1's #1074, 0332) are therefore asserted as the
+invariants this file actually depends on — the human lane never names `standing_instruction`, and
+the occurrence body still hands the plan's `authorised_by` to `clara.admit_journal_work` — and
+`clara._prepayment_plan_core` as the delegation §E needs from it. Tail items 6 and 7 moved the same
+way: item 6 asks the human door AND the shared wall whether either names the second kind, and item
+7 asserts the ROSTER of readers of `clara._authority_ref_refusal` rather than a count of three.
+The count is in fact three on both chains, with different members —
+`sign_depreciation_authority`, `create_accounting_plan`, `_obo_plan_core` without L1;
+`sign_depreciation_authority`, `_assert_plan_authority`, `_obo_plan_core` with it — which is
+exactly why a count was the wrong assertion. `p1050.authority.human_lane_unwidened` holds both
+facts from the test side, on either chain.

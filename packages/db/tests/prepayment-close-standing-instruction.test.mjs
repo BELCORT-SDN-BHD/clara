@@ -262,6 +262,44 @@ async (t) => {
     `the authority-kind CHECK admits something the ruling did not name: ${d}`);
 });
 
+test("p1050.authority.human_lane_unwidened -- the second kind is the unattended lane's alone, and "
+  + "that is asserted of the LANE rather than of one body's text: neither the human plan door nor "
+  + "the shared wall it delegates to after #1051 names standing_instruction anywhere, and nothing "
+  + "outside the plan family resolves an authority reference",
+async (t) => {
+  if (await standingGate(t)) return;
+
+  // NOT A SHA PIN, and not a pin on any particular spelling: `clara.create_accounting_plan` and
+  // `clara._obo_plan_core` are written by lane L1 (#1051) as well as by this one, so the claim is
+  // stated as the FACT the ruling owns. It reads the same on a chain with L1's 0330 and on one
+  // without it -- which is exactly why it is worth having.
+  const widened = await rootQuery(
+    `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara'
+        and p.proname in ('create_accounting_plan', '_assert_plan_authority')
+        and position('standing_instruction' in p.prosrc) > 0`);
+  assert.deepEqual(widened.rows.map((r) => r.proname), [],
+    "the human plan lane admits standing_instruction -- the ruling gives the second kind to the "
+    + "unattended lane only");
+
+  // #977's CLOSED WORLD IS A ROSTER OF NAMES, NOT A COUNT: #1051 folds two readers into one
+  // predicate and #1080 points a third at it, so the count legitimately moves while the invariant
+  // does not.
+  const readers = await rootQuery(
+    `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname <> '_authority_ref_refusal'
+        and p.prosrc like '%clara._authority_ref_refusal(%'
+        and p.proname not in ('create_accounting_plan', '_obo_plan_core', '_accrual_plan_core',
+                              '_assert_plan_authority', 'sign_depreciation_authority')`);
+  assert.deepEqual(readers.rows.map((r) => r.proname), [],
+    "a body outside the plan family resolves an authority reference -- #977's closed world");
+  const all = await rootQuery(
+    `select count(*)::int as n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname <> '_authority_ref_refusal'
+        and p.prosrc like '%clara._authority_ref_refusal(%'`);
+  assert.ok(all.rows[0].n >= 1, "nothing reads clara._authority_ref_refusal -- #977's wall is gone");
+});
+
 test("p1050.authority.resolve -- clara._authority_ref_refusal resolves a firm_standing_instruction "
   + "at FIRM scope: the firm's own LIVE row passes, an unknown id, a WITHDRAWN row and another "
   + "firm's row are each unresolved, and the three kinds that were already there did not move",

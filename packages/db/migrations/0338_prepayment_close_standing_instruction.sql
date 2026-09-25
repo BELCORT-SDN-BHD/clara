@@ -68,23 +68,38 @@ declare
   v_recut text[][] := array[
     ['clara._authority_ref_refusal(text,uuid,uuid,uuid)',
      '55c20b2008d51cc58cd4dc29b3f434965ead8450a846a73eb9f01f62d53cc208'],
-    ['clara._obo_plan_core(text,uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)',
-     '2049c1c4404e47102b375d506271938f5f3e03405fd7a25b8d303118c13a6b4a'],
     ['clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)',
      '87fc7e25d9e872e593d7c1c1e6fd6afb2a6373a25b868d711c62f99d73fef79a']
   ];
-  -- …AND THE NEIGHBOURS THIS FILE DEPENDS ON AND MUST NOT MOVE.
+  -- …AND THE ONE RECUT BODY WITH **TWO** ADMISSIBLE PRE-IMAGES, because two lanes of this wave
+  -- write it. `clara._obo_plan_core` is 0308 §D's on-behalf twin. Lane L1's #1051
+  -- (`0330_plan_authority_wall_predicate.sql` §C) extracts its authority wall into the shared
+  -- `clara._assert_plan_authority` and recuts this body to `perform` it; the sweep plan merges L1
+  -- FIRST, so on the integrated chain the pre-image here is L1's post-image and not 0308's. §E
+  -- writes whichever shape it finds -- decided by whether the shared predicate EXISTS, a fact
+  -- about the catalog rather than a marker inside a body -- and both shapes are pinned here, so a
+  -- body that is neither refuses BY NAME rather than being silently overwritten.
+  --   · 2049c1c4… — 0308 §D, the shape on a chain WITHOUT lane L1 (this lane's own rig).
+  --   · 149b4a3d… — 0330 §C's post-image, MEASURED off lane L1's own migration file
+  --                 (`git show riders/wS-lane01:packages/db/migrations/0330_…sql`, the function
+  --                 body hashed the same way pg_proc.prosrc is), and equal to the sha lane L1's
+  --                 own ticket report records for it.
+  v_obo constant text :=
+    'clara._obo_plan_core(text,uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)';
+  v_obo_pre text[] := array[
+    '2049c1c4404e47102b375d506271938f5f3e03405fd7a25b8d303118c13a6b4a',
+    '149b4a3d0ff1b22b3dd8d11eabcfb7b0b8c113054cd7df76194355c2b976b61d'
+  ];
+  -- …AND THE NEIGHBOURS THIS FILE DEPENDS ON AND MUST NOT MOVE. A sha pin is the right instrument
+  -- for a body NO OTHER LANE OF THIS WAVE WRITES; for one that another lane DOES write it is the
+  -- wrong instrument, because it turns that lane's lawful recut into an abort of the whole chain
+  -- (the sweep plan's own seam rule: "no lane pins a body another lane writes"). Three of the five
+  -- neighbours this file used to sha-pin are written by lane L1 --
+  -- `clara.create_accounting_plan` and `clara._obo_plan_core` by #1051 (0330) and
+  -- `clara._plan_admit_occurrence` by #1074 (0332) -- so each of those is asserted below as the
+  -- NAMED INVARIANT this file actually depends on instead. The two that no other lane touches keep
+  -- their sha.
   --
-  --   · `create_accounting_plan` is the door this file deliberately does NOT widen. §E's whole
-  --     claim -- that the explicit-instruction branch is byte-for-byte the wall that was there --
-  --     is a claim about THIS body's text, because #915's and #941's parity cells compare the two
-  --     entrances' refusal payloads byte for byte. If it moved, §E must be re-derived against it.
-  --   · `_prepayment_plan_core` is the one-line wrapper the schedule core reaches §E through. It
-  --     is `_obo_plan_core` with the kind bound; if it stopped delegating, §E would be dead code.
-  --   · `_plan_admit_occurrence` is what makes the directing human MEAN something: it hands the
-  --     plan's `authorised_by` to `clara.admit_journal_work`, which rechecks that person's
-  --     membership, activity, rank and client status every month. This file writes plans FOR that
-  --     body to admit and does not touch it.
   --   · `wake_establish_prepayment_schedule` keeps its exact seven arguments and its delegation
   --     (the ticket's own words). The lane re-opens inside the shared core, which is where #1036's
   --     own header said to re-open it -- "one arm in one body rather than a second door".
@@ -93,12 +108,6 @@ declare
   --     the catalog, so there is nothing for a standing instruction to authorise on that side.
   --     Pinned so the asymmetry is a decision and a drift is visible.
   v_keep text[][] := array[
-    ['clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)',
-     'a7c108d5dd4febbae9f98a87b42b69468aec31f1731336b2185c8e91b1b0951c'],
-    ['clara._prepayment_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)',
-     '266499b22d5e71c2095fccb570c301349810a0742129f33765e03f3060f72e7a'],
-    ['clara._plan_admit_occurrence(uuid,date,text,text,boolean)',
-     '02ea6afe635dc9a8453d69918f5f48cb05f404f6e404973096db2ec92d0a655e'],
     ['clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)',
      '84348ed4365bdbc07ad0020eca307e6f12fa5fc3141903092a0764fae462693e'],
     ['clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)',
@@ -148,6 +157,24 @@ begin
     end if;
   end loop;
 
+  -- 4b · clara._obo_plan_core -- THE BODY TWO LANES WRITE, in ONE of its THREE admissible shapes:
+  --      0308 §D's (a chain without lane L1), 0330 §C's (the integrated chain, L1 first), or this
+  --      file's own recut. §E writes whichever of the two it finds; anything else refuses by name.
+  select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex'), p.prosrc into v_sha, v_src
+    from pg_proc p where p.oid = v_obo::regprocedure;
+  if v_sha is null then
+    raise exception '0338 prestate: % is absent', v_obo using errcode='CLR10';
+  elsif v_sha = v_obo_pre[1] then
+    v_first := v_first + 1; v_modes := v_modes || v_obo || '=FIRST(0308) ';
+  elsif v_sha = v_obo_pre[2] then
+    v_first := v_first + 1; v_modes := v_modes || v_obo || '=FIRST(0330/#1051) ';
+  elsif position('0338' in v_src) > 0 then
+    v_redo := v_redo + 1; v_modes := v_modes || v_obo || '=REDO ';
+  else
+    raise exception '0338 prestate: % is none of its three admissible shapes -- not 0308 §D (%), not 0330 §C''s post-image (%), and not this file''s own recut; live sha %. Lane L1 moved it again: re-derive §E''s POST-#1051 branch against the new body and re-measure this pin.',
+      v_obo, v_obo_pre[1], v_obo_pre[2], v_sha using errcode='CLR10';
+  end if;
+
   -- 5 · THE NEIGHBOURS ARE EXACTLY WHAT THIS FILE WAS WRITTEN AGAINST.
   for v_i in 1 .. array_length(v_keep, 1) loop
     select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_sha
@@ -157,6 +184,46 @@ begin
         v_keep[v_i][1], v_keep[v_i][2], coalesce(v_sha, '(absent)') using errcode='CLR10';
     end if;
   end loop;
+
+  -- 5b · THE THREE NEIGHBOURS LANE L1 ALSO WRITES, asserted as the INVARIANT this file depends on
+  --      rather than as a sha it has no standing to freeze.
+  --
+  --   · `create_accounting_plan` is the door this file deliberately does NOT widen. What §E's
+  --     asymmetry needs of it is not a particular body text but that it never admits the second
+  --     kind -- neither in its own body nor in the shared wall it delegates to after #1051. Tail
+  --     item 6 re-reads the same fact AFTER this file runs.
+  --   · `_prepayment_plan_core` is the one-line wrapper the schedule core reaches §E through. It
+  --     is `_obo_plan_core` with the kind bound; if it stopped DELEGATING, §E would be dead code,
+  --     and that delegation -- not its text -- is what this file relies on.
+  --   · `_plan_admit_occurrence` is what makes the directing human MEAN something: it hands the
+  --     plan's `authorised_by` to `clara.admit_journal_work`, which rechecks that person's
+  --     membership, activity, rank and client status every month. This file writes plans FOR that
+  --     body to admit and does not touch it; what it needs is that the hand-off is still there.
+  if to_regprocedure('clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)') is null
+     or to_regprocedure('clara._prepayment_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)') is null
+     or to_regprocedure('clara._plan_admit_occurrence(uuid,date,text,text,boolean)') is null then
+    raise exception '0338 prestate: one of the three plan-family neighbours is absent' using errcode='CLR10';
+  end if;
+  select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara'
+     and (p.proname = 'create_accounting_plan' or p.proname = '_assert_plan_authority')
+     and position('standing_instruction' in p.prosrc) > 0;
+  if v_n <> 0 then
+    raise exception '0338 prestate: the HUMAN plan door already admits standing_instruction (% body/bodies name it) -- the ruling gives the second kind to the unattended lane alone', v_n
+      using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara._prepayment_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)'::regprocedure;
+  if position('_obo_plan_core' in v_src) = 0 then
+    raise exception '0338 prestate: clara._prepayment_plan_core no longer delegates to clara._obo_plan_core -- §E would be dead code'
+      using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara._plan_admit_occurrence(uuid,date,text,text,boolean)'::regprocedure;
+  if position('admit_journal_work' in v_src) = 0 then
+    raise exception '0338 prestate: clara._plan_admit_occurrence no longer hands the plan''s authorised_by to clara.admit_journal_work -- the directing human would mean nothing'
+      using errcode='CLR10';
+  end if;
 
   -- 6 · THE AUTHORITY-KIND WALL IS STILL A NAMED CHECK. §C widens it by name; a wall that had
   --     been dropped or renamed would leave §C adding a constraint nobody removed.
@@ -605,10 +672,32 @@ begin
 end $c0338_arr$;
 
 -- =====================================================================================
--- §E — clara._obo_plan_core (0308 §D, #941's fold of the two OBO plan steps into one body).
---      VERBATIM except the
---      authority-kind wall and the reference-kind wall, each widened by exactly one member, and
---      the two admitted ONLY in their own pairing.
+-- =====================================================================================
+-- §E — clara._obo_plan_core: THE TWO AUTHORITY KINDS, ADMITTED ONLY IN THEIR OWN PAIRING.
+--
+-- TWO ADMISSIBLE STARTING SHAPES, AND THE EDIT IS THE SAME ADDITIVE ONE ON BOTH. This body is
+-- also written by lane L1 (#1051, `0330_plan_authority_wall_predicate.sql`), which extracts the
+-- authority wall this file widens into ONE shared predicate,
+-- `clara._assert_plan_authority(text, jsonb, uuid, uuid)`, and recuts both plan doors to
+-- `perform` it. The sweep plan says L1 merges first, so on the integrated chain 0330 applies
+-- BEFORE this file and the pre-image here is L1's, not 0308's.
+--
+-- A SINGLE `create or replace` WOULD THEREFORE HAVE SILENTLY REVERTED #1051 on the very chain it
+-- is meant to run on, and an `if not this exact sha then refuse` would have aborted the chain.
+-- Neither is acceptable, so the file writes the shape it actually finds, and which shape that is
+-- is decided BY A FACT ABOUT THE CATALOG -- does the shared predicate exist -- rather than by a
+-- marker inside a body (the wave-3 addendum's rule, and 0238's own idiom). §0 pins BOTH
+-- pre-images, so if L1 moves its body again before the merge this file refuses BY NAME instead of
+-- reverting it.
+--
+-- THE SECOND KIND STAYS OUTSIDE THE SHARED PREDICATE, and that is a decision, not an omission.
+-- `clara._assert_plan_authority` admits exactly one authority kind and is called by the HUMAN plan
+-- door and (after #1080) by the accrual core as well; folding `standing_instruction` into it would
+-- admit the firm's blanket delegation at doors the ruling gives it to nobody, which is precisely
+-- what this file's own tail item 6 refuses. So the twin answers its own kind in its own branch and
+-- DELEGATES everything else, unchanged, to the one wall -- which is what keeps #915's and #941's
+-- parity cells (`p915.obo.refusals_match`, `p941.obo.authority`: they compare the two entrances'
+-- whole refusal payloads byte for byte) true on both shapes.
 --
 -- WHY THIS BODY AND NOT `clara.create_accounting_plan`. The human door resolves its actor through
 -- `clara._human_ctx` -> `clara.jwt_sub()`, which no unattended connection carries; the wake lane
@@ -616,6 +705,11 @@ end $c0338_arr$;
 -- is left at ONE authority kind on purpose: nothing in the ruling asks a person to plead their
 -- firm's standing instruction for a plan they typed themselves.
 -- =====================================================================================
+do $c0338_e$
+begin
+  if to_regprocedure('clara._assert_plan_authority(text,jsonb,uuid,uuid)') is null then
+    raise notice '0338 §E: the PRE-#1051 shape (no clara._assert_plan_authority) -- the wall is recut inline';
+    execute $c0338_e_pre$
 create or replace function clara._obo_plan_core(p_kind text, p_firm uuid, p_client uuid, p_author uuid, p_purpose text, p_authority_kind text, p_authority_ref jsonb, p_frequency text, p_day_rule text, p_day_of_month integer, p_timezone text, p_effective_from date, p_effective_to date, p_basis jsonb)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $c0338_obo$
 declare
@@ -749,6 +843,128 @@ begin
     'status', 'active', 'kind', p_kind,
     'next_occurrences', coalesce(v_next,'[]'::jsonb), 'overlap_warning', v_warning);
 end $c0338_obo$;
+$c0338_e_pre$;
+  else
+    raise notice '0338 §E: the POST-#1051 shape -- every other kind delegates to clara._assert_plan_authority';
+    execute $c0338_e_post$
+create or replace function clara._obo_plan_core(
+  p_kind text, p_firm uuid, p_client uuid, p_author uuid, p_purpose text, p_authority_kind text,
+  p_authority_ref jsonb, p_frequency text, p_day_rule text, p_day_of_month integer,
+  p_timezone text, p_effective_from date, p_effective_to date, p_basis jsonb)
+returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $c0338_obo$
+declare
+  v_plan uuid; v_rev uuid; v_digest text;
+  v_warning jsonb; v_next jsonb; v_via text;
+  -- #1050 (0338 §E): the standing-instruction branch resolves its own reference, so it needs the
+  -- two locals #1051's extraction took out of this body.
+  v_ref_id uuid; v_reason text;
+begin
+  -- THE KIND IS A CLOSED SET, and an unknown one RAISES rather than writing a plan row the CHECK
+  -- would refuse with a bare 23514. Unreachable from either caller (both pass a literal); a later
+  -- lane that widens the set finds this line instead of a silent constraint violation.
+  if p_kind is null or p_kind not in ('amortisation_schedule', 'revenue_recognition_schedule') then
+    raise exception 'clara._obo_plan_core: unknown plan kind %', coalesce(p_kind, '(null)')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','plan_kind_unsupported','kind',p_kind)::text;
+  end if;
+  v_via := case p_kind when 'amortisation_schedule' then 'create_prepayment_schedule_for'
+                       else 'create_revenue_recognition_schedule_for' end;
+
+  -- THE AUTHORITY SHAPE -- #1051 (0330): THE SAME PREDICATE clara.create_accounting_plan calls,
+  -- for every kind but this file's own. #1050 (0338 §E) adds A SECOND AUTHORITY KIND, and exactly
+  -- one: `standing_instruction` is what the clocked prepayment lane writes -- a NAMED MEMBER of
+  -- the firm recorded a firm-level standing instruction (0338 §A/§B), and every plan the
+  -- close_prep wake writes while it stands is authorised by THAT member, admitted under THEIR
+  -- membership and rank.
+  --
+  -- IT IS ADMITTED ONLY IN ITS OWN PAIRING, and the widening is additive only because of it. A
+  -- `standing_instruction` citing a chat turn would be a label pasted on a person's typed
+  -- decision; an `explicit_instruction` citing a standing-instruction row would be a person
+  -- claiming their firm's blanket delegation as something they themselves decided.
+  --
+  -- AND IT STAYS OUT OF THE SHARED PREDICATE. `clara._assert_plan_authority` is also the human
+  -- plan door's wall and (after #1080) the accrual core's, and the ruling gives the second kind to
+  -- the unattended lane ALONE -- so the twin answers its own kind here and hands EVERY other kind,
+  -- unchanged, to the one wall. That is what keeps the two entrances' refusal payloads identical
+  -- on the axes #915 and #941 measure.
+  if p_authority_kind = 'standing_instruction' then
+    if p_authority_ref is null or jsonb_typeof(p_authority_ref) <> 'object' then
+      raise exception 'a plan authority names the instruction that carries it'
+        using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"object"}';
+    end if;
+    if p_authority_ref ->> 'kind' is distinct from 'firm_standing_instruction' then
+      raise exception 'a standing instruction authorises a plan only by citing the firm standing-instruction row that carries it'
+        using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"kind"}';
+    end if;
+    begin
+      v_ref_id := (p_authority_ref ->> 'id')::uuid;
+    exception when others then
+      v_ref_id := null;
+    end;
+    if v_ref_id is null then
+      raise exception 'a plan authority reference names a row by id'
+        using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"id"}';
+    end if;
+    -- RESOLVED, through the same #977 resolver every other kind goes through: the row must be this
+    -- firm's own and still IN FORCE (0338 §D). A withdrawn instruction resolves to nothing.
+    v_reason := clara._authority_ref_refusal('firm_standing_instruction', v_ref_id, p_firm, p_client);
+    if v_reason = 'authority_ref_not_human_instruction' then
+      raise exception 'the instruction this plan cites is not a person''s instruction'
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason',v_reason,'kind','firm_standing_instruction','id',v_ref_id)::text;
+    elsif v_reason is not null then
+      raise exception 'the instruction this plan cites does not exist for this client'
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason',v_reason,'kind','firm_standing_instruction','id',v_ref_id)::text;
+    end if;
+  else
+    perform clara._assert_plan_authority(p_authority_kind, p_authority_ref, p_firm, p_client);
+  end if;
+
+  if p_purpose is null or btrim(p_purpose) = '' then
+    raise exception 'an accounting plan needs a purpose' using errcode='CLR10',
+      detail='{"reason":"invalid_purpose","constraint":"nonempty"}';
+  end if;
+  perform clara._assert_plan_schedule(p_kind, p_frequency, p_day_rule,
+    p_day_of_month, p_timezone, p_effective_from, p_effective_to, null);
+  perform clara._assert_journal_basis(p_basis);
+  v_digest := clara._journal_basis_digest(p_basis);
+
+  perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
+
+  v_plan := gen_random_uuid();
+  insert into clara.accounting_plans(id, firm_id, client_id, kind, status, purpose, authority_kind,
+      authority_ref, authorised_by, authority_from, current_revision, created_by)
+    values (v_plan, p_firm, p_client, p_kind, 'active', btrim(p_purpose),
+      p_authority_kind, p_authority_ref, p_author, p_effective_from, 1, p_author);
+  insert into clara.accounting_plan_revisions(plan_id, firm_id, client_id, plan_kind, revision,
+      frequency, day_rule, day_of_month, timezone, effective_from, effective_to, basis,
+      basis_digest, auto_reverse, reversal_day_rule, created_by)
+    values (v_plan, p_firm, p_client, p_kind, 1, p_frequency, p_day_rule,
+      p_day_of_month, p_timezone, p_effective_from, p_effective_to, p_basis, v_digest, false,
+      null, p_author)
+    returning id into v_rev;
+
+  v_warning := clara._plan_overlap_warning(p_client, p_basis, v_plan);
+  select jsonb_agg(jsonb_build_object('due_date', to_char(e.due_date,'YYYY-MM-DD'), 'leg', e.leg)
+           order by e.due_date) into v_next
+    from clara._plan_due_events(p_effective_from, p_frequency, p_day_rule, p_day_of_month, false,
+           p_effective_from, coalesce(p_effective_to, (p_effective_from + 3650)), 3) e;
+
+  -- THE AUDIT ROW IS 0193'S OWN VERB with the entrance's `via`, exactly as 0222's core stamps its
+  -- own: the audit trail says a plan was created and by WHICH entrance, and a reader can tell an
+  -- OBO configuration from a human one without joining anything.
+  perform clara._audit(p_firm, p_author, null, null, 'create_accounting_plan', null,
+    jsonb_build_object('client', p_client, 'plan', v_plan, 'kind', p_kind,
+      'revision', 1, 'authority', p_authority_ref, 'via', v_via));
+
+  return jsonb_build_object('plan_id', v_plan, 'revision_id', v_rev, 'revision', 1,
+    'status', 'active', 'kind', p_kind,
+    'next_occurrences', coalesce(v_next,'[]'::jsonb), 'overlap_warning', v_warning);
+end $c0338_obo$;
+$c0338_e_post$;
+  end if;
+end $c0338_e$;
 
 
 -- =====================================================================================
@@ -1627,25 +1843,56 @@ begin
   end if;
 
   -- 6 · THE HUMAN PLAN DOOR IS NOT WIDENED. §E gives the second kind to the OBO twin alone, and
-  --     that asymmetry is a decision rather than an oversight, so it is asserted.
-  select count(*) into v_n from pg_proc p
-   where p.oid = 'clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)'::regprocedure
-     and p.prosrc like '%p_authority_kind is distinct from ''explicit_instruction'' then%'
-     and p.prosrc not like '%standing_instruction%';
-  if v_n <> 1 then
-    raise exception '0338 tail: clara.create_accounting_plan was widened -- the ruling gives the second kind to the unattended lane only'
+  --     that asymmetry is a decision rather than an oversight, so it is asserted -- as the FACT
+  --     rather than as a body text. After lane L1's #1051 the human door's wall lives in
+  --     `clara._assert_plan_authority`, so the question "does the human lane admit
+  --     standing_instruction" is asked of the door AND of the wall it delegates to, and a pin on
+  --     one particular spelling of either would have been a pin on a body L1 writes.
+  select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara'
+     and (p.proname = 'create_accounting_plan' or p.proname = '_assert_plan_authority')
+     and position('standing_instruction' in p.prosrc) > 0;
+  if v_n <> 0 then
+    raise exception '0338 tail: the human plan lane admits standing_instruction (% body/bodies name it) -- the ruling gives the second kind to the unattended lane only', v_n
       using errcode='CLR10';
   end if;
 
-  -- 7 · #977's CLOSED WORLD OF READERS IS UNMOVED. `p977.definition.one` asserts exactly three
-  --     bodies read the shared definition; this file adds none, and says so here too.
+  -- 7 · #977's CLOSED WORLD OF READERS IS UNMOVED -- and it is a closed world of NAMES, not a
+  --     count. `p977.definition.one` counted three readers when it was written; lane L1's #1051
+  --     folds two of them into `clara._assert_plan_authority` and #1080 points the accrual core at
+  --     it too, so the COUNT legitimately moves (3 on a chain without L1, 2 with it) while the
+  --     invariant #977 actually owns does not: nothing outside the plan family resolves an
+  --     authority reference. This file adds no reader of its own -- §E's standing branch is inside
+  --     `_obo_plan_core`, which is already on the roster.
+  --
+  --     THE ROSTER, BY NAME: the human plan door and its on-behalf twin (0250/#941), the
+  --     depreciation-authority signing door 0250 widened at the same time
+  --     (`clara.sign_depreciation_authority`, 0227 recut by 0250), and the two bodies lane L1
+  --     adds to the family -- `clara._assert_plan_authority` (#1051, the extracted wall) and
+  --     `clara._accrual_plan_core` (#1080, which is pointed at it). Measured on this rig: three
+  --     readers, `sign_depreciation_authority`, `create_accounting_plan`, `_obo_plan_core`.
+  select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara' and p.proname <> '_authority_ref_refusal'
+     and p.prosrc like '%clara._authority_ref_refusal(%'
+     and p.proname not in ('create_accounting_plan', '_obo_plan_core', '_accrual_plan_core',
+                           '_assert_plan_authority', 'sign_depreciation_authority');
+  if v_n <> 0 then
+    raise exception '0338 tail: % body/bodies outside the plan family read clara._authority_ref_refusal -- #977''s closed world is the plan family', v_n
+      using errcode='CLR10';
+  end if;
   select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'clara' and p.proname <> '_authority_ref_refusal'
      and p.prosrc like '%clara._authority_ref_refusal(%';
-  if v_n <> 3 then
-    raise exception '0338 tail: % bodies read clara._authority_ref_refusal -- #977''s closed world is three', v_n
+  if v_n < 1 then
+    raise exception '0338 tail: nothing reads clara._authority_ref_refusal -- #977''s wall is gone'
       using errcode='CLR10';
   end if;
+  --     MEASURED ON BOTH CHAINS, and the count is three on each while the MEMBERS differ:
+  --     without L1 they are `sign_depreciation_authority`, `create_accounting_plan` and
+  --     `_obo_plan_core`; with L1 applied first, `create_accounting_plan` delegates and
+  --     `_assert_plan_authority` takes its place. A count would have been the wrong assertion even
+  --     though it happens to hold; the roster is the claim.
+  raise notice '0338 tail: % plan-family bodies read clara._authority_ref_refusal', v_n;
 
   -- 8 · THE CLOCKED LANE NOW READS THE INSTRUCTION. Structural rather than a sha pin: this body
   --     is recut by this lane's own earlier tickets, so what matters is that the arm is there.
