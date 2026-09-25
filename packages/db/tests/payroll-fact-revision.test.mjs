@@ -30,7 +30,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { rootQuery, humanQuery, endPool } from "./rig-helpers.mjs";
-import { buildWorld } from "./rig-fixtures.mjs";
+import { buildWorld, reverseEntry } from "./rig-fixtures.mjs";
 import {
   readPayrollDoc, seedPayrollChart, bankedState, verdictOf, payrollExtractionsOf, regionsOf,
   value, opk, RUN_FIELDS,
@@ -119,7 +119,8 @@ test("S2 · the payroll observation points at the payroll chain, and counts it",
   if (gate(t)) return;
 
   await seedPayrollChart(world.users.alice, world.clients.A1);
-  const doc = await readPayrollDoc(world.users.alice, world.clients.A1);
+  // Its own month, like every cell in this file: see the fixture's `envelope` note.
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, { month: "2026-01" });
 
   const obs = await payrollObservation(doc.documentId);
   // ONE read has happened, so the payroll facts version is 1 — the same counting rule
@@ -157,6 +158,7 @@ test("S3 · a declared figure establishes its own question, discloses itself, an
   // The two channels read the printed gross differently — the exact condition #1056 names first
   // ("a channel disagreement the evaluator could not resolve"). Everything else agrees.
   const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    month: "2026-02",
     answers: { "payroll.run.gross_pay": value("5,050.00") },
     visionAnswers: { "payroll.run.gross_pay": value("5,000.00") },
   });
@@ -210,8 +212,8 @@ test("S3 · a second declaration joins the first, and the month is declared with
 
   await seedPayrollChart(world.users.alice, world.clients.A1);
   const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
-    answers: { "payroll.run.period": value("Aug 2026") },
-    visionAnswers: { "payroll.run.period": value("2026-08") },
+    answers: { "payroll.run.period": value("Mar 2026") },
+    visionAnswers: { "payroll.run.period": value("2026-03") },
   });
   const before = await bankedState(doc.documentId);
   assert.equal(before.facts["payroll.run.period"].state, "channels_disagree",
@@ -269,9 +271,10 @@ const revisionsOf = async (document) =>
 /** A payroll run the gate BLOCKS, because the two channels read the gross differently — #1056's
  *  own first named case ("a channel disagreement the evaluator could not resolve"). Nothing is
  *  posted from it, so it is the unposted arm of AC2. */
-async function blockedRun() {
+async function blockedRun(month) {
   await seedPayrollChart(world.users.alice, world.clients.A1);
   const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    month,
     answers: { "payroll.run.gross_pay": value("5,050.00") },
     visionAnswers: { "payroll.run.gross_pay": value("5,000.00") },
   });
@@ -284,7 +287,7 @@ async function blockedRun() {
 test("S4 · a payroll question a person corrects lands in the PAYROLL chain, carrying the other ten forward", async (t) => {
   if (gate(t)) return;
 
-  const doc = await blockedRun();
+  const doc = await blockedRun("2026-04");
   const machine = (await payrollExtractionsOf(doc.documentId))
     .find((e) => e.engine_kind === "payroll_text_facts");
   const machineRegionsBefore = await regionsOf(machine.id);
@@ -351,7 +354,7 @@ test("S4 · a payroll question a person corrects lands in the PAYROLL chain, car
 test("S4 · a per-employee cell and a foreign lane's path are still refused", async (t) => {
   if (gate(t)) return;
 
-  const doc = await blockedRun();
+  const doc = await blockedRun("2026-05");
   // A cell the estate never persisted. The grammar admits the path (0296 registered the
   // namespace); the LANE arbiter is what refuses it, and it must, because there is no region to
   // revise and no figure to replace.
@@ -377,4 +380,173 @@ test("S4 · a per-employee cell and a foreign lane's path are still refused", as
       return true;
     });
   assert.deepEqual(await revisionsOf(doc.documentId), [], "and neither attempt left a revision row");
+});
+
+// ---------------------------------------------------------------------------------------------
+// S5 — AC2, the UNPOSTED arm: the correction moves the reading, the verdict is re-derived from it,
+//      and nothing posts
+// ---------------------------------------------------------------------------------------------
+
+const entriesOf = async (document) =>
+  (await rootQuery(
+    `select id, status, posting_date::text as posting_date, memo, flags, reversed_by
+       from clara.journal_entries where document_id=$1 order by created_at`,
+    [document])).rows;
+
+test("S5 · correcting an unposted run re-derives the verdict off the corrected figures, and posts nothing", async (t) => {
+  if (gate(t)) return;
+
+  const doc = await blockedRun("2026-06");
+  assert.deepEqual(await entriesOf(doc.documentId), [], "mandatory setup: the blocked run booked nothing");
+
+  await reviseFact(world.users.alice, {
+    document: doc.documentId, fieldPath: "payroll.run.gross_pay",
+    value: "5,000.00", observedVersion: 1,
+  });
+
+  // THE GATE IS STABLE AND DERIVED (0297:844), so this is the whole of "the correction re-runs the
+  // posting verdict": ask it again and it answers about the reading that is now current.
+  const v = await verdictOf(doc.documentId);
+  assert.equal(v.verdict, "ready",
+    `the disagreement the person resolved no longer blocks the run: ${JSON.stringify(v.reason)}`);
+  assert.equal(v.rung_vector.channels_agree, "pass");
+
+  // …and it is judging the HUMAN's extraction, not the machine's. This is the pin that would go
+  // red if the correction had landed in a chain the gate does not read.
+  const appended = (await payrollExtractionsOf(doc.documentId))
+    .filter((e) => e.engine_kind === "payroll_text_facts" && e.engine_id === "clara-fact-human:v1");
+  assert.equal(appended.length, 1);
+  assert.equal(v.extraction_id, appended[0].id);
+
+  // THE CORRECTED FIGURE IS WHAT THE ENTRY WOULD BE DRAFTED FROM. 500000 cents is the worked
+  // example's gross, by hand; the plan's gross-pay leg is the number a person corrected.
+  const grossLeg = v.plan.legs.find((l) => l.account_code === "6000");
+  assert.equal(Number(grossLeg.cents), 500000);
+  assert.equal(Number(v.plan.debit_cents), 576145, "the worked example's own total, still balancing");
+  assert.equal(Number(v.plan.credit_cents), 576145);
+
+  // AND NOTHING POSTED. The unattended post lives inside clara.persist_payroll_facts (0297 §G) and
+  // this lane has no "post it anyway" door; a correction corrects the READING, and saying so out
+  // loud is the other half of the brief's question.
+  assert.deepEqual(await entriesOf(doc.documentId), [],
+    "a correction is not an instruction to post");
+});
+
+test("S5 · a run-level correction cannot clear a problem that lives in the employee rows", async (t) => {
+  if (gate(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  // Row 1's own identity fails: 3,000.00 - (330.00 + 14.75 + 5.90 + 120.00) = 2,529.35, and the
+  // page prints 2,500.00. Worked by hand. Both channels read the row the SAME way, so this is an
+  // arithmetic failure, not a disagreement.
+  const brokenRows = [
+    { row_no: 1, cells: {
+      "payroll.row.gross_pay": value("3,000.00"), "payroll.row.epf_employee": value("330.00"),
+      "payroll.row.socso_employee": value("14.75"), "payroll.row.eis_employee": value("5.90"),
+      "payroll.row.pcb": value("120.00"), "payroll.row.net_pay": value("2,500.00") } },
+    { row_no: 2, cells: {
+      "payroll.row.gross_pay": value("2,000.00"), "payroll.row.epf_employee": value("220.00"),
+      "payroll.row.socso_employee": value("9.75"), "payroll.row.eis_employee": value("3.90"),
+      "payroll.row.pcb": value("40.00"), "payroll.row.net_pay": value("1,726.35") } },
+  ];
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, { month: "2026-07", rows: brokenRows });
+  const before = await verdictOf(doc.documentId);
+  assert.equal(before.verdict, "blocked");
+  assert.equal(before.rung, "arithmetic_holds", "mandatory setup: a row fails its own identity");
+
+  const state = await bankedState(doc.documentId);
+  assert.deepEqual(state.rows.unbalanced, [1], "mandatory setup: row 1 is the unbalanced one");
+
+  // A person restates the run's gross. It is admitted — the door does not second-guess a
+  // professional — but it says nothing about row 1, and the gate still knows that.
+  await reviseFact(world.users.alice, {
+    document: doc.documentId, fieldPath: "payroll.run.gross_pay",
+    value: "5,000.01", observedVersion: 1,
+  });
+
+  const after = await verdictOf(doc.documentId);
+  assert.equal(after.verdict, "blocked",
+    "a run-level declaration is not a claim about the quoted employee rows");
+  assert.equal(after.rung, "arithmetic_holds");
+  assert.deepEqual((await bankedState(doc.documentId)).rows.unbalanced, [1],
+    "the unbalanced row is carried, never cleared by a correction one level above it");
+  assert.deepEqual(await entriesOf(doc.documentId), []);
+});
+
+// ---------------------------------------------------------------------------------------------
+// S6 — AC2, the ALREADY-POSTED arm: refused by name, and the reversal is what clears it
+// ---------------------------------------------------------------------------------------------
+
+/** A clean payroll run. Every condition holds, so clara.persist_payroll_facts posts it unattended
+ *  in the same transaction that reads it (0297 §G). */
+async function postedRun(month) {
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, { month });
+  assert.equal(doc.receipt.posting?.posted, true,
+    `mandatory setup: the clean run posted itself (${JSON.stringify(doc.receipt.posting)})`);
+  return doc;
+}
+
+test("S6 · a payroll run that is already posted refuses the correction, and names the entry to reverse", async (t) => {
+  if (gate(t)) return;
+
+  const doc = await postedRun("2026-09");
+  const posted = (await entriesOf(doc.documentId)).filter((e) => e.status === "approved");
+  assert.equal(posted.length, 1, "mandatory setup: one approved entry stands on this document");
+  const before = await payrollExtractionsOf(doc.documentId);
+
+  await assert.rejects(
+    () => reviseFact(world.users.alice, {
+      document: doc.documentId, fieldPath: "payroll.run.gross_pay",
+      value: "5,100.00", observedVersion: 1,
+    }),
+    (e) => {
+      const r = refusal(e);
+      assert.equal(r.code, "CLR10");
+      assert.equal(r.reason, "payroll_run_already_posted",
+        "the refusal is NAMED, so a surface can say what to do instead of showing a generic wall");
+      assert.equal(r.detail.entry_id, posted[0].id, "…and it points at the entry standing on the reading");
+      assert.equal(r.detail.status, "approved");
+      assert.equal(r.detail.posting_date, posted[0].posting_date);
+      assert.match(e.message, /reverse that entry/, "…and says the act that clears it");
+      return true;
+    });
+
+  // NOTHING WAS WRITTEN. No extraction, no region, no revision row — the reading the books cite is
+  // exactly the reading they cited a moment ago, which is the whole of "must not silently
+  // desynchronize the posted entry from the corrected fact state".
+  assert.deepEqual(await payrollExtractionsOf(doc.documentId), before);
+  assert.deepEqual(await revisionsOf(doc.documentId), []);
+  const stillPosted = (await entriesOf(doc.documentId)).filter((e) => e.status === "approved");
+  assert.equal(stillPosted.length, 1);
+  assert.equal(stillPosted[0].flags.payroll_run.extraction_id, before
+    .find((e) => e.engine_kind === "payroll_text_facts").id,
+    "the posted entry still cites the extraction it was drafted from");
+});
+
+test("S6 · reversing the entry re-opens the reading, and the same correction is then admitted", async (t) => {
+  if (gate(t)) return;
+
+  const doc = await postedRun("2026-10");
+  const posted = (await entriesOf(doc.documentId)).find((e) => e.status === "approved");
+
+  // THE ACT THE REFUSAL NAMED, driven for real. A reversal is how a posted entry is corrected in
+  // this estate, and clara._document_posting_entry stops answering once `reversed_by` is set --
+  // the same asymmetry clara._payroll_posting_verdict relies on when it says a reversal re-opens
+  // the month (0297:697).
+  await reverseEntry(world.users.alice, {
+    entry: posted.id, reason: "#1056 rig: the gross was misread", opKey: opk("rev"),
+  });
+
+  const out = await reviseFact(world.users.alice, {
+    document: doc.documentId, fieldPath: "payroll.run.gross_pay",
+    value: "5,100.00", observedVersion: 1,
+  });
+  assert.equal(out.facts_version, 2, "the correction the posted entry was blocking now lands");
+  assert.equal(Number(out.new_value.cents), 510000);
+
+  const rows = await revisionsOf(doc.documentId);
+  assert.equal(rows.length, 1, "one revision, recorded after the reversal");
+  assert.deepEqual(rows[0].prior_value, { text: "5,000.00", cents: 500000 },
+    "…against the figure the reversed entry had been booked from");
 });

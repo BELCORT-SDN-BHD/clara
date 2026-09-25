@@ -102,10 +102,21 @@ function payslipRow(rowNo, r) {
   return { row_no: rowNo, cells: Object.fromEntries(ROW_FIELDS.map((f) => [f, cells[f]])) };
 }
 
-/** The wire shape #945's answer-vocabulary gate and evaluator both read. */
-export function envelope({ channel = "text", answers = {}, rows = null } = {}) {
+/** The wire shape #945's answer-vocabulary gate and evaluator both read.
+ *
+ *  `month` IS A PARAMETER AND EVERY CELL NAMES ITS OWN. The gate's `no_duplicate_entry` rung has a
+ *  `same_month_payroll_run` scope (0297:722): once ANY document in this world has posted an August
+ *  run for a client, every later August run for that client is a duplicate. Two cells sharing a
+ *  month would therefore measure each other rather than the door, and the first cut of this
+ *  battery did exactly that (measured: S5 read `duplicate_entry` because S2's clean run had
+ *  already posted August). */
+export function envelope({ channel = "text", answers = {}, rows = null, month = "2026-08" } = {}) {
   const a = {};
-  for (const f of RUN_FIELDS) a[f] = f in answers ? answers[f] : PRINTED[f];
+  for (const f of RUN_FIELDS) {
+    a[f] = f in answers ? answers[f]
+      : f === "payroll.run.period" ? value(month)
+      : PRINTED[f];
+  }
   return { payroll: { channel, answers: a, rows: rows ?? [payslipRow(1, R1), payslipRow(2, R2)] } };
 }
 
@@ -137,7 +148,7 @@ export async function payrollDoc(sub, client) {
 }
 
 /** Drive a payroll document all the way through the lane: filed, routed, claimed, read. */
-export async function readPayrollDoc(sub, client, { answers = {}, rows = null, visionAnswers = null } = {}) {
+export async function readPayrollDoc(sub, client, { answers = {}, rows = null, visionAnswers = null, month = "2026-08" } = {}) {
   const doc = await payrollDoc(sub, client);
   await enqueueInvoiceFacts(doc.documentId);
   const task = (
@@ -153,8 +164,8 @@ export async function readPayrollDoc(sub, client, { answers = {}, rows = null, v
   assert.equal(claimed.status, "running", `mandatory setup: the task is claimable (got ${JSON.stringify(claimed)})`);
   const sha = (await rootQuery("select sha256 from clara.documents where id=$1", [doc.documentId])).rows[0].sha256;
 
-  const textEnv = envelope({ channel: "text", answers, rows });
-  const visionEnv = envelope({ channel: "vision", answers: visionAnswers ?? answers, rows });
+  const textEnv = envelope({ channel: "text", answers, rows, month });
+  const visionEnv = envelope({ channel: "vision", answers: visionAnswers ?? answers, rows, month });
   const receipt = (
     await rootQuery("select clara.persist_payroll_facts($1,$2::jsonb,$3::jsonb,$4) as receipt", [
       task.id,
