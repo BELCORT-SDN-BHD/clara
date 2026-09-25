@@ -208,6 +208,17 @@ the roster's) and assert the sum equals the list's declared `#!cells-floor:` —
 no database and no dispatch run needed. Raise or lower the declared number in the SAME PR that
 changes the corpus; this cell is what now refuses the PR that forgets to.
 
+**Every measured run in the leg also writes its own counts to the dispatch run's summary
+(#1126).** The bounds above prove a run met its declared numbers; before #1126 they printed the
+actual pass/fail/skip/cells nowhere but the step's raw log, so noticing a leg whose measured
+count drifted from its declared floor took a human reading that log. `db-slice-frontiers` is a
+matrix of separate jobs, and GitHub groups every job's `$GITHUB_STEP_SUMMARY` writes onto the
+SAME workflow run's summary page (in job-completion order), so each of the leg's three measured
+steps — the slice list, the cross-slice contract roster, the isolated deploy drill — now appends
+a small Markdown table there: pass, fail, skip, cells and the declared floor/skip-max it was
+held to. A dispatch run's summary page therefore carries every leg's real numbers next to what
+they were checked against, with no raw log to open.
+
 **A fixture that runs at two frontiers is not a gate.** A gate lets a cell stand down; a
 FRONTIER-COMPAT fixture keeps the cell running on both sides of the migration that changed a
 door's grammar. `fa-authority-sign-compat.mjs` holds both of the x41 rig's:

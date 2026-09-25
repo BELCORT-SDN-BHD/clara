@@ -320,3 +320,55 @@ test("p1126.floor.roster the cross-slice contract roster's declared #!cells-floo
     `test-list-contracts.txt declares a floor of ${floor[1]} while its own listed files carry ${total} top-level `
     + `test( cell(s) on disk right now (#1126)`);
 });
+
+// #1126 AC1 — the run's own measured pass/fail/skip/cells, recorded where a human can see them
+// without reading a raw log. The floor/skip-bound checks above prove the run met its DECLARED
+// numbers; they print nothing anywhere a dispatch run's own SUMMARY PAGE shows it. Each matrix
+// leg is its own job, and GitHub groups every job's $GITHUB_STEP_SUMMARY writes onto the SAME
+// run's summary page ("summaries from multiple jobs are ordered by job completion time" —
+// docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands), so a leg that
+// writes its counts there makes them visible on the dispatch run itself, not only in its raw log.
+
+/** The `{ ... } >> "$GITHUB_STEP_SUMMARY"` group inside one step's `run:` block, so a cell can
+ *  check exactly what that write contains rather than whether the six-letter names it needs
+ *  happen to appear anywhere else in the step (every one of PASS/FAIL/SKIP/CELLS already does,
+ *  for the floor check above it — a loose match would pass before any write existed at all). */
+function summaryBlock(step) {
+  const m = /\{([\s\S]*?)\}\s*>>\s*"\$GITHUB_STEP_SUMMARY"/.exec(step);
+  return m ? m[1] : null;
+}
+
+test("p1126.summary.list the slice-list step records its measured pass/fail/skip/cells and its declared floor to $GITHUB_STEP_SUMMARY", () => {
+  const yaml = readFileSync(FRONTIER_ACTION, "utf8");
+  const step = stepBlock(yaml, "Run the ${{ inputs.slice }} test list");
+  const block = summaryBlock(step);
+  assert.ok(block,
+    "the slice-list step has no `{ ... } >> \"$GITHUB_STEP_SUMMARY\"` block — a dispatch run's summary page "
+    + "carries none of its measured counts, so a stale declared floor is visible only to someone reading raw CI "
+    + "logs (#1126)");
+  for (const v of ["$PASS", "$FAIL", "$SKIP", "$CELLS", "$FLOOR", "$SKIPMAX"]) {
+    assert.ok(block.includes(v), `the slice-list step's $GITHUB_STEP_SUMMARY write is missing ${v}`);
+  }
+});
+
+test("p1126.summary.roster the contract-roster step records its measured pass/fail/skip/cells and its declared floor to $GITHUB_STEP_SUMMARY", () => {
+  const yaml = readFileSync(FRONTIER_ACTION, "utf8");
+  const step = stepBlock(yaml, "Run the cross-slice contract roster at the ${{ inputs.slice }} frontier");
+  const block = summaryBlock(step);
+  assert.ok(block,
+    "the contract-roster step has no `{ ... } >> \"$GITHUB_STEP_SUMMARY\"` block (#1126)");
+  for (const v of ["$PASS", "$FAIL", "$SKIP", "$CELLS", "$FLOOR", "$SKIPMAX"]) {
+    assert.ok(block.includes(v), `the contract-roster step's $GITHUB_STEP_SUMMARY write is missing ${v}`);
+  }
+});
+
+test("p1126.summary.drill the isolated-drill step records its measured pass/fail/skip/cells and its declared floor to $GITHUB_STEP_SUMMARY", () => {
+  const yaml = readFileSync(FRONTIER_ACTION, "utf8");
+  const step = stepBlock(yaml, "${{ inputs.slice }} upgrade drill (isolated DB)");
+  const block = summaryBlock(step);
+  assert.ok(block,
+    "the isolated-drill step has no `{ ... } >> \"$GITHUB_STEP_SUMMARY\"` block (#1126)");
+  for (const v of ["$PASS", "$FAIL", "$SKIP", "$CELLS", "$DFLOOR", "$DSKIPMAX"]) {
+    assert.ok(block.includes(v), `the isolated-drill step's $GITHUB_STEP_SUMMARY write is missing ${v}`);
+  }
+});
