@@ -125,6 +125,35 @@ export const REFUSAL_FN_SIG = "clara._authority_ref_refusal(text,uuid,uuid,uuid)
 export const PLAN_WALL_FN_SIG = "clara._assert_plan_authority(text,jsonb,uuid,uuid)";
 export const PLAN_WALL_CALL = "clara._assert_plan_authority(";
 
+/** #1080 (0331) — THE LAST CARRIER OF THE INLINE PROBE. 0250 could not reach
+ *  `clara._accrual_plan_core` (its own header says so at line 63) and pinned the surviving inline
+ *  chat-lane existence test to exactly that one function in its tail (0250:604). 0331 points that
+ *  body at #1051's shared predicate, and with it the probe leaves the catalog entirely, which is
+ *  the state 0250's own prose always wanted and could not have. So the census cell's expected
+ *  roster is `["_accrual_plan_core"]` below 0331 and `[]` from 0331 on.
+ *
+ *  MEASURED OFF THE APPLIED CHAIN, never off the body under test. `PLAN_WALL_FN_SIG` can be
+ *  feature-detected with `to_regprocedure` because 0330 MINTS a name; 0331 mints none — it recuts
+ *  one body — so the only honest instrument is the chain itself, on 0331's STABLE STEM. Asking
+ *  the body whether it still carries the probe would be asking the subject under test what it
+ *  should be. */
+export const ACCRUAL_PLAN_AUTHORITY_WALL_STEM = "accrual_plan_authority_wall$";
+
+let _accrualWall = null;
+export async function accrualPlanAuthorityWallReady() {
+  if (_accrualWall === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [ACCRUAL_PLAN_AUTHORITY_WALL_STEM]);
+      _accrualWall = r.rows[0].n > 0;
+    } catch {
+      _accrualWall = false;
+    }
+  }
+  return _accrualWall;
+}
+
 /** Normalize a `prosrc` the way 0250's tail assertions do. */
 export const normalizeSrc = (src) =>
   String(src).replace(/--[^\n]*/g, "").toLowerCase().replace(/\s+/g, " ").trim();

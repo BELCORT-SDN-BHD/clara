@@ -47,11 +47,30 @@ const NOT_HUMAN = "authority_ref_not_human_instruction";
  *  "that row is not a person's instruction" one. */
 const NOWHERE = "00000000-0000-4000-8000-0000000000fd";
 
+/** The body this ticket recuts, and the ONE predicate it now calls (#1051, 0330). */
+const ACCRUAL_CORE_SIG =
+  "clara._accrual_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)";
+const PREDICATE_CALL = "clara._assert_plan_authority(";
+
+/** The wall's own sentence, in the PREFIX both spellings share — 0222's two-kind one and #949's
+ *  three-kind one — so "this body still keeps a copy of the wall" cannot be dodged by a widening. */
+const WALL_SENTENCE = "a plan authority reference names an accounting_work";
+
+/** 0222's own unresolved sentence, the one only the on-behalf entrance ever gave. */
+const ACCRUAL_SENTENCE = "the instruction this accrual cites";
+
+/** #977's inline chat-lane EXISTENCE probe, normalized exactly the way 0250's own tail normalizes
+ *  `prosrc` (comments stripped, lowercased, whitespace runs collapsed), so this file and the
+ *  migrations can never disagree about what "the fragment" is. */
+const INLINE_CHAT_LANE_PROBE = "from clara.agent_tasks t where t.id = v_ref_id";
+const normalizeSrc = (src) =>
+  String(src).replace(/--[^\n]*/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+
 let world = null;
 let today = null;
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 3;
+const EXPECTED_CELLS = 4;
 
 before(async () => {
   world = await buildWorkWorld();
@@ -351,4 +370,90 @@ async () => {
         "…and the plan's authority is the human's, never the run's");
     }
   }
+});
+
+// ===========================================================================================
+// AC3 — THE CATALOG. "There is exactly ONE spelling of the plan authority wall, and #977's
+//       inline chat-lane probe survives nowhere" is a claim only a census can carry: it is about
+//       every `clara` body at once, and `clara._accrual_plan_core` is an ungranted internal with
+//       no public interface of its own. WORK-ORDER rule 4: where this repo's own documented
+//       standard asks for a structural cell, that standard wins.
+//
+//       0250's tail (`0250_authority_ref_human_instruction.sql:604`) pinned the surviving inline
+//       probe to exactly `{_accrual_plan_core}` because its own header (0250:63) says it could
+//       not reach that body. This cell is the other end of that sentence.
+// ===========================================================================================
+
+/** Every `clara` routine, with the four facts this census is about. `order by p.proname` is the
+ *  catalog's own C ordering (`proname` is `name`, which never takes a database collation), so
+ *  comparing the result against a literal roster is collation-proof by construction. */
+async function wallCensus() {
+  const r = await rootQuery(
+    "select p.proname, p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace "
+    + "where n.nspname = 'clara' order by p.proname");
+  return r.rows.map((row) => ({
+    name: row.proname,
+    carriesOwnWall: row.prosrc.includes(WALL_SENTENCE),
+    callsPredicate: row.prosrc.includes(PREDICATE_CALL),
+    carriesInlineProbe: normalizeSrc(row.prosrc).includes(INLINE_CHAT_LANE_PROBE),
+    carriesAccrualSentence: row.prosrc.includes(ACCRUAL_SENTENCE),
+  }));
+}
+
+cell("p1080.wall.one_spelling — clara._accrual_plan_core reaches the wall through "
+  + "clara._assert_plan_authority and keeps neither the wall's sentence nor #977's inline "
+  + "chat-lane existence probe, with its definer shape, owner, pinned search_path and owner-only "
+  + "ACL unmoved by the recut; across the whole clara schema the wall's sentence lives in exactly "
+  + "one body, the predicate is called by exactly the three plan bodies, and both the inline "
+  + "probe and 0222's own accrual-specific sentence survive in none",
+async () => {
+  // 1 — THE RECUT BODY'S POSTURE. A `create or replace` preserves an ACL; this is the cell that
+  //     would see a recut which quietly granted the core to an application role.
+  const fn = await rootQuery(
+    `select p.provolatile, p.prosecdef, p.proowner::regrole::text as owner,
+            'search_path=clara, pg_temp' = any(p.proconfig) as pinned_path,
+            (select count(*)::int from unnest(coalesce(p.proacl, '{}'::aclitem[])) as a
+              where a::text not like 'clara_fn_owner=%') as extra_grants
+       from pg_proc p where p.oid = $1::regprocedure`, [ACCRUAL_CORE_SIG]);
+  assert.equal(fn.rows.length, 1, `${ACCRUAL_CORE_SIG} exists`);
+  assert.equal(fn.rows[0].provolatile, "v", "…and is still VOLATILE — it writes the plan");
+  assert.ok(fn.rows[0].prosecdef, "…SECURITY DEFINER");
+  assert.equal(fn.rows[0].owner, "clara_fn_owner", "…owned by clara_fn_owner");
+  assert.ok(fn.rows[0].pinned_path, "…and its search_path is still pinned");
+  assert.equal(fn.rows[0].extra_grants, 0,
+    "no grant beyond the owner's own — it is a definer-internal core (0004:6-12)");
+  for (const role of ["clara_authenticated", "clara_runtime", "clara_agent_ro"]) {
+    const has = await rootQuery(
+      "select has_function_privilege($1, $2::regprocedure, 'EXECUTE') as ok",
+      [role, ACCRUAL_CORE_SIG]);
+    assert.equal(has.rows[0].ok, false, `${role} does NOT hold EXECUTE on the accrual plan core`);
+  }
+
+  // 2 — THE FOLD, IN THE BODY'S OWN TEXT.
+  const src = (await rootQuery(
+    "select p.prosrc as src from pg_proc p where p.oid = $1::regprocedure",
+    [ACCRUAL_CORE_SIG])).rows[0].src;
+  assert.ok(src.includes(PREDICATE_CALL),
+    `${ACCRUAL_CORE_SIG} reaches the wall through ${PREDICATE_CALL}`);
+  assert.ok(!src.includes(WALL_SENTENCE),
+    "…and no longer carries its own copy of the wall — the fold is real");
+  assert.ok(!normalizeSrc(src).includes(INLINE_CHAT_LANE_PROBE),
+    "…nor #977's inline chat-lane existence probe, which is the authority gap itself");
+
+  // 3 — THE WHOLE SCHEMA, AS AN EXACT CLOSED WORLD.
+  const census = await wallCensus();
+  assert.deepEqual(census.filter((c) => c.carriesOwnWall).map((c) => c.name),
+    ["_assert_plan_authority"],
+    "the wall's sentence lives in exactly ONE clara body — #1051's predicate");
+  assert.deepEqual(census.filter((c) => c.callsPredicate).map((c) => c.name),
+    ["_accrual_plan_core", "_obo_plan_core", "create_accounting_plan"],
+    "and exactly the three plan bodies call it — the two #1051 folded and this ticket's third");
+  assert.deepEqual(census.filter((c) => c.carriesInlineProbe).map((c) => c.name), [],
+    "#977's inline chat-lane existence probe survives in NO clara body; 0250:604 pinned it at "
+    + "one because 0250 could not reach this lane, and this is the ticket that took it to none");
+  assert.deepEqual(census.filter((c) => c.carriesAccrualSentence).map((c) => c.name), [],
+    "and 0222's own 'the instruction this accrual cites' sentence survives nowhere: one client "
+    + "now gets ONE sentence for this refusal, whichever accrual entrance ran");
+  assert.deepEqual(census.filter((c) => c.carriesOwnWall && c.callsPredicate).map((c) => c.name), [],
+    "no body both calls the shared predicate and keeps its own copy of the wall");
 });

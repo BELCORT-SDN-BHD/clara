@@ -18,6 +18,7 @@ import {
   gate977, NOT_HUMAN, UNRESOLVED, refusedWith,
   REFUSAL_CALL, INLINE_CHAT_LANE_EXISTENCE, normalizedBody, normalizeSrc,
   REFUSAL_FN_SIG, PLAN_WALL_FN_SIG, PLAN_WALL_CALL, AUTHORITY_REF_HUMAN_INSTRUCTION_STEM,
+  accrualPlanAuthorityWallReady,
 } from "./authority-ref-human-instruction-fixtures.mjs";
 import { mintAgentTaskRef } from "./fa-authority-sign-compat.mjs";
 import {
@@ -182,7 +183,7 @@ test("p977.definition.shape clara._authority_ref_refusal(text,uuid,uuid,uuid) ex
   }
 });
 
-test("p977.definition.one both doors REACH clara._authority_ref_refusal — the signing door by naming it, the plan door and #941's on-behalf twin of it through #1051's one shared plan-authority wall once that is live — and none of them still carries its own inline chat-lane existence test; that inline test now survives in exactly one clara function — the accrual lane's core, which the owner's ruling deliberately leaves alone", async (t) => {
+test("p977.definition.one both doors REACH clara._authority_ref_refusal — the signing door by naming it, the plan door and #941's on-behalf twin of it through #1051's one shared plan-authority wall once that is live — and none of them still carries its own inline chat-lane existence test; that inline test survives in exactly one clara function below #1080 (the accrual lane's core, which 0250 could not reach) and in NO clara function at all from 0331 on", async (t) => {
   if (await gate(t)) return;
 
   const SIGN = "clara.sign_depreciation_authority(uuid,uuid,text,jsonb)";
@@ -220,9 +221,20 @@ test("p977.definition.one both doors REACH clara._authority_ref_refusal — the 
   const carriers = bodies.rows
     .filter((r) => normalizeSrc(r.prosrc).includes(INLINE_CHAT_LANE_EXISTENCE))
     .map((r) => r.proname);
-  assert.deepEqual(carriers, ["_accrual_plan_core"],
-    "the inline existence test survives in exactly the one body the ruling leaves alone "
-    + "(the accrual lane's core) — never in either door, and never in a third place");
+  // #1080 (0331) TAKES THE LAST CARRIER AWAY. 0250 named `clara._accrual_plan_core` as the one
+  // body it could not reach and pinned the probe there; 0331 points that body at #1051's shared
+  // predicate, so from 0331 on the probe lives in NO clara function — the state 0250's own prose
+  // always described and could not yet assert. MEASURED off the applied chain (0331 mints no
+  // name, so `to_regprocedure` cannot feature-detect it and asking the body itself would be
+  // asking the subject under test what it should be). Still an EXACT closed world in either
+  // branch: a carrier outside the expected roster still reds this cell.
+  const accrualWallLive = await accrualPlanAuthorityWallReady();
+  assert.deepEqual(carriers, accrualWallLive ? [] : ["_accrual_plan_core"],
+    accrualWallLive
+      ? "from #1080 (0331) the inline existence test survives in NO clara body at all — not in "
+        + "either door, not in the accrual lane's core, and not in a third place"
+      : "below #1080 the inline existence test survives in exactly the one body 0250 could not "
+        + "reach (the accrual lane's core) — never in either door, and never in a third place");
 
   // THE THIRD READER, AND WHY IT IS ONE (riders wave 4, #941/0308). `clara._obo_plan_core` is the
   // ON-BEHALF twin of the plan door's own plan step: #915 wrote it because

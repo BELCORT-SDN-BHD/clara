@@ -1902,9 +1902,15 @@ Six `p977.*` cells:
   `clara_fn_owner`, `search_path` pinned, EXECUTE held by nobody (not PUBLIC, not
   `clara_authenticated`/`clara_runtime`/`clara_agent_ro`).
 * `p977.definition.one` — the catalog census: both doors REACH the shared definition, neither
-  still carries its own inline chat-lane existence test, that inline test now survives in EXACTLY
-  ONE `clara` function (`_accrual_plan_core`, the accrual lane's copy, which the owner's ruling
-  deliberately leaves alone), and EXACTLY the expected roster reads the one definition.
+  still carries its own inline chat-lane existence test, that inline test survives in EXACTLY the
+  expected set of `clara` functions, and EXACTLY the expected roster reads the one definition.
+  **The carrier set is BIMODAL on #1080 (`0331_accrual_plan_authority_wall.sql`)**, measured off
+  the applied chain on 0331's stable stem rather than off the body under test (0331 mints no name,
+  so `to_regprocedure` cannot feature-detect it): below 0331 it is exactly
+  `{_accrual_plan_core}` — the accrual lane's copy, which 0250's own header (line 63) says it
+  could not reach and whose survival 0250's tail pinned at line 604 — and from 0331 on it is
+  EMPTY, because that body now calls #1051's shared predicate. That empty set is the state 0250's
+  prose always described and could not yet assert.
   Normalized in JS by the same rule 0250's tail normalizes `prosrc` in SQL, so the cell and the
   migration cannot disagree about what "the fragment" is. **BIMODAL since #1051
   (`0330_plan_authority_wall_predicate.sql`)**, measured off the catalog rather than assumed: on
@@ -1967,7 +1973,10 @@ Cells:
   neither carries a line of the wall any more; and the wall's own sentence lives in exactly one
   body besides `clara._accrual_plan_core`, the THIRD copy #1051 deliberately leaves standing and
   #1080 owns. Stated as a RULE (a body either calls the predicate or keeps its own copy, never
-  both) rather than as a closed roster, so #1080 composes with it instead of having to edit it.
+  both) rather than as a closed roster, so #1080 composes with it instead of having to edit it —
+  and it did: **#1080 (0331) landed and this cell needed no edit**, because the accrual core moved
+  from the carrier side of the rule to the caller side, which the rule already admitted. The
+  closed roster for the post-#1080 state lives in `accrual-plan-authority-wall.test.mjs` below.
 * `p1051.wall.same_kinds` — the behaviour half, driven END TO END through BOTH seams on ONE
   client: the human door `clara.create_accounting_plan` as a bookkeeper and the on-behalf
   entrance `clara.create_prepayment_schedule_for` on a real `clara_runtime` connection. All
@@ -2081,3 +2090,60 @@ package-wide run below 0289 SKIPS loudly, a focused run FAILS.
   reads the VALUE written at `recorded_via` rather than only the column name — a body that named
   the column and bound it to a variable used to pass. Its own parser is proved non-vacuous against
   a crafted body in the same cell.
+
+## The accrual lane's own authority wall (#1080, `0331_accrual_plan_authority_wall.sql`)
+
+`accrual-plan-authority-wall.test.mjs` is frontier-gated on the `accrual_plan_authority_wall$`
+stem with the same loud-fail discriminator its two siblings use, and its own package-sweep escape
+(`CLARA_ALLOW_MISSING_ACCRUAL_PLAN_AUTHORITY_WALL`). A FOCUSED run does not preload the gate, so a
+chain missing 0331 fails loudly there rather than skipping. It rides
+`accrual-adjustments-fixtures.mjs` (#652's own world, chart and door wrappers) plus
+`fa-authority-sign-compat.mjs`'s `mintAgentTaskRef`, and adds no third world.
+
+**What it is about.** `clara._accrual_plan_core` resolved a `{kind:'chat_task', id}` authority by a
+bare existence probe against `clara.agent_tasks`, so a `wake` task or an `autodraft` run — work
+the estate enqueued for itself — satisfied the same check as an instruction a person typed. 0250
+replaced exactly that probe in the signing door and the human plan door and said in its own header
+that it was leaving this third copy alone; 0330 folded the plan family's wall into one predicate
+and named this body as the copy #1080 owns. **Only the ON-BEHALF accrual entrance was exposed**:
+`clara.create_accrual_adjustment` nests `clara.create_accounting_plan` and has been behind the
+shared wall since 0250, while `clara.create_accrual_adjustment_for` (`clara_runtime` only) nests
+the core.
+
+Four `p1080.*` cells:
+
+* `p1080.accrual.obo_machine_task_refused` — the ticket's own acceptance criterion, at the seam
+  its threat model names: `clara.create_accrual_adjustment_for`, on a REAL least-privileged
+  `clara_runtime` connection with no human JWT, refuses a `wake` task (no author by construction)
+  and an `autodraft` run (which DOES carry one) with CLR10 and
+  `authority_ref_not_human_instruction`, naming the kind and the row, and writes no plan, revision,
+  occurrence, accrual or Work. The lane's own `accounting_work` instruction still configures on the
+  same client, so the refusals are the wall answering rather than the scene being unusable. **This
+  cell was RED before 0331 for the right reason — "the call SUCCEEDED (no error)".**
+* `p1080.accrual.entrances_agree` — both accrual entrances driven on the same five references (a
+  wake task, an autodraft run, a `chat_task` naming no row, an `accounting_work` naming no row and
+  a kind nobody admits), with the WHOLE refusal required to match: SQLSTATE, sentence and detail
+  payload, each side's payload naming its own row. Before 0331 the two disagreed on all three axes
+  for a machine chat task, and gave two different sentences for `authority_ref_unresolved`.
+* `p1080.accrual.three_kinds_admitted` — the admissions, so a wall that refused everything cannot
+  pass: an `accounting_work`, a human-authored chat turn and a real
+  `clara.contract_plan_confirmations` row are each admitted by BOTH entrances, and each plan row is
+  read back for the authority it cites and the human it is authorised by. The confirmation arm is
+  the parity half — the human entrance has admitted the kind since 0300 and the on-behalf one
+  refused it `authority_ref_invalid`/`kind` until 0331. The confirmation row is planted directly
+  and the fixture says so; #949's own confirm door is `tenancy-rent-plan.test.mjs`'s subject.
+* `p1080.wall.one_spelling` — the catalog census, the structural standard for a recut body, and
+  the other end of 0250:604's sentence. Across the whole `clara` schema: the wall's sentence lives
+  in exactly ONE body (`_assert_plan_authority`), the predicate is called by exactly
+  `{_accrual_plan_core, _obo_plan_core, create_accounting_plan}`, #977's inline chat-lane probe
+  survives in NONE, and 0222's own "the instruction this accrual cites" sentence survives in NONE.
+  It also re-reads the recut body's volatility, definer flag, owner, pinned `search_path` and
+  owner-only ACL, because a `create or replace` preserves an ACL and a recut that granted the core
+  to an application role would otherwise pass. Each roster is compared against a literal built with
+  `order by p.proname`, the catalog's own C ordering, so it is collation-proof by construction.
+
+**Non-vacuity.** All four cells were re-run with `clara._accrual_plan_core` recut on the rig back
+to its 0283 pre-image and all four went RED, each for its own reason: the runtime door ADMITTED the
+wake task; the two entrances disagreed; the on-behalf one refused a `contract_confirmation` with
+the two-kind sentence; and the census found the body still carrying its own wall. The subject was
+then restored byte for byte to 0331's output and all four were green again.
