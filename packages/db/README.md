@@ -7578,3 +7578,117 @@ existing occurrence (`v_start := greatest(r.effective_from, v_after + 1)`), so n
 can have a posted accrual behind it, and the preview already passes `null` for the reversed entry —
 a projection of the past would be a different feature. And it changes nothing about an occurrence
 that has not posted: that is what a correction is for.
+
+## 0333 — a third accrual/bill-conflict remedy: one period's own correcting entry (#1073, riders sweep wave, lane 01)
+
+**The gap, measured on the lane database before the file was written.** A document-sourced bill
+posting inside a period an accrual has already posted for surfaces
+`row_kind='accrual_bill_conflict'` (0302, #938) and offers a bookkeeper exactly two remedies:
+`clara.request_plan_catch_up` over a window from the flagged due date through the accrual's
+scheduled reversal date ("reverse now"), and `clara.skip_plan_occurrence`, which marks a FUTURE due
+date handled and — by its own comment and its own tail — "never touches the CURRENT (already
+posted) occurrence". Neither is "book the correcting entry for exactly this one conflicting
+period".
+
+**No such door existed.** Exactly FIVE bodies reached `clara._plan_admit_occurrence` before 0333:
+`clara._accrual_finish` (the configuration door's tail, primary leg only), the two schedule cores
+`clara._prepayment_schedule_core` and `clara._record_journal_entry_core`,
+`clara.request_plan_catch_up` (the window) and `clara.wake_due_plan_occurrences` (the automatic
+scan). Not one takes "one occurrence, named" from a person. 0333 is the sixth and the only one that
+does, and the file's own tail asserts that count.
+
+### The whole of it
+
+```sql
+clara.reverse_plan_occurrence(p_plan uuid, p_due date, p_op_key text) returns jsonb
+```
+
+`p_due` is the FLAGGED PERIOD's own primary due date — the value the conflict row carries in
+`period`, byte for byte, which is also what both existing remedies take. The door resolves the
+scheduled reversal date itself (`clara._plan_reversal_date`) and admits exactly one occurrence
+(`clara._plan_admit_occurrence(plan, reversal_date, 'reversal', …, p_allow_reattempt => true)`).
+It answers `{plan_id, due_date, reversal_due_date, leg:'reversal', reversed:true, occurrence:<the
+admission core's own answer, verbatim>}`. bookkeeper+, `clara_authenticated` alone: no OBO twin, no
+agent lane, no wake wrapper — the posture `clara.skip_plan_occurrence` and
+`clara.correct_accrual_adjustment` already carry.
+
+### Why it is not "reverse now" under another name
+
+`clara._plan_reversal_date(p_due)` is the first day of the month AFTER `p_due`'s, whatever the
+plan's frequency. On a monthly schedule with `day_rule='day_of_month'` and `day_of_month=1` — a
+shape `ck_plan_revisions_day_of_month` admits and the accrual form offers (1..28) — the NEXT primary
+due date falls on exactly that reversal date. "Reverse now" therefore sends a window whose last day
+carries two due events and admits the next period's ACCRUAL beside the reversal the person asked
+for. Driven on the rig, both sides, by `p1073.scope.only_the_reversal`.
+
+That is not a defect in `clara.request_plan_catch_up`, which is doing exactly what a catch-up is
+defined to do. It is the reason the ticket asks for a remedy that is not a catch-up. The two
+existing remedies are untouched: both are `sha256(prosrc)`-pinned in 0333's prestate AND re-pinned,
+with their ACLs, at its tail, and the tail also refuses a body that mentions
+`clara._plan_due_events(`, `clara.request_plan_catch_up(` or `clara.skip_plan_occurrence(` — so
+"it never walks a window" is structural rather than prose.
+
+### Why the net ledger state agrees, and how that is known
+
+Both remedies end in the SAME body. Since 0332 (#1074) `clara._plan_admit_occurrence` builds a
+reversal from the lines the occurrence's own entry POSTED rather than from the plan's live revision,
+so "this door nets what 'reverse now' nets for that one period" is true by construction. The battery
+still measures it on two identically configured clients rather than asserting it
+(`p1073.one_period.nets_like_reverse_now`): same reversal lines, and the profit-and-loss leg left
+carrying the BILL's own amount — an independent figure, never a re-computation of what the door did.
+
+### What the door owns, and what it refuses to re-decide
+
+It owns four things, because it needs four things to name the right occurrence: the bookkeeper
+floor (through `clara._plan_door_ctx` with the typed-reason wrapper, since the raw body raises a
+bare CLR04 a surface cannot classify); the op-key reservation and receipt; that `p_due` really is a
+due date of this schedule (the same `_plan_due_index_on_or_before` + `_plan_due_nth` pair and the
+same `accrual_occurrence_not_found` token `clara.skip_plan_occurrence` uses for its own
+`p_after_due`); and that this plan reverses at all.
+
+That last one is NOT redundant, and it was measured rather than assumed. On a `recurring_journal`
+plan whose schedule is monthly/`last_day_of_month`, `clara._plan_primary_for_reversal` resolves the
+reversal date back to a real primary due date from the date arithmetic alone, so without this wall
+the admission core would have admitted a swapped-sides entry for a plan whose revision says
+`auto_reverse = false` (`ck_plan_revisions_auto_reverse`, 0193:561, ties that flag to
+`plan_kind='reversing_journal'`). Refused here by name, `plan_does_not_reverse`, before anything is
+reserved or written — and driven by `p1073.refusals`.
+
+Everything else is the admission core's answer, passed outward rather than re-decided: the plan's
+status, the client's status, the authority window, the due gate on the house legal date, convergence
+and the ORPHAN WALL. Copying any of them here would be the third copy of a wall #1051 (0330) and
+#1080 (0331) exist to have stopped making.
+
+### A refusal is raised, not reported
+
+`clara.request_plan_catch_up` answers a window with a list of per-event outcomes and commits its
+receipt either way, which is right for a window. This door is ONE act a person asked for by name, so
+it follows `clara.skip_plan_occurrence`: every way it cannot act is a typed RAISE, the transaction
+rolls back — so the op key is left free for a real retry instead of pinned to a receipt that
+recorded nothing — and the DoorRefusal surfaces verbatim on both surfaces that offer it.
+
+The core's own `reason` and `code` travel outward unchanged. 0333 mints exactly two reason tokens of
+its own that no body already names (`plan_does_not_reverse`, and `reversal_already_admitted` for the
+core's CONVERGED answer, which carries no `reason` key at all); `invalid_op_key`,
+`invalid_request` and `accrual_occurrence_not_found` are `clara.skip_plan_occurrence`'s own, reused
+deliberately so one fact keeps one vocabulary.
+
+### What this file does not do
+
+It does not touch `clara.request_plan_catch_up`, `clara.skip_plan_occurrence`,
+`clara._plan_admit_occurrence`, `clara._plan_occurrence_basis` or any per-kind arm — the first two
+because the ticket puts them out of scope, the rest because this file is a caller. It does not touch
+`clara.list_review_queue`, the read that surfaces the conflict item, and it deliberately does NOT
+`sha256`-pin it either: a sibling lane of this same wave splices a new `row_kind` onto that body, and
+pinning a body another lane writes is the collision the wave's plan of record forbids. What the
+prestate and the tail assert instead is structural — the `accrual_bill_conflict` arm is still there.
+It mints no table, no CHECK, no chart row, no trigger, and no grant beyond the one EXECUTE the new
+door needs.
+
+**Redo (#957).** Applied first-apply on `clara_l04` (the prestate printed `FIRST APPLY` and the
+census read 5 bodies), then re-applied once with
+`CLARA_MIGRATION_REDO=0333_plan_occurrence_reversal_door` after the post-image sha was measured into
+the prestate's own redo branch (the prestate then printed `REDO APPLY` and the census read 6). BOTH
+branches of the bimodal pin were therefore exercised for real, so the wave-3 addendum's hand proof of
+the first-apply branch was not needed. The file has no data-dependent branch: every prestate and tail
+arm reads `pg_proc` and `pg_namespace` only.

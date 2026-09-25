@@ -2353,6 +2353,21 @@ export const PLAN_AUTHORITY_WALL_0330_COHORT = [...PLAN_AUTHORITY_WALL_0330_UNGR
 const PLAN_REVERSAL_POSTED_BASIS_0332_UNGRANTED_FNS = ["_plan_posted_entry_lines"];
 export const PLAN_REVERSAL_POSTED_BASIS_0332_COHORT = [...PLAN_REVERSAL_POSTED_BASIS_0332_UNGRANTED_FNS];
 
+// #1073 [0333, the THIRD accrual/bill-conflict remedy: one period's own correcting entry] — its
+// own cohort, for the same "wholly present or wholly absent" reason 0332's carries: the
+// `db-slice-frontiers` matrix runs this package against earlier frontiers where 0302/0332 have
+// applied and 0333 has not.
+//
+//   the ONE new human door — clara_authenticated ONLY, bookkeeper-floored in its own body. It
+//   admits exactly ONE reversal occurrence through clara._plan_admit_occurrence for a period a
+//   person named, and walks no catch-up window; clara_runtime, both agent read roles and all four
+//   wake lanes gain ZERO — no OBO twin, no agent read, no wake wrapper, the same posture
+//   clara.skip_plan_occurrence (0302) carries for the sibling remedy. It mints no ungranted
+//   internal at all: everything it stands on (the admission core, the reversal-date rule, the
+//   plan door context, the two schedule helpers) already existed.
+const PLAN_OCCURRENCE_REVERSAL_DOOR_0333_HUMAN_FNS = ["reverse_plan_occurrence"];
+export const PLAN_OCCURRENCE_REVERSAL_DOOR_0333_COHORT = [...PLAN_OCCURRENCE_REVERSAL_DOOR_0333_HUMAN_FNS];
+
 // #979 [0251, the depreciation authority read tells "never had one" apart from "had one, and it
 // was retired"] — NO COHORT, NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed, for
 // the same reason #797's (0212) and #720's (0198) blocks state theirs. 0251 creates no function:
@@ -3697,6 +3712,11 @@ export const ALLOWED = {
     // row `clara._plan_admissible_event`'s own picker already treats as handled — it does not
     // recut or nest the admission core.
     ...ACCRUAL_BILL_CONFLICT_0302_HUMAN_FNS,
+    // #1073 [0333] the one-period reversal door — the THIRD remedy for the same conflict row, see
+    // the block above. clara_authenticated ONLY, bookkeeper floor body-enforced; clara_runtime,
+    // both agent read roles and all four wake lanes gain ZERO. It admits one occurrence through
+    // the admission core rather than recutting it, and it touches neither existing remedy.
+    ...PLAN_OCCURRENCE_REVERSAL_DOOR_0333_HUMAN_FNS,
     // #939 [0305] the stated-prepayment-term door — see the block above. clara_authenticated
     // ONLY, bookkeeper-floored in its own body; clara_runtime, both agent read roles and all four
     // wake lanes gain ZERO, and no wake wrapper for it exists anywhere in the catalog.
@@ -4262,6 +4282,11 @@ export async function grantMatrixFailures() {
   const postedReversalBasisLive = PLAN_REVERSAL_POSTED_BASIS_0332_COHORT.filter((n) => liveNames.has(n));
   if (postedReversalBasisLive.length !== 0) {
     failures.push(...cohortFailures("#1074 0332 posted-entry reversal basis", PLAN_REVERSAL_POSTED_BASIS_0332_COHORT, liveNames));
+  }
+  // #1073 [0333] — bimodal like 0332's: wholly present once 0333 applies, wholly absent before it.
+  const oneperiodReversalLive = PLAN_OCCURRENCE_REVERSAL_DOOR_0333_COHORT.filter((n) => liveNames.has(n));
+  if (oneperiodReversalLive.length !== 0) {
+    failures.push(...cohortFailures("#1073 0333 one-period reversal door", PLAN_OCCURRENCE_REVERSAL_DOOR_0333_COHORT, liveNames));
   }
   // #652 [0222] — bimodal like F-A6's: wholly present once 0222 applies, wholly absent before it,
   // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.
