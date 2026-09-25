@@ -723,3 +723,146 @@ begin
 end
 $w1048_freeze$;
 set local search_path = clara, pg_temp;
+
+-- =====================================================================================
+-- SectionC  THE ANSWER VOCABULARY GAINS TWO OPTIONAL QUESTIONS -- clara._payroll_answers_ok
+--     recut. 0296's own body, with exactly one change: the two witness names are KNOWN keys, and
+--     they are the FIRST keys in this family that are not also REQUIRED keys.
+--
+--     WHY OPTIONAL, AND WHY THAT IS THE WHOLE DEPLOY STORY. `payrollFacts_v1` is a FROZEN workflow
+--     family (#945) and the work order forbids editing a frozen body, so the worker that reads a
+--     payslip today sends exactly the eleven run-level answers 0296's prompts ask for. If this door
+--     required thirteen, every payroll read in the estate would be refused at the write boundary
+--     the moment 0343 applied -- a migration that turns a working lane off. So the two witnesses
+--     are admitted when present and absent without complaint, the evaluator calls an absent one
+--     `not_asked` rather than `not_printed`, and the lane degrades to the PARKED QUESTION, which is
+--     the brief's own fallback. The prompt stanza that starts asking them is a SUCCESSOR CONTRACT
+--     in the ticket report, never an edit here.
+--
+--     `not_printed` IS STILL A FIRST-CLASS ANSWER, for a witness as much as for a figure: a prompt
+--     that asked for the headcount and a page that does not print one are two different facts, and
+--     a worker that answered `not_printed` is telling this estate the second.
+--
+--     EVERYTHING ELSE IS 0296's, unchanged and deliberately so: the closed three-member envelope
+--     (no `totals` key smuggled in beside the answers), the per-answer 200-character bound, the
+--     two-state vocabulary with no default, the 2000-row bound, the per-row closed key set, the
+--     duplicate row_no refusal. The battery re-drives each of them after this recut, because a
+--     vocabulary widening that quietly relaxed a neighbour is the failure this recut most risks.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._payroll_answers_ok(p_envelope jsonb, p_channel text)
+  returns boolean language plpgsql stable security definer
+  set search_path = clara, pg_temp as $pao$
+declare
+  -- The ELEVEN run-level questions. `period` is the only non-monetary one; the other ten are
+  -- money the page either prints or does not. EVERY one of them is required.
+  v_run text[] := array['payroll.run.period','payroll.run.gross_pay',
+    'payroll.run.epf_employee','payroll.run.epf_employer',
+    'payroll.run.socso_employee','payroll.run.socso_employer',
+    'payroll.run.eis_employee','payroll.run.eis_employer',
+    'payroll.run.pcb','payroll.run.hrdf_levy','payroll.run.net_pay'];
+  -- #1048: THE TWO COMPLETENESS WITNESSES -- KNOWN keys, NOT required ones. See this section's
+  -- header for why optional is the only shape that does not turn the live lane off.
+  v_witness text[] := array['payroll.run.employee_count','payroll.run.page_count'];
+  -- The SIX cells a payslip row prints, and the exact terms of the row identity.
+  v_cell text[] := array['payroll.row.gross_pay','payroll.row.epf_employee',
+    'payroll.row.socso_employee','payroll.row.eis_employee',
+    'payroll.row.pcb','payroll.row.net_pay'];
+  v_payroll jsonb; v_answers jsonb; v_rows jsonb; v_row jsonb; v_cells jsonb;
+  v_f text; v_a jsonb; v_state text; v_raw text; v_no int; v_seen int[] := array[]::int[];
+begin
+  if p_envelope is null or jsonb_typeof(p_envelope) <> 'object' then return false; end if;
+  v_payroll := p_envelope->'payroll';
+  if v_payroll is null or jsonb_typeof(v_payroll) <> 'object' then return false; end if;
+  -- THE ENVELOPE ITSELF IS CLOSED. Three members and no fourth: a `totals` key smuggled in
+  -- beside the answers would be a computed figure travelling as a read, which is the one thing
+  -- this family forbids the model to produce.
+  if exists (select 1 from jsonb_object_keys(v_payroll) as k(name)
+              where k.name not in ('channel','answers','rows')) then return false; end if;
+  if (v_payroll->>'channel') is distinct from p_channel then return false; end if;
+
+  v_answers := v_payroll->'answers';
+  if v_answers is null or jsonb_typeof(v_answers) <> 'object' then return false; end if;
+  -- HALF ONE: every key present is a KNOWN key -- one of the eleven, or one of #1048's two
+  -- witnesses. A near-miss spelling (`payroll.run.headcount`) is still an unknown key.
+  if exists (select 1 from jsonb_object_keys(v_answers) as k(name)
+              where k.name <> all(v_run) and k.name <> all(v_witness)) then return false; end if;
+  -- HALF TWO: every one of the eleven is PRESENT. A `count = 11` test would pass a map that
+  -- answered one question twice under two spellings, which is why this is a loop and not a
+  -- count (clara._witness_answers_ok's own recorded reason for the same shape).
+  foreach v_f in array v_run loop
+    v_a := v_answers->v_f;
+    if v_a is null or jsonb_typeof(v_a) <> 'object' then return false; end if;
+    v_state := v_a->>'state';
+    if v_state is null or v_state not in ('value','not_printed') then return false; end if;
+    if v_state = 'value' then
+      v_raw := nullif(btrim(coalesce(v_a->>'raw','')),'');
+      if v_raw is null then return false; end if;
+      -- The same 200-character bound clara._witness_answers_ok applies to every answer: far past
+      -- any real rendering, far short of anything that could stress a later numeric read.
+      if length(v_a->>'raw') > 200 then return false; end if;
+    end if;
+  end loop;
+  -- HALF THREE (#1048): a witness answer that IS present is held to the SAME shape as one of the
+  -- eleven -- the two-state vocabulary, a non-blank rendering, the 200-character bound. Optional
+  -- means "may be absent", never "may be malformed".
+  foreach v_f in array v_witness loop
+    v_a := v_answers->v_f;
+    if v_a is null then continue; end if;
+    if jsonb_typeof(v_a) <> 'object' then return false; end if;
+    v_state := v_a->>'state';
+    if v_state is null or v_state not in ('value','not_printed') then return false; end if;
+    if v_state = 'value' then
+      v_raw := nullif(btrim(coalesce(v_a->>'raw','')),'');
+      if v_raw is null then return false; end if;
+      if length(v_a->>'raw') > 200 then return false; end if;
+    end if;
+  end loop;
+
+  v_rows := v_payroll->'rows';
+  if v_rows is null or jsonb_typeof(v_rows) <> 'array' then return false; end if;
+  -- A BOUND ON THE QUOTED ROWS. 2000 is far past any payroll run a Malaysian SME firm files and
+  -- far short of a payload that could make the evaluator's own loop a denial of service. A run
+  -- larger than this is a refusal to READ, never a silent truncation.
+  if jsonb_array_length(v_rows) > 2000 then return false; end if;
+  for v_row in select value from jsonb_array_elements(v_rows) loop
+    if jsonb_typeof(v_row) <> 'object' then return false; end if;
+    if exists (select 1 from jsonb_object_keys(v_row) as k(name)
+                where k.name not in ('row_no','cells')) then return false; end if;
+    if jsonb_typeof(v_row->'row_no') <> 'number' then return false; end if;
+    -- The shape is checked BEFORE the cast: a fractional or negative row number is refused as a
+    -- malformed read rather than silently rounded into a neighbour's row.
+    if (v_row->>'row_no') !~ '^[1-9][0-9]*$' then return false; end if;
+    v_no := (v_row->>'row_no')::int;
+    -- TWO ROWS AT ONE PRINTED ROW NUMBER would be double-counted by every column sum.
+    if v_no = any(v_seen) then return false; end if;
+    v_seen := v_seen || v_no;
+    v_cells := v_row->'cells';
+    if v_cells is null or jsonb_typeof(v_cells) <> 'object' then return false; end if;
+    if exists (select 1 from jsonb_object_keys(v_cells) as k(name)
+                where k.name <> all(v_cell)) then return false; end if;
+    foreach v_f in array v_cell loop
+      v_a := v_cells->v_f;
+      if v_a is null or jsonb_typeof(v_a) <> 'object' then return false; end if;
+      v_state := v_a->>'state';
+      if v_state is null or v_state not in ('value','not_printed') then return false; end if;
+      if v_state = 'value' then
+        v_raw := nullif(btrim(coalesce(v_a->>'raw','')),'');
+        if v_raw is null then return false; end if;
+        if length(v_a->>'raw') > 200 then return false; end if;
+      end if;
+    end loop;
+  end loop;
+
+  return true;
+end $pao$;
+
+revoke all on function clara._payroll_answers_ok(jsonb, text) from public;
+
+comment on function clara._payroll_answers_ok(jsonb, text) is
+  '#945, widened by #1048: the payroll family''s OWN closed answer vocabulary -- eleven REQUIRED run-level questions, two OPTIONAL completeness witnesses (payroll.run.employee_count, payroll.run.page_count), six per-employee cells, `not_printed` a first-class answer everywhere, an unknown key at any level a refusal. The witnesses are optional because payrollFacts_v1 is FROZEN and does not ask them yet: requiring them would refuse every live payroll read at the write boundary. Optional means may be absent, never may be malformed -- a witness answer that IS present is held to the same two-state, non-blank, 200-character shape as one of the eleven. Deliberately NOT an arm of clara._witness_answers_ok: a versioned workflow may not couple its shape to another family''s frozen files. Ungranted; its only caller is clara.persist_payroll_facts, which runs as the owner.';
+
+reset role;

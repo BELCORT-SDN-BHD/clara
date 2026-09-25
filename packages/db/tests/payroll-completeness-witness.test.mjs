@@ -233,3 +233,72 @@ test("W1 · v2 reads a printed headcount that matches the lines as a completenes
     "mandatory setup: the row sum this witness admits is the worked example's own gross",
   );
 });
+
+// ---------------------------------------------------------------------------
+// W2 — the answer vocabulary
+// ---------------------------------------------------------------------------
+
+const answersOk = async (env, channel) =>
+  (await rootQuery("select clara._payroll_answers_ok($1::jsonb, $2) as ok", [JSON.stringify(env), channel]))
+    .rows[0].ok;
+
+test("W2 · the two witness questions are KNOWN but OPTIONAL: the eleven are still required and an unknown key is still refused", async (t) => {
+  if (unready(t)) return;
+
+  // THE LIVE LANE MUST NOT STOP READING. The frozen payrollFacts_v1 worker sends exactly eleven
+  // run-level answers and no witness at all; if this door began requiring thirteen, every payroll
+  // read in the estate would be refused at the write boundary. That is the FIRST assertion here,
+  // not an afterthought.
+  assert.equal(
+    await answersOk(envelope({ answers: NO_TOTALS }), "text"),
+    true,
+    "an ELEVEN-key envelope -- exactly what the frozen prompts send today -- is still admitted",
+  );
+  assert.equal(
+    await answersOk(
+      envelope({ answers: NO_TOTALS, witness: { "payroll.run.employee_count": value("2") } }),
+      "text",
+    ),
+    true,
+    "…and so is one that answers ONE of the two witnesses: each is independently optional",
+  );
+  assert.equal(
+    await answersOk(
+      envelope({
+        answers: NO_TOTALS,
+        witness: { "payroll.run.employee_count": value("2"), "payroll.run.page_count": notPrinted() },
+      }),
+      "text",
+    ),
+    true,
+    "…and `not_printed` is a first-class answer for a witness too",
+  );
+
+  // The two halves the vocabulary has always enforced are untouched.
+  const missingOne = { ...NO_TOTALS };
+  delete missingOne["payroll.run.pcb"];
+  assert.equal(
+    await answersOk({ payroll: { channel: "text", answers: missingOne, rows: [] } }, "text"),
+    false,
+    "one of the ELEVEN omitted is still a refusal -- optional applies to the witnesses alone",
+  );
+  const unknown = envelope({ answers: NO_TOTALS });
+  unknown.payroll.answers["payroll.run.headcount"] = value("2");
+  assert.equal(
+    await answersOk(unknown, "text"),
+    false,
+    "a near-miss spelling is still an unknown key, not a witness",
+  );
+  const overlong = envelope({
+    answers: NO_TOTALS,
+    witness: { "payroll.run.employee_count": value("9".repeat(201)) },
+  });
+  assert.equal(await answersOk(overlong, "text"), false, "the 200-character bound applies to a witness answer too");
+  const blank = envelope({ answers: NO_TOTALS, witness: { "payroll.run.page_count": { state: "value", raw: "   " } } });
+  assert.equal(await answersOk(blank, "text"), false, "`state:value` with a blank rendering is still malformed");
+  const badState = envelope({
+    answers: NO_TOTALS,
+    witness: { "payroll.run.page_count": { state: "computed", raw: "1" } },
+  });
+  assert.equal(await answersOk(badState, "text"), false, "there is still no third state");
+});
