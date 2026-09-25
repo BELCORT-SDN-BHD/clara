@@ -291,14 +291,25 @@ export function StaffExpenseClaimFormView({
    *  the claimant's; before this the chooser never offered such a candidate, so only a caller
    *  going around the form could reach it. `a.enrolment_active` mirrors the wall's own `sa2.active`
    *  — a retired enrolment on a second account still fails arm (b) at the door and is not offered
-   *  here either. */
+   *  here either.
+   *
+   *  FIX ROUND (ADV-03) — `enrolment_active` GUARDS BOTH ARMS, because the wall does. 0340 tests
+   *  the ADVANCE'S OWN ENROLMENT (`v_adv_enrol is distinct from v_claim_enrol`), never its account
+   *  code, and the claimant's resolved enrolment is always a LIVE one (rule (i), and
+   *  `clara._adv_enrolment_at(..., now())`). So an advance issued under a RETIRED earlier
+   *  generation of the claimant's own account is not the claimant's own enrolment's either: it
+   *  falls to arm (b), whose `sa2.active` it fails, and the door answers
+   *  `advance_allocation_mismatch` / `not_this_claimant`. Offering it — and, since #1052,
+   *  attributing it in words — promised a confirmation the door refuses. The account-code arm
+   *  stays an ACCOUNT-CODE arm so that a form whose enrolment register could not be read still
+   *  offers the claimant's own advances, exactly as before; only the retired generation leaves. */
   const advanceCandidates = useMemo(() => {
     const code = draft.claimantAccountCode.trim();
     if (code === "" || advancesRead.data === null) return [];
     return advancesRead.data.advances.filter((a) => {
-      if (!isOutstandingAdvance(a)) return false;
+      if (!isOutstandingAdvance(a) || !a.enrolment_active) return false;
       if (a.account_code === code) return true;
-      return a.enrolment_active && claimantLabel !== null && a.person_label.trim().toLowerCase() === claimantLabel;
+      return claimantLabel !== null && a.person_label.trim().toLowerCase() === claimantLabel;
     });
   }, [advancesRead.data, draft.claimantAccountCode, claimantLabel]);
   /** #1066 — advance_id → the REAL account it sits on, off the SAME `staff_advance_summary` read

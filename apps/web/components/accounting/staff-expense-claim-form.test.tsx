@@ -891,21 +891,28 @@ test("ticket 1068 the SAME empty-list focus holds when the claim never had an op
 // all — is #1066's, not this ticket's, and is deliberately untouched here.
 // ---------------------------------------------------------------------------------------------
 
-test("ticket 1052 an offered advance issued under an EARLIER enrolment of the same account names that enrolment, and the claimant's own carries no extra line", async () => {
+test("ticket 1052 an offered advance issued under ANOTHER live enrolment names that enrolment, and the claimant's own carries no extra line", async () => {
   const store = memoryStorage();
   restoreAdvanceApplicationDraft(store, "");
 
   const h = await renderComponent(App({
     storage: store,
+    loadEnrolments: async () => [
+      ...ENROLMENTS,
+      { id: "e-second-account", account_code: "1191", person_label: "Farah binti Idris" },
+    ],
     loadAdvances: async () => staffAdvanceSummary([
       // The claimant's own, under the LIVE enrolment on 1190.
       advanceRow({}),
-      // 1190 was retired and re-enrolled after a name correction; this advance was issued under
-      // the FIRST generation, so it is offered (same account code) but it is not the current
-      // claimant enrolment's.
+      // The SAME person, enrolled again on a SECOND account — the shape arm (b) of the wall
+      // admits, and (since #1066) the shape the chooser offers. FIX ROUND (ADV-03): this cell
+      // used to build an advance under a RETIRED earlier generation of 1190, which the door
+      // refuses `not_this_claimant`; attributing an enrolment to an advance the wall will not
+      // take is exactly the divergence the fix round closes, so the positive case moved onto a
+      // candidate the door admits and the retired one has a refusal cell of its own below.
       advanceRow({
-        enrolment_id: "e-first-generation", person_label: "Farah Idris",
-        advance_id: OTHER_CLAIMANT_ADVANCE, outstanding_cents: 30000, enrolment_active: false,
+        account_code: "1191", enrolment_id: "e-second-account", person_label: "Farah binti Idris",
+        advance_id: OTHER_CLAIMANT_ADVANCE, outstanding_cents: 30000, enrolment_active: true,
       }),
     ]),
   }));
@@ -914,11 +921,11 @@ test("ticket 1052 an offered advance issued under an EARLIER enrolment of the sa
     const select = byId(h, F("advanceId"));
     assert.deepEqual(optionsOf(select).map((o) => attrOf(o, "value")),
       ["", FARAH_ADVANCE, OTHER_CLAIMANT_ADVANCE],
-      "both advances on the claimant's account are offered, exactly as before");
+      "both of this claimant's advances are offered, her own and the second account's");
 
     const texts = optionsOf(select).map((o) => o.textContent);
-    assert.ok(String(texts[2]).includes("Farah Idris") && String(texts[2]).includes("1190"),
-      `the advance from the earlier enrolment names it: ${String(texts[2])}`);
+    assert.ok(String(texts[2]).includes("Farah binti Idris") && String(texts[2]).includes("1191"),
+      `the advance from the other enrolment names it: ${String(texts[2])}`);
     assert.ok(!String(texts[1]).includes("enrolment"),
       `the claimant's own advance carries no extra text: ${String(texts[1])}`);
 
@@ -932,8 +939,8 @@ test("ticket 1052 an offered advance issued under an EARLIER enrolment of the sa
     await h.settle();
     const lines = findAll(h.container, (n) => attrOf(n, "data-testid") === "allocation-source-enrolment");
     assert.equal(lines.length, 1, "the confirmed row says which enrolment it discharges");
-    assert.ok(String(lines[0]!.textContent).includes("Farah Idris"),
-      `…naming the person that enrolment carries: ${String(lines[0]!.textContent)}`);
+    assert.ok(String(lines[0]!.textContent).includes("1191"),
+      `…naming the account that enrolment carries: ${String(lines[0]!.textContent)}`);
 
     // AND CHOOSING THE CLAIMANT'S OWN TAKES IT AWAY AGAIN.
     await h.fireEvent(select, "change", (n) => setFieldValue(n, FARAH_ADVANCE));
@@ -970,6 +977,43 @@ test("ticket 1052 with the enrolment register unread, no advance is described as
     const texts = optionsOf(byId(h, F("advanceId"))).map((o) => String(o.textContent));
     assert.ok(texts.every((x) => !x.includes("enrolment")),
       `no option claims a source enrolment while the register is unread: ${texts.join(" | ")}`);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1052 fix round an advance under a RETIRED earlier generation of the claimant's OWN account is not offered", async () => {
+  // ADV-03 — THE CHOOSER'S ADMISSION SET IS THE DOOR'S. `clara._assert_claim_basis` (0340) tests
+  // the ADVANCE'S OWN ENROLMENT, never its account code: an advance whose enrolment is not the
+  // claimant's resolved one must pass arm (b), which requires that enrolment to be ACTIVE. An
+  // advance issued under a retired generation of the very same account therefore fails the wall
+  // (driven on the lane database by the adversarial review: CLR10
+  // advance_allocation_mismatch / not_this_claimant), so offering it — and, since #1052,
+  // positively attributing it — promised a confirmation the door refuses.
+  //
+  // It is reachable: `clara.retire_staff_advance_account` guards on outstanding at 'infinity'
+  // while `clara.staff_advance_summary` reports outstanding at today's as-of, so a claim settled
+  // with a FORWARD-DATED posting date leaves the row retirable and still outstanding today.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}),
+      // 1190 was retired and re-enrolled after a name correction; this advance was issued under
+      // the FIRST generation.
+      advanceRow({
+        enrolment_id: "e-first-generation", person_label: "Farah Idris",
+        advance_id: OTHER_CLAIMANT_ADVANCE, outstanding_cents: 30000, enrolment_active: false,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    assert.deepEqual(optionsOf(byId(h, F("advanceId"))).map((o) => attrOf(o, "value")),
+      ["", FARAH_ADVANCE],
+      "the retired generation's advance is not offered: the wall would refuse it not_this_claimant");
   } finally {
     await h.unmount();
   }
