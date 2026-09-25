@@ -7445,16 +7445,20 @@ projection of either verdict would have been a second place for those words to d
 are the whole of what #946 and #948 ask a tool to report. `clara._agreement_posting_verdict(uuid)`
 stays granted to NOBODY, exactly as 0299 left it, and the tail re-reads that after applying.
 
-**Neither core is retyped.** Each is derived from the LIVE body by anchored string surgery, and
-§TAIL REVERSES that surgery on the COMMITTED core and asserts the result hashes to the pre-image
-§0 pinned — so "the rows did not change" is a checked fact about the live catalog. The settlement
-read takes two substitutions (the `declare c record;` + bookkeeper-floor opener, and
-`cl.firm_id = c.firm`); the queue takes three (the `declare` opener, the viewer-floor line, and
-every `c.firm`, at a MEASURED count of 23 on this frontier rather than a remembered one, because
-eleven migrations have spliced that body and a twelfth arm would bring its own firm predicate).
-The anchors and the reversal live in eight `clara.__t1136_*` helper functions created at the top of
-the file's own transaction and dropped in §Z, so §0, §A, §D and §TAIL cannot drift apart and
-nothing outside the migration can ever call them.
+**Neither core is hand-retyped, and neither is built at run time.** Each core's body is the live
+body with a closed roster of anchored substitutions applied, WRITTEN OUT in §A and §D as ordinary
+SQL, so a reader and the migration lexer both see exactly what is installed. The pin sits on both
+sides of the apply: §0 applies the surgery to the LIVE pre-image and refuses unless the result
+hashes to the body embedded below it, and §TAIL re-reads the COMMITTED core, pins the same value,
+and REVERSES the surgery to assert it hashes back to the pre-image — so "the rows did not change"
+is a checked fact about the live catalog. The settlement read takes two substitutions (the
+`declare c record;` + bookkeeper-floor opener, and `cl.firm_id = c.firm`); the queue takes three
+(the `declare` opener, the viewer-floor line, and every `c.firm`, at a MEASURED count of 23 on this
+frontier rather than a remembered one, because eleven migrations have spliced that body and a
+twelfth arm would bring its own firm predicate). The anchors, the forward derivation and the
+reversal live in ten `clara.__t1136_*` helper functions created at the top of the file's own
+transaction and dropped in §Z, so §0 and §TAIL cannot drift apart and nothing outside the migration
+can ever call them.
 
 **What it buys the machine side, in full:** two EXECUTEs and two allowlist rows. Not one relation
 grant, not one policy, no act. `clara.settle_payroll_net_pay` is untouched and still
