@@ -354,6 +354,72 @@ test("p931.accounts allocations on two enrolled accounts produce TWO credit legs
     "accounts: the claim row's own account column carries the HEAD of the confirmed list");
 });
 
+test("p1066.head the CROSS-ACCOUNT HEAD shape the claim form actually sends is admitted and posts both legs", async (t) => {
+  if (await gateAlloc(t)) return;
+  const client = await allocClient("allochead");
+  // WHY THIS CELL EXISTS (fix round, L03-SPEC-04). #1066's AC1 is that a claimant with two
+  // dedicated advance accounts can CONFIRM advances from both THROUGH THE FORM. p931.accounts
+  // above posts the opposite shape: its head sits on the claimant's own account and only the
+  // SECOND row states an account. The shape `toClaimWire` emits when the preparer confirms the
+  // second account's advance FIRST was asserted only in a pure-function cell, never driven
+  // through the real door -- so this drives exactly that wire:
+  //
+  //   claim.advance_account_code = 1191 (the HEAD's own account, which the wire makes the column
+  //                                      follow, because 0340 refuses a column that disagrees)
+  //   advance_allocations[1]     = { advance_id: C }            -- the head, stating NO account
+  //   advance_allocations[2]     = { advance_id: A, account_code: 1190 }
+  //
+  // THE WORKED EXAMPLE. C = 30,000 sen on 1191, A = 40,000 sen on 1190. The 60,500 claim takes
+  // 30,000 from C and 30,500 from A, so the entry credits 1191 by 30,000 and 1190 by 30,500.
+  await enrolAdvanceFor(ALICE(), {
+    client, code: SECHART.advanceFresh, person: "Farah binti Idris",
+  });
+  const advA = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const advC = (await seedAdvance(ALICE(), BOB(), {
+    client, code: SECHART.advanceFresh, cents: 30000, issueDate: "2026-02-01",
+  })).advance;
+
+  const c = allocClaim({
+    allocations: [
+      { advance_id: advC.id, amount_cents: 30000 },                                 // the BARE head
+      { advance_id: advA.id, amount_cents: 30500, account_code: SECHART.advance },
+    ],
+    // …and the column the wire makes FOLLOW that head, which `allocClaim` would otherwise take
+    // from the head row's own (absent) account_code.
+    advanceAccountCode: SECHART.advanceFresh,
+  });
+  assert.equal(c.advance_allocations[0].account_code, undefined,
+    "head: the head row states no account of its own -- exactly what toClaimWire emits");
+  assert.equal(c.advance_account_code, SECHART.advanceFresh,
+    "head: …and the claim's own column carries the head's real account");
+
+  const a = await armed({ client, claim: c });
+  const out = await post(a);
+  assert.equal(out.posted, true, "head: a cross-account HEAD is admitted and posts");
+
+  const lines = await linesWithIds(out.entry_id);
+  const credits = lines.filter((l) => Number(l.credit_cents) > 0);
+  assert.equal(credits.length, 2, "head: ONE credit leg per advance ACCOUNT, and there are two");
+  const byCode = new Map(credits.map((l) => [l.account_code, l]));
+  assert.equal(String(byCode.get(SECHART.advanceFresh).credit_cents), "30000",
+    "head: the head's own account carries the head's own amount");
+  assert.equal(String(byCode.get(SECHART.advance).credit_cents), "30500");
+
+  const apps = await applicationsForEntry(out.entry_id);
+  const appOf = new Map(apps.map((r) => [r.advance_id, r]));
+  assert.equal(appOf.get(advC.id).application_line_id, byCode.get(SECHART.advanceFresh).id,
+    "head: each allocation is keyed to the credit leg on ITS OWN advance account");
+  assert.equal(appOf.get(advA.id).application_line_id, byCode.get(SECHART.advance).id);
+
+  assert.equal(await advanceOutstanding(advC.id, SEC_DATE.posting), 0, "head: C is fully discharged");
+  assert.equal(await advanceOutstanding(advA.id, SEC_DATE.posting), 9500, "head: A keeps 9,500 sen");
+
+  const row = await claimRow(a.claim_id);
+  assert.equal(row.advance_account_code, SECHART.advanceFresh,
+    "head: the stored column is the SECOND account -- the head's, not the claimant's own");
+  assert.equal(row.advance_id, advC.id, "head: …and the stored advance_id is that head advance");
+});
+
 // ===========================================================================================
 // 4 · p931.sum / p931.twice / p931.claimant — the list's own walls.
 // ===========================================================================================
