@@ -1737,6 +1737,7 @@
     "payableAccountCode": "Owed to the claimant on",
     "payableAccountCodeHelp": "A non-control liability account, such as Other Payables.",
     "advanceAccountCode": "Staff advance account",
+    "advanceAccountCodeFollowsHead": "This claim will credit {account}, the account the first confirmed advance sits on.",
     "advanceAccountCodeHelp": "The enrolled account the advance was paid from.",
     "advanceId": "Which advance",
     "advanceIdHelp": "Choose the advance this claim discharges. Only the claimant's own advances that still carry a balance are offered; the register never guesses.",

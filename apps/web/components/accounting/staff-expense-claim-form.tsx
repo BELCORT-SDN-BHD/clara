@@ -96,6 +96,7 @@ import {
   PENDING_FACT_MAX_CHARS,
   allocationFieldId,
   allocationsAreApportioned,
+  claimAdvanceAccountCode,
   claimTotalCents,
   defaultMemo,
   derivedLines,
@@ -351,11 +352,26 @@ export function StaffExpenseClaimFormView({
     && (enrolledCodes === null || !enrolledCodes.has(draft.claimantAccountCode.trim()));
 
   const issues: ClaimIssue[] = useMemo(
-    () => (showIssues ? validateClaimDraft(draft, knownCodes, enrolledCodes) : []),
-    [showIssues, draft, knownCodes, enrolledCodes],
+    // FIX ROUND (ADV-04) — VALIDATE WHAT IS SENT. `toClaimWire` fills `advance_account_code` from
+    // the head allocation's REAL account, so the chart check must ask about that one; handing the
+    // lookup in is what keeps the form from passing a draft the door refuses `unknown_account`.
+    () => (showIssues ? validateClaimDraft(draft, knownCodes, enrolledCodes, advanceAccountCodes) : []),
+    [showIssues, draft, knownCodes, enrolledCodes, advanceAccountCodes],
   );
   const lines = useMemo(() => derivedLines(draft, advanceAccountCodes), [draft, advanceAccountCodes]);
   const total = claimTotalCents(draft);
+  /** #1066 fix round (L03-SPEC-03) — THE ACCOUNT THIS CLAIM WILL ACTUALLY CREDIT, when that is
+   *  not the one the preparer picked. `clara._assert_claim_basis` (0340) refuses a claim whose
+   *  `advance_account_code` disagrees with its confirmed list's first entry, so `toClaimWire` makes
+   *  the column FOLLOW the head allocation's own account. That override is necessary; leaving it
+   *  silent was not — the picker went on reading 1190 while the claim filed 1191. `null` whenever
+   *  the two agree (every single-account claim, which is every claim before #1066), so the field
+   *  is byte for byte what it was. */
+  const creditedAdvanceAccount = useMemo(() => {
+    if (draft.settlement !== "advance_application") return null;
+    const head = claimAdvanceAccountCode(draft, advanceAccountCodes);
+    return head === "" || head === draft.advanceAccountCode.trim() ? null : head;
+  }, [draft, advanceAccountCodes]);
 
   // PERSIST ON EVERY EDIT. Not debounced: the payload is small, the storage is synchronous, and a
   // debounce is exactly how a draft goes missing when a tab is closed a moment after the last
@@ -737,9 +753,19 @@ export function StaffExpenseClaimFormView({
         <>
           <Field field="advanceAccountCode" errorText={errorFor("advanceAccountCode")}
             label={t("advanceAccountCode")} hint={t("advanceAccountCodeHelp")}>
-            <AccountPicker field="advanceAccountCode" value={draft.advanceAccountCode}
-              accounts={accounts} props={controlProps("advanceAccountCode", true)}
-              onPick={(v) => set("advanceAccountCode", v)} placeholder={t("accountPlaceholder")} />
+            <div className="flex flex-col gap-1">
+              <AccountPicker field="advanceAccountCode" value={draft.advanceAccountCode}
+                accounts={accounts} props={controlProps("advanceAccountCode", true)}
+                onPick={(v) => set("advanceAccountCode", v)} placeholder={t("accountPlaceholder")} />
+              {/* WHAT THE CLAIM WILL ACTUALLY CREDIT (fix round, L03-SPEC-03). Shown only when the
+                  confirmed head sits somewhere else, so a preparer never files a claim against an
+                  account the form did not say out loud. */}
+              {creditedAdvanceAccount === null ? null : (
+                <p className="text-xs text-muted-foreground" data-testid="advance-account-follows-head">
+                  {t("advanceAccountCodeFollowsHead", { account: creditedAdvanceAccount })}
+                </p>
+              )}
+            </div>
           </Field>
           {/* NO SILENT FIFO (WD-R10). The claim says WHICH advances it discharges and by how much;
               the register never guesses, and the database refuses a claim that does not name one.

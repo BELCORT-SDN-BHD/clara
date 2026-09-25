@@ -1139,6 +1139,48 @@ test("ticket 1066 with the enrolment register unread, no second-account candidat
   }
 });
 
+test("ticket 1066 fix round the claim says WHICH account it will credit when the head sits on a second one", async () => {
+  // L03-SPEC-03. `toClaimWire` makes `advance_account_code` FOLLOW the head allocation's real
+  // account, because 0340 refuses a claim whose column disagrees with its list's first entry. The
+  // first cut left that silent: the picker still read 1190 while the claim filed 1191, and nothing
+  // on screen reconciled the two. The override is necessary; its silence was not.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => [
+      ...ENROLMENTS,
+      { id: "e-second-account", account_code: "1191", person_label: "Farah binti Idris" },
+    ],
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}),
+      advanceRow({
+        account_code: "1191", enrolment_id: "e-second-account", person_label: "Farah binti Idris",
+        advance_id: SECOND_ACCOUNT_ADVANCE, outstanding_cents: 60000, enrolment_active: true,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    // NOTHING IS SAID while the head sits on the typed account.
+    const line = () => h.find((n) => attrOf(n, "data-testid") === "advance-account-follows-head");
+    await h.fireEvent(byId(h, F("advanceId")), "change", (n) => setFieldValue(n, FARAH_ADVANCE));
+    await h.settle();
+    assert.equal(line(), null, "a head on the typed account needs no reconciling line");
+
+    // CONFIRM THE SECOND ACCOUNT'S ADVANCE AS THE HEAD, and the claim says what it will credit.
+    await h.fireEvent(byId(h, F("advanceId")), "change", (n) => setFieldValue(n, SECOND_ACCOUNT_ADVANCE));
+    await h.settle();
+    const shown = line();
+    assert.ok(shown, "the claim names the account it will actually credit");
+    assert.ok(String(shown.textContent).includes("1191"),
+      `…and it is the head advance's own account: ${String(shown.textContent)}`);
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("ticket 1066 the SUGGESTED split across two accounts is confirmed and sent with each row's own account", async () => {
   // END TO END: the chooser offers both accounts (this commit's first cell), and what is
   // CONFIRMED and SENT names each row's own account so the door's arm (b) and its head-consistency
