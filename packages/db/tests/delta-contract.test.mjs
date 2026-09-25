@@ -115,13 +115,26 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
     // them like the original five. Their PRESENCE is measured, never assumed, because the rows do
     // not exist on a pre-0296 / pre-0299 chain — the same three-state discipline every
     // frontier-sensitive read in this cell uses.
+    //
+    // RIDERS SWEEP WAVE (S), LANE L4 — A THIRD COVERED CLOSURE ON THE SAME TERMS. #1048's
+    // evaluate_payroll_run_state **v2** (0343) is a NEW closure beside the frozen v1, never a
+    // recut of it: 0296:710 refuses an in-place edit at APPLY and 0343's own freeze block says
+    // its only lawful repair is a _v3. It is covered rather than excluded for v1's own reasons,
+    // re-measured on the integrated chain: it is not in EXCLUDED_PAIRS_SQL, it does not ship
+    // dark, and the live census of bodies reading clara.evaluator_versions still names only the
+    // metric / report / prepayment / revenue-recognition families. So this ceremony commits it
+    // too, and the roster below has to carry it or the closed world reds on a lawful row.
     const coveredWave4 = (await rootQuery(
       `select evaluator_name, version from clara.evaluator_versions
         where firm_id is null
           and (evaluator_name, version) in (('evaluate_payroll_run_state',1),
+                                            ('evaluate_payroll_run_state',2),
                                             ('evaluate_agreement_contract_state',1))
         order by evaluator_name, version`)).rows;
-    const payrollRegistered = coveredWave4.some((r) => r.evaluator_name === "evaluate_payroll_run_state");
+    const payrollRegistered = coveredWave4.some(
+      (r) => r.evaluator_name === "evaluate_payroll_run_state" && r.version === 1);
+    const payrollV2Registered = coveredWave4.some(
+      (r) => r.evaluator_name === "evaluate_payroll_run_state" && r.version === 2);
     const agreementRegistered = coveredWave4.some((r) => r.evaluator_name === "evaluate_agreement_contract_state");
     const coveredNew = coveredWave4.length;
     // CLOSED-WORLD ROSTER, extended rather than loosened: F-A1 (Wave-F Track A, migrations
@@ -159,6 +172,13 @@ test("delta contract requires a fresh disposable DB and runs its one-way ceremon
       // #945's payroll evaluator (0296), on the same covered footing as #948's above.
       ...(payrollRegistered
         ? [{ evaluator_name: "evaluate_payroll_run_state", version: 1, deployed: !fresh }]
+        : []),
+      // #1048's payroll evaluator v2 (0343, riders sweep wave lane L4) — a NEW closure beside the
+      // frozen v1, which is why the family now carries two rows here too and the identity
+      // compared is name AND VERSION. Covered, so its state is the covered set's own, not a
+      // separate ceremony's. Absent entirely on a pre-0343 chain.
+      ...(payrollV2Registered
+        ? [{ evaluator_name: "evaluate_payroll_run_state", version: 2, deployed: !fresh }]
         : []),
       { evaluator_name: "evaluate_witness_fact_state", version: 1, deployed: !fresh },
       { evaluator_name: "evaluate_witness_fact_state", version: 2, deployed: !fresh },

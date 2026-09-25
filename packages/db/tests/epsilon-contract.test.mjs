@@ -139,6 +139,10 @@ async function ensureEvaluatorDeployed() {
   const extra = (fsPackPending ? 0 : 1) + (v2Registered && !v2Pending ? 1 : 0)
     + (v3Registered && !v3Pending ? 1 : 0) + (v4Registered && !v4Pending ? 1 : 0);
   // RIDERS WAVE 4, LANE 01 — the floor this ceremony COVERS moved from five to seven wherever
+  // RIDERS SWEEP WAVE (S), LANE L4: the floor moves once more, to EIGHT, wherever #1048's
+  // evaluate_payroll_run_state v2 (0343) is registered — a NEW closure beside the frozen v1, on
+  // exactly v1's covered footing: not an exclusion, does not ship dark, nothing in the estate
+  // reads its `deployed` flag. Counted from the same measured query for the same reason.
   // #945's evaluate_payroll_run_state v1 (0296) and #948's evaluate_agreement_contract_state v1
   // (0299) are registered. They are NOT exclusions: neither ships dark, nothing in the estate
   // reads their `deployed` flag, and no battery of theirs must witness a pre-flip refusal — so
@@ -149,6 +153,7 @@ async function ensureEvaluatorDeployed() {
     `select count(*)::int n from clara.evaluator_versions
       where firm_id is null
         and (evaluator_name, version) in (('evaluate_payroll_run_state',1),
+                                          ('evaluate_payroll_run_state',2),
                                           ('evaluate_agreement_contract_state',1))`)).rows[0].n;
   assert.equal(verified.verified_deployed, 5 + coveredNew + extra,
     `the one-way evaluator ceremony committed every registered closure it covers (${5 + coveredNew}) plus ${extra} row(s) some prior run's own ceremony had already flipped`);
