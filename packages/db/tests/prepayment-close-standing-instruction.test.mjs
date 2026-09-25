@@ -22,7 +22,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { humanQuery } from "./rig-helpers.mjs";
-import { ensurePrepay, prepayGate, prepaidScene, rootQuery, opk, caught }
+import { ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, opk, caught, wake12 }
   from "./f-a4-pr2a-fixtures.mjs";
 
 let skipped = 0;
@@ -39,6 +39,8 @@ const KEY = "prepayment_schedule_at_close";
 const REASON = "Let Clara establish prepayment schedules at close for this firm's clients.";
 /** A well-formed uuid this database holds nowhere. */
 const NOWHERE = "00000000-0000-4000-8000-00000000dead";
+/** The agent identity every unattended act is attributed to (0002's one fixed row). */
+const AGENT = "00000000-0000-4000-8000-000000c1a7a0";
 
 // A SECOND, INDEPENDENT gate, on THIS ticket's own migration: the F-A4 PR-2a frontier is true from
 // 0140 onward, so a cell here needs its OWN stem check — `prepayment-wake-reroute.test.mjs`'s idiom.
@@ -276,4 +278,173 @@ async (t) => {
     () => human("standing_instruction", { kind: "firm_standing_instruction", id: live.instruction_id }));
   assert.ok(humanStanding, "the human plan door admitted a standing instruction");
   assert.equal(JSON.parse(humanStanding.detail).reason, "invalid_authority_kind");
+});
+
+// ---------------------------------------------------------------------------------------------
+// THE CLOCKED LANE ITSELF — #1036's AC1 AND AC2, WHICH HAVE NEVER PASSED.
+//
+// The lane refuses today for a reason that was RIGHT (#1036's fix round): an unattended wake named
+// no directing human. It re-opens here with one, and the refusal survives unchanged for the firm
+// that has instructed nothing — which is every firm until a member says otherwise.
+// ---------------------------------------------------------------------------------------------
+
+/** Everything durable a wake call could leave behind, for one client. p1036's own footprint. */
+async function footprint(sc) {
+  const r = await rootQuery(
+    `select (select count(*)::int from clara.prepayment_schedules where client_id = $1) as schedules,
+            (select count(*)::int from clara.accounting_plans where client_id = $1) as plans,
+            (select count(*)::int from clara.adjustment_templates where firm_id = $2) as templates,
+            (select count(*)::int from clara.op_receipts where firm_id = $2
+              and fn = 'create_prepayment_schedule') as reservations`,
+    [sc.client, sc.firm]);
+  return r.rows[0];
+}
+
+test("p1050.wake.absent -- a firm that has instructed NOTHING is answered exactly as it was before "
+  + "this ticket: CLR03 wake_authority_absent, nothing written, the human door still named -- and "
+  + "the refusal now also names the door a member uses to give the instruction",
+async (t) => {
+  if (await standingGate(t)) return;
+  const sc = await prepaidScene("p1050absent");
+  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
+  assert.equal(await liveRow(sc.firm), null, "the scene already carries an instruction -- fixture leak");
+
+  const before = await footprint(sc);
+  const err = await caught(() => wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target }));
+  assert.ok(err, "a firm that instructed nothing had a schedule configured for it");
+  assert.equal(err.code, "CLR03", "a wake-authority refusal is CLR03, the estate's own wake class");
+  const d = JSON.parse(err.detail);
+  assert.equal(d.reason, "wake_authority_absent", "#1036's own reason token moved");
+  assert.equal(d.lane, "wake");
+  assert.equal(d.wake_kind, "close_prep");
+  assert.equal(d.remedy, "clara.create_prepayment_schedule",
+    "the refusal must still name the door a PERSON uses to configure this one schedule");
+  assert.equal(d.standing_remedy, "clara.record_firm_standing_instruction",
+    "the refusal does not name the door that gives Clara the standing instruction");
+  assert.equal(d.instruction_key, KEY,
+    "the refusal does not name WHICH standing instruction is missing");
+
+  assert.deepEqual(await footprint(sc), before, "the refused wake left something durable behind");
+});
+
+test("p1050.wake.configures -- under a LIVE standing instruction the clocked lane configures ONE "
+  + "amortisation schedule: the plan names the RECORDING MEMBER as its directing human, "
+  + "authority_kind standing_instruction, citing the instruction row AND the wake task that acted "
+  + "on it; the schedule names the AGENT as the run that wrote it; and a second wake under the "
+  + "same key yields the same schedule rather than a second one (#1036 AC1)",
+async (t) => {
+  if (await standingGate(t)) return;
+  const sc = await prepaidScene("p1050configures");
+  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
+
+  // THE INSTRUCTION IS GIVEN BY A NAMED MEMBER, through the real door.
+  const si = await record(sc.alice, { opKey: opk("p1050-configures") });
+
+  // NO op key of this battery's own: `clara.wake_establish_prepayment_schedule` admits ONLY the
+  // key derived from (task, verb, subject), so the replay below is driven the way the production
+  // belt drives it -- the same task asking twice.
+  const r = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.ok(r.schedule_id, `the clocked lane refused under a live standing instruction: ${JSON.stringify(r)}`);
+  assert.ok(r.plan_id, "the schedule carries no plan");
+  assert.equal(r.configuration_only, true, "an accepted configuration is not a posted occurrence");
+  assert.ok(Array.isArray(r.next_occurrences) && r.next_occurrences.length > 0,
+    "the plan yields no occurrence -- a schedule that can never post is what #1036 refused");
+
+  const plan = (await rootQuery(
+    "select * from clara.accounting_plans where id = $1", [r.plan_id])).rows[0];
+  assert.equal(plan.authorised_by, sc.alice,
+    "the plan's directing human is not the member who recorded the standing instruction");
+  assert.equal(plan.created_by, sc.alice,
+    "the plan is authored by the member whose instruction produced it");
+  assert.equal(plan.authority_kind, "standing_instruction",
+    "the plan is labelled as something a person typed");
+  assert.equal(plan.authority_ref.kind, "firm_standing_instruction");
+  assert.equal(plan.authority_ref.id, si.instruction_id,
+    "the plan does not cite the instruction row that authorised it");
+  assert.equal(plan.authority_ref.wake_kind, "close_prep");
+  assert.equal(plan.authority_ref.task_id, sc.s.task,
+    "the plan does not name the clocked task that acted on the instruction");
+  assert.equal(plan.kind, "amortisation_schedule");
+  assert.equal(plan.status, "active");
+
+  // THE SCHEDULE ROW NAMES THE RUN THAT WROTE IT, which is the agent -- the member authorised the
+  // act, Clara performed it, and the two are different facts the trail keeps apart.
+  const sched = (await rootQuery(
+    "select * from clara.prepayment_schedules where id = $1", [r.schedule_id])).rows[0];
+  assert.equal(sched.created_by, AGENT,
+    "the schedule does not name the unattended run that actually wrote it");
+  assert.equal(sched.plan_id, r.plan_id);
+
+  // #1036 AC1's second half: TWICE YIELDS ONE.
+  const again = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(again.schedule_id, r.schedule_id, "a replayed wake configured a SECOND schedule");
+  const n = await rootQuery(
+    "select count(*)::int as n from clara.prepayment_schedules where client_id = $1", [sc.client]);
+  assert.equal(n.rows[0].n, 1, "the client carries more than one schedule");
+  const plans = await rootQuery(
+    "select count(*)::int as n from clara.accounting_plans where client_id = $1", [sc.client]);
+  assert.equal(plans.rows[0].n, 1, "the client carries more than one plan");
+
+  // NOTHING IS ADMITTED ON THE AGENT'S OWN AUTHORITY -- the invariant #1036 left behind.
+  const agentPlans = await rootQuery(
+    "select count(*)::int as n from clara.accounting_plans where client_id = $1 and authorised_by = $2",
+    [sc.client, AGENT]);
+  assert.equal(agentPlans.rows[0].n, 0,
+    "the clocked lane wrote a plan under clara.agent_user_id() -- it could never admit an occurrence");
+});
+
+test("p1050.wake.lapsed -- when the recording member is no longer an ACTIVE member of the firm the "
+  + "clocked lane refuses CLR03 wake_authority_lapsed and writes nothing, rather than configuring "
+  + "a plan that could never post",
+async (t) => {
+  if (await standingGate(t)) return;
+  const sc = await prepaidScene("p1050lapsed");
+  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
+  const si = await record(sc.alice, { opKey: opk("p1050-lapsed") });
+
+  const before = await footprint(sc);
+
+  // THE LAPSE IS COMMITTED, not held in a rolled-back transaction, and it has to be: the wake door
+  // is driven on its OWN `clara_wake_interactive` connection (the production path this battery
+  // never reaches around), so a membership change this cell held uncommitted would be invisible to
+  // it -- which is exactly how this cell first went green against an unbuilt wall. Every scene
+  // builds its own firm and its own users, so the mutation is local to this cell's world, and it
+  // is restored in a `finally`.
+  let err;
+  try {
+    // A SECOND OWNER FIRST: `clara._tf_guard_last_owner` refuses to remove the last active owner,
+    // and the state this cell needs is "the member who instructed Clara has left", not "the firm
+    // has no owner".
+    await rootQuery(
+      "update clara.firm_memberships set role = 'owner' where firm_id = $1 and user_id = $2",
+      [sc.firm, sc.bob]);
+    await rootQuery(
+      "update clara.firm_memberships set status = 'removed' where firm_id = $1 and user_id = $2",
+      [sc.firm, sc.alice]);
+    err = await caught(() => wake12(sc.s,
+      { client: sc.client, entry: sc.entry, target: sc.target }));
+  } finally {
+    await rootQuery(
+      "update clara.firm_memberships set status = 'active' where firm_id = $1 and user_id = $2",
+      [sc.firm, sc.alice]);
+    await rootQuery(
+      "update clara.firm_memberships set role = 'bookkeeper' where firm_id = $1 and user_id = $2",
+      [sc.firm, sc.bob]);
+  }
+  const still = await rootQuery(
+    "select status from clara.firm_memberships where firm_id = $1 and user_id = $2",
+    [sc.firm, sc.alice]);
+  assert.equal(still.rows[0].status, "active", "the membership mutant was not restored");
+
+  assert.ok(err, "a lapsed member's standing instruction still configured a schedule");
+  assert.equal(err.code, "CLR03");
+  const d = JSON.parse(err.detail);
+  assert.equal(d.reason, "wake_authority_lapsed");
+  assert.equal(d.lane, "wake");
+  assert.equal(d.instruction_id, si.instruction_id,
+    "the refusal does not name the instruction whose author lapsed");
+  assert.equal(d.standing_remedy, "clara.record_firm_standing_instruction",
+    "the refusal does not name the door another member uses to re-record it");
+
+  assert.deepEqual(await footprint(sc), before, "the refused wake left something durable behind");
 });
