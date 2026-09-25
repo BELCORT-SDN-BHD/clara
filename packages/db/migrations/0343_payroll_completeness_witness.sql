@@ -1067,7 +1067,9 @@ begin
   -- #1048: BOTH STATE VERSIONS ARE ADMITTED BY NAME. A v1 state is a reading banked before 0343;
   -- it carries no `completeness` object, which this body reads as "no witness".
   if p_state is null or coalesce(p_state->>'state_version','') not in ('v1','v2') then
-    return jsonb_build_object('plan_version','v1','ready',false,'legs','[]'::jsonb,
+    return jsonb_build_object('plan_version','v1',
+      'state_version', to_jsonb(p_state->>'state_version'),
+      'ready',false,'legs','[]'::jsonb,
       'debit_cents',0,'credit_cents',0,'unprinted','[]'::jsonb,'missing_accounts','[]'::jsonb,
       'posting_basis', jsonb_build_object('kind','none','witness',null,'rows_read',0,
         'employee_count',null,'page_count',null,'row_sum_fields','[]'::jsonb,'answer',null),
@@ -1233,6 +1235,13 @@ begin
 
   return jsonb_build_object(
     'plan_version','v1',
+    -- #1048 FIX ROUND (ADV-04): WHICH STATE THIS PLAN DRAFTED FROM, which is not the same fact as
+    -- the plan's own output shape. Before 0343 there was exactly one state version, so a poster
+    -- reading `plan_version` off this object got 'v1' and was accidentally right; 0343 mints a
+    -- second one, and an entry that says its figures came from evaluator v1 -- a body that cannot
+    -- produce a completeness verdict at all -- would be systematically wrong for every row-sum
+    -- post. Two facts, two keys.
+    'state_version', to_jsonb(p_state->>'state_version'),
     'period_raw', to_jsonb(v_period_raw),
     'period_month', to_jsonb(v_month),
     'posting_date', to_jsonb(v_posting),
@@ -1884,7 +1893,11 @@ begin
     'period_month', to_char(v_month, 'YYYY-MM-DD'),
     'document_id', p_document,
     'extraction_id', v_extraction,
-    'state_version', coalesce(v->'plan'->>'plan_version','v1'),
+    -- #1048 FIX ROUND (ADV-04): the STATE's own version, read off the plan's new `state_version`
+    -- key rather than off its `plan_version` literal. The two were the same string by accident
+    -- while only one state version existed; this file mints a second, and an entry naming the
+    -- wrong evaluator is exactly the "true and misleading" receipt this section's header forbids.
+    'state_version', coalesce(v->'plan'->>'state_version','v1'),
     'posting_basis', v_basis));
 
   -- #1048: THE RATIONALE SAYS WHERE THE FIGURES CAME FROM. 0297's sentence stays verbatim as its

@@ -1066,3 +1066,35 @@ test("W12 · ADV-01: a no-totals page whose witness the channels split on PARKS 
   assert.equal(v.completeness.parked, true, "a person can settle this by answering, which is the whole point");
   assert.match(v.sentence, /is this every employee for the month\?/);
 });
+
+test("W13 · ADV-04: the entry records the STATE version it was judged from, not the plan's own literal", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: noTotals("2027-01"),
+    witness: { "payroll.run.employee_count": value("2") },
+  });
+  assert.equal(doc.receipt.posting.posted, true, `${JSON.stringify(doc.receipt.posting)}`);
+
+  const state = await bankedState(doc.documentId);
+  assert.equal(state.state_version, "v2", "mandatory setup: this reading was banked by the successor evaluator");
+
+  const entries = await entriesOf(doc.documentId);
+  assert.equal(entries.length, 1);
+  assert.equal(
+    entries[0].flags.payroll_run.state_version, "v2",
+    "0343's own premise is that an auditor reading the LEDGER can tell a stated figure from a " +
+      "computed one; an entry claiming evaluator v1 -- which cannot produce a completeness " +
+      "verdict at all -- says the opposite of what happened",
+  );
+  assert.equal(
+    entries[0].flags.payroll_run.state_version, state.state_version,
+    "the ledger and the reading it came from name ONE version between them",
+  );
+
+  // The PLAN's own shape version is a different fact and keeps its own key on the plan.
+  const v = await verdict(doc.documentId);
+  assert.equal(v.plan.plan_version, "v1", "the drafting body's output shape is still v1");
+  assert.equal(v.plan.state_version, "v2", "…and it says which state it drafted from");
+});
