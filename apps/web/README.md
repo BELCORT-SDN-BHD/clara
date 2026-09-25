@@ -2331,3 +2331,45 @@ claimant's own account and refused `not_this_client`, or worse, credited to the 
 
 **What is deliberately out of scope**, per the ticket: no staff master, and no widening of the chat
 tool's own allocation handling beyond its existing successor contract (`chatTurn_v22`).
+
+## #1068 — the empty allocation list still focuses something real
+
+#931 replaced the advance-application arm's single `advanceId` `<select>` with the shared
+allocation-list editor, whose "×" on a row has no floor at one: a preparer can remove EVERY row,
+leaving `draft.advanceAllocations` truly empty. `claimAllocations`
+(`lib/work/staff-expense-claim.ts`) still has to say what an empty confirmed list means for
+validation, and it says the same thing it always has — nothing is named, so it synthesises one
+phantom row (`{advanceId: "", amountCents: claimTotalCents(draft)}`) purely so
+`validateClaimDraft` can raise its ordinary `advanceRequired` issue, addressed by
+`allocationFieldId(0, "advanceId")` — the literal field id `"advanceId"`, exactly as it would be
+for a real row 0. **That addressing was never the bug and is unchanged by this ticket.**
+
+The bug was on the DOM side: `StaffAdvanceAllocationsEditor`'s empty state rendered only its own
+"Add allocation" button, carrying no id at all. `errorFor("advanceId")`'s message still rendered
+(the `<Field>` wrapper around the whole arm renders its error paragraph unconditionally), but the
+existing focus/scroll-to-error mechanism (`fields.current.get("advanceId")?.focus()`) found nothing
+registered under that id and silently did nothing — a refusal a preparer could not be moved to.
+
+**The fix is one conditional prop-spread on the shared editor, nothing in `lib/work/`.** When
+`allocations.length === 0`, the "Add allocation" button now also receives
+`rowProps?.(0, "advance")` — the SAME call a real row 0 would have received. For the claim form
+that means the button inherits row 0's `id` (`"advanceId"`), the `ref` that registers it as the
+focus target, and its `aria-invalid`/`aria-describedby` wiring; `disabled` is the OR of the
+button's own `candidates.length === 0` guard and whatever `rowProps` states, so the button stays
+correctly disabled while busy or while there is nothing to add. A NON-empty list never reaches this
+branch, so a real row 0 never has its id contested. A caller that passes no `rowProps` at all — the
+staff-advance register's own `BookApplicationDialog`, which has no field-id-addressed validation to
+begin with — is untouched: the spread is empty and the button renders byte for byte as before.
+
+**The seam is the editor, not only the claim form**, for the same reason #1052's own section above
+gives: two callers mount this component, and a cell that only drove the claim form would leave the
+register's caller free to drift. `components/registers/staff-advance-allocations-editor.test.tsx`
+proves the mechanism directly (empty list + `rowProps` given → the button carries row 0's props;
+non-empty list → the real row keeps the id, never the button; no `rowProps` at all, the register's
+own shape → nothing changes); `staff-expense-claim-form.test.tsx` proves the end-to-end seam the
+ticket actually names — a mounted form, the last row removed by its own "×", a submit attempt, and
+`document.activeElement` landing on a real, enabled, rendered node.
+
+**What is deliberately out of scope**, per the ticket: the validation rule itself (an advance is
+still required for this settlement type) and the allocation editor's non-empty behaviour, neither of
+which changed.
