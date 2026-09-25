@@ -839,6 +839,9 @@ test("W9 · AC2: a NO leaves the document unposted and the row says who said so"
   ).rows[0].display_name;
   assert.match(rows[0].question_text, new RegExp(escapeRe(name)));
   assert.match(rows[0].question_text, /not every employee for the month/);
+  // FIX ROUND (ADV-12): and the row names BOTH remedies. A changed mind is a new reading, so a
+  // mis-clicked `no` is cleared by a re-read -- not by re-filing a document that was never wrong.
+  assert.match(rows[0].question_text, /read this payslip again/i);
 });
 
 test("W10 · the answer door refuses a question that was never asked, and an answer that is neither yes nor no", async (t) => {
@@ -1195,4 +1198,45 @@ test("W15 · ADV-06: the parked question names the employer cost the entry a yes
   for (const code of ["6010", "6020", "6030", "6040", "2140"]) {
     assert.equal(legs.filter((l) => l.account_code === code).length, 0, `no ${code} leg`);
   }
+});
+
+test("W16 · ADV-07: two people answering the same question at once get a NAMED refusal, never a raw 23505", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, { answers: noTotals("2027-04") });
+  assert.equal(doc.receipt.posting.posted, false, "mandatory setup: parked");
+
+  // TWO BOOKKEEPERS WORKING THE SAME NEEDS-YOU INBOX -- the ordinary case this row kind exists
+  // for. Two real connections (the rig pool hands out one each), two different op keys, so the
+  // dedupe belt is not what decides this.
+  const [a, b] = await Promise.allSettled([
+    answerCompleteness(world.users.alice, { document: doc.documentId, answer: "yes" }),
+    answerCompleteness(world.users.bob, { document: doc.documentId, answer: "yes" }),
+  ]);
+  const winners = [a, b].filter((r) => r.status === "fulfilled");
+  const losers = [a, b].filter((r) => r.status === "rejected");
+  assert.equal(winners.length, 1, "exactly one answer lands");
+  assert.equal(losers.length, 1);
+
+  const err = losers[0].reason;
+  assert.doesNotMatch(
+    String(err.message), /duplicate key value|payroll_completeness_answers_extraction_id_key/i,
+    "the loser must not see an internal database error for the benign cause the lane predicts",
+  );
+  assert.match(String(err.message), /no parked completeness question/i, `got: ${err.message}`);
+  assert.equal(err.code, "CLR10");
+  assert.equal(
+    JSON.parse(err.detail ?? "{}").reason, "no_parked_completeness_question",
+    "…and it carries the discriminant the web refusal mapper already reads",
+  );
+
+  // The belt held either way: one entry, one answer row.
+  assert.equal((await entriesOf(doc.documentId)).length, 1);
+  const answers = (
+    await rootQuery("select count(*)::int as n from clara.payroll_completeness_answers where document_id=$1", [
+      doc.documentId,
+    ])
+  ).rows[0].n;
+  assert.equal(answers, 1);
 });

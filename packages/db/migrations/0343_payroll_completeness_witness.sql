@@ -1781,7 +1781,12 @@ begin
             coalesce(v_month_label, 'an unestablished month'),
             coalesce(v_comp->>'employee_count', 'a different number of'), v_rows_read)
         when 'completeness_declined' then
-          format('Payroll run %s was not posted: %s answered that this summary is not every employee for the month. Re-file a complete copy of the summary.',
+          -- FIX ROUND (ADV-12): BOTH REMEDIES, because the sentence used to assume the answer was
+          -- right and the DOCUMENT was wrong. A changed mind is a new reading (the answer is bound
+          -- to the extraction, and the UNIQUE on it is deliberate), so the way out of a mis-clicked
+          -- `no` is a re-read -- which clara.request_reextraction has offered since 0025/0026 --
+          -- and nothing on the row pointed at it.
+          format('Payroll run %s was not posted: %s answered that this summary is not every employee for the month. Re-file a complete copy of the summary; if that answer was a mistake, ask Clara to read this payslip again and the question is asked afresh.',
             coalesce(v_month_label, 'for this payslip'),
             coalesce(v_answer->>'answered_by_name', 'somebody at this firm'))
         else
@@ -2456,6 +2461,21 @@ begin
   -- the rest of this transaction so a retirement cannot race the answer.
   perform clara._active_document_filing(p_document, v_sha, v_client, true);
 
+  -- FIX ROUND (ADV-07) · ONE ANSWER AT A TIME, PER DOCUMENT. Two bookkeepers working the same
+  -- Needs-you inbox is the ORDINARY case this row kind exists for, and the overlap window is not
+  -- small: it spans clara._post_payroll_run, which drafts, validates and approves a journal entry.
+  -- Without this lock both callers passed the parked check, both inserted, and the loser saw a raw
+  -- SQLSTATE 23505 on payroll_completeness_answers_extraction_id_key -- an internal database error
+  -- for the most benign cause there is, and one carrying no `detail.reason` a refusal mapper can
+  -- read. With it, the loser WAITS, re-reads the verdict below, finds the question no longer
+  -- parked and is told so by name.
+  --
+  -- The house idiom (0006:952, 0007:1637 and eleven siblings): a namespace constant plus
+  -- hashtext of the key. Transaction-scoped, so it is released by COMMIT or ROLLBACK and never
+  -- by a body remembering to. The UNIQUE on extraction_id stays as the belt behind it, and its
+  -- violation is converted below rather than left to escape.
+  perform pg_advisory_xact_lock(203431048, hashtext(p_document::text));
+
   -- THE QUESTION MUST ACTUALLY BE PARKED. One body decides that -- the same one the queue row and
   -- the poster read -- so this door can never record an answer to a question no surface asked.
   v := clara._payroll_posting_verdict(p_document);
@@ -2471,10 +2491,20 @@ begin
 
   -- THE ANSWER IS THE EVIDENCE. Bound to the READING (unique), carrying the line count the person
   -- was shown, their note and their identity.
-  insert into clara.payroll_completeness_answers(firm_id, client_id, document_id, extraction_id,
-      rows_read, answer, note, answered_by)
-    values (v_firm, v_client, p_document, v_extraction, v_rows, v_answer, v_note, c.actor)
-    returning id into v_id;
+  begin
+    insert into clara.payroll_completeness_answers(firm_id, client_id, document_id, extraction_id,
+        rows_read, answer, note, answered_by)
+      values (v_firm, v_client, p_document, v_extraction, v_rows, v_answer, v_note, c.actor)
+      returning id into v_id;
+  exception when unique_violation then
+    -- THE BELT BEHIND THE LOCK (ADV-07). Reachable only if this reading was answered by a path
+    -- that did not take the advisory lock above; the answer that IS on the row wins, and the
+    -- caller is told the same thing the parked check would have told them a moment later. It is
+    -- converted rather than left to escape because 23505 carries no discriminant, and this lane's
+    -- web module names exactly three refusals it can surface.
+    raise exception 'there is no parked completeness question on this payroll summary (it was answered while you were answering it)'
+      using errcode = 'CLR10', detail = '{"reason":"no_parked_completeness_question"}';
+  end;
 
   perform clara._audit(c.firm, c.actor, null, null, 'answer_payroll_completeness', null,
     jsonb_build_object('document', p_document, 'answer', v_answer, 'answer_id', v_id,
