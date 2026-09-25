@@ -1508,6 +1508,30 @@ const SCHEDULE_CORRECTION_0317_CLOCK_NAMES = [
   "replace_prepayment_schedule", "replace_revenue_recognition_schedule",
 ];
 
+// RIDERS CUT PHASE (0321, #1030) — ONE NAME, and the adjudication is the CHEAP one wave 3 could
+// use and wave 4's seven could not, because it holds here by measurement rather than by argument.
+//
+// `clara.settle_source_corrected_rederivation` is the lane that claims a source correction's
+// successor. Measured on the live 312-file catalog (from-scratch chain, 2026-09-25):
+//   · its clock lines are TWO, and both are the same idiom —
+//       update clara.accounting_work set superseded_by = p_successor, updated_at = now()
+//       update clara.accounting_work set supersedes    = w.id,        updated_at = now()
+//   · it declares NO date-typed local (`v_rev uuid; v_work uuid; v_firm uuid; w record; sx record;
+//     v_dedupe jsonb; v_result jsonb; v_reason text; v_actor uuid;`), and its body carries no
+//     `::date`, no `current_date`, no `date_trunc` and no `clara._book_today()` token at all;
+//   · the ONLY relation it writes is `clara.accounting_work`, which carries no DATE column
+//     whatsoever (`information_schema.columns` where `data_type = 'date'` returns nothing for it),
+//     and `updated_at` is `timestamp with time zone`.
+// So both clock reads land on a timestamptz target, no date is derived from either, and the house
+// legal date is not owed: the body never answers "what is today". The op-receipt it settles is
+// written by `clara._finish_op`, a separate body with its own roster entry.
+//
+// 0320 (#1000) and 0323 (#1135) add NO arm-(D) name, and that is MEASURED rather than assumed:
+// the live census over the 312-file chain returns exactly one name this roster did not hold.
+// 0320's sampled instant moved from the pack door into its core and is already carried by
+// CLIENT_FINANCIAL_PACK_WAKE_0320_CLOCK_NAMES's reverse gate below.
+const WORK_SOURCE_REDERIVATION_0321_CLOCK_NAMES = ["settle_source_corrected_rederivation"];
+
 // #720 [0198, chat-clarify expiry] — ADDS NO NAME AND MOVES NONE, and that is MEASURED rather than
 // assumed: 0198 creates no body at all. It RECUTS exactly one, `clara.expire_due_interruptions`,
 // which already sits on WORK_QUESTIONS_0180_CLOCK_NAMES above, and the recut deletes a predicate
@@ -1692,6 +1716,12 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("prepayment_account_roster$")) names.push(...PREPAYMENT_ACCOUNT_ROSTER_0306_CLOCK_NAMES);
   if (await appliedStem("invite_preview_public_door$")) names.push(...INVITE_PREVIEW_0309_CLOCK_NAMES);
   if (await appliedStem("schedule_term_correction$")) names.push(...SCHEDULE_CORRECTION_0317_CLOCK_NAMES);
+  // RIDERS CUT PHASE (0321) - stem-gated, never number-gated, for the reason :207-214 gives; and
+  // the stem is the FULL one, because 0268 is `work_source_correction_supersede` and a shorter
+  // gate would witness the wrong file. See the array's own header for the adjudication.
+  if (await appliedStem("work_source_correction_rederivation$")) {
+    names.push(...WORK_SOURCE_REDERIVATION_0321_CLOCK_NAMES);
+  }
   return names.sort();
 }
 
