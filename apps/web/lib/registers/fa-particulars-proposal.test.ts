@@ -17,7 +17,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  loadAssetParticularsProposal, particularsFromProposal, proposalAnswerDraft, readFaParticularsProposal,
+  loadAssetParticularsProposal, particularsFromProposal, proposalAnswerDraft, proposalDepartures,
+  readFaParticularsProposal,
 } from "./fa-particulars-proposal";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -251,4 +252,68 @@ test("proposalAnswerDraft: a field the question did not declare is never pre-fil
   assert.deepEqual(draft, { method: "straight_line" },
     "the question's own declared fields bound the fill — a key outside them is one the answer door refuses");
   assert.deepEqual(proposalAnswerDraft(fields, null), {});
+});
+
+// ------------------------------------------------------------------------------------------
+// #1093 ITEM 3 — WHICH FIELDS DID THE CONFIRMED ANSWER DEPART FROM. `proposalAnswerDraft` already
+// restates the proposal in the ANSWER DOOR's own spelling (a `text` driver as a string, `money` as
+// an integer), so comparing against the stored `answer` this way is apples to apples: a proposed
+// 60 compares against a confirmed "60", never against the number 60 itself.
+// ------------------------------------------------------------------------------------------
+
+const FA_FIELDS = [
+  { key: "method", label: "Depreciation method", kind: "choice", required: true,
+    options: [{ value: "straight_line", label: "Straight line" }, { value: "reducing_balance", label: "Reducing balance" }, { value: "none", label: "Not depreciated" }] },
+  { key: "useful_life_months", label: "Useful life (months)", kind: "text", required: false },
+  { key: "rate_bps", label: "Annual rate (basis points)", kind: "text", required: false },
+  { key: "residual_cents", label: "Residual value", kind: "money", required: false },
+  { key: "start_date", label: "In-service date", kind: "date", required: true },
+  { key: "description", label: "Asset description", kind: "text", required: false },
+];
+
+test("proposalDepartures: a confirmed answer that matches the proposal field for field has no departures", () => {
+  const proposal = readFaParticularsProposal(sourceRef());
+  // The db battery's own p933.wire.answerable fixture, answered EXACTLY as proposed.
+  const confirmed = {
+    method: "straight_line", useful_life_months: "60", residual_cents: 0,
+    start_date: "2026-08-15", description: "Air compressor, workshop bay 2",
+  };
+  assert.deepEqual(proposalDepartures(FA_FIELDS, proposal, confirmed), {});
+});
+
+test("proposalDepartures: a field the person changed comes back holding what CLARA proposed, in the answer door's own spelling", () => {
+  const proposal = readFaParticularsProposal(sourceRef());
+  // p933.wire.answerable's own fixture: the proposal says 60 months and a nil residual; the person
+  // answered 84 months and a real residual — the ruling (#883) is that the APPLIED value is theirs.
+  const confirmed = {
+    method: "straight_line", useful_life_months: "84", residual_cents: 150_000,
+    start_date: "2026-08-15", description: "Air compressor, workshop bay 2",
+  };
+  assert.deepEqual(proposalDepartures(FA_FIELDS, proposal, confirmed), {
+    useful_life_months: "60", residual_cents: 0,
+  }, "departures: exactly the two fields the person changed, each holding the PROPOSED value — never the confirmed one");
+});
+
+test("proposalDepartures: no proposal at all means no departures — there is nothing to have departed from", () => {
+  const confirmed = { method: "straight_line", start_date: "2026-08-15" };
+  assert.deepEqual(proposalDepartures(FA_FIELDS, null, confirmed), {});
+});
+
+test("proposalDepartures: a field the proposal never grounded is never flagged, even when the person supplied a value there", () => {
+  // WIRE's own rate_bps is null (straight_line grounds no rate) — the person's reducing_balance
+  // answer supplying one is not a DEPARTURE from a proposal that never proposed anything for it.
+  const proposal = readFaParticularsProposal(sourceRef());
+  const confirmed = {
+    method: "reducing_balance", useful_life_months: "60", rate_bps: "500", residual_cents: 0,
+    start_date: "2026-08-15", description: "Air compressor, workshop bay 2",
+  };
+  const departures = proposalDepartures(FA_FIELDS, proposal, confirmed);
+  assert.ok(!("rate_bps" in departures), "an ungrounded field is never in the departure set");
+  assert.deepEqual(departures, { method: "straight_line" }, "…but a field the proposal DID ground, method here, still is");
+});
+
+test("proposalDepartures: an answer that is not an object (or absent) reads as no departures — never a throw", () => {
+  const proposal = readFaParticularsProposal(sourceRef());
+  assert.deepEqual(proposalDepartures(FA_FIELDS, proposal, null), {});
+  assert.deepEqual(proposalDepartures(FA_FIELDS, proposal, undefined), {});
 });

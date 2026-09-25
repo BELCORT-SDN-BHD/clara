@@ -268,3 +268,42 @@ export function proposalAnswerDraft(
   }
   return draft;
 }
+
+/**
+ * WHICH DECLARED FIELDS DID THE CONFIRMED ANSWER DEPART FROM, AND WHAT DID CLARA PROPOSE INSTEAD —
+ * the read #1093 item 3 asks for: "the proposal and the person's answer both survive on the same
+ * database row" (`p933.wire.answerable`, driven on a live database — the settled question's own
+ * `source_ref.proposal` stands unedited beside its `answer`), so a reviewer can be shown, per
+ * field, whether and how a proposal was departed from.
+ *
+ * THE COMPARISON REUSES `proposalAnswerDraft` RATHER THAN RE-DERIVING IT. Comparing the typed
+ * proposal directly against the stored answer would be comparing two different grammars — a
+ * `text`-declared driver's proposed `60` against its confirmed `"60"` — and `!==` would call every
+ * field a departure. `proposalAnswerDraft` has already restated the proposal in the ANSWER DOOR's
+ * own spelling, so this is apples to apples: `String(proposed) !== String(confirmed)`.
+ *
+ * A FIELD THE PROPOSAL NEVER GROUNDED IS NEVER A DEPARTURE, even when the person's answer supplies
+ * one — there is nothing proposed to have departed FROM. Likewise a field the ANSWER never
+ * mentions (an optional field left blank, which `clara._assert_work_answer` stores as absent) is
+ * not flagged: this function reports a value the person confirmed DIFFERENTLY, never a value they
+ * simply did not restate.
+ *
+ * NEVER THROWS: an `answer` that is not an object (a settled record read before `answer_work_
+ * question` returns it, or a malformed body) reads as no departures, the same tolerant posture
+ * every other read in this module keeps.
+ */
+export function proposalDepartures(
+  fields: readonly DeclaredField[],
+  proposal: FaParticularsProposal | null,
+  answer: Record<string, unknown> | null | undefined,
+): Record<string, string | number> {
+  const departures: Record<string, string | number> = {};
+  if (!isObject(answer)) return departures;
+  const proposed = proposalAnswerDraft(fields, proposal);
+  for (const [key, proposedValue] of Object.entries(proposed)) {
+    const confirmedValue = answer[key];
+    if (confirmedValue === undefined || confirmedValue === null) continue;
+    if (String(confirmedValue) !== String(proposedValue)) departures[key] = proposedValue;
+  }
+  return departures;
+}
