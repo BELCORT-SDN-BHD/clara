@@ -425,9 +425,21 @@ group role no client credential is a member of. The block renders above the cont
 the link, with the firm, the role and the masked address; an unknown, expired, revoked or
 already-accepted token gets ONE identical refusal, and the signed-out surface renders NOTHING for
 it — no verdict, no second place that blocks an invitation, the sign-in step unchanged. The read
-is rate-walled (fifteen minutes, five per token and five per address) and a walled read simply
-leaves the block out. The credential never reaches the browser: this app holds only
-`CLARA_AUTH_WALL_SERVICE_TOKEN` and the runtime holds the DSN.
+is rate-walled (fifteen minutes, five per token and five per address). The credential never
+reaches the browser: this app holds only `CLARA_AUTH_WALL_SERVICE_TOKEN` and the runtime holds
+the DSN.
+
+CORRECTED (ticket 1095, 2026-09-25) — "a walled read simply leaves the block out" no longer
+describes the rate-limited case. `clara.preview_invite_by_token`'s own wall already computed a
+`retry_after_seconds` and the runtime route (`packages/runtime/src/invitePreviewRoutes.ts`) already
+put it on the 429's own body and `Retry-After` header; only the courier
+(`lib/firm/invite-preview-public.ts`) discarded it. It now carries that wait through — clamped to
+900s and flagged when clamped, by the same `waitSeconds` rule the confirm lane's own walls use —
+and the confirm stage renders it as a notice distinct from the firm/role/email block (which still
+needs an `ok: true` read) and from the two OTHER indefinite reasons, `transport` and `unreadable`,
+which still render nothing at all: neither carries a number worth showing, and there is still
+nothing for the visitor to do about them. The invitation itself stays untouched either way — this
+is still a courtesy, never a second admission gate.
 
 CLOSED (ticket 872, migration 0269): a fifth, READ-TIME-ONLY effective status, `issuer_lapsed`,
 now covers exactly the gap the paragraph below used to describe. When a still-`pending`
