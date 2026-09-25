@@ -782,12 +782,29 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
   // its own STEM, never by a number, for the reason every generation above carries: 0302 and 0304
   // are files of one ordered chain, so a database resting between them is a chain that failed.
   const wave4AccrualQueueSplices = await migrationApplied("accrual_revenue_side$");
+  // RIDERS SWEEP WAVE (S) INTEGRATION. Lane L4's #1048 splices this body ONCE more, at a number
+  // above every wave-4 splice: 0343 adds the `payroll_witness_rows` CTE, one union arm and one
+  // predicate inside the `payroll_rows` arm 0297 put there, which is the seventeenth row kind.
+  // Its own postcheck proves all sixteen pre-existing kinds survive at their exact marker counts
+  // and the shared column vector gains exactly one occurrence; the behavioural proof lives in
+  // payroll-completeness-witness.test.mjs, not here, and this cell's claim is still only "0231
+  // recuts nothing". Gated on 0343's own STEM, never on a number, for the reason every
+  // generation above carries.
+  const sweepWitnessQueueSplice = await migrationApplied("payroll_completeness_witness$");
   const activityRecut = await migrationApplied("^0264_");
   const workListWidened = await migrationApplied("^0267_");
+  // RIDERS SWEEP WAVE (S) INTEGRATION, the work-list side of the same collision. Lane L3's #1069
+  // (0341) recuts `clara.list_accounting_work` — and `get_accounting_work_row` and
+  // `get_work_claim_origin` with it — to project `allocation_count`, the number of staff advances
+  // a claim discharges. The signature does not move, so the pin's KEY is unchanged and only its
+  // value is; the behavioural proof lives in work-list.test.mjs. Gated on 0341's own STEM.
+  const sweepAllocationCount = await migrationApplied("work_claim_allocation_count$");
   const workListSig = workListWidened ? "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int,timestamptz,timestamptz)" : "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int)";
   const PINS = {
     "clara.list_review_queue(jsonb,jsonb,int)":
-      wave4AccrualQueueSplices
+      sweepWitnessQueueSplice
+        ? "ae0ee7e6bded5c7b9e3e1d5397e793522465adbee0ae789235d965a05abf9784"
+        : wave4AccrualQueueSplices
         ? "d5456eccb945decd9f61bba6194543d0528ee5f052776d6fdc20cf9fa0226b6b"
         : wave4QueueSplices
         ? "886df58021fbaed512000dc2a7f0a64fcabe2b93448a84ece5169b163fa47e0c"
@@ -797,7 +814,9 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
           ? "1641f99f4d295400bd39bd7b2cee3ac4cac2c34e7478078014e7305d99d9b570"
           : "29deb82d1609441d40a5be6131ffac12dc6b0ee8f1d37645dd9de986ce3eaf40",
     [workListSig]:
-      workListWidened
+      sweepAllocationCount
+        ? "fc679a2d4d96341d664d881b9e43da54ed1d8d2e5fe04f4ca45351ff7dbf8dbc"
+        : workListWidened
         ? "dffa917db2180f5a13be48795ea823ef5cece813677d8d6ad6c61cf01726a828"
         : "61bd9184fe271e081af426647c4081155c6d086368411478d1f2be88a1f4ca5a",
     "clara.get_client_work_pack(uuid,int)":
@@ -816,8 +835,8 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
     assert.equal(r.rows[0].sha, sha,
       `${sig} DRIFTED — 0231 recuts nothing, and only #974's (0260), #840/#861's (0262/0264), `
       + "#880/#905's (0266/0267), ticket 1012's (0288), riders wave 4 lane 01's "
-      + "(0297/0298/0299/0300) and riders wave 4 lane 03's (0302/0304) own named recuts are "
-      + "tolerated");
+      + "(0297/0298/0299/0300), riders wave 4 lane 03's (0302/0304) and the riders sweep wave's "
+      + "(0341 for the work list, 0343 for the queue) own named recuts are tolerated");
   }
   const secdef = await rootQuery(
     "select (select prosecdef from pg_proc where oid = 'clara.list_review_queue(jsonb,jsonb,int)'::regprocedure) as q, "
