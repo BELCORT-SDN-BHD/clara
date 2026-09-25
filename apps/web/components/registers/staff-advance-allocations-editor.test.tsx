@@ -54,6 +54,7 @@ const CANDIDATES: StaffAdvanceSummaryRow[] = [
 function Editor(props: {
   allocations?: { advance_id: string; amount_cents: number }[];
   sourceEnrolment?: (candidate: StaffAdvanceSummaryRow) => string | null;
+  rowProps?: (index: number, key: "advance" | "amount") => Record<string, unknown>;
 }): ReactElement {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -66,8 +67,15 @@ function Editor(props: {
       newRow: () => ({ advance_id: "", amount_cents: 0 }),
       optionLabel: (a) => `${a.issue_date} — ${a.outstanding_cents} outstanding`,
       ...(props.sourceEnrolment === undefined ? {} : { sourceEnrolment: props.sourceEnrolment }),
+      ...(props.rowProps === undefined ? {} : { rowProps: props.rowProps }),
     }),
   });
+}
+
+/** An attribute off a stub node, or null — the house idiom
+ *  (`staff-expense-claim-form.test.tsx`'s own `attrOf`) for reading an id or an aria attribute. */
+function attrOf(n: Stub, name: string): string | null {
+  return (n as { getAttribute?: (k: string) => string | null }).getAttribute?.(name) ?? null;
 }
 
 /** The caller's own note: the register spells out the account and the person, which is precisely
@@ -171,6 +179,67 @@ test("ticket 1052 a caller that passes no source-enrolment reader renders exactl
       ["Select an outstanding advance…", "2026-02-01 — 40000 outstanding", "2026-02-01 — 30000 outstanding"],
       "the option text is the caller's own label, unchanged",
     );
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// #1068 — WHEN THE CONFIRMED LIST IS TRULY EMPTY (every row removed), a caller that addresses row
+// 0's advance control by field id (the claim form's `claimAllocations` synthesises exactly one
+// phantom row for validation, addressed by `allocationFieldId(0, "advanceId")`, whenever the real
+// list has nothing in it — `lib/work/staff-expense-claim.ts`'s own header) still needs SOMETHING
+// on screen carrying that id, or the existing focus/scroll-to-error behaviour silently finds
+// nothing. THE SEAM IS THE EDITOR, for the same reason #1052's own header gives: two callers mount
+// this component, and a cell that only drove the claim form would leave the register's caller free
+// to drift.
+// ---------------------------------------------------------------------------------------------
+
+test("ticket 1068 an EMPTY list wires row zero's own field props onto the add-a-row button", async () => {
+  const h = await renderComponent(Editor({
+    allocations: [],
+    rowProps: (i, key) => (i === 0 && key === "advance"
+      ? { id: "advanceId", "aria-invalid": true, "aria-describedby": "advanceId-help advanceId-error" }
+      : {}),
+  }));
+  try {
+    await h.settle();
+    const node = h.find((n) => attrOf(n, "id") === "advanceId");
+    assert.ok(node, "SOMETHING on screen carries row 0's own field id once the list is empty");
+    assert.equal(node.tagName, "BUTTON", "…and it is the add-a-row affordance the empty state renders");
+    assert.equal(attrOf(node, "aria-invalid"), "true",
+      "the caller's own invalid wiring rides along, exactly as it would on a real row 0");
+    assert.equal(attrOf(node, "aria-describedby"), "advanceId-help advanceId-error");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1068 a NON-EMPTY list never steals row zero's field id for the add-a-row button", async () => {
+  const h = await renderComponent(Editor({
+    allocations: [{ advance_id: "", amount_cents: 0 }],
+    rowProps: (i, key) => (i === 0 && key === "advance" ? { id: "advanceId" } : {}),
+  }));
+  try {
+    await h.settle();
+    const withId = findAll(h.container as Stub, (n) => attrOf(n, "id") === "advanceId");
+    assert.equal(withId.length, 1, "the id names exactly ONE control");
+    assert.equal(withId[0]!.tagName, "SELECT", "…and it is the real row's own chooser, not the add button");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1068 a caller that passes NO rowProps (the register's own dialog) renders the empty " +
+  "add-a-row button exactly as before", async () => {
+  const h = await renderComponent(Editor({ allocations: [] }));
+  try {
+    await h.settle();
+    const button = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes(
+      messages.StaffAdvances.allocationsEditor.addAllocation));
+    assert.ok(button, "the add-a-row button still renders with nothing to spread onto it");
+    assert.equal(attrOf(button, "id"), null, "no id is invented for a caller that names none");
+    assert.equal(attrOf(button, "aria-invalid"), null);
   } finally {
     await h.unmount();
   }

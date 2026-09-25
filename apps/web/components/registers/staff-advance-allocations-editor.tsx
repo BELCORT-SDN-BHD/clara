@@ -123,6 +123,26 @@ export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
     onChange([...allocations, newRow()]);
   }
 
+  /**
+   * #1068 — WHEN THE LIST IS TRULY EMPTY, THE "ADD" BUTTON IS ROW ZERO'S OWN STAND-IN.
+   *
+   * A caller that addresses row 0's advance control by field id (the claim form's
+   * `claimAllocations` synthesises exactly one phantom row for validation, addressed by
+   * `allocationFieldId(0, "advanceId")`, whenever the CONFIRMED list has nothing left in it —
+   * `lib/work/staff-expense-claim.ts`'s own header) still needs something on screen carrying that
+   * id once every row is gone, or the existing focus/scroll-to-error behaviour silently finds
+   * nothing to focus. `rowProps(0, "advance")` is the SAME call a real row 0 would receive, so the
+   * id, the ref that registers the focus target, and the aria-invalid/aria-describedby wiring all
+   * land on the ONE control the empty state actually renders — never invented afresh, and never
+   * borrowed by any row that is genuinely there (a NON-empty list never reaches this branch).
+   *
+   * A caller that passes no `rowProps` at all — the staff-advance register's own dialog, which has
+   * no field-id-addressed validation to begin with — is untouched: `rowProps?.(...)` is undefined,
+   * the spread below is empty, and the button renders byte for byte as before.
+   */
+  const emptyStateProps: Record<string, unknown> =
+    allocations.length === 0 ? (rowProps?.(0, "advance") ?? {}) : {};
+
   return (
     <div className="flex flex-col gap-2">
       <Table>
@@ -207,7 +227,9 @@ export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
           ))}
         </TableBody>
       </Table>
-      <Button type="button" variant="outline" size="sm" onClick={addAllocation} disabled={candidates.length === 0}>
+      <Button type="button" variant="outline" size="sm" onClick={addAllocation}
+        {...emptyStateProps}
+        disabled={candidates.length === 0 || Boolean(emptyStateProps.disabled)}>
         {t("addAllocation")}
       </Button>
       {candidates.length === 0 ? <p className="text-xs text-muted-foreground">{t("noOutstanding")}</p> : null}
