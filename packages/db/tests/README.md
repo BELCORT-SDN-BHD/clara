@@ -2147,3 +2147,65 @@ to its 0283 pre-image and all four went RED, each for its own reason: the runtim
 wake task; the two entrances disagreed; the on-behalf one refused a `contract_confirmation` with
 the two-kind sentence; and the census found the body still carrying its own wall. The subject was
 then restored byte for byte to 0331's output and all four were green again.
+
+## A reversal reverses what its occurrence POSTED (#1074, `0332_plan_reversal_posted_basis.sql`)
+
+`plan-reversal-posted-basis.test.mjs`, frontier-gated on the `plan_reversal_posted_basis$` stem.
+Six cells. The subject is `clara._plan_admit_occurrence`, reached through the doors a bookkeeper
+actually uses — `clara.create_accrual_adjustment`, `clara.correct_accrual_adjustment` and
+`clara.request_plan_catch_up` — with every figure read back off `clara.journal_lines` after the
+estate's own posting lane committed it.
+
+**The defect the battery was written against, measured before the fix existed.** An accrual posts a
+period at 300,000c; a correction restates it to 275,000c (which advances the plan to a new live
+revision carrying a new basis); the reversal for the already-posted period is then admitted, and it
+posts 275,000c. 25,000c is left on the accrued-liability account that nothing ever posted and
+nothing will ever reverse.
+
+* `p1074.expense.reverses_what_posted` — that exact sequence on the expense side, end to end, and
+  the ticket's second acceptance criterion beside it: the balance-sheet leg AND the profit-and-loss
+  leg are each summed over every approved, un-reversed entry of the client and each must be zero.
+  This is the cell that was RED first, with `Dr 2020 275,000` where `Dr 2020 300,000` was owed.
+* `p1074.revenue.reverses_what_posted` — the ticket's third acceptance criterion. The same sequence
+  on a #942 revenue accrual (Dr accrued income / Cr revenue), reversed the same way, with the
+  accrued-income asset netting to zero. It is not a copy for its own sake: the fix is side-agnostic
+  only because the sides are exchanged by `clara._plan_occurrence_basis`, and a cell is the only
+  thing that makes "identically on both sides" a measurement.
+* `p1074.per_period.reverses_what_posted` — the same defect by its SECOND route. A
+  `stated_period_amount` accrual's figure never touches the plan revision: it lives in
+  `clara.accrual_period_amounts`, and `clara._plan_accrual_period_line` reads the HIGHEST revision
+  of the accrual detail, which a correction supersedes too. The cell states two periods, posts the
+  second at 200,000c, restates BOTH, and requires the reversal to undo 200,000c rather than the
+  160,000c the restated set names.
+* `p1074.not_posted.reads_live_revision` — the ticket's OUT-OF-SCOPE line, driven rather than
+  promised. A three-month window, the latest period posted, a correction, and then an EARLIER
+  period caught up: it has no entry behind it, takes no override, and posts the CORRECTED figure.
+  This is the one cell that stays GREEN against the pre-image, and deliberately so — it guards
+  against the fix being applied too widely, so it must pass both before and after.
+* `p1074.basis.only_the_lines_move` — the reversal's ADMITTED basis, read off
+  `clara.accounting_work`, not just the posted entry. Only the `lines` come from the entry: the memo
+  is still the plan's own with the reversed entry appended (0193's rule), the posting date is still
+  the reversal's own due date, the currency is still the revision's, and the basis carries exactly
+  `{currency, lines, memo, posting_date}` — so neither the resolver's `source` nor its `entry_id`
+  leaked into a journal basis. A fix that had replaced the basis wholesale would pass every cell
+  above and silently drop the memo.
+* `p1074.catalog.one_resolver` — the catalog census, the structural standard for an ungranted
+  internal (`clara._plan_posted_entry_lines` has no public interface of its own: it reads every
+  client's `clara.journal_lines` under a SECURITY DEFINER and reaches no application role by
+  design). It re-reads the resolver's volatility (STABLE — it reads a table, which is why the basis
+  body cannot), definer flag, owner, pinned `search_path` and owner-only ACL; requires the resolver
+  to be called by exactly `{_plan_admit_occurrence}`, because a second caller would be a second
+  place deciding what a reversal reverses; requires the resolver's own text to name no revision, no
+  accrual detail, no schedule and no clock; and re-reads that `clara._plan_occurrence_basis` is
+  still IMMUTABLE, which is the whole reason the override can arrive as an argument. The roster is
+  compared against a literal built with `order by p.proname`, the catalog's own C ordering, so it is
+  collation-proof by construction.
+
+**Non-vacuity.** The whole file was re-run with `clara._plan_admit_occurrence` recut on the rig back
+to its 0308 pre-image (the sha re-measured as `02ea6afe…` to prove the break was exact). FIVE of the
+six cells went RED, each for its own reason — the expense reversal posted 275,000c, the revenue one
+275,000c, the per-period one 160,000c, the admitted basis carried the corrected lines, and the
+census found ZERO callers of the resolver. The sixth, `p1074.not_posted`, stayed green, which is the
+correct answer for a guard against over-application. The subject was then restored byte for byte by
+re-running 0332's own statement (`5cc0fa56…` before the break and after the restore) and all six
+were green again.

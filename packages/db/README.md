@@ -7421,3 +7421,149 @@ not widen or narrow the authority-reference vocabulary; and it does not touch an
 rule. If a later lane ever needs one plan lane to admit a NARROWER set than the other two, the
 parameter goes on `clara._assert_plan_authority` — there is now exactly one place for it, which is
 the point of 0330 and 0331 together.
+
+## 0332 — a reversal reverses what its own occurrence posted (#1074, riders sweep wave, lane 01)
+
+`0332_plan_reversal_posted_basis.sql` mints `clara._plan_posted_entry_lines(uuid)` and recuts
+`clara._plan_admit_occurrence` so that a REVERSAL leg with a POSTED entry behind it is built from
+that entry's own journal lines instead of from the plan's live revision. It mints no table, no
+CHECK, no chart row and no grant, and it changes no refusal reason, SQLSTATE or message anywhere
+in the estate.
+
+**The defect, measured on the lane rig before a line of the file was written.** An expense accrual
+was configured at 300,000c through `clara.create_accrual_adjustment`; its current period's
+occurrence was admitted and posted through the estate's own lane (Dr 6100 300,000 / Cr 2020
+300,000). `clara.correct_accrual_adjustment` then restated it to 275,000c — which, by 0284's
+design, advances the plan to a NEW live revision carrying a NEW basis. The reversal leg was then
+admitted through `clara.request_plan_catch_up` and posted. It posted **Dr 2020 275,000 / Cr 6100
+275,000**, and the ledger was left carrying **25,000c on the accrued-liability account that nothing
+ever posted and nothing will ever reverse.**
+
+**Why, in one line of the pre-image.** `clara._plan_admit_occurrence` resolves the plan's live
+revision into `r` (`superseded_at is null`) and calls
+`clara._plan_occurrence_basis(r.basis, p_due, p_leg, v_primary_entry, v_line)` for BOTH legs. For a
+primary that is right, and is the whole point of a correction. For a reversal it is a category
+error: a reversal exists to undo ONE entry that is already on the books, and what that entry
+carries is a fact, not a restatement.
+
+**The fix uses a seam #653 already built.** `clara._plan_occurrence_basis` takes an optional
+`p_line_override` whose `lines` REPLACE the revision's before a reversal's sides are exchanged, and
+it stays `language sql IMMUTABLE` precisely because the lines ARRIVE as an argument. So this file
+needs no new mechanism — one more resolver and one more override:
+
+```
+    -- clara._plan_admit_occurrence, after 0332 (the whole of the change)
+    if p_leg = 'reversal' and v_primary_entry is not null then
+      v_posted_basis := clara._plan_posted_entry_lines(v_primary_entry);
+      if v_posted_basis is not null then
+        v_line := v_posted_basis;
+        v_line_missing := false;
+      end if;
+    end if;
+```
+
+`clara._plan_posted_entry_lines` is STABLE, SECURITY DEFINER, `search_path`-pinned and granted to
+NOBODY — the same posture `clara._plan_amortisation_period_line` (0223) and
+`clara._plan_accrual_period_line` (0303) carry, and for the same reason: it reads a table, which is
+why the IMMUTABLE basis body cannot do the lookup itself. It answers `clara.journal_lines` in
+`line_no` order (an INTEGER ordering, so no database collation can move it) and NULL when the entry
+carries fewer than two lines.
+
+**The block supersedes whichever per-kind arm ran, and that is deliberate.** The three arms above
+it resolve a line from the plan's live revision (`amortisation_schedule`,
+`revenue_recognition_schedule`) or from the LIVE accrual detail (`reversing_journal` under
+`stated_period_amount`). Every one of those sources is something a correction moves, and the
+ledger outranks all of them on the one question a reversal asks. In particular a
+`stated_period_amount` accrual reached the same defect by a second route —
+`clara._plan_accrual_period_line` reads the HIGHEST revision of the accrual detail, which a
+correction supersedes — and one mechanism closes both.
+
+**It clears a refusal a correction could previously create.** Before 0332, a correction that
+dropped the stated amount for a period already on the books left that period's reversal refused
+`CLR10 accrual_period_amount_missing` — a posted balance with no lawful way to come off the books.
+The override sets `v_line_missing := false`, so the reversal proceeds against what posted. That is
+a refusal ceasing to fire, never a new one appearing.
+
+**For a reversal with no correction behind it, nothing changes, and that is measured rather than
+argued.** `clara._record_journal_entry_core` writes `clara.journal_lines` from
+`clara._validate_entry_lines`'s output `with ordinality` (0225:1849-1854), and that validator keeps
+exactly `account_code` / `debit_cents` / `credit_cents` / `description` in the basis's own order
+(0009:294-299). So for an uncorrected plan the override IS the revision's own lines and the basis
+body produces the same bytes it produced before. The estate's existing reversal cells are the
+evidence: `p640.occ.reversal` compares a reversal's admitted basis line by line against the
+revision's, `p652.reversal.binds`, `p942.posts` and #937's per-period pair compare posted lines, and
+all of them stay green (250 plan-family cells were run; see the lane report).
+
+The one place the two can differ without a correction is a 1..5c residual, which
+`clara._validate_entry_lines` settles onto the client's rounding account as an EXTRA line. Before
+0332 a reversal dropped that line and the validator minted its own mirror at posting time; after
+it, the reversal carries the mirror explicitly. The netted ledger is identical and the explicit form
+is the better of the two, because the reversal now names every line it undoes. No accrual,
+prepayment or recognition basis can produce a residual — both legs of each carry the same figure —
+so this is a statement about the shared body, not about a lane that ships today.
+
+**One consequence nobody asked for, and it is the right one.** If a correction moved an accrual onto
+DIFFERENT accounts after a period posted, the reversal now posts to the ORIGINAL two accounts (the
+ones carrying the balance) rather than the new ones. If one of those has since been deactivated, the
+reversal REFUSES at posting time through `clara._validate_entry_lines`'s existing "line codes to a
+non-existent account" floor instead of posting to an account that carries nothing. A balance cannot
+be cleared off an account the books will not accept a line on; the remedy is to reactivate it. No
+new refusal is minted here, and the floor is 0009's, unchanged.
+
+**The NULL guard is a belt, not a branch a caller can reach**, and the file says so in a checkable
+way rather than in prose. `v_primary_entry` is the entry `clara._plan_primary_entry` just resolved
+under this plan's row lock — approved, still live, carrying a committed receipt —
+`clara._validate_entry_lines` refused it at posting time unless it carried at least two lines, and
+`clara._tf_lines_immutable` (0003) has frozen those lines ever since. The prestate asserts that
+belt is still on `clara.journal_lines` and pins the validator's own `sha256(prosrc)`; if the belt
+ever fired it would leave today's basis rather than post a figure nobody measured.
+
+**What is proved, and how.** The recut is static DDL — no `pg_get_functiondef` splice, no `execute`,
+no dynamic SQL of any kind — so **no new entry in `apps/web/tests/firm-scope-db-pins.corpus.ts` is
+owed**; `apps/web/tests/firm-scope-db-pins.test.ts` was run to confirm it. The installed body is
+0308's LIVE pre-image with exactly ONE block inserted and ONE declaration added, and the tail proves
+that by **reverse substitution** (0330's `T.8`, 0331's `T.5`): it reads the installed body, REMOVES
+this file's two additions, and requires what is left to hash to the `sha256(prosrc)` the prestate
+pinned (`02ea6afe…`). That is the mechanical form of "nothing else in the admission core moved" —
+the plan row lock, the client-status gate, the authority window, the due gate, convergence, the
+one-period-one-leg wall, the per-kind arms, the missing-line refusal, the orphan wall, the Work
+admission, the occurrence ledger and the audit row cannot have moved. The tail also re-reads the
+post-image (`5cc0fa56…`), the resolver's own output (`e13df9d0…`), both bodies' whole grant posture
+(owner-only, unreachable by `clara_authenticated`, `clara_runtime`, `clara_agent_ro` and PUBLIC),
+and:
+
+* the resolver is called by **exactly one** `clara` body, `_plan_admit_occurrence` — a second caller
+  would be a second place deciding what a reversal reverses;
+* the override is gated on the literal
+  `if p_leg = 'reversal' and v_primary_entry is not null then`, which is how the ticket's
+  out-of-scope line ("an occurrence that has NOT posted keeps reading the live revision") is
+  structural rather than promised;
+* the resolver's own text names none of `accounting_plan_revisions`, `accrual_adjustments`,
+  `accrual_period_amounts`, `prepayment_schedules`, `revenue_recognition_schedules` or `now(` — it
+  answers from `clara.journal_lines` alone, because a resolver that reached any of those would be
+  re-deriving what the plan STATES, which is the very thing this file exists to stop a reversal
+  doing;
+* `clara._plan_occurrence_basis` is byte-identical (`cef3264e…`) and still IMMUTABLE, and
+  `clara._plan_primary_entry` (`e3106ae1…`), `clara._plan_accrual_period_line` (`9951a63f…`) and
+  `clara.correct_accrual_adjustment` (`6a59591a…`) are byte-identical to their pre-images — the last
+  of those because the ticket's out-of-scope line is that the correction door does not change, and
+  the honest way to keep a promise about a body is to pin it at both ends.
+
+The census compares against a literal roster built with `order by p.proname`, the catalog's own C
+ordering (`proname` is `name`, which never takes a database collation), so it is collation-proof by
+construction.
+
+**Redo-safe by construction (#957).** Every statement is `create or replace function`, `revoke` or
+`comment on`. The prestate is bimodal on the one body this file recuts and absence-or-own-output on
+the one name it mints, and it prints which branch it took. The FIRST APPLY branch ran for real
+through `pnpm db:migrate` and printed `FIRST APPLY … clara._plan_posted_entry_lines is absent`; the
+REDO branch was then exercised with `CLARA_MIGRATION_REDO=0332_plan_reversal_posted_basis`. There is
+no data-dependent branch: every prestate and tail arm reads `pg_proc` and `pg_trigger` only.
+
+**What it does NOT do.** It does not touch `clara._plan_occurrence_basis`,
+`clara._plan_primary_entry`, `clara._plan_accrual_period_line` or any correction door. It does not
+touch `clara.preview_accounting_plan`: a preview only ever projects events AFTER the plan's last
+existing occurrence (`v_start := greatest(r.effective_from, v_after + 1)`), so no previewed reversal
+can have a posted accrual behind it, and the preview already passes `null` for the reversed entry —
+a projection of the past would be a different feature. And it changes nothing about an occurrence
+that has not posted: that is what a correction is for.

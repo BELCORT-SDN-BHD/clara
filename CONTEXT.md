@@ -84,7 +84,8 @@ created — and every attempt it ever admitted, so a cancelled one stays reachab
 refused one records the refusal and creates nothing, and re-attempting it is an explicit catch-up
 rather than the next scan's business. A REVERSING occurrence also names the journal entry it undoes:
 it is admissible only once its own period's accrual has POSTED a still-live entry, never merely
-because that accrual was admitted.
+because that accrual was admitted, and it posts that entry's OWN lines with the sides exchanged —
+so a correction that lands between a posting and its reversal cannot leave a balance behind.
 An AMORTISATION occurrence posts the amount ITS OWN period was allocated — not the plan's stored
 basis amount, which is only the first period's — and a due date the allocation does not cover is a
 typed refusal rather than a fall-back to that constant.
@@ -895,17 +896,20 @@ The second leg of one accrual's schedule: the same entry with both sides exchang
 day of the period after the one it accrued for, and NAMING the journal entry it undoes. It is
 admissible only once its own period's accrual has POSTED an entry that is still live — never merely
 because that accrual was admitted — and a reversal the lane reached before then is recorded as
-refused, with which of the three ways the accrual failed to stand behind it.
+refused, with which of the three ways the accrual failed to stand behind it. "The same entry" is
+literal: a reversal is built from the lines the entry it names actually carries, so what it undoes
+is what was POSTED, never what the schedule states by the time the reversal comes due.
 _Avoid_: A correction; a cancellation; a separately authorised entry; treating an admitted accrual
-as a posted one.
+as a posted one; reversing what the accrual says today rather than what its own period posted.
 
 **Accrual correction**:
 A restatement of an accrual's own particulars — amount, either account leg, the service period, the
 method or the instruction — that advances its schedule to a NEW plan revision and writes a
 SUCCESSOR accrual-adjustment row for it, naming the row it supersedes. The superseded row is kept,
 stamped with which row corrected it, and is otherwise unchanged; occurrences the schedule has
-already admitted keep naming the revision they ran under, so a correction reaches only what has not
-yet come due. It moves neither the schedule nor the authority window — those are the LIVE revision's
+already admitted keep naming the revision they ran under, and a period that has already POSTED is
+still reversed at the figure it posted, so a correction reaches only what has not yet come due. It
+moves neither the schedule nor the authority window — those are the LIVE revision's
 own, carried through unchanged — because a correction restates what was STATED, not when or how
 often the plan runs.
 _Avoid_: The generic plan revision alone (it advances the schedule but leaves the accrual's own

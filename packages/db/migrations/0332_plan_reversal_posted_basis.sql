@@ -108,14 +108,13 @@
 -- `comment on`, each idempotent by construction. The prestate is BIMODAL on the one body this file
 -- recuts: it admits either the measured pre-image (FIRST APPLY) or this file's own output (REDO)
 -- and refuses anything else, printing which branch it took; the resolver this file mints is probed
--- for ABSENCE-or-own-output for the same reason. Because a bimodal pin hides its first-apply
--- branch from `CLARA_MIGRATION_REDO` (which can only ever take the "already live" branch), the
--- first-apply branch was proved by hand on the lane database before this file was committed:
--- inside one transaction that was rolled back, 0308's own `create or replace function` statement
--- was re-run to restore the pre-image, the resolver was dropped, this prestate block was run
--- verbatim, and it printed its FIRST APPLY notice and passed. The lane report records that run.
--- This file has NO data-dependent branch: every prestate and tail arm reads the catalog
--- (`pg_proc`, `pg_trigger`) only, so no arm needs rows to be entered.
+-- for ABSENCE-or-own-output for the same reason. A bimodal pin normally hides its first-apply
+-- branch from `CLARA_MIGRATION_REDO` (which can only ever take the "already live" branch), so the
+-- wave asks for that branch to be proved by hand; here it needed no hand proof, because the FIRST
+-- apply of this file on the lane database took it FOR REAL and printed `FIRST APPLY … absent`
+-- (the lane report records the run, and the REDO branch beside it). This file has NO
+-- data-dependent branch: every prestate and tail arm reads the catalog (`pg_proc`, `pg_trigger`)
+-- only, so no arm needs rows to be entered.
 -- =====================================================================================
 
 do $p1074_pre$
