@@ -7751,7 +7751,7 @@
     "standingScopeNote": "This is a firm-wide instruction. It covers every client of this firm, and only an admin or owner can give it or take it back.",
     "standingWithdrawalNote": "Taking the instruction back closes the lane to new schedules. A schedule already running keeps posting to the end of its term, under the member who authorised it.",
     "standingWithdrawalStopNote": "To stop one, open that client and pause or end the schedule on its own Plans page (Client → Plans). Pausing blocks the next posting and keeps the schedule; ending it closes the schedule for good.",
-    "standingWithdrawnPlans": "{count, plural, =0 {Nothing was running under it, so nothing keeps posting.} one {One schedule opened under it keeps posting, under the member who authorised it.} other {# schedules opened under it keep posting, under the member who authorised them.}}",
+    "standingWithdrawnPlans": "{count, plural, =0 {No schedule opened under it was running when you took it back.} one {One schedule opened under it keeps posting, under the member who authorised it.} other {# schedules opened under it keep posting, under the member who authorised them.}}",
     "usageHeading": "Model usage",
     "usageSubheading": "What Clara's models were asked to do for this firm, by month.",
     "usagePeriodLabel": "Month",

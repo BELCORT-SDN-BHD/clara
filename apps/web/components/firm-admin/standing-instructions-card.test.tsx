@@ -199,8 +199,9 @@ test("ticket 1147 — a withdrawal that leaves schedules running SAYS SO, with t
   } finally { await h.unmount(); }
 });
 
-test("ticket 1147 — ONE is one, and a withdrawal that stopped nothing running says that too", async () => {
-  for (const [count, pattern] of [[1, /One schedule/i], [0, /Nothing was running/i]] as const) {
+test("ticket 1147 — ONE is one, and a withdrawal that stopped nothing running says WHAT WAS TRUE AT THE MOMENT, not what will be true afterwards", async () => {
+  for (const [count, pattern] of
+    [[1, /One schedule/i], [0, /was running when you took it back/i]] as const) {
     const h = await mount({ status: "ready", data: LIVE }, { withdraw: async () => withdrawnWith(count) });
     try {
       await clickButton(buttonMatching(h, /take this back/i) as Stub);
@@ -208,6 +209,18 @@ test("ticket 1147 — ONE is one, and a withdrawal that stopped nothing running 
       assert.match(h.text(), pattern, `plans_still_posting=${count} reads wrong: ${h.text()}`);
       // …and never the plural sentence for a singular fact.
       if (count === 1) assert.doesNotMatch(h.text(), /1 schedules/i, "a plural sentence for one schedule");
+      // FIX ROUND (ADV-04). The count is the withdrawing transaction's SNAPSHOT. The wake arm of
+      // clara._prepayment_schedule_core resolves the live instruction with a plain
+      // `select … limit 1` and takes no share lock (read off the installed body on clara_c01), and
+      // the withdraw door's own `for update` is on the instruction ROW, so an unattended close_prep
+      // run already in flight can commit a plan a moment later. A `=0` sentence that asserted
+      // "nothing keeps posting" would then be a firm-facing false statement in exactly the window
+      // this key exists to close. The zero arm therefore states what was MEASURED, at the moment it
+      // was measured, and promises nothing about afterwards.
+      if (count === 0) {
+        assert.doesNotMatch(h.text(), /nothing keeps posting/i,
+          `the zero arm promises a future this transaction cannot see: ${h.text()}`);
+      }
     } finally { await h.unmount(); }
   }
 });
@@ -222,7 +235,8 @@ test("ticket 1147 — a count the door did not answer with is NOT painted as zer
     await h.settle();
     const text = h.text();
     assert.match(text, /Taken back\. Clara will ask again/i);
-    assert.doesNotMatch(text, /Nothing was running/i, `an unknown count was painted as zero: ${text}`);
+    assert.doesNotMatch(text, /was running when you took it back/i,
+      `an unknown count was painted as zero: ${text}`);
     assert.doesNotMatch(text, /schedules? opened under it/i, `an unknown count was painted: ${text}`);
   } finally { await h.unmount(); }
 });

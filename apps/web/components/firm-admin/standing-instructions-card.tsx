@@ -141,9 +141,16 @@ export function StandingInstructionsCard({
                     the one moment it is worth saying that it did not.
 
                     `null` IS NOT ZERO and is rendered as SILENCE. It means the door did not say
-                    (a database below 0362), and painting it as "nothing keeps posting" would state
-                    as fact the very thing this sentence exists to correct. The standing note below
-                    still tells the person that a running schedule is not stopped. */}
+                    (a database below 0362), and painting it as a count of zero would state as fact
+                    the very thing this sentence exists to correct. The standing note below still
+                    tells the person that a running schedule is not stopped.
+
+                    AND THE ZERO ARM STATES A MOMENT, NOT A FUTURE (fix round, ADV-04): the count is
+                    the withdrawing transaction's snapshot, and the clocked lane takes no share lock
+                    on the instruction row, so a `close_prep` run already in flight can land a plan
+                    just after. "No schedule opened under it was running when you took it back" is
+                    what was measured; "nothing keeps posting" would have been a promise this
+                    transaction cannot make. */}
                 {outcome.plansStillPosting !== null ? (
                   <p className="mt-1">
                     {t("standingWithdrawnPlans", { count: outcome.plansStillPosting })}
