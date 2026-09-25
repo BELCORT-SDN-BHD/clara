@@ -391,6 +391,24 @@ const AGREEMENT_0299_COHORT = [...AGREEMENT_0299_RUNTIME_FNS];
 // _post_payroll_run) keep the grants they already had, which the migration's own tail re-derives.
 const PAYROLL_COMPLETENESS_0343_HUMAN_FNS = ["answer_payroll_completeness"];
 const PAYROLL_COMPLETENESS_0343_COHORT = [...PAYROLL_COMPLETENESS_0343_HUMAN_FNS];
+// #1148 [0363, a granted document-scoped read of the payroll posting verdict] — its OWN cohort per
+// the "wholly present or wholly absent" rule, exactly as PAYROLL_0296 and PAYROLL_COMPLETENESS_0343
+// are: folding it into either array would red every database whose chain stops before 0363.
+//
+//   get_payroll_posting_state — ONE clara_authenticated door at the VIEWER floor (body-enforced,
+//     through clara._human_ctx, the estate's one floor body). It wraps
+//     clara._payroll_posting_verdict, which stays UNGRANTED: before 0363 the only way to SEE the
+//     verdict was a Needs-you queue row or the entry's own receipt, so a document page that wanted
+//     to say "this payslip did not post because …" had no read to call. The wrapper projects the
+//     verdict's sentence, verdict, rung, reason and completeness and NOT its rung_vector.
+//
+//   NOTHING ELSE MOVES, and 0363's own tail re-derives all of it: the internal keeps its
+//   owner-only ACL, clara_runtime and both agent read roles and all four wake lanes gain ZERO
+//   (a model-lane twin is a successor contract for a later cut, not this file's business), and
+//   the two surfaces that already reach the verdict — answer_payroll_completeness and
+//   list_review_queue — keep the grants they had.
+const PAYROLL_POSTING_STATE_0363_HUMAN_FNS = ["get_payroll_posting_state"];
+const PAYROLL_POSTING_STATE_0363_COHORT = [...PAYROLL_POSTING_STATE_0363_HUMAN_FNS];
 // #1061 [0342, the payroll registry's business_operation catches up to #946] — COMMENT-ONLY,
 // deliberately, and for the SAME reason #782's 0245 entry and #988's 0246 entry above carry none.
 //
@@ -4009,6 +4027,10 @@ export const ALLOWED = {
     // ONLY, bookkeeper floor body-enforced; clara_runtime, both agent read roles and all four wake
     // lanes gain ZERO, and the two internals it reaches through hold no role at all.
     ...PAYROLL_COMPLETENESS_0343_HUMAN_FNS,
+    // #1148 [0363] the payroll posting-state read — see the block above. clara_authenticated ONLY,
+    // viewer floor body-enforced; clara_runtime, both agent read roles and all four wake lanes gain
+    // ZERO, and clara._payroll_posting_verdict — the body it wraps — stays ungranted to every role.
+    ...PAYROLL_POSTING_STATE_0363_HUMAN_FNS,
     // #949 [0300] the tenancy contract-terms + rent-plan lane — see the block above.
     // clara_authenticated ONLY, floors body-enforced (viewer for the four reads, bookkeeper for
     // the six acts); clara_runtime, both agent read roles and all four wake lanes gain ZERO, and
@@ -4583,6 +4605,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#947 0298 payroll net-pay settlement", PAYROLL_SETTLEMENT_0298_COHORT, liveNames));
   failures.push(...cohortFailures("#948 0299 agreement-contract reading + acquisition lane", AGREEMENT_0299_COHORT, liveNames));
   failures.push(...cohortFailures("#1048 0343 payroll completeness witness", PAYROLL_COMPLETENESS_0343_COHORT, liveNames));
+  failures.push(...cohortFailures("#1148 0363 payroll posting-state read", PAYROLL_POSTING_STATE_0363_COHORT, liveNames));
   failures.push(...cohortFailures("#949 0300 tenancy contract terms + recurring rent plan", TENANCY_RENT_0300_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3 PR-1a bank/COA core extractions", EXTRACTION_F_A3_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("#623 0178 accounting-work lane", WORK_JOURNAL_0178_COHORT, liveNames));
