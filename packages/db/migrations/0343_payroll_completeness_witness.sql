@@ -964,3 +964,285 @@ begin
   end if;
 end
 $w1048_persist$;
+
+-- =====================================================================================
+-- SectionE  A WITNESSED ROW SUM IS A POSTING BASIS -- clara._payroll_entry_plan recut (AC1).
+--
+--     0297's drafting body, with ONE new decision and nothing else moved: WHERE a leg's figure may
+--     come from. The leg roster, the account resolution, the exact-balance rule, the
+--     no-leg-for-an-unprinted-line rule, the month parse and every refusal name it already emits
+--     are untouched, and the #946 battery re-drives all of them.
+--
+--     THE PRINTED TOTAL STILL WINS. A question the page prints is drafted from the PRINTED figure,
+--     always, and a printed total the row sum contradicts is still `totals_mismatch` inside the
+--     fact state -- which never reaches this body as a postable figure and is refused by the
+--     verdict's `arithmetic_holds` rung. The row sum is a fallback for SILENCE, never a second
+--     opinion about a figure. That is the brief's own AC4, and it is why the admission below is
+--     decided ONCE, before the leg loop, from the two questions without which there is no entry.
+--
+--     THE ADMISSION, IN ORDER:
+--       1. If gross and net are both `established`, the page prints its totals: nothing to admit,
+--          `posting_basis.kind = 'printed_totals'`, and this body behaves exactly as it did.
+--       2. Otherwise, for each of gross and net that is not `established`: a row sum stands in ONLY
+--          if the page was SILENT about it (`not_printed`) AND the evaluator computed a figure for
+--          it. Anything else -- a contested reading, an unreadable rendering, a totals mismatch, a
+--          silence with no rows to sum -- is `run_totals_not_printed`, the refusal 0297 already
+--          emits, with 0297's own detail shape. A reading problem is never papered over by a sum.
+--       3. If a sum could stand in, the COMPLETENESS VERDICT decides whether it may:
+--            witnessed    -> admitted; the witness is named in posting_basis.
+--            contradicted -> `completeness_contradicted` (AC3). This is the one case where a
+--                            witness makes things worse than silence: the page says twelve and the
+--                            reading found eleven, so the reading is KNOWN incomplete.
+--            otherwise    -> the parked question, resolved by the answer the verdict injects:
+--                            a named `yes` admits the sum (witness `answered_question`), a named
+--                            `no` refuses `completeness_declined`, and no answer at all refuses
+--                            `completeness_unwitnessed`.
+--
+--     A v1 STATE IS ADMITTED AND HAS NO WITNESS. Every payroll pair read before 0343 banked
+--     `state_version: v1` with no `completeness` object; this body takes both versions by name and
+--     treats a v1 state as `absent`, which puts an already-read, never-posted summary on the parked
+--     question rather than on the dead end 0297 left it at. That is a deliberate behaviour change
+--     for already-banked reads, and it is the change the brief asks for.
+--
+--     `completeness_answer` IS INJECTED, NOT READ. This body takes (client, state) and stays a PURE
+--     function of its inputs -- it reaches for no table, so the same state and the same chart give
+--     the same plan forever. clara._payroll_posting_verdict merges the answer record into the state
+--     it passes, under the key `completeness_answer`; a caller that passes the banked state alone
+--     simply sees the unanswered case. That is deliberately not a third argument: an overload of a
+--     body two callers already name by signature is a wider change than a key nobody else writes.
+--
+--     `unprinted` KEEPS ITS OWN MEANING, which 0297 states as "the plan drew no figure from it
+--     either way" rather than "the page was silent". A question whose figure came from the row sum
+--     IS drawn from, so it is NOT listed there; `posting_basis.row_sum_fields` names those instead,
+--     which is the honest split and leaves #946's own `unprinted` cell byte-unchanged.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara._payroll_entry_plan(p_client uuid, p_state jsonb)
+  returns jsonb language plpgsql stable
+  set search_path = clara, pg_temp as $pep$
+declare
+  -- THE LEG ROSTER, in the brief's own order (0297's array, unchanged).
+  v_spec jsonb := jsonb_build_array(
+    jsonb_build_object('a','6000','side','debit', 'f1','payroll.run.gross_pay',      'f2',null,'d','Gross pay'),
+    jsonb_build_object('a','6010','side','debit', 'f1','payroll.run.epf_employer',   'f2',null,'d','EPF contribution (employer)'),
+    jsonb_build_object('a','6020','side','debit', 'f1','payroll.run.socso_employer', 'f2',null,'d','SOCSO contribution (employer)'),
+    jsonb_build_object('a','6030','side','debit', 'f1','payroll.run.eis_employer',   'f2',null,'d','EIS contribution (employer)'),
+    jsonb_build_object('a','6040','side','debit', 'f1','payroll.run.hrdf_levy',      'f2',null,'d','HRDF levy'),
+    jsonb_build_object('a','2100','side','credit','f1','payroll.run.epf_employee',   'f2','payroll.run.epf_employer',  'd','EPF payable (employee + employer)'),
+    jsonb_build_object('a','2110','side','credit','f1','payroll.run.socso_employee', 'f2','payroll.run.socso_employer','d','SOCSO payable (employee + employer)'),
+    jsonb_build_object('a','2120','side','credit','f1','payroll.run.eis_employee',   'f2','payroll.run.eis_employer',  'd','EIS payable (employee + employer)'),
+    jsonb_build_object('a','2130','side','credit','f1','payroll.run.pcb',            'f2',null,'d','PCB payable'),
+    jsonb_build_object('a','2140','side','credit','f1','payroll.run.hrdf_levy',      'f2',null,'d','HRDF levy payable'),
+    jsonb_build_object('a','2040','side','credit','f1','payroll.run.net_pay',        'f2',null,'d','Net pay'));
+  r record;
+  v_legs jsonb := '[]'::jsonb; v_refusals jsonb := '[]'::jsonb;
+  v_unprinted text[] := '{}'; v_missing text[] := '{}'; v_basis text;
+  v_c1 bigint; v_c2 bigint; v_cents bigint; v_name text;
+  v_dr bigint := 0; v_cr bigint := 0;
+  v_period_raw text; v_period_state text; v_month date; v_posting date;
+  v_f text;
+  -- #1048's own locals.
+  v_comp jsonb; v_answer jsonb; v_cverdict text; v_rows_read int;
+  v_admit_sum boolean := false; v_needs_sum boolean := false; v_witness_used text;
+  v_summed text[] := '{}'; v_fstate text; v_fsum bigint; v_sum1 boolean; v_sum2 boolean;
+  v_b1 text; v_b2 text;
+begin
+  -- #1048: BOTH STATE VERSIONS ARE ADMITTED BY NAME. A v1 state is a reading banked before 0343;
+  -- it carries no `completeness` object, which this body reads as "no witness".
+  if p_state is null or coalesce(p_state->>'state_version','') not in ('v1','v2') then
+    return jsonb_build_object('plan_version','v1','ready',false,'legs','[]'::jsonb,
+      'debit_cents',0,'credit_cents',0,'unprinted','[]'::jsonb,'missing_accounts','[]'::jsonb,
+      'posting_basis', jsonb_build_object('kind','none','witness',null,'rows_read',0,
+        'employee_count',null,'page_count',null,'row_sum_fields','[]'::jsonb,'answer',null),
+      'refusals', jsonb_build_array(jsonb_build_object('reason','state_unreadable',
+        'detail', jsonb_build_object('state_version', p_state->>'state_version'))));
+  end if;
+
+  v_comp := p_state->'completeness';
+  v_answer := p_state->'completeness_answer';          -- injected by the verdict; absent otherwise
+  v_cverdict := coalesce(v_comp->>'verdict', 'absent');
+  v_rows_read := coalesce(nullif(p_state->'rows'->>'agreed','')::int, 0);
+
+  -- 1 . THE MONTH. Established from the rendering the page printed, never from today's date and
+  --     never from the upload.
+  v_period_state := p_state->'facts'->'payroll.run.period'->>'state';
+  v_period_raw := p_state->'facts'->'payroll.run.period'->>'printed_raw';
+  if v_period_state = 'established' then
+    v_month := clara._payroll_period_month(v_period_raw);
+  end if;
+  if v_month is null then
+    v_refusals := v_refusals || jsonb_build_object('reason','period_not_established',
+      'detail', jsonb_build_object('period_state', v_period_state, 'period_raw', v_period_raw));
+  else
+    -- THE LAST DAY OF THE PAYSLIP'S OWN MONTH.
+    v_posting := (v_month + interval '1 month - 1 day')::date;
+  end if;
+
+  -- 2 . THE TWO QUESTIONS WITHOUT WHICH THERE IS NO ENTRY, and #1048's fallback for them. A run
+  --     whose gross or whose net the page does not print has nothing this body can honestly post
+  --     -- UNLESS the evaluator summed that column over the quoted rows AND the page (or a named
+  --     person) witnessed that those rows are all the rows.
+  foreach v_f in array array['payroll.run.gross_pay','payroll.run.net_pay'] loop
+    v_fstate := p_state->'facts'->v_f->>'state';
+    if v_fstate = 'established' then
+      continue;
+    end if;
+    v_fsum := case when jsonb_typeof(p_state->'facts'->v_f->'computed_cents') = 'number'
+                   then (p_state->'facts'->v_f->>'computed_cents')::bigint end;
+    if v_fstate = 'not_printed' and v_fsum is not null then
+      -- A row sum EXISTS for this question. Whether it may be used is decided once, below.
+      v_needs_sum := true;
+    else
+      -- 0297's own refusal, with 0297's own detail shape: the page printed no total and no sum can
+      -- stand in (no rows, a contested reading, an unreadable rendering, a totals mismatch).
+      v_refusals := v_refusals || jsonb_build_object('reason','run_totals_not_printed',
+        'detail', jsonb_build_object('field', v_f,
+          'field_state', v_fstate,
+          'field_reason', p_state->'facts'->v_f->>'reason'));
+    end if;
+  end loop;
+
+  -- 2b . #1048 . MAY THE SUM STAND IN? Decided ONCE, and only when a sum is actually needed and
+  --      the OTHER of the two questions did not already refuse for want of any figure at all.
+  --      It is deliberately NOT gated on "no refusal yet": a page whose month is also unreadable
+  --      must still report the completeness rung honestly, or the verdict's rung vector would say
+  --      `run_totals_printed: pass` and `completeness_witness: pass` about a page that prints
+  --      neither -- a rung that lies. The month's own refusal is earlier in the roster and is
+  --      still the first thing a person is told.
+  if v_needs_sum and not exists (
+       select 1 from jsonb_array_elements(v_refusals) x where x->>'reason' = 'run_totals_not_printed') then
+    if v_cverdict = 'witnessed' then
+      v_admit_sum := true; v_witness_used := v_comp->>'witness';
+    elsif v_cverdict = 'contradicted' then
+      v_refusals := v_refusals || jsonb_build_object('reason','completeness_contradicted',
+        'detail', jsonb_build_object('rows_read', v_rows_read,
+          'employee_count', coalesce(v_comp->'employee_count','null'::jsonb),
+          'reason', v_comp->>'reason'));
+    elsif coalesce(v_answer->>'answer','') = 'yes' then
+      v_admit_sum := true; v_witness_used := 'answered_question';
+    elsif coalesce(v_answer->>'answer','') = 'no' then
+      v_refusals := v_refusals || jsonb_build_object('reason','completeness_declined',
+        'detail', jsonb_build_object('rows_read', v_rows_read,
+          'answered_at', v_answer->'answered_at', 'answered_by_name', v_answer->'answered_by_name'));
+    else
+      v_refusals := v_refusals || jsonb_build_object('reason','completeness_unwitnessed',
+        'detail', jsonb_build_object('rows_read', v_rows_read,
+          'reason', coalesce(v_comp->>'reason','the reading predates the completeness witness')));
+    end if;
+  end if;
+
+  -- 3 . THE LEGS.
+  for r in select (t.x->>'a') acc, (t.x->>'side') side, (t.x->>'f1') f1, (t.x->>'f2') f2,
+                  (t.x->>'d') d, t.ord
+             from jsonb_array_elements(v_spec) with ordinality as t(x, ord)
+            order by t.ord loop
+    -- #1048: a figure comes from the PRINTED total when the page prints one, and from the
+    -- evaluator's own row sum only when the sum was admitted above. There is no third source.
+    v_sum1 := false; v_sum2 := false;
+    if (p_state->'facts'->r.f1->>'state') = 'established' then
+      v_c1 := nullif(p_state->'facts'->r.f1->>'printed_cents','')::bigint;
+    elsif v_admit_sum and (p_state->'facts'->r.f1->>'state') = 'not_printed'
+          and jsonb_typeof(p_state->'facts'->r.f1->'computed_cents') = 'number' then
+      v_c1 := (p_state->'facts'->r.f1->>'computed_cents')::bigint; v_sum1 := true;
+    else
+      v_c1 := null;
+    end if;
+    if r.f2 is null then
+      v_c2 := null;
+    elsif (p_state->'facts'->r.f2->>'state') = 'established' then
+      v_c2 := nullif(p_state->'facts'->r.f2->>'printed_cents','')::bigint;
+    elsif v_admit_sum and (p_state->'facts'->r.f2->>'state') = 'not_printed'
+          and jsonb_typeof(p_state->'facts'->r.f2->'computed_cents') = 'number' then
+      v_c2 := (p_state->'facts'->r.f2->>'computed_cents')::bigint; v_sum2 := true;
+    else
+      v_c2 := null;
+    end if;
+    v_cents := coalesce(v_c1,0) + coalesce(v_c2,0);
+    -- THE BASIS NAMES THE QUESTION AND, WHEN THE FIGURE WAS SUMMED, SAYS SO. `#row_sum` is the
+    -- suffix, so a reader of a posted entry can tell a printed figure from a computed one without
+    -- going back to the reading.
+    v_b1 := case when v_c1 is not null then r.f1 || case when v_sum1 then '#row_sum' else '' end end;
+    v_b2 := case when v_c2 is not null then r.f2 || case when v_sum2 then '#row_sum' else '' end end;
+    v_basis := concat_ws('+', v_b1, v_b2);
+    if v_sum1 and not (r.f1 = any(v_summed)) then v_summed := v_summed || r.f1; end if;
+    if v_sum2 and not (r.f2 = any(v_summed)) then v_summed := v_summed || r.f2; end if;
+
+    -- WHAT THE PLAN DREW NO FIGURE FROM, recorded by QUESTION rather than by leg and DISTINCT: the
+    -- levy is read by two legs (its expense and its payable) and the two paired payables read two
+    -- questions each, so a per-leg list would both repeat itself and lose the employer side of a
+    -- pair whose employee side printed. A question the page printed as 0.00 belongs here too --
+    -- the plan drew no figure from it either way. A question whose figure came from the ROW SUM is
+    -- NOT here: the plan did draw from it, and posting_basis.row_sum_fields names it instead.
+    if v_c1 is null or v_c1 = 0 then
+      if not (r.f1 = any(v_unprinted)) then v_unprinted := v_unprinted || r.f1; end if;
+    end if;
+    if r.f2 is not null and (v_c2 is null or v_c2 = 0) then
+      if not (r.f2 = any(v_unprinted)) then v_unprinted := v_unprinted || r.f2; end if;
+    end if;
+
+    if v_cents = 0 then
+      -- AN UNPRINTED LINE PRODUCES NO LEG, and neither does a printed zero: 0.00 is a reading,
+      -- and a zero-cent line would assert a movement the document prices at nothing.
+      continue;
+    end if;
+
+    select a.name into v_name from clara.coa_accounts a
+     where a.client_id = p_client and a.account_code = r.acc and a.is_active;
+    if v_name is null then
+      if not (r.acc = any(v_missing)) then
+        v_missing := v_missing || r.acc;
+        v_refusals := v_refusals || jsonb_build_object('reason','account_missing',
+          'detail', jsonb_build_object('account_code', r.acc, 'for', r.d, 'basis', v_basis));
+      end if;
+      continue;
+    end if;
+
+    v_legs := v_legs || jsonb_build_object(
+      'account_code', r.acc, 'account_name', v_name, 'side', r.side,
+      'cents', v_cents, 'basis', v_basis, 'description', r.d);
+    if r.side = 'debit' then v_dr := v_dr + v_cents; else v_cr := v_cr + v_cents; end if;
+  end loop;
+
+  -- 4 . EXACT BALANCE. Checked only when nothing above already refused, so a missing account
+  --     reports itself as a missing account rather than as an imbalance it caused. A row-sum entry
+  --     balances by the SAME identity every quoted row was checked against -- gross minus the four
+  --     employee deductions equals net -- so this belt cannot fire for a witnessed sum unless the
+  --     evaluator's own row identity failed, which would have refused earlier.
+  if jsonb_array_length(v_refusals) = 0 and v_dr <> v_cr then
+    v_refusals := v_refusals || jsonb_build_object('reason','entry_unbalanced',
+      'detail', jsonb_build_object('debit_cents', v_dr, 'credit_cents', v_cr,
+        'difference_cents', v_dr - v_cr));
+  end if;
+
+  return jsonb_build_object(
+    'plan_version','v1',
+    'period_raw', to_jsonb(v_period_raw),
+    'period_month', to_jsonb(v_month),
+    'posting_date', to_jsonb(v_posting),
+    'legs', v_legs,
+    'debit_cents', v_dr,
+    'credit_cents', v_cr,
+    'unprinted', to_jsonb(v_unprinted),
+    'missing_accounts', to_jsonb(v_missing),
+    -- #1048 AC1: the plan says WHAT its figures came from, so the entry it becomes can say it too.
+    'posting_basis', jsonb_build_object(
+      'kind', case when coalesce(array_length(v_summed,1),0) > 0 then 'row_sum' else 'printed_totals' end,
+      'witness', to_jsonb(case when coalesce(array_length(v_summed,1),0) > 0 then v_witness_used end),
+      'rows_read', v_rows_read,
+      'employee_count', coalesce(v_comp->'employee_count','null'::jsonb),
+      'page_count', coalesce(v_comp->'page_count','null'::jsonb),
+      'row_sum_fields', to_jsonb(v_summed),
+      'answer', coalesce(v_answer,'null'::jsonb)),
+    'refusals', v_refusals,
+    'ready', jsonb_array_length(v_refusals) = 0);
+end $pep$;
+
+revoke all on function clara._payroll_entry_plan(uuid, jsonb) from public;
+
+comment on function clara._payroll_entry_plan(uuid, jsonb) is
+  '#946, widened by #1048: THE DRAFTING BODY. An established payroll fact state (0296''s or 0343''s evaluator output, v1 or v2) plus this client''s own chart in; the payroll entry out -- the gross debited to salaries and wages, each employer contribution the document prints debited to its own employment-cost account, every statutory deduction credited to its own payable, and the net credited to salaries payable. A figure comes from the PRINTED total whenever the page prints one; when the page prints no gross or net total, #1048 admits the evaluator''s own ROW SUM instead -- but only where the reading is WITNESSED complete (a printed headcount equal to the lines read, a printed page count of one, or a named person''s yes), and never where a printed headcount CONTRADICTS the lines read. Every leg names the question it came from and suffixes `#row_sum` where the figure was summed; `posting_basis` names the basis, the witness and the summed questions. It still gives an unprinted line no leg at all, resolves every account by code in the client''s chart, and requires EXACT balance rather than the rounding tolerance clara._validate_entry_lines allows. It reads no table but clara.coa_accounts and is a pure function of its inputs: the completeness ANSWER is injected into the state by clara._payroll_posting_verdict under `completeness_answer`, never read here. Every failure is a named refusal in `refusals`; it writes nothing.';
+
+reset role;

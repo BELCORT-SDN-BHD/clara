@@ -475,3 +475,91 @@ test("W3 · the lane banks a v2 fact state, and the witness answers ride the sto
   ).rows[0].n;
   assert.equal(anyRows, 0, "the per-employee quotes are still consumed and discarded, never stored");
 });
+
+// ---------------------------------------------------------------------------
+// W4 — the drafting body (AC1's first half: the plan)
+// ---------------------------------------------------------------------------
+
+async function plan(client, state) {
+  return (
+    await rootQuery("select clara._payroll_entry_plan($1, $2::jsonb) as plan", [client, JSON.stringify(state)])
+  ).rows[0].plan;
+}
+
+/** The entry a WITNESSED row sum should draft, transcribed from the worked example at the top of
+ *  this file. The five employer-side/levy legs are ABSENT because the page prints those figures
+ *  nowhere and a payslip row has no counterpart for them. */
+const EXPECTED_ROW_SUM_LEGS = [
+  { account_code: "6000", side: "debit", cents: 500000, basis: "payroll.run.gross_pay#row_sum" },
+  { account_code: "2100", side: "credit", cents: 55000, basis: "payroll.run.epf_employee#row_sum" },
+  { account_code: "2110", side: "credit", cents: 2450, basis: "payroll.run.socso_employee#row_sum" },
+  { account_code: "2120", side: "credit", cents: 980, basis: "payroll.run.eis_employee#row_sum" },
+  { account_code: "2130", side: "credit", cents: 16000, basis: "payroll.run.pcb#row_sum" },
+  { account_code: "2040", side: "credit", cents: 425570, basis: "payroll.run.net_pay#row_sum" },
+];
+
+test("W4 · a witnessed row sum is a posting basis, and every leg says the figure was summed", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const [textEnv, visionEnv] = bothChannels({
+    answers: NO_TOTALS,
+    witness: { "payroll.run.employee_count": value("2") },
+  });
+  const state = await evaluate("v2", textEnv, visionEnv);
+  assert.equal(state.completeness.verdict, "witnessed", "mandatory setup: the page witnesses itself");
+
+  const p = await plan(world.clients.A1, state);
+
+  assert.equal(p.ready, true, `the plan drafts from the row sum: ${JSON.stringify(p.refusals)}`);
+  assert.deepEqual(
+    p.legs.map((l) => ({
+      account_code: l.account_code,
+      side: l.side,
+      cents: Number(l.cents),
+      basis: l.basis,
+    })),
+    EXPECTED_ROW_SUM_LEGS,
+    "six legs, in the spec's own order, each naming the question it was summed from",
+  );
+  assert.equal(Number(p.debit_cents), 500000, "the debits are the worked example's own gross sum");
+  assert.equal(
+    Number(p.credit_cents),
+    500000,
+    "…and the entry balances EXACTLY, because gross - (epf + socso + eis + pcb) = net at run level too",
+  );
+  assert.equal(p.posting_date, "2026-08-31", "the entry is still dated at the END of the payslip's own month");
+
+  // AC1: "the entry's basis names the row-sum and the witness."
+  assert.equal(p.posting_basis.kind, "row_sum");
+  assert.equal(p.posting_basis.witness, "headcount");
+  assert.equal(p.posting_basis.rows_read, 2);
+  assert.equal(p.posting_basis.employee_count, 2);
+  assert.deepEqual(p.posting_basis.row_sum_fields, [
+    "payroll.run.gross_pay",
+    "payroll.run.epf_employee",
+    "payroll.run.socso_employee",
+    "payroll.run.eis_employee",
+    "payroll.run.pcb",
+    "payroll.run.net_pay",
+  ]);
+});
+
+test("W4b · AC4's control: a page that DOES print its totals is untouched -- the printed total wins and the basis says so", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const [textEnv, visionEnv] = bothChannels({ witness: { "payroll.run.employee_count": value("2") } });
+  const state = await evaluate("v2", textEnv, visionEnv);
+  const p = await plan(world.clients.A1, state);
+
+  assert.equal(p.ready, true, `${JSON.stringify(p.refusals)}`);
+  assert.equal(Number(p.debit_cents), 576145, "#946's own worked total, unmoved: eleven legs from printed figures");
+  assert.equal(Number(p.credit_cents), 576145);
+  assert.equal(p.legs.length, 11, "the employer-side legs are back, because the page prints them");
+  assert.equal(p.posting_basis.kind, "printed_totals", "a witness present alongside printed totals changes nothing");
+  assert.deepEqual(p.posting_basis.row_sum_fields, [], "…and no leg was summed");
+  for (const leg of p.legs) {
+    assert.doesNotMatch(leg.basis, /#row_sum/, `leg ${leg.account_code} came from a printed figure`);
+  }
+});

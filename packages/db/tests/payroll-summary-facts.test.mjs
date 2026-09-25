@@ -816,7 +816,12 @@ test("S5 · NO employee-level figure is persisted anywhere — the quotes exist 
       [doc.documentId],
     )
   ).rows[0].s;
-  assert.equal(state.state_version, "v1");
+  // #1048 (migration 0343) moved the door onto clara.evaluate_payroll_run_state_v2: a new
+  // completeness-witness field read off the page needs a _vN beside the frozen v1, because this
+  // file's own §D.1 freeze refuses an in-place recut by name. v2 is v1 plus two NEW TOP-LEVEL keys
+  // (`witness`, `completeness`) and nothing else moved, which the three assertions below re-prove
+  // on the same page: eleven established questions over two agreed, balanced rows.
+  assert.equal(state.state_version, "v2");
   assert.equal(state.established.length, 11, "every question on this page was established");
   assert.equal(state.rows.agreed, 2, "…over two agreed rows");
   assert.equal(state.rows.balanced, 2);
