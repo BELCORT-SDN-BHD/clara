@@ -54,6 +54,7 @@ const {
   sweepSpoolTtl, taskMetaPath, writeIntakeMeta, writeTaskMeta,
 } = await import("../lib/spool.mjs");
 const { recoverPendingDocumentIntakes } = await import("../lib/intake.mjs");
+const { reconcileDocumentTasks } = await import("../lib/reconciler.mjs");
 
 /** A sidecar body shaped like a live, mid-flight upload. `n` is the write counter the race cell
  *  reads back, so "the last write is the one on disk" is a positive assertion. */
@@ -368,6 +369,67 @@ test("p1044.lost_update: a merge cannot drop the transport fields a concurrent w
   for (const key of TRANSPORT_KEYS) {
     assert.equal(merged[key], intake[key], `…and it kept '${key}', a key it was not given`);
   }
+});
+
+test("p1044.sweep: the REAL sweep's merge keeps the transport a concurrent intake write put on disk", async (t) => {
+  await ownSpool(t);
+  const taskId = randomUUID();
+  const intake = intakeShapedTask(taskId, 1);
+  // The `clara.document_processing_tasks` row `documentTaskSnapshot` selects — task columns only,
+  // no transport (the runtime holds no SELECT on clara.documents, PIN-AB-6), widened as above.
+  const row = {
+    task_id: taskId,
+    document_id: intake.documentId,
+    firm_id: intake.firmId,
+    engine_id: intake.engineId,
+    engine_config: { model: "prebuilt-layout", widener: "x".repeat(WIDENER_BYTES) },
+    version_n: 1,
+    lane: "ocr",
+    status: "queued",
+    run_id: null,
+    created_at: new Date(Date.now() - 60_000).toISOString(),
+  };
+  const dispatched = [];
+  let intakeWrite = null;
+  const client = {
+    async query(sql) {
+      if (/select t\.id as task_id/.test(sql)) {
+        // THE INTAKE'S WRITE, launched at the one moment the ticket names: the DB row exists (this
+        // snapshot IS it, and `clara.finalize_document_intake` committed it before the intake path
+        // got here), and `lib/intake.mjs:439` has not written the sidecar yet. It lands while the
+        // sweep's own merge is between its read and its rename.
+        if (!intakeWrite) intakeWrite = writeTaskMeta(taskId, intake);
+        return { rows: [row], rowCount: 1 };
+      }
+      if (/count\(\*\)::int as running/.test(sql)) return { rows: [], rowCount: 0 };
+      throw new Error(`p1044.sweep drives no other statement: ${sql.slice(0, 60)}`);
+    },
+  };
+  const deps = {
+    graceMs: 0,
+    enqueueDocumentIngest: async (id) => (dispatched.push(id), { runId: "run-1044" }),
+    getRun: refuse("a run probe — this task carries no run id"),
+  };
+
+  const first = await reconcileDocumentTasks(client, deps);
+  await intakeWrite;
+  // Whether THIS sweep dispatches is a genuine coin toss and is not asserted: a merge that ran
+  // entirely before the intake's write legitimately saw no transport, and refusing to dispatch is
+  // then the correct fail-closed answer (0051 §2). What must never happen is the sidecar LOSING
+  // what the intake wrote, because nothing can put it back.
+  const afterSweep = await readTaskMeta(taskId);
+  for (const key of TRANSPORT_KEYS) {
+    assert.equal(afterSweep?.[key], intake[key],
+      `the sweep's merge dropped '${key}' (documentTransportless=${first.documentTransportless}) — `
+      + `this task can now never be dispatched (#1044)`);
+  }
+
+  // …and because it survived, the NEXT sweep dispatches it. Before the fix the key was gone for
+  // good, so this second sweep refused too: documentTransportless=1, documentReenqueued=0.
+  const second = await reconcileDocumentTasks(client, deps);
+  assert.equal(second.documentTransportless, 0, "the second sweep must not refuse a task whose transport is on disk");
+  assert.equal(second.documentReenqueued, 1, "…it dispatches it");
+  assert.ok(dispatched.includes(taskId), `…through the ingest enqueue (dispatched=${JSON.stringify(dispatched)})`);
 });
 
 // ---------------------------------------------------------------------------
