@@ -7329,6 +7329,34 @@ recut was then restored through the supported redo mode
 `5c55fc8d860bc74c4fd721a81442b4ea19ed66240ef3d20386efd53e2a2cd294`, and a second redo over that
 post-image exercised the prestate's REDO branch (`clean (REDO apply)`).
 
+**Tail T.6 is structurally unreachable, and is kept anyway — say so rather than read it as
+evidence** (fix round, adversarial finding ADV-06; this section is corrected in place because
+0339 is this lane's own unmerged file). T.6 counts stored claims whose canonical basis carries
+`advance_allocations` as an array of length 0. It can never be anything but 0 on any database,
+hosted included: `clara._claim_basis_canonical` appends that key only under `case when
+jsonb_array_length(clara._claim_allocations(p_claim)) >= 2`, and `clara._claim_allocations` turns a
+present-but-empty array into the one-element `advance_id` shape — both bodies re-read from
+`pg_proc` on the lane database to confirm it. So the wave-3 rule "a data-dependent branch must be
+entered once" cannot be met for T.6, and it proves nothing about real rows; it is a belt-and-braces
+catalogue assertion that the shape this file refuses was never storable in the first place, and the
+real guard for that is the `sha256(prosrc)` pin on `clara._claim_basis_canonical` in the same tail,
+which fixes the `>= 2` rule itself. It is not dropped because the migration is applied on every
+lane rig and an applied file is never edited: `CLARA_MIGRATION_REDO` takes the HIGHEST applied
+version only (0341 here), and editing 0339's bytes would abort every later `migrate` on those
+databases with checksum drift — a disproportionate price for deleting an assertion that costs one
+sequential scan and can only ever pass.
+
+**`set local statement_timeout` — the lane's decision, recorded** (fix round, adversarial finding
+ADV-07). 0341 opens with `set local statement_timeout = '5min'` and calls it "the runner rule";
+0339 and 0340 do not set it at all. Repo practice is genuinely mixed (17 of the last 30 migrations
+set it; 0301, 0310, 0316 and 0318 do not), so neither spelling breaches a documented house rule —
+but three files written by one lane in one week should not disagree with each other about a rule
+one of them names. **The decision: setting it is the better default** (a long `create or replace`
+on a loaded hosted database should not inherit an unbounded timeout), and it is a note for the NEXT
+migration this family writes rather than a change to 0339/0340, for the same immutability and
+checksum-drift reason above. Both files are single `create or replace function` statements, so the
+practical exposure is nil either way.
+
 ## 0340 — the #931 label arm matches on `lower(btrim(person_label))`, the first of the owner's two conditions (#1052, riders sweep wave, lane 03)
 
 `0340_staff_expense_claim_label_case.sql` recuts exactly one body,
