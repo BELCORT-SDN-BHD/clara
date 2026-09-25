@@ -47,6 +47,7 @@ import { CommercialStateCard } from "@/components/firm-admin/commercial-state-ca
 import { FirmIdentityCard } from "@/components/firm-admin/firm-identity-card";
 import { LegalStandingCard } from "@/components/firm-admin/legal-standing-card";
 import { ProcessingCapacityCard } from "@/components/firm-admin/processing-capacity-card";
+import { StandingInstructionsCard } from "@/components/firm-admin/standing-instructions-card";
 import { useFirmScope } from "@/components/firm-scope-provider";
 import { isDoorRefusal } from "@/lib/doors";
 import {
@@ -63,6 +64,14 @@ import {
   type FirmLegalStanding,
   type FirmUsageTable,
 } from "@/lib/firm/commercial-reads";
+import {
+  loadPrepaymentStandingInstruction,
+  newStandingInstructionOpKey,
+  recordPrepaymentStandingInstruction,
+  withdrawPrepaymentStandingInstruction,
+  type FirmStandingInstruction,
+  type StandingInstructionOutcome,
+} from "@/lib/firm/standing-instructions";
 import { recentUsageMonths, resolveUsagePeriod, type UsagePeriod } from "@/lib/firm/usage-period";
 import { denied, failed, LOADING, ready, type FirmSettingsView } from "./firm-settings-view";
 
@@ -71,16 +80,25 @@ import { denied, failed, LOADING, ready, type FirmSettingsView } from "./firm-se
  *  cap change nobody asked for. */
 export type SetFirmCaps = (edits: ProcessingCapEdits) => Promise<SetProcessingCapsOutcome>;
 
+/** #1050 - the two governed WRITES behind the standing-instruction card. They are not loaders
+ *  for the same reason `SetFirmCaps` is not: re-firing one on the focus refresh would be a
+ *  second act of firm governance nobody asked for. */
+export type WriteStandingInstruction = (reason: string) => Promise<StandingInstructionOutcome>;
+
 export type FirmSettingsLoaders = {
   readonly legalStanding: () => Promise<FirmLegalStanding>;
   readonly commercialState: () => Promise<FirmCommercialState>;
   readonly aiUsage: (period: string) => Promise<FirmUsageTable>;
+  /** #1050 - the firm's live standing instruction, or `null` when it has instructed nothing.
+   *  Absence is a state, not an error (law 2), so it rides the same ladder as the rest. */
+  readonly standingInstruction: () => Promise<FirmStandingInstruction | null>;
 };
 
 const PRODUCTION_LOADERS: FirmSettingsLoaders = {
   legalStanding: () => loadFirmLegalStanding(),
   commercialState: () => loadFirmCommercialState(),
   aiUsage: (period) => loadFirmAiUsage(period),
+  standingInstruction: () => loadPrepaymentStandingInstruction(),
 };
 
 /** THE ONE CLASSIFIER. A governed refusal is a STATE with the database's own sentence; anything
@@ -97,6 +115,9 @@ export type FirmSettingsPanelProps = {
   readonly loaders?: FirmSettingsLoaders;
   /** #960: injected by the cells; production calls `clara.set_firm_document_limits` directly. */
   readonly setCaps?: SetFirmCaps;
+  /** #1050: injected by the cells; production calls the two 0338 doors directly. */
+  readonly recordStanding?: WriteStandingInstruction;
+  readonly withdrawStanding?: WriteStandingInstruction;
   /** Injected by the cells so "the current month" is not a moving target. */
   readonly now?: Date;
   readonly dialogProps?: React.ComponentProps<typeof LegalStandingCard>["dialogProps"];
@@ -136,6 +157,8 @@ export function FirmSettingsPanel(props: FirmSettingsPanelProps) {
 export function FirmSettingsPanelView({
   loaders = PRODUCTION_LOADERS,
   setCaps,
+  recordStanding,
+  withdrawStanding,
   dialogProps,
   download,
   period,
@@ -151,6 +174,8 @@ export function FirmSettingsPanelView({
   const [standing, setStanding] = useState<FirmSettingsView<FirmLegalStanding>>(LOADING);
   const [commercial, setCommercial] = useState<FirmSettingsView<FirmCommercialState>>(LOADING);
   const [usage, setUsage] = useState<FirmSettingsView<FirmUsageAnswer>>(LOADING);
+  const [instruction, setInstruction] =
+    useState<FirmSettingsView<FirmStandingInstruction | null>>(LOADING);
 
   // N3's latest-wins epoch, and there is ONE PER READ rather than one shared counter. A single
   // counter is not a smaller version of this: the three reads start together, so the third would
@@ -160,6 +185,7 @@ export function FirmSettingsPanelView({
   const standingEpoch = useRef(0);
   const commercialEpoch = useRef(0);
   const usageEpoch = useRef(0);
+  const instructionEpoch = useRef(0);
 
   // THE LOADERS ARE READ THROUGH A REF, NEVER DEPENDED ON BY IDENTITY (`lib/parts/hooks.ts`'s
   // "P3 FOLLOW-UP" paragraph). A caller handing in a fresh `loaders` object every render would
@@ -204,7 +230,24 @@ export function FirmSettingsPanelView({
     }
   }, []);
 
+  // #1050 - THE STANDING INSTRUCTION. An ordinary firm-scoped read of
+  // `clara.firm_standing_instructions`, whose FORCED row-level security scopes it to the
+  // caller's own firm and whose only writers are the two SECURITY DEFINER doors. It gets its
+  // own epoch for the reason the three above each have one.
+  const readInstruction = useCallback(async () => {
+    const mine = ++instructionEpoch.current;
+    try {
+      const data = await loaderRef.current.standingInstruction();
+      if (instructionEpoch.current === mine) setInstruction(ready(data));
+    } catch (e) {
+      if (instructionEpoch.current === mine) {
+        setInstruction(classify<FirmStandingInstruction | null>(e));
+      }
+    }
+  }, []);
+
   useEffect(() => { void readStanding(); }, [readStanding]);
+  useEffect(() => { void readInstruction(); }, [readInstruction]);
   useEffect(() => { void readCommercial(); }, [readCommercial]);
   useEffect(() => { void readUsage(period.month); }, [readUsage, period.month]);
 
@@ -218,6 +261,9 @@ export function FirmSettingsPanelView({
       void readStanding();
       void readCommercial();
       void readUsage(period.month);
+      // A COLLEAGUE MAY HAVE WITHDRAWN IT while this tab was hidden, and whether Clara may
+      // act right now is the whole of what the card says.
+      void readInstruction();
     };
     document.addEventListener("visibilitychange", refresh);
     window.addEventListener("focus", refresh);
@@ -225,7 +271,7 @@ export function FirmSettingsPanelView({
       document.removeEventListener("visibilitychange", refresh);
       window.removeEventListener("focus", refresh);
     };
-  }, [readStanding, readCommercial, readUsage, period.month]);
+  }, [readStanding, readCommercial, readUsage, readInstruction, period.month]);
 
   const createdAt = commercial.status === "ready" ? commercial.data.firm.createdAt : null;
 
@@ -247,6 +293,34 @@ export function FirmSettingsPanelView({
     }
   }, [setCaps, readCommercial]);
 
+  // #1050 - THE TWO GOVERNED WRITES, each followed by an unconditional re-read, for the reason
+  // `saveCaps` states above: the sentence over the control belongs to the live row and to
+  // nothing else, and a refusal is exactly the moment this page's idea of the instruction is
+  // most worth checking. A FRESH op key per submission - giving an instruction, taking it back
+  // and giving it again are three genuine acts of firm governance, and a key derived from their
+  // values would make the second one replay the first receipt and write nothing.
+  const recordInstruction = useCallback(
+    async (reason: string): Promise<StandingInstructionOutcome> => {
+      const call = recordStanding ?? ((r: string) => recordPrepaymentStandingInstruction(
+        { reason: r, opKey: newStandingInstructionOpKey() }));
+      try {
+        return await call(reason);
+      } finally {
+        await readInstruction();
+      }
+    }, [recordStanding, readInstruction]);
+
+  const withdrawInstruction = useCallback(
+    async (reason: string): Promise<StandingInstructionOutcome> => {
+      const call = withdrawStanding ?? ((r: string) => withdrawPrepaymentStandingInstruction(
+        { reason: r, opKey: newStandingInstructionOpKey() }));
+      try {
+        return await call(reason);
+      } finally {
+        await readInstruction();
+      }
+    }, [withdrawStanding, readInstruction]);
+
   return (
     <div className="flex flex-col gap-4">
       <FirmIdentityCard createdAt={createdAt} />
@@ -267,6 +341,12 @@ export function FirmSettingsPanelView({
         download={download}
       />
       <ProcessingCapacityCard view={commercial} save={saveCaps} />
+      <StandingInstructionsCard
+        view={instruction}
+        record={recordInstruction}
+        withdraw={withdrawInstruction}
+        onRetry={() => { void readInstruction(); }}
+      />
       {/* The two legacy cards, rendered rather than re-typed — see this file's header. */}
       <SettingsPanel />
     </div>

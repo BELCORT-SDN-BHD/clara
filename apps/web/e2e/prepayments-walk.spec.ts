@@ -414,7 +414,7 @@ test("prepayments.walk.roster: the Registers page carries the prepayment-account
   const enrolDialog = page.getByRole("dialog");
   await enrolDialog.getByLabel("Account", { exact: true }).selectOption("19000001");
   await expect(enrolDialog.getByRole("button", { name: "Enrol an account" })).toBeDisabled();
-  await enrolDialog.getByLabel("Why this account holds prepayments").fill(
+  await enrolDialog.getByLabel("Why this account is enrolled").fill(
     "the client pays rent and insurance a quarter ahead and books both here");
   await enrolDialog.getByRole("button", { name: "Enrol an account" }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
