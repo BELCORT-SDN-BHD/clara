@@ -6752,6 +6752,8 @@
       "statePosted": "Posted",
       "stateConfigured": "Configured",
       "methodStatedAmount": "The amount stated here, accrued in every period of the authority window",
+      "amountKindPerPeriod": "Per period",
+      "amountKindWindowTotal": "Window total",
       "createHeading": "Record an accrual",
       "createBody": "State the amount, the accounts, the service period it belongs to, the authority behind it and the schedule it runs on.",
       "detailHeading": "Accrual",

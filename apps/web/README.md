@@ -2129,6 +2129,30 @@ component (none existed before this ticket): it proves the per-period schedule r
 dates and amounts, that the section is absent for a `stated_amount` row, and that the side (already
 built) renders labelled consistently with the list and forms.
 
+## #1071 — the register's Amount column names whether its figure is per period or a window total
+
+`clara.list_accrual_adjustments` answers `amount_cents` with two different meanings depending on
+`method.rule`: under `stated_amount` it is the figure THIS accrual posts every period; under
+`stated_period_amount` (#937) it is the TOTAL across the whole authority window, and the per-period
+figures live only in `period_amounts`, which the register does not render (that is #1070's detail
+view, by #1070's own out-of-scope line). `components/accruals/accruals-list.tsx`'s Amount column
+printed the bare figure for both rows alike, so a reader scanning the register could not tell — from
+the Amount column alone — which fact they were looking at. The Term column's method sentence
+(`methodLabel`, unchanged by this ticket) already states the same fact in different words, but not
+beside the money, which is where a reader who reads figures first needs it.
+
+**A new short label beside the money, for both rows.** `amountKindLabel` (beside `sideLabel` and
+`methodLabel`, same honest raw-value fallback for a rule this build has not enumerated) maps
+`stated_amount` → "Per period" and `stated_period_amount` → "Window total"
+(`amountKindPerPeriod` / `amountKindWindowTotal`), rendered as a `text-xs` line under the figure —
+the same shape `occurrenceCount` already uses under the State badge. Both cases are labelled rather
+than leaving the per-period case silent, so the column reads the same way for every row instead of
+asking a reader to infer "no label means per period".
+
+`components/accruals/accruals-list.test.tsx`'s `1071.list.amount-kind` cell is the coverage: one
+`stated_amount` row and one `stated_period_amount` row, distinguishable amounts, and the label tied
+to the right row's own figure in both directions (neither label leaks onto the other row's amount).
+
 ## #940 — which accounts hold prepayments, and what the surfaces say when none do
 
 Before migration 0306 any ordinary asset account could be amortised: the prepaid-leg wall is
