@@ -461,3 +461,139 @@ async (t) => {
   assert.equal(outOther.plans_still_posting, 1,
     `the sibling firm's own live plan is not counted at its own withdrawal: ${JSON.stringify(outOther)}`);
 });
+
+// =============================================================================================
+// S3 — THE DEFERRED-REVENUE ASYMMETRY, HELD BY A CENSUS RATHER THAN BY A COMMENT.
+//
+// WHAT THE ASYMMETRY IS. `clara._prepayment_schedule_core` admits three lanes — human, obo and
+// wake — and the wake arm is what #1050 re-opened: an unattended `close_prep` run may establish a
+// client's prepayment schedule while the firm's standing instruction stands.
+// `clara._revenue_recognition_core`, the deferred-revenue twin, admits ('human','obo') and NO wake
+// wrapper for it exists anywhere in the catalog, so the contract-liability side cannot be stood in
+// the same way. 0338 states that in its own header (`:42`, `:111`) and NOTHING ELSE HELD IT.
+//
+// WHY A CENSUS AND NOT A BEHAVIOURAL CELL. The claim is about what a LATER FILE may not do — widen
+// one side and not the other — which no cell written today can drive. This estate's own documented
+// shape for exactly that is a catalog census (`p1137.obo.plan_step_parity`,
+// tenancy-agent-twins.test.mjs), and WORK-ORDER rule 4 names it: "where this repo's own documented
+// standard asks for a structural cell … that standard wins and you say so".
+//
+// WHAT IT WOULD COST TO CLOSE THE ASYMMETRY, so that a reader knows this is a RULING and not an
+// oversight: a wake wrapper over the revenue core, the lane set widened to include 'wake', a
+// `clara.wake_fn_allowlist` row for it, and a SECOND instruction key in 0338 §A's closed set (and
+// in both write doors) so a firm could stand the revenue side separately from the prepayment side.
+// Four moving parts and an accounting question — should a firm that let Clara amortise its
+// prepayments thereby also let Clara recognise its deferred revenue? — that is the owner's, not a
+// worker's. Written out in `packages/db/README.md`'s 0362 section.
+// =============================================================================================
+
+const PREPAY_CORE = "clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)";
+const REVENUE_CORE = "clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)";
+
+/** The two sides, and what each is TODAY. The expectation is written out so that a widening is a
+ *  failure with a sentence rather than a silently updated baseline. */
+const SIDES = [
+  { label: "prepayment (amortisation)", core: PREPAY_CORE, lanes: ["human", "obo", "wake"] },
+  { label: "deferred revenue (recognition)", core: REVENUE_CORE, lanes: ["human", "obo"] },
+];
+
+/** The closed lane set a core admits, READ OFF ITS LIVE BODY -- `p_lane not in (...)` is how every
+ *  member of this family spells it, and the raise beneath it names the core. */
+async function laneSetOf(sig) {
+  const r = await rootQuery("select p.prosrc from pg_proc p where p.oid = to_regprocedure($1)", [sig]);
+  const src = r.rows[0]?.prosrc;
+  assert.ok(src, `${sig} is absent -- the census has nothing to measure`);
+  const m = [...src.matchAll(/p_lane\s+not\s+in\s*\(([^)]*)\)/g)];
+  assert.equal(m.length, 1,
+    `${sig} spells its closed lane set ${m.length} times -- the census reads exactly one`);
+  return [...m[0][1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]).sort();
+}
+
+/** Every clara body whose name marks it a wake wrapper and whose text reaches this core. */
+async function wakeWrappersOf(coreName) {
+  const r = await rootQuery(
+    `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname like 'wake\\_%' and p.prosrc like '%' || $1 || '%'
+      order by p.proname`, [coreName]);
+  return r.rows.map((x) => x.proname);
+}
+
+/** The allowlist rows that let a wake kind call a named wrapper. A wrapper with no row is a lane
+ *  nothing may drive; a row with no wrapper is a promise nothing keeps. */
+async function allowlistFor(fnNames) {
+  if (fnNames.length === 0) return [];
+  const r = await rootQuery(
+    `select wake_kind, function_name from clara.wake_fn_allowlist
+      where function_name = any($1::text[]) order by wake_kind, function_name`, [fnNames]);
+  return r.rows;
+}
+
+/** The whole census, as a list of complaints -- so one run names EVERY half that moved rather than
+ *  stopping at the first. Exported shape mirrors rig-meta.mjs's own checkers. */
+async function asymmetryFailures() {
+  const problems = [];
+  for (const side of SIDES) {
+    const coreName = side.core.slice("clara.".length).split("(")[0];
+    const lanes = await laneSetOf(side.core);
+    const expected = [...side.lanes].sort();
+    if (JSON.stringify(lanes) !== JSON.stringify(expected)) {
+      problems.push(
+        `${side.label}: clara.${coreName} admits (${lanes.join(", ")}), and this census was written `
+        + `against (${expected.join(", ")}). If that widening is deliberate, the OTHER side and the `
+        + "wake allowlist move with it or the asymmetry #1147 pinned has changed without a ruling.");
+    }
+    const wrappers = await wakeWrappersOf(coreName);
+    const rows = await allowlistFor(wrappers);
+    const hasWakeLane = lanes.includes("wake");
+    if (hasWakeLane && wrappers.length === 0) {
+      problems.push(
+        `${side.label}: clara.${coreName} admits the 'wake' lane and NO wake wrapper reaches it -- `
+        + "a lane nothing can drive.");
+    }
+    if (!hasWakeLane && wrappers.length > 0) {
+      problems.push(
+        `${side.label}: clara.${coreName} does NOT admit the 'wake' lane, yet ${wrappers.join(", ")} `
+        + "reaches it -- either the lane set was meant to be widened with it, or the wrapper is a "
+        + "door onto a refusal.");
+    }
+    for (const w of wrappers) {
+      if (!rows.some((row) => row.function_name === w)) {
+        problems.push(
+          `${side.label}: clara.${w} reaches the core and carries NO clara.wake_fn_allowlist row, `
+          + "so clara.assert_wake_allowed refuses every kind -- a wrapper nothing may call.");
+      }
+    }
+    if (!hasWakeLane && rows.length > 0) {
+      problems.push(
+        `${side.label}: the allowlist names ${rows.map((r) => `${r.wake_kind}/${r.function_name}`).join(", ")} `
+        + "for a family with no wake lane at all.");
+    }
+  }
+  // …AND THE ASYMMETRY ITSELF, stated as the one fact the two sides disagree on. Without this the
+  // census would pass a world where BOTH sides gained the wake lane -- which is exactly the
+  // decision #1147 is not allowed to take.
+  const prepay = await laneSetOf(PREPAY_CORE);
+  const revenue = await laneSetOf(REVENUE_CORE);
+  const onlyPrepay = prepay.filter((l) => !revenue.includes(l));
+  const onlyRevenue = revenue.filter((l) => !prepay.includes(l));
+  if (JSON.stringify(onlyPrepay) !== JSON.stringify(["wake"]) || onlyRevenue.length !== 0) {
+    problems.push(
+      `the two schedule cores no longer differ by exactly the 'wake' lane: prepayment alone has `
+      + `(${onlyPrepay.join(", ") || "none"}), revenue alone has (${onlyRevenue.join(", ") || "none"}). `
+      + "Building the deferred-revenue wake lane needs a wrapper, the lane, an allowlist row and a "
+      + "SECOND instruction key in 0338 SA's closed set -- and the accounting question of whether "
+      + "one instruction may stand both sides is an OWNER RULING (#1147, 'Out of scope').");
+  }
+  return problems;
+}
+
+test("p1147.asymmetry.census -- the deferred-revenue twin has no wake lane and the prepayment twin "
+  + "does, and that stays a DECISION: the two cores' closed lane sets, the wake wrappers that reach "
+  + "them and the wake allowlist are read off the LIVE catalog, and one side widened without the "
+  + "other fails here by name",
+async (t) => {
+  if (await readGate(t)) return;
+  assert.deepEqual(await asymmetryFailures(), [],
+    "the prepayment / deferred-revenue asymmetry #1050 recorded in a comment and #1147 pinned here "
+    + "has moved");
+});
