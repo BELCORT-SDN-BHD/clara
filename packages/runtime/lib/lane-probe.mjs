@@ -296,11 +296,6 @@ let busy = false;
 let probeOverride = null; // test seam only; production is always null
 let loopStartedAt = 0;
 let lastSettledAt = 0;
-// #1128 — a monotonic count of REAL cycles that have SETTLED (started and finished, whether the
-// verdict landed or the hard bound discarded it), plus the resolvers of anyone waiting on the
-// NEXT one. See _waitForLaneProbeSettleForTest's own header for the defect this closes.
-let settleSeq = 0;
-let settleWaiters = [];
 
 async function refreshOnce() {
   // NEVER a fresh no-op promise while a cycle is running (review-558 r2 NIT): returning the
@@ -317,13 +312,6 @@ async function refreshOnce() {
     if (Array.isArray(result)) lastSettledAt = Date.now();
   } finally {
     busy = false;
-    // #1128 — announce a REAL settle to every waiter registered before this cycle's finish, then
-    // clear the list. A waiter registered DURING this finally (impossible today — nothing async
-    // happens here — but kept correct regardless) would simply wait for the NEXT one.
-    settleSeq += 1;
-    const waiters = settleWaiters;
-    settleWaiters = [];
-    for (const resolve of waiters) resolve();
   }
   return undefined;
 }
@@ -399,8 +387,6 @@ export function _resetLaneProbeCacheForTest() {
   probeOverride = null;
   loopStartedAt = 0;
   lastSettledAt = 0;
-  settleSeq = 0;
-  settleWaiters = [];
 }
 
 /** Test-only: drive the background loop with an injected prober, so a cell can arm a lane that
@@ -410,8 +396,8 @@ export function _setLaneProbeForTest(fn) {
 }
 
 /**
- * Test-only: await the NEXT background cycle to genuinely settle — one that starts at or after
- * this call — so a cell asserts on a FRESH verdict instead of racing it, or reading a stale one.
+ * Test-only: await a NEW background cycle — one that starts at this call, or the one already in
+ * flight — so a cell asserts on a FRESH verdict instead of racing it, or reading a stale one.
  *
  * #1128 — the OLD implementation (`laneProbeHealth(); await inFlight; return laneProbeHealth();`)
  * read the module-level `inFlight` variable, which is only REASSIGNED when the interval's own
@@ -422,20 +408,20 @@ export function _setLaneProbeForTest(fn) {
  * at whatever cadence a DB round trip takes until the real tick eventually landed, rather than
  * genuinely waiting for it.
  *
- * This version instead waits on `settleSeq`, a monotonic count of cycles that have ACTUALLY
- * settled, bumped once per real `refreshOnce()` completion — the loop's own first start, an
- * interval tick, or a manual `_refreshOnceForTest()`. A call between ticks therefore genuinely
- * blocks until the loop's next real cycle — whether already in flight or not yet started —
- * completes, with NO extra cycle forced out of the interval's own schedule.
+ * This version calls `refreshOnce()` directly instead of reading `inFlight`. `refreshOnce()`'s own
+ * `busy` guard means this is never redundant: if a cycle is already running, it returns and awaits
+ * THAT one (same as before); if none is, it starts and awaits a brand-new one right now, bounded by
+ * `cycleMs()` — never by `intervalMs()`'s own, possibly much longer, schedule. That also keeps this
+ * safe under `node --test`: `intervalMs()`'s timer is deliberately unref'd (this module's header —
+ * it must never hold a PRODUCTION process open by itself, where an HTTP listener already does that
+ * job), so a bare test process waiting on IT ALONE for up to `intervalMs()` risks Node deciding the
+ * event loop has nothing left ref'd and abandoning the wait first. Driving a cycle here directly —
+ * the same thing `_refreshOnceForTest()` already does safely throughout this file — never has that
+ * problem: `cycleMs()`'s own bound is short, and this call is the very thing keeping the awaiting
+ * test alive while it runs.
  */
 export async function _waitForLaneProbeSettleForTest() {
   laneProbeHealth(); // starts the loop lazily, same as before
-  const target = settleSeq + 1;
-  if (settleSeq < target) {
-    await new Promise((resolve) => {
-      if (settleSeq >= target) resolve();
-      else settleWaiters.push(resolve);
-    });
-  }
+  await refreshOnce();
   return laneProbeHealth();
 }

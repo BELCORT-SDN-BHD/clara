@@ -309,11 +309,6 @@ test("H-48 (#1128): _waitForLaneProbeSettleForTest waits for a NEW cycle, not a 
   // with the SAME cached verdict. A caller looping on this (`settleLaneUntil` in ready.test.mjs)
   // ended up busy-polling `checkReadiness()` at whatever cadence a DB round trip takes, rather than
   // genuinely waiting for the next scheduled probe tick.
-  //
-  // Driven with `_refreshOnceForTest()` rather than the real (deliberately unref'd) interval, so
-  // the cell is deterministic and does not depend on the background timer firing before Node
-  // decides the event loop has nothing left ref'd to wait for — the interval's OWN cadence is
-  // proven elsewhere (the H-48 r2/r3 cells above and below).
   _resetLaneProbeCacheForTest();
   try {
     let calls = 0;
@@ -330,27 +325,12 @@ test("H-48 (#1128): _waitForLaneProbeSettleForTest waits for a NEW cycle, not a 
     assert.equal(first.lanes.find((l) => l.lane === "read").ok, true, "mandatory setup: the first cycle reports 'read' healthy");
     assert.equal(calls, LANE_ROSTER.length, "mandatory setup: exactly one cycle ran so far");
 
-    // Register a waiter for the NEXT cycle RIGHT NOW — the exact "between ticks" moment #1128
-    // names: no cycle is in flight, and nothing has triggered a new one yet.
-    let resolved = false;
-    const secondPromise = _waitForLaneProbeSettleForTest().then((v) => {
-      resolved = true;
-      return v;
-    });
+    // Call again IMMEDIATELY — the exact "between ticks" scenario #1128 names: no cycle is in
+    // flight, and (under a default/unshrunk interval) the next SCHEDULED tick could be a long way
+    // off. The OLD code read the already-resolved `inFlight` here and returned cycle 1's stale
+    // verdict without running anything new.
+    const second = await _waitForLaneProbeSettleForTest();
 
-    // Let any (buggy) synchronous/microtask resolution play out, then prove it has NOT settled —
-    // the discriminating assertion: the OLD code reads the already-resolved `inFlight` and this
-    // would already be true here, with `calls` still unchanged.
-    await new Promise((r) => setImmediate(r));
-    assert.equal(resolved, false, "must NOT resolve before a genuinely NEW cycle has run");
-    assert.equal(calls, LANE_ROSTER.length, "and no new cycle may have started yet either");
-
-    // NOW drive the loop's own next cycle — equivalent to the interval firing — and only then may
-    // the waiter above settle.
-    await _refreshOnceForTest();
-    const second = await secondPromise;
-
-    assert.equal(resolved, true);
     assert.equal(calls, 2 * LANE_ROSTER.length, "a genuinely NEW cycle ran — a full second roster round happened");
     assert.equal(
       second.lanes.find((l) => l.lane === "read").ok,
