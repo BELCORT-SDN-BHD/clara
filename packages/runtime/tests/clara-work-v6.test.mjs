@@ -140,7 +140,12 @@ test("v6.question: a confirmation is a POSITIVE act — anything else is a stop"
 });
 
 test("v6.registry: the five edits, and every superseded body still exported and rostered", () => {
-  assert.equal(registry.workflowPins.claraWork, "claraWork_v6", "the pin moved");
+  // THE PIN HAS SINCE MOVED, and this cell now says what it still owns. The 2026-09-26 closing
+  // wave (#1144) cut `claraWork_v7` and repointed the class; what #1030's cell can assert
+  // honestly is that v6's own five edits survive — the body imported, exported and rostered under
+  // policy (c), which is what a Work parked on a v6 question hook resumes into. The claraWork
+  // PIN's assertion moved to `tests/clara-work-v7.test.mjs`, which is the cut that owns it.
+  assert.equal(registry.workflowPins.claraWork, "claraWork_v7", "the closing wave's #1144 repointed the class");
   assert.equal(typeof registry.claraWork_v6, "function", "…the body is exported");
   assert.ok(registry.workflowBodies.includes("claraWork_v6"), "…and rostered");
   // POLICY (c): a superseded body stays imported, exported and rostered, or a parked run is
@@ -152,7 +157,8 @@ test("v6.registry: the five edits, and every superseded body still exported and 
   // …and the dispatch table routes the CLASS to the pinned body, which is what actually takes
   // traffic. `registryModule[pin] === workflows[class]` is registry-view's own cell; this one is
   // the narrower statement that the pin and the dispatch agree for THIS class.
-  assert.equal(registry.workflows.claraWork, registry.claraWork_v6);
+  assert.equal(registry.workflows.claraWork, registry.claraWork_v7,
+    "the dispatch follows the pin, which #1144 moved to v7");
 });
 
 test("v6.boot: the SIXTH banner is imported and logged — the defect the last cut shipped", () => {

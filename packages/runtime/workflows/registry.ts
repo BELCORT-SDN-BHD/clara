@@ -38,6 +38,7 @@ import { claraWork_v3 } from "./claraWork.v3.js";
 import { claraWork_v4 } from "./claraWork.v4.js";
 import { claraWork_v5 } from "./claraWork.v5.js";
 import { claraWork_v6 } from "./claraWork.v6.js";
+import { claraWork_v7 } from "./claraWork.v7.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -382,7 +383,24 @@ export const workflows = {
   // read-set rows already written stay readable. A Work parked on a v5 question stays ANSWERABLE
   // under a v4 image, but the resumed v4 run will not be told about drift — so a rollback should
   // drain parked questions first rather than assume they resume identically.
-  claraWork: claraWork_v6,
+  //
+  // THE CLOSING WAVE (2026-09-26, #1144): REPOINTED v6 -> v7. One change, and it is a step body:
+  // `loadFaProposalInputsStepV7` grounds the dependent-particulars proposal on the two registers
+  // the riders sweep wave opened to this credential (0345's `depreciation_policy` knowledge key,
+  // 0346's firm-scoped read of the retired account policies) and applies the estate's OWN
+  // six-condition completeness predicate instead of v6's two. Under the narrow form a register row
+  // with a method and a start date but no useful life reads complete, and the dependent question
+  // that would collect the missing drivers is never opened.
+  //
+  // NO COUPLED MIGRATION: 0345 and 0346 have been live since the sweep wave, hosted 2026-09-25.
+  // Against a database missing either, the two reads throw inside the step's own try, the step
+  // answers null exactly as it does for any unreadable register, and the question opens without a
+  // block — the same behaviour v6 has today. v6's 0321, v5's 0230 and v4's 0192/0216 are inherited.
+  //
+  // ROLLBACK TO v7 -> v6 narrows the proposal back to the asset's own row and its siblings and
+  // changes no database state. A question already opened keeps the block it was opened with: the
+  // proposal is a value on a durable question row, not something an image re-derives on answer.
+  claraWork: claraWork_v7,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -1036,6 +1054,11 @@ export { claraWork_v4 };
 // uniform census for every version.
 export { claraWork_v5 };
 export { claraWork_v6 };
+// #1144 (the 2026-09-26 closing wave) repointed `claraWork:` v6 -> v7. v6 remains exported by
+// policy (c) — it is the rollback target and the body any Work parked on a v6 question hook
+// resumes into at cutover — and the pinned v7 body is exported too so the rollback preflight can
+// use the same uniform census for every version.
+export { claraWork_v7 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
@@ -1128,6 +1151,7 @@ export const workflowBodies: readonly string[] = Object.freeze([
   "claraWork_v4",
   "claraWork_v5",
   "claraWork_v6",
+  "claraWork_v7",
   "documentIngest_v1",
   "documentIngest_v2",
   "invoiceFacts_v1",
@@ -1169,7 +1193,7 @@ export const workflowBodies: readonly string[] = Object.freeze([
 export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
   closeExample: "closeExampleV1",
   chatTurn: "chatTurn_v23",
-  claraWork: "claraWork_v6",
+  claraWork: "claraWork_v7",
   documentIngest: "documentIngest_v2",
   invoiceFacts: "invoiceFacts_v1",
   statementFacts: "statementFacts_v4",

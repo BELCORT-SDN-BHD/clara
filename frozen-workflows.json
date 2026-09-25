@@ -66,6 +66,10 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/lib/fa-proposal-grounds.ts": {
+      "sha256": "335ae643324cb8dd413abaaaeb087152786a782faa3fa5f4a9203a85650dcbd9",
+      "note": ""
+    },
     "packages/runtime/lib/fixed-asset-acquisition.ts": {
       "sha256": "9846bdbdf33c374994fb9033ea8765f7b3dd64e9016867b6d2177a544868a6d9",
       "note": "#639 — frozen BY CLOSURE, not by marker: claraWork_v4 imports FA_PARTICULARS_FIELDS, faParticularsAnswerSchema, particularsFromAnswer, localParticularsRefusal and refusalFieldForAxis, so check-frozen-workflows.mjs's import closure hash-locks this file and apps/web does NOT import it — nothing under apps/web imports @clara/runtime and no @clara/* package is in apps/web's dependencies. The web question form keeps a hand-maintained MIRROR of the axis→field table in apps/web/lib/registers/fa-refusal-field.ts (which says so in its own header), pinned by fa-refusal-field.test.ts to the DOOR's own axis vocabulary (transcribed there from 0041:2970-3033 + 0216 §D) but not to this file; this hash lock does not cover that mirror, so a change to the axis map here needs it moved in the same commit. It carries the bridge between the two spellings the DATABASE uses: a `text` field's answer is a JSON string at clara.answer_work_question (0180) and a number at clara._fa_validate_particulars (0041). DEPLOY ORDER: migration 0216 (clara.complete_fixed_asset_particulars_for) must be live BEFORE this image runs any Work. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live.",
@@ -1382,6 +1386,30 @@
       "sha256": "73365a3f4802038466009ef8bcf9e0ecfc295fd62f443c782b73437f513036d7",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/workflows/claraWork.v7.bundle.ts": {
+      "sha256": "f479cb4b5388b0eccd7336bdeb8fcd567ea223b3879ab15d1a76311c41d88ff9",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v7.errors.ts": {
+      "sha256": "010b26886363504a08ea624d784c4c2e35682f62873e833794d092b7293446ec",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v7.impl.ts": {
+      "sha256": "27e5226bd10caf3e3466ebf1e1c6e522f107165944aa3a8d54105dcc0eda0390",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v7.prompt.ts": {
+      "sha256": "2fddc2c556190c7532711ea47f2c79b8d245c1702d4d71b5cc6dd2ea68690bf9",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v7.tools.ts": {
+      "sha256": "f92d8846317a1cf5fe0173c4bfaf63259bdc7d34f78c9f9970b5fcc8d0307c8c",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v7.ts": {
+      "sha256": "d26cc59cf0bb9a01347af0b5fed158834e3db10af2ec2b9e68b532df4a842ed5",
+      "note": ""
     },
     "packages/runtime/workflows/clientOnboarding.v1.ts": {
       "sha256": "e0c03498363833b0585904af1f41b77677efb2c81cad107e979623e7d95baa39",

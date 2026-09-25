@@ -510,6 +510,14 @@ const REVIEWED_NON_PART_LITERAL_SITES = [
   // human's answer is fed back to the model. v6 adds NO transcript part kind at all.
   ["packages/runtime/workflows/claraWork.v6.ts","claraWork_v6","type: \"tool-result\"","fbe951846aee44f34798a4eb11e4f4e00df981e1e900169359642bad31049db9","0"],
   ["packages/runtime/workflows/claraWork.v6.ts","claraWork_v6","type: \"json\"","fbe951846aee44f34798a4eb11e4f4e00df981e1e900169359642bad31049db9","0"],
+  // claraWork_v7 (the 2026-09-26 CLOSING wave, #1144). IDENTICAL in kind to every row above it,
+  // and the FINGERPRINT IS AGAIN BYTE-EQUAL TO v5's AND v6's — the ledger saying something true
+  // rather than a copied constant: v7's resume statement is v6's, comments included, because this
+  // cut changes a STEP BODY that runs after a commit and nothing at all about how a human's answer
+  // is fed back to the model. `tool-result` and `json` are the AI SDK's OWN message-content
+  // discriminants, not Clara transcript part kinds. v7 adds NO transcript part kind.
+  ["packages/runtime/workflows/claraWork.v7.ts","claraWork_v7","type: \"tool-result\"","fbe951846aee44f34798a4eb11e4f4e00df981e1e900169359642bad31049db9","0"],
+  ["packages/runtime/workflows/claraWork.v7.ts","claraWork_v7","type: \"json\"","fbe951846aee44f34798a4eb11e4f4e00df981e1e900169359642bad31049db9","0"],
   ["packages/runtime/workflows/chatTurn.v2.ts","chatTurn_v2","type: \"tool-result\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v2.ts","chatTurn_v2","type: \"json\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v3.ts","chatTurn_v3","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
