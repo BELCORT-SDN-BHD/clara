@@ -7404,3 +7404,66 @@ marker branch (`clean (REDO apply)`).
 because it pins behaviour this file must not move. The recut was then restored through the
 supported redo mode; post-image sha
 `d1dff7654eda906324b534d723511ba9d4fd5b091f994a84200680c3fb164ffd`.
+
+## 0341 — the Work card names how many advances a staff expense claim discharges (#1069, riders sweep wave, lane 03)
+
+`0341_work_claim_allocation_count.sql` recuts exactly one body, `clara.get_work_claim_origin(uuid)`,
+at its 0221 pre-image byte for byte plus one new projected key, `allocation_count`. It creates no
+relation, drops nothing, grants nothing and mints no new name, so it carries no `rig-meta.mjs`
+cohort; its frontier is the stem `work_claim_allocation_count$` and its sweep escape hatch is
+`tests/work-claim-allocation-count-preintegration-gate.mjs`
+(`CLARA_ALLOW_MISSING_WORK_CLAIM_ALLOCATION_COUNT=1`), last in the gate chain, in migration order.
+
+**What was live.** `clara.get_work_claim_origin` (0221) labels a claim Work's identity block on the
+Work detail page with the claimant and the settlement kind alone. Since #931 (0301) a single claim
+can discharge SEVERAL open advances through its own confirmed allocation list
+(`clara.staff_expense_claim_allocations`), but neither the door nor the web line it feeds
+(`apps/web/components/work/work-detail.tsx`'s `PostedEntrySection`,
+`data-testid="work-claim-origin"`) said so: a claim that discharges one advance and a claim that
+discharges three rendered byte-identically. Verified by reading 0221's live
+`jsonb_build_object(...)`, which carried no such key.
+
+**The measurement.** `allocation_count` is a bare `select count(*) from
+clara.staff_expense_claim_allocations where claim_id = sec.id` — no `coalesce(...,1)`, no
+settlement branch. That is exact for EVERY claim the door has ever answered for, not only ones
+admitted after 0301, because 0301 itself makes it so: SECTION G backfills one allocation row per
+pre-0301 `advance_application` claim at 0301's own apply time (unconditional, run once), every
+claim admitted after 0301 gets its row(s) from `admit_staff_expense_claim_work` SECTION 8a whose
+`clara._claim_allocations` normaliser gives a legacy single-`advance_id` submission its own
+one-element list, and #1067 (0339) closed the one gap (a present-but-empty `advance_allocations`
+array) that could have left a live claim with zero rows. So the count is 1 for a single-advance
+claim, the matching row count for a multi-advance one, and 0 for a claim that discharges no advance
+at all (`reimbursement`, `already_settled`) — the honest count of an arm that is not there. Tail T.2
+DRIVES all three shapes to prove it rather than trust the inventory: it admits a reimbursement, a
+single-advance and a two-advance claim through the REAL door (`admit_staff_expense_claim_work` takes
+its author as an explicit argument, not from a JWT, so it is callable directly inside a migration
+DO block) and reads each back through the REAL recut door under a faked
+`request.jwt.claims` GUC (`clara._human_ctx` reads exactly that), the same mechanism PostgREST sets.
+This is a new pattern in this migration family — earlier tickets in this lane drove `_assert_claim_
+basis` directly rather than the admission door — introduced here because `allocation_count`'s
+correctness is a property of ADMITTED rows, not of the validator alone.
+
+**What this file does not touch, and pins.** `clara._claim_allocations` (the normaliser whose
+single-advance branch is why a legacy claim's row exists at all) and
+`clara.admit_staff_expense_claim_work` (SECTION 8a, the writer of every row this count reads) —
+neither is CALLED by the recut body, but both are pinned because a future change to either could
+silently break the invariant this field leans on without touching a byte of `get_work_claim_origin`
+itself, which is exactly the drift a pin is for.
+
+**The web half** ships in the same ticket's commits and carries no database object:
+`apps/web/lib/work/staff-expense-claim-reads.ts`'s `WorkClaimOrigin` type gains
+`allocation_count: number`, and `work-detail.tsx`'s identity block renders
+`StaffExpenseClaim.origin.allocationCount` (`"settles {count, plural, one {# advance} other {#
+advances}}"`, `data-testid="work-claim-allocation-count"`) beside the existing claimant/settlement
+line only when `allocation_count > 1` — a single-advance claim's card is byte-identical to today's.
+`apps/web/e2e/staff-expense-claim-mock.mjs`'s `get_work_claim_origin` handler was widened the same
+way, for the same reason 0266's own header gives for restating a mock: an inaccurate mock is a
+silent hole a real regression could hide in.
+
+**Redo (#957) and the first-apply branch.** The single statement is a `create or replace function`
+and the prestate detects its own redo by the marker `#1069 (0341` in the live door. Both branches
+were exercised FOR REAL on the lane database, in chronological order rather than simulated: the
+TRUE first apply ran through `pnpm db:migrate` (`#1069 prestate: clean (FIRST apply)`, tail T.2's
+three DRIVEN shapes all green), and `CLARA_MIGRATION_REDO=0341_work_claim_allocation_count`
+re-applied it over its own post-image (`#1069 prestate: clean (REDO apply)`, same tail green
+again), post-image sha `f7d1b9944349da60a0a8e9e8f7fd2418ace8fc2b08084cee0009578b280a99e2`.
