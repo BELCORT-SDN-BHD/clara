@@ -67,6 +67,15 @@ export async function bodiesDeriving(suffix) {
        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'clara'
         and p.prosrc ~ ('p_op_key[[:space:]]*\\|\\|[[:space:]]*''' || $1 || '''')
-      order by 1`, [suffix]);
+      -- ORDERED UNDER C, NOT UNDER THE DATABASE'S OWN COLLATION (#1047's house rule). The
+      -- census's expected lists are JavaScript arrays sorted by Array.prototype.sort, which is
+      -- UTF-16 code-unit order -- byte order for these ASCII signatures. A C.UTF-8 rig orders
+      -- this readback the same way and agrees by luck; CI's postgres:17 service initdb's at
+      -- en_US.utf8, where the underscore is ignored at the primary level, so
+      -- clara.replace_revenue_recognition_schedule sorts BEFORE clara._revenue_recognition_core
+      -- and p1077.namespace.census reds on ORDER alone with both members present (CI run
+      -- 36137571054, cell 3285). Pinning the readback's collation makes the two sides agree on
+      -- every rig rather than on some of them.
+      order by (p.oid::regprocedure::text) collate "C"`, [suffix]);
   return r.rows.map((x) => x.sig);
 }
