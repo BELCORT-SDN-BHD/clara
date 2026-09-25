@@ -32,6 +32,9 @@ import {
 
 register();
 const proposalLib = await import("../../runtime/lib/fa-particulars-proposal.ts");
+// The two grounds' statements and mappers live beside the deriver, not inside it: its own
+// file is deploy-locked on main (fix round 2026-09-25, see fa-proposal-grounds.ts's header).
+const groundsLib = await import("../../runtime/lib/fa-proposal-grounds.ts");
 
 let live = false;
 let w = null;
@@ -128,7 +131,7 @@ test("fp.wall AC1 — clara_agent_ro reads its OWN firm's depreciation policies 
 
 test("fp.read AC2 — the ground read returns the account's NEWEST retired policy, and returns NOTHING while a live version supersedes it", async (t) => {
   if (await shut(t)) return;
-  const SQL = proposalLib.FA_RETIRED_ACCOUNT_POLICY_SQL;
+  const SQL = groundsLib.FA_RETIRED_ACCOUNT_POLICY_SQL;
   const cred = await mintWake({ kind: "interactive", firm: w.firms.A });
   const read = (client) => wakeQuery(ROLES.agentRo, cred.secret, SQL, [client, COST]);
 
@@ -140,7 +143,7 @@ test("fp.read AC2 — the ground read returns the account's NEWEST retired polic
   const one = await read(plain);
   assert.equal(one.rowCount, 1, "the retired policy is readable under the runtime read credential");
   assert.deepEqual(
-    proposalLib.mapRetiredAccountPolicyRow(one.rows[0]),
+    groundsLib.mapRetiredAccountPolicyRow(one.rows[0]),
     { assetAccount: COST, version: 1, method: "straight_line", usefulLifeMonths: 96, rateBps: null },
     "mapped, it carries EXACTLY what the person signed — from an independent expected literal");
 
@@ -154,7 +157,7 @@ test("fp.read AC2 — the ground read returns the account's NEWEST retired polic
   const versions = (await policyRows(twice)).map((r) => [r.version, r.active]);
   assert.deepEqual(versions, [[2, false], [1, false]], "two retired versions, none live");
   assert.deepEqual(
-    proposalLib.mapRetiredAccountPolicyRow((await read(twice)).rows[0]),
+    groundsLib.mapRetiredAccountPolicyRow((await read(twice)).rows[0]),
     { assetAccount: COST, version: 2, method: "reducing_balance", usefulLifeMonths: 60, rateBps: 2000 },
     "version 2, the last thing a person signed — never the older version 1");
 
@@ -170,7 +173,7 @@ test("fp.read AC2 — the ground read returns the account's NEWEST retired polic
   assert.deepEqual(both, [[2, true], [1, false]], "version 1 retired underneath a LIVE version 2");
   assert.equal((await read(superseded)).rowCount, 0,
     "the retired version 1 grounds nothing while a live version 2 speaks for the account");
-  assert.equal(proposalLib.mapRetiredAccountPolicyRow((await read(superseded)).rows[0]), null,
+  assert.equal(groundsLib.mapRetiredAccountPolicyRow((await read(superseded)).rows[0]), null,
     "and the mapper turns that empty result into no ground, not into a half-filled one");
 
   // (d) VACUITY CONTROL for (c): the SAME statement with its supersession guard stripped DOES
@@ -223,8 +226,8 @@ test("fp.ground AC3 — an account whose only policy is RETIRED grounds the pend
   // (4) THE READ, under the runtime read credential, exactly as the successor step will run it.
   const cred = await mintWake({ kind: "interactive", firm: w.firms.A });
   const rows = await wakeQuery(ROLES.agentRo, cred.secret,
-    proposalLib.FA_RETIRED_ACCOUNT_POLICY_SQL, [client, COST]);
-  const retiredPolicy = proposalLib.mapRetiredAccountPolicyRow(rows.rows[0]);
+    groundsLib.FA_RETIRED_ACCOUNT_POLICY_SQL, [client, COST]);
+  const retiredPolicy = groundsLib.mapRetiredAccountPolicyRow(rows.rows[0]);
   assert.deepEqual(retiredPolicy,
     { assetAccount: COST, version: 1, method: "reducing_balance", usefulLifeMonths: 60, rateBps: 2500 },
     "the ground carries exactly what the person signed");

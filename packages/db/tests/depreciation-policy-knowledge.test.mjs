@@ -44,6 +44,9 @@ import { depreciationPolicyKnowledgeCohortApplied, knowledgeWorld } from "./know
 
 register();
 const proposalLib = await import("../../runtime/lib/fa-particulars-proposal.ts");
+// The two grounds' statements and mappers live beside the deriver, not inside it: its own
+// file is deploy-locked on main (fix round 2026-09-25, see fa-proposal-grounds.ts's header).
+const groundsLib = await import("../../runtime/lib/fa-proposal-grounds.ts");
 
 const EXPECTED_CELLS = 9; // dk.01 .. dk.09
 let live = false;
@@ -101,7 +104,7 @@ const reasonOf = (err) => {
 // pass review twice). Under clara_agent_ro, RLS `p_knowledge_records_agent`
 // (firm_id = clara.wake_firm()), the client pinned as $1 and the calendar day the proposal is
 // being made for as $2 (null = today in MYT).
-const READ = proposalLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL;
+const READ = groundsLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL;
 
 cell("dk.01 the catalogue carries depreciation_policy: assertion/object/shape_only, authority-bearing, and an admin+ floor at BOTH scopes from authority_bearing alone", async () => {
   const r = await rootQuery(
@@ -208,7 +211,7 @@ cell("dk.06 mapDepreciationKnowledgeRows carries the captured row's exact values
   const cred = await mintWake({ kind: "interactive", firm: w.firm });
   const rows = await wakeQuery(ROLES.agentRo, cred.secret, READ, [w.clientA, null]);
   assert.equal(rows.rowCount, 1);
-  const notes = proposalLib.mapDepreciationKnowledgeRows(rows.rows);
+  const notes = groundsLib.mapDepreciationKnowledgeRows(rows.rows);
   assert.equal(notes.length, 1);
   assert.deepEqual(
     { assetAccount: notes[0].assetAccount, label: notes[0].label, method: notes[0].method,
@@ -229,7 +232,7 @@ cell("dk.07 AC3 — a client's recorded depreciation-policy note, captured and r
   });
   const cred = await mintWake({ kind: "interactive", firm: w.firm });
   const rows = await wakeQuery(ROLES.agentRo, cred.secret, READ, [w.clientA, null]);
-  const knowledge = proposalLib.mapDepreciationKnowledgeRows(rows.rows);
+  const knowledge = groundsLib.mapDepreciationKnowledgeRows(rows.rows);
 
   const asset = {
     assetId: "22222222-2222-4222-8222-222222222222", description: "Forklift", costCents: 800_000,
@@ -282,16 +285,16 @@ cell("dk.08 a note whose effective window has CLOSED grounds nothing — the rea
 
   // AS OF A DAY AFTER THE WINDOW CLOSED: nothing. A 2026 proposal is not grounded on a 2024 note.
   const after = await wakeQuery(ROLES.agentRo, cred.secret,
-    proposalLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL, [w.clientA, "2026-09-01"]);
+    groundsLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL, [w.clientA, "2026-09-01"]);
   assert.equal(after.rowCount, 0,
     "an expired note grounds nothing: the proposal's own sentence is present tense about what the client's record STATES");
 
   // AS OF A DAY INSIDE THE WINDOW: the same row comes back. This is the control that makes the
   // exclusion above the window's doing rather than the statement's.
   const inside = await wakeQuery(ROLES.agentRo, cred.secret,
-    proposalLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL, [w.clientA, "2024-06-30"]);
+    groundsLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL, [w.clientA, "2024-06-30"]);
   assert.equal(inside.rowCount, 1, "inside its own window the note reads exactly as before");
-  assert.deepEqual(proposalLib.mapDepreciationKnowledgeRows(inside.rows).map((n) => n.usefulLifeMonths), [24]);
+  assert.deepEqual(groundsLib.mapDepreciationKnowledgeRows(inside.rows).map((n) => n.usefulLifeMonths), [24]);
 
   // AND A NOTE WITH NO WINDOW AT ALL — the ordinary case — is unaffected by either as-of.
   const w2 = await knowledgeWorld("dk8_open");
@@ -303,7 +306,7 @@ cell("dk.08 a note whose effective window has CLOSED grounds nothing — the rea
   const cred2 = await mintWake({ kind: "interactive", firm: w2.firm });
   for (const asOf of ["2024-06-30", "2026-09-01", null]) {
     const r = await wakeQuery(ROLES.agentRo, cred2.secret,
-      proposalLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL, [w2.clientA, asOf]);
+      groundsLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL, [w2.clientA, asOf]);
     assert.equal(r.rowCount, 1,
       `an unwindowed note speaks as of ${asOf ?? "the statement's own MYT day (the null default)"}`);
   }
@@ -314,7 +317,7 @@ cell("dk.08 a note whose effective window has CLOSED grounds nothing — the rea
   // estate's own knowledge window at a UTC midnight boundary. clara._book_today() would have been
   // the nicer spelling and is ungranted to this credential (dk.09's sibling measurement).
   const expired = await wakeQuery(ROLES.agentRo, cred.secret,
-    proposalLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL, [w.clientA, null]);
+    groundsLib.FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL, [w.clientA, null]);
   assert.equal(expired.rowCount, 0, "with no as-of, the read asks about TODAY in MYT, and the 2024 note is past");
 });
 

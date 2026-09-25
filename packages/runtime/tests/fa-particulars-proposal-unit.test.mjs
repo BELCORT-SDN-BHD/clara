@@ -26,6 +26,9 @@ import { register } from "tsx/esm/api";
 
 register();
 const p = await import("../lib/fa-particulars-proposal.ts");
+// The two grounds' statements and mappers live beside the deriver, not inside it: its own
+// file is deploy-locked on main (fix round 2026-09-25, see fa-proposal-grounds.ts's header).
+const g = await import("../lib/fa-proposal-grounds.ts");
 
 /** A pending register row on an enrolled, depreciable account — the state the dependent
  *  particulars question is opened for. */
@@ -481,7 +484,7 @@ test("p933.reason.a_sibling_ground_claims_the_DRIVERS it read, never 'the same' 
 // rest of this file.
 
 test("p1090.map.happy_path — a well-formed row maps field for field, from an independent expected literal", () => {
-  const notes = p.mapDepreciationKnowledgeRows([
+  const notes = g.mapDepreciationKnowledgeRows([
     { id: "rec-1", applies_when: { asset_account_code: "1500" },
       value: { method: "straight_line", useful_life_months: 96, rate_bps: null, label: "Plant, 8 years" } },
   ]);
@@ -492,7 +495,7 @@ test("p1090.map.happy_path — a well-formed row maps field for field, from an i
 });
 
 test("p1090.map.client_wide_when_applies_when_is_empty — an empty applies_when (the client-wide capture) maps assetAccount to null, never an empty string", () => {
-  const [note] = p.mapDepreciationKnowledgeRows([
+  const [note] = g.mapDepreciationKnowledgeRows([
     { id: "rec-2", applies_when: {}, value: { method: "reducing_balance", useful_life_months: 60, rate_bps: 2000 } },
   ]);
   assert.equal(note.assetAccount, null);
@@ -502,14 +505,14 @@ test("p1090.map.client_wide_when_applies_when_is_empty — an empty applies_when
 });
 
 test("p1090.map.missing_fields_become_null_or_empty_label, never undefined", () => {
-  const [note] = p.mapDepreciationKnowledgeRows([{ id: "rec-3", applies_when: {}, value: {} }]);
+  const [note] = g.mapDepreciationKnowledgeRows([{ id: "rec-3", applies_when: {}, value: {} }]);
   assert.deepEqual(note, {
     recordId: "rec-3", assetAccount: null, label: "", method: null, usefulLifeMonths: null, rateBps: null,
   });
 });
 
 test("p1090.map.a_malformed_value_is_DROPPED, never thrown — the catalog validates 'an object' alone (shape_only), so anything narrower is this mapper's own problem to tolerate", () => {
-  const notes = p.mapDepreciationKnowledgeRows([
+  const notes = g.mapDepreciationKnowledgeRows([
     { id: "bad-null", applies_when: {}, value: null },
     { id: "bad-string", applies_when: {}, value: "not an object" },
     { id: "bad-array", applies_when: {}, value: ["not", "an", "object"] },
@@ -520,14 +523,14 @@ test("p1090.map.a_malformed_value_is_DROPPED, never thrown — the catalog valid
 });
 
 test("p1090.map.a_malformed_applies_when_reads_as_client-wide, never thrown", () => {
-  const [note] = p.mapDepreciationKnowledgeRows([
+  const [note] = g.mapDepreciationKnowledgeRows([
     { id: "rec-4", applies_when: "not an object", value: { method: "none" } },
   ]);
   assert.equal(note.assetAccount, null);
 });
 
 test("p1090.map.order_is_preserved_and_nothing_is_ranked_here — ranking is deriveFaParticularsProposal's own job, over every note it is handed", () => {
-  const notes = p.mapDepreciationKnowledgeRows([
+  const notes = g.mapDepreciationKnowledgeRows([
     { id: "first", applies_when: {}, value: { method: "straight_line", useful_life_months: 24 } },
     { id: "second", applies_when: {}, value: { method: "straight_line", useful_life_months: 48 } },
   ]);
@@ -543,7 +546,7 @@ test("p1090.map.order_is_preserved_and_nothing_is_ranked_here — ranking is der
 
 test("p1092.map.happy_path — a well-formed retired row maps field for field, from an independent expected literal", () => {
   assert.deepEqual(
-    p.mapRetiredAccountPolicyRow({
+    g.mapRetiredAccountPolicyRow({
       asset_account_code: "1500", version: 2, method: "reducing_balance",
       useful_life_months: 84, rate_bps: 2500,
     }),
@@ -554,7 +557,7 @@ test("p1092.map.happy_path — a well-formed retired row maps field for field, f
 test("p1092.map.an_unreadable_account_code_DROPS_the_whole_ground — `asset_account_code` is NOT NULL on the relation, so a missing one is not a client-wide statement and must never be allowed to speak for an account-less register row", () => {
   for (const bad of [undefined, null, "", 1500, {}]) {
     assert.equal(
-      p.mapRetiredAccountPolicyRow({
+      g.mapRetiredAccountPolicyRow({
         asset_account_code: bad, version: 1, method: "straight_line", useful_life_months: 60, rate_bps: null,
       }),
       null,
@@ -563,29 +566,29 @@ test("p1092.map.an_unreadable_account_code_DROPS_the_whole_ground — `asset_acc
   // THE CONTROL: the same row with a readable account code DOES ground, so the four above are
   // refused for their account code and not because the mapper refuses everything.
   assert.equal(
-    p.mapRetiredAccountPolicyRow({
+    g.mapRetiredAccountPolicyRow({
       asset_account_code: "1500", version: 1, method: "straight_line", useful_life_months: 60, rate_bps: null,
     })?.assetAccount,
     "1500");
 });
 
 test("p1092.map.no_row_is_null — an account with no retired policy the read admits grounds nothing, and the successor hands the mapper exactly that", () => {
-  assert.equal(p.mapRetiredAccountPolicyRow(undefined), null, "rows[0] of an empty result set");
-  assert.equal(p.mapRetiredAccountPolicyRow(null), null);
+  assert.equal(g.mapRetiredAccountPolicyRow(undefined), null, "rows[0] of an empty result set");
+  assert.equal(g.mapRetiredAccountPolicyRow(null), null);
 });
 
 test("p1092.map.missing_drivers_become_null, never undefined — a shape the wire schema would drop is not what this mapper emits", () => {
   assert.deepEqual(
-    p.mapRetiredAccountPolicyRow({ asset_account_code: "1600", version: 1, method: "none",
+    g.mapRetiredAccountPolicyRow({ asset_account_code: "1600", version: 1, method: "none",
       useful_life_months: null, rate_bps: null }),
     { assetAccount: "1600", version: 1, method: "none", usefulLifeMonths: null, rateBps: null });
   assert.deepEqual(
-    p.mapRetiredAccountPolicyRow({ asset_account_code: "1600" }),
+    g.mapRetiredAccountPolicyRow({ asset_account_code: "1600" }),
     { assetAccount: "1600", version: null, method: null, usefulLifeMonths: null, rateBps: null });
 });
 
 test("p1092.map.an_unusable_method_is_carried, never repaired — congruent() is the ONE shape gate, exactly as it is for a sibling", () => {
-  const mapped = p.mapRetiredAccountPolicyRow({ asset_account_code: "1500", version: 3,
+  const mapped = g.mapRetiredAccountPolicyRow({ asset_account_code: "1500", version: 3,
     method: "sum_of_digits", useful_life_months: 60, rate_bps: null });
   assert.equal(mapped.method, "sum_of_digits", "the mapper neither repairs nor refuses it");
   // AND the derivation drops it, so an unusable retired policy costs the proposal nothing: the

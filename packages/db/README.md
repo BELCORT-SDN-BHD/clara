@@ -7481,7 +7481,7 @@ for the proposal derivation should read a client's recorded depreciation note �
 onto `FaProposalKnowledgeNote`") are NOT a migration and are not wired into any workflow step:
 `loadFaProposalInputsStepV6` does not exist (`claraWork.v6.impl.ts` is absent; `registry.ts` still
 resolves `claraWork_v5`), and that step lives inside a frozen-workflow closure this lane must never
-create. `mapDepreciationKnowledgeRows` (`packages/runtime/lib/fa-particulars-proposal.ts`) is the
+create. `mapDepreciationKnowledgeRows` (`packages/runtime/lib/fa-proposal-grounds.ts`) is the
 pure mapping, built and tested; the SQL a step would run under the SAME OBO `clara_agent_ro`
 credential v4's own register read mints is stated in this ticket's report as a successor-contract
 addition, and `packages/db/tests/depreciation-policy-knowledge.test.mjs` drives capture -> that
@@ -7501,7 +7501,7 @@ successor-contract read stated above asked `state = 'live'` and nothing more. A 
 captured for 2024 alone was still `live` in 2026 and grounded a 2026 proposal under the deriver's
 present-tense sentence (driven on `clara_l03` inside a rolled-back transaction, 2026-09-25). The
 statement now lives in ONE place, `FA_DEPRECIATION_POLICY_KNOWLEDGE_SQL`
-(`packages/runtime/lib/fa-particulars-proposal.ts`), takes the calendar day as `$2` (null = today
+(`packages/runtime/lib/fa-proposal-grounds.ts`), takes the calendar day as `$2` (null = today
 in MYT) and carries the SAME window terms `clara.retrieve_knowledge` computes `in_effect` from
 (0230:361-362). It DROPS where that door MARKS, on purpose: that door hands a model a marked
 record so the model can say "this expired", while this ground feeds a deterministic deriver with no
@@ -7509,6 +7509,16 @@ vocabulary for an expired note. Cells `dk.08` and `dk.09` drive the window both 
 why the step does not call `clara.retrieve_knowledge` itself — `clara_agent_ro` holds EXECUTE
 neither on it nor on `clara.record_work_knowledge_read`, so the step reads the relation directly
 and leaves NO work-knowledge-read receipt for `clara.work_knowledge_drift` to find.
+
+**The statements and mappers moved out of the deriver's own file, which is deploy-locked on
+`main`.** `frozen-workflows.json` at `061a6992b` carries
+`packages/runtime/lib/fa-particulars-proposal.ts` with `deployed: true` and the sha this lane was
+cut at; the lane's own manifest has no such entry, because the cut phase minted it after the
+branch. #1090 and #1092 had appended their statement and mapper to that very file, which at
+integration is a changed deploy-locked body -- the one thing the freeze exists to stop. They now
+live in `packages/runtime/lib/fa-proposal-grounds.ts`, a new module that imports the deriver's
+types and nothing else, and the deriver's file is byte-identical to `main` again
+(sha256 `49d583fc…07cd51c3`, re-measured).
 
 **"`registry.ts` still resolves `claraWork_v5`" was true of this lane's base and is false of what
 this merges into.** `main` at `061a6992b` (the cut phase, PR #1140) carries
@@ -7561,7 +7571,7 @@ register row that was already pending when version 2 landed still opens a questi
 from the retired version 1 while a live version 2 says something else would put a SUPERSEDED human
 judgement on a form under Clara's own sentence. The read therefore carries a
 `not exists (… where q.active)` guard (`FA_RETIRED_ACCOUNT_POLICY_SQL`,
-`packages/runtime/lib/fa-particulars-proposal.ts`). Under a retired-only RLS wall that sub-select
+`packages/runtime/lib/fa-proposal-grounds.ts`). Under a retired-only RLS wall that sub-select
 would see nothing and ALWAYS pass — the guard would be vacuous under the very credential that runs
 it, which is worse than a slightly wider read. `packages/db/tests/fa-retired-policy-agent-read.test.mjs`
 (`fp.read`) drives both arms and carries the vacuity control that shows the guard, not luck, is what
