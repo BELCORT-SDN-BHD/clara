@@ -62,6 +62,13 @@ export const CLR = {
   badRequest: "CLR10", // malformed args / unknown account / bad lifecycle
   notFound: "CLR11", // not-found-in-your-firm (NO existence oracle)
   stale: "CLR12", // stale context / books-version freshness gate (Slice 3, §2.5)
+  conflict: "CLR13", // state conflict (0006): a turn already live for the session, an
+  // interruption not pending/expired, an illegal agent_task transition (incl. any move out
+  // of a terminal state), or open_interruption on a non-running task
+  period: "CLR19", // correction authorization, staleness, or lifecycle refusal (0007+): a
+  // distinct-checker/attestation requirement unmet, a stale books-version or source-revision
+  // plan, a correction touching an already-closed period (write_into_closed_period, 0056+),
+  // or an illegal correction-state transition
   // #1114 [0335] — CALLER-CONTRACT VIOLATION, and it is the one code in this catalog that names a
   // mistake made by a PROGRAM rather than by a person. A `clara_runtime`-only door whose own
   // contract guarantees an argument (the human an on-behalf-of act names; the firm/client/entry a
