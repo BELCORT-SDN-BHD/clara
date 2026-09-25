@@ -517,15 +517,26 @@ test("v21.refusals: a FAULT answers `internal` — only a CLR reaches the model 
 // 5 · identity and the prompt
 // ---------------------------------------------------------------------------
 
-test("v21.identity: the engine stamp is this closure's, and the registry pins the body", () => {
+test("v21.identity: the engine stamp is this closure's, and the body is still carried for parked runs", () => {
   assert.equal(v21Usage.chatEngineId(MODEL), `llm-openai:${MODEL}:chatturn-v21`,
     "check-workflow-bundle derives the expected stamp from the registry and refuses a built bundle without it");
-  assert.equal(registry.workflowPins.chatTurn, "chatTurn_v21");
-  assert.equal(registry.workflows.chatTurn, registry.chatTurn_v21);
-  assert.ok(registry.workflowBodies.includes("chatTurn_v21"));
+  // THE PIN IS NO LONGER ASSERTED AS A LITERAL HERE, and the reason is this cell's own history.
+  // It read `workflowPins.chatTurn === "chatTurn_v21"` until the 2026-09-25 cut phase repointed
+  // the class to v22 (#985) — exactly the failure mode `tests/version-cutover-e2e.mjs`'s header
+  // records for a "newest" literal ("it went stale the moment a later PR repointed chatTurn and
+  // broke CI silently-until-red"), and exactly what v20's own cell was rewritten for at the
+  // previous cut. What this FILE owns is that v21 stays a RETAINED body; the pin, the dispatch
+  // table and the roster agreeing for every class at once is `tests/registry-view.test.mjs`'s.
+  assert.equal(typeof registry.chatTurn_v21, "function",
+    "policy (c): a superseded body is never renamed or deleted while a run could be parked on it");
+  assert.ok(registry.workflowBodies.includes("chatTurn_v21"),
+    "and the provenance roster still carries it, which is what the rollback preflight enumerates");
+  const pin = registry.workflowPins.chatTurn;
+  assert.equal(registry.workflows.chatTurn, registry[pin],
+    "whatever the pin is, the dispatch table and the pin roster name ONE body");
   // policy (c): every superseded body stays exported. The ladder starts at v2 — #810 RETIRED v1.
   assert.equal(registry.chatTurn_v1, undefined);
-  for (let n = 2; n <= 20; n += 1) {
+  for (let n = 2; n <= 21; n += 1) {
     assert.equal(typeof registry[`chatTurn_v${n}`], "function", `policy (c): chatTurn_v${n} is still exported for parked runs`);
   }
 });

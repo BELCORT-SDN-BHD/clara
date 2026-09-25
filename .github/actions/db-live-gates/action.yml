@@ -420,6 +420,27 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/chat-turn-v21-e2e.mjs
+        # #1135 — THE 2026-09-25 CUT'S OWN WALK, chatTurn_v22 + claraWork_v6. A separate file per
+        # version, on purpose and for the reason each predecessor gives: its scripted model is this
+        # cut's and widening v21's would put it in the path of a lane that has nothing to do with
+        # it. What only a real World can show, and what this leg is for: (1) #1007's look-alike
+        # comes back as a QUESTION rather than a refusal — the model SEES `duplicates_found`, no
+        # second Work and no acknowledgement exist at that moment, and then the person says record
+        # it anyway and exactly ONE acknowledgement rides with the second recording, naming the
+        # invoice the PROBE showed rather than one the harness supplied; (2) #931's register
+        # refuses a split nobody confirmed, LOCALLY and before any round trip, hands the model the
+        # exact list to read back, and then discharges two advances through one entry and two
+        # `clara.staff_advance_applications` rows; (3) claraWork_v6 serves both Works and the
+        # committed receipts record ITS digest, read from the registry's own pin rather than from a
+        # version literal in the test.
+        #
+        # It SKIPS CLEANLY (exit 0, printed reason) when migration 0225, 0275 or 0301 is absent, so
+        # it is safe to merge before any DB half lands.
+        PGPORT=$PGC_PORT \
+        PGDATABASE=clara_wave_b_ci \
+        RELAY_TEST_MODE=1 \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
+          node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/chat-turn-v22-e2e.mjs
         # #637 — the TWO-BUILD cutover e2e, LAST on this rig because it is the only step here that
         # BUILDS A SECOND IMAGE (as of #794, TWO second images — see #850 below). It copies the
         # runtime package to <repo>/.scratch/two-build/previous, rewrites that copy's registry to

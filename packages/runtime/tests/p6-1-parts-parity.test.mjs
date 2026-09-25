@@ -164,6 +164,15 @@ test("p6-1.parts-parity: v16 plus the live reader admits the freeform_result emi
         "packages/runtime/workflows/chatTurn.v20.tools.ts",
         "packages/runtime/workflows/chatTurn.v20.tools.ts",
         "packages/runtime/workflows/chatTurn.v21.tools.ts",
+        // CUT PHASE 2026-09-25 - chatTurn_v22 adds THREE sites, and all three are REPLACEMENTS of
+        // v21's or v20's tools under the same name rather than new cards: #982/#1007's trade
+        // invoice, #931's staff expense claim and #937/#942's accrual. Every one of them still
+        // announces a `journal_entry` Work on the existing card, so `WORK_ACCEPTED_PURPOSES` stays
+        // at three for the fourth cut running, and the cut's six OTHER tools appear nowhere here:
+        // two opening acts, two reads and two CONFIGURATION receipts, none of which mints a card.
+        "packages/runtime/workflows/chatTurn.v22.tools.ts",
+        "packages/runtime/workflows/chatTurn.v22.tools.ts",
+        "packages/runtime/workflows/chatTurn.v22.tools.ts",
       ],
     },
     {
@@ -196,6 +205,12 @@ test("p6-1.parts-parity: v16 plus the live reader admits the freeform_result emi
         "packages/runtime/workflows/claraWork.v3.impl.ts",
         "packages/runtime/workflows/claraWork.v4.impl.ts",
         "packages/runtime/workflows/claraWork.v5.impl.ts",
+        // CUT PHASE 2026-09-25 (#1030). v6 is v5's step bodies with this closure's own identity, so
+        // its `completedResultV6` mints `work_result` at the same one site — and, exactly as the
+        // note above says of v5, `work_status` and `work_question` below do NOT gain a v6 site:
+        // v6's confirmation park calls v3's emitters and v2's open by IMPORT. A v6 site appearing
+        // on either would mean this cut copied a park body it was supposed to inherit.
+        "packages/runtime/workflows/claraWork.v6.impl.ts",
       ],
     },
     {

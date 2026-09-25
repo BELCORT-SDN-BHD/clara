@@ -19,12 +19,230 @@ The registry selects the current chat, autodraft, statement/witness facts, docum
 firm interview, client onboarding, and bank/close wake workflows. Read it for the exact versions
 and retained exports; repository state alone is not evidence of a deployed image.
 
-### The pin the wave 2026-09-25 cut moved
+### The three pins the 2026-09-25 cut phase moved
 
-`statementFacts → statementFacts_v4`. Every superseded body stays exported and in `workflowBodies`
-— v1, v2 and v3 — because the boot census refuses to start the world database-wide if a body a
-parked run needs is missing, and that is policy (c) enforced rather than promised. What the new
-body carries, and nothing more:
+`chatTurn → chatTurn_v22`, `claraWork → claraWork_v6` and `statementFacts → statementFacts_v4`.
+The cut phase carries every successor contract the riders waves wrote into ONE new body per class:
+lane C1 cut the chat and Work families — `#985` minted the file sets, `#1000` and `#1030` added
+their own doors, and `#1135` applied the ROSTER (CUT-PLAN §1.2 and §1.5, in the §1.10 conflict
+order) — and lane C2 cut the statement-facts family for `#1037`. Every superseded body stays
+exported and in `workflowBodies`, chatTurn v1–v21, claraWork v1–v5 and statementFacts v1–v3 alike,
+because the boot census refuses to start the world database-wide if a body a parked run needs is
+missing, and that is policy (c) enforced rather than promised.
+
+**What `claraWork_v6` carries** (#1030): ONE new behaviour and no new capability. Before a v6 run
+reads knowledge, spends a token or reaches a model it asks
+`clara.source_correction_successor_brief` whether this Work is the successor a document correction
+owed; if it is, the run PARKS on a confirmation question naming BOTH figures — what the retired
+Work was admitted on, and what the document says now — and nothing may post until a person answers
+it. The tool roster does not move (same seven names, same schemas, same declared doors) and the
+budgets do not move (the park happens before the loop and spends no segment, model call or tool
+call). What moves in the hashed bundle is the instructions text — one stanza,
+`SOURCE_CORRECTION_SUCCESSOR_STANZA` — and this closure's four ids, so the digest moves and
+`tests/pinned-work-bundle.mjs` can tell a v6 run from a v5 one on the record. **No wire kind is
+added**, so `claraWork.v3.parts.ts` stays the declarer and `apps/web` is untouched.
+
+**Deploy order, in one direction: migration 0321 must be LIVE BEFORE this image runs any Work**, on
+top of v5's 0230, v4's 0192/0216 and v3's 0195. Against a database without 0321 the successor probe
+cannot answer and EVERY Work settles `failed`/`internal` with nothing posted — contained, loud, and
+the correct failure for a deploy-order mistake, exactly as v5's 0230 stanza reasons. On the chat
+lane a missing function is a typed refusal and the turn survives; **on the Work lane it is
+terminal**. The REVERSE order is free: 0321 against a v5 image adds doors that nothing calls.
+
+**Rollback to v5** stops asking the confirmation and changes no database state, but it is NOT free
+while the re-derivation belt is live: a successor the belt admits would run under a v5 image
+WITHOUT the confirmation — v5 has no arm for it — and could post a re-derived basis nobody was
+shown. The belt ships in the same image, so rolling the image back removes both halves together;
+a rollback should still drain parked confirmations rather than assume they resume identically.
+
+**Refinements the digest cannot see** (CUT-PLAN §5, R5): `z.toJSONSchema` erases `.refine` /
+`.superRefine`, so `ask_question`'s `fields[]` superRefine contributes nothing to the hashed text.
+**v6 changes no refinement.** Stated here by hand because no gate will state it.
+
+#### What the cut's FIX ROUND changed, and the one migration it added
+
+The two-axis review and the adversarial lens over the whole lane diff produced five changes worth
+a reader's attention here, because three of them move behaviour a person sees.
+
+* **A recording is not its own look-alike (migration `0323`).** `chatTurn_v22` probes for duplicate
+  trade invoices BEFORE it admits, and the admission door is idempotent on its intent key — so a
+  retried tool call was shown the invoice its own earlier attempt had admitted and asked the person
+  whether to duplicate their own recording. `0323` adds a SIBLING probe carrying that intent key
+  (`clara.probe_trade_invoice_duplicates_for(uuid,uuid,text,jsonb,text)`), leaving 0275's
+  four-argument door byte-untouched for `chatTurn_v21`'s parked runs. **Deploy 0323 before this
+  image**; the reverse order is free.
+* **`record_anyway` and `allocations_confirmed` no longer reach the intent key.** A tool-local flag
+  that is the person's ANSWER to a question is not part of what is being recorded, and hashing it
+  minted a second key for one recording: measured, a retry admitted a second invoice with the same
+  reference, date and total.
+* **A look-alike question ENDS the turn.** `stoppedOnDuplicateQuestionV22` joins the stop set beside
+  `stoppedOnTerminalPost`, so one model segment can no longer probe, set `record_anyway` itself and
+  record while the acknowledgement door writes a durable row asserting a person was warned. Because
+  stopping costs the model the step it would have narrated in, the segment appends the door's own
+  question as a `text` part — no new wire kind — and the person answers in a later turn.
+* **The prepayment term question shows four facts, not model prose.** `answerPrepaymentTermInputSchemaV6`
+  has no `context` key; the run builds `{source_entry_id, document_id, prepaid_account_code,
+  total_cents}` from its own `read_prepayment_source` answer.
+* **The re-derivation belt no longer declines `source_moved_again`.** A second correction landing
+  before the sweep retires nothing (the Work is already cancelled), so the decline consumed the
+  correction's op key and left a retired instruction with no successor and nothing on Needs-you.
+  The successor is now derived from the document's LIVE reading, which is where the ruling already
+  puts the figures.
+
+* **`chatTurn_v22`** — v21's thirty-nine tools by import plus exactly ONE: `read_opening_source`
+  (#985, the contract #656 wrote and v21 deliberately left out). It takes `{client_id, seed_id}`
+  `.strict()` and nothing else — no amount, no account code, no document id — because the tie
+  document is the basis's own and every figure is re-derived by the database from that document's
+  stored regions. It calls the ROUTE CORE `parseOpeningTargets(client, {seedId, firmId, reassert})`
+  on a `clara_runtime` connection, the same function `POST /api/opening/parse-targets` calls, and
+  never `clara.record_opening_targets_parsed` itself, so the chat lane and the browser record the
+  same targets under the same op key. It restates the route's bookkeeper+ floor through
+  `clara.resolve_chat_principal` (the writer takes no author and checks no role: the runtime
+  credential IS the authority, so this floor is the only one on the chat path), masks a sibling
+  client's basis exactly as a basis that does not exist, and carries every refusal the core can
+  return VERBATIM — the named region ids, the chart gap's `unmapped_accounts`, the producer's own
+  refusal text and the door's own CLR code. NO new wire kind, NO new `WORK_ACCEPTED_PURPOSES`, and
+  the tool is deliberately OUT of `hasCodingIntent_v22`: it mints no terminal card, so a successful
+  read must not collect "the coding could not be completed into a review card this turn".
+  **No coupled migration**: every door it touches has been live since 0017 and 0006, and v21's own
+  deploy-order obligations (0225, 0227, 0230) are inherited unchanged because v22 carries v21's
+  whole tool map.
+* **`chatTurn_v22`, second tool — `read_client_financial_pack`** (#1000). It answers the client
+  home's MONEY BAND: `clara.get_client_financial_pack`'s own envelope — book cash and period profit
+  over the approved ledger, each with its ten-field envelope, its coverage, six months of history,
+  its comparison and its per-account composition — carried to the model key for key. It computes
+  NOTHING: a NULL `value_cents` stays NULL (it means "nobody has said which accounts are cash yet",
+  not zero), a profit is never re-derived from income minus expense, and month-to-date is the
+  ABSENCE of a `month` argument rather than a date this process supplied. Input
+  `{client_id, as_of?, month?}` `.strict()`, both dates plain calendar days: whether a month is a
+  first day, whether an as-of is in the future and whether it falls inside the named month are the
+  READ'S OWN CLR10s, answered against `clara.book_today()`, and the tool carries them with their
+  reason and their whole detail bag rather than pre-empting them in a second vocabulary.
+  **It has a COUPLED MIGRATION, `0320_client_financial_pack_wake_read`, and the deploy order is
+  not a preference.** The read is granted to `clara_authenticated` alone and this lane carries no
+  JWT claims, so 0320 split the computation into ONE ungranted core
+  (`clara._client_financial_pack_core`, which takes the caller's firm as an argument), left the
+  human door its VIEWER-floored delegate with the same signature, envelope, refusal codes and ACL,
+  and gave this lane its own audited door: `clara.wake_get_client_financial_pack`, EXECUTE to
+  `clara_agent_ro` alone with ONE `interactive` allowlist row. **0320 must be applied before the
+  image that carries `chatTurn_v22` serves**, or this tool answers `42883` as an internal fault on
+  every call. The credential is minted ON BEHALF OF the human the turn acts for, and
+  `clara.wake_context` re-validates that person as an ACTIVE BOOKKEEPER+ on every use — a floor
+  STRICTLY ABOVE the read's own VIEWER floor, so the model lane is narrower than the door it
+  reaches and nothing was widened to open it. NO new wire kind (the envelope rides the generic
+  `tool_result` part), no new `WORK_ACCEPTED_PURPOSES`, and — like `read_opening_source` — it is
+  deliberately OUT of `hasCodingIntent_v22`: it mints no terminal card and acts on nothing.
+
+* **`chatTurn_v22`, the ROSTER #1135 applied** — eleven class-A contracts and two class-D
+  prohibitions, in CUT-PLAN §1.10's order. Six tools are NEW and three are REPLACEMENTS under names
+  v20 and v21 already serve, which a set difference cannot see and `chat-turn-v22-tools.test.mjs`
+  names one by one:
+  * `start_trade_invoice_work` (REPLACED, #982 + #1007). The TIN now RESOLVES a party at the
+    registration number's own tier, so the map holds **twenty-one** tokens — #982 counted eighteen
+    to nineteen and #1007 eighteen to twenty, both from the same base, and the stanza says
+    twenty-one. Before it admits, the tool PROBES
+    (`clara.probe_trade_invoice_duplicates_for(client, author, kind, particulars)`) and a match is a
+    QUESTION in the turn rather than a refusal — the owner's ruling, and refusing would also lose
+    the figures a person needs to answer. `record_anyway` is the whole of the model's contribution;
+    the acknowledged ids are the PROBE's own measurement, never a uuid a model supplied, and
+    `clara.record_trade_invoice_duplicate_ack` is written under the SAME intent key BEFORE the
+    admission.
+  * `refresh_opening_source` (NEW, #986). A SECOND verb beside the read, never a flag on it: a
+    model that could pass `force` to the read could retire a basis's targets by accident. It reports
+    BOTH counts, and a 202 missing either one is a fault rather than a zero. The read's own
+    "read again since last parse" mapping is UNCHANGED and a cell says so; what moved is the act
+    beside it, which now names this tool.
+  * `start_staff_expense_claim_work` (REPLACED, #931). One claim may come off several advances.
+    `allocations_confirmed` is TOOL-LOCAL and never reaches the wire — the door judges the list, not
+    the conversation that produced it — and a split of two or more lines is refused LOCALLY until a
+    person has said yes, with the exact list handed back for the model to read out.
+  * `start_accrual_work` (REPLACED, #937 + #942, consumed TOGETHER). `period_amounts` and `side`
+    land on the same `p_accrual` jsonb and the door's arity is unchanged. The eight per-period
+    tokens are all local; `accrual_period_amount_missing` is THE ASK and carries the exact dates.
+    The two account NAMES do not move: they are the database's own wire keys and the rename
+    `wave4-lane03-fix.md` proposed for this cut needs a migration nobody reserved.
+  * `start_prepayment_schedule_work` and `start_revenue_recognition_work` (NEW, #915 + #941). Both
+    reach the OBO TWIN — `…_for` — because a `clara_runtime` connection carries no JWT claims and
+    the human door would answer CLR04 on every call; `p_author` is the human the turn acts for.
+    Neither input has anywhere to put an amount, a term, a date, a cadence or a pattern, and every
+    one of those absences is a rule. `p_pattern` is NOT sent: 0308 offers one value.
+  * `read_payroll_fact_state` (NEW, #945). Class A rather than class C on a MEASUREMENT:
+    `clara.get_document_extract` carries `clara_agent_ro` as well as `clara_authenticated`. The
+    live signature takes THREE arguments (document, CLIENT, character ceiling), not the two the
+    contract wrote, and the client argument keeps the read inside the conversation's own client. A
+    null figure stays null: `Number(null)` is 0, and that coercion is the exact defect the stanza
+    forbids in words.
+  * **Class D is carried into the prompt and nowhere else.** #939: Clara may ask exactly two
+    questions and never states a service period. #940: she never enrols an account and never
+    proposes which to enrol — she says which account and names the panel. Neither has a tool, a zod
+    input, a door call or a part kind, by ruling.
+  **NO new wire kind at this cut.** The two "part kinds" #915 and #941 name are payload
+  discriminants on `kind`, and `check-parts-parity.mjs`'s discriminant is `type`, so they ride
+  INSIDE the tool result and `apps/web` is untouched — the emittable set is the same six it was.
+
+* **`claraWork_v6`, the ROSTER #1135 applied** — v5's seven tools plus exactly three, every one a
+  READ or a QUESTION, and the three declarations (names, schemas, declared doors) move together
+  because the bundle digest hashes all three:
+  * `read_prepayment_source` and `read_revenue_recognition_source` (#915 item 2, #941 item 2), one
+    uuid each; the firm and the client are the RUN's. No document bytes, ever — the byte door stays
+    0190's — and a not-found is the same answer for another firm's entry.
+  * `answer_prepayment_term` (#915's question in #653's shape, bound by #939's ruling): NO date
+    field, and the three fields are this closure's own constants, so there is no path from a tool
+    input to a service period.
+  * The instructions gain `PREPAYMENT_SOURCE_STANZA`, which replaces `claraWork.v1.prompt.ts`'s
+    "there is no source document for this Work" clause — true while the run had no document read
+    at all, and false for a Work standing on a prepayment whose entry BINDS one.
+  * **#933's dependent-particulars proposal** rides the question the body already opens: ONLY the
+    `source_ref` changes, through `proposalSourceRef(assetId, proposal)`. The cut takes
+    `wave4-lane05-fix.md`'s CORRECTED contract rather than the ticket report's §2/§3, because
+    `fa.acquired_date::text` is load-bearing: without it node-postgres returns a JS `Date` at local
+    midnight whose UTC spelling under Asia/Kuala_Lumpur is the day before, and every depreciation
+    charge from then on would be computed from a date one day early. A read that fails, or a
+    proposal its own schema refuses, opens exactly v5's question — never a block the particulars
+    door would later refuse, sitting on a question a person reads hours later.
+  **No wire kind, no budget change**, and no refinement change: `z.toJSONSchema` erases
+  `.refine`/`.superRefine`, so a relaxed rule would ship under a digest that could not see it
+  (CUT-PLAN §5, R5). Stated here by hand because no gate will state it.
+
+**Deploy order for the roster: NOTHING NEW.** #1135 adds no migration. Every door it wires has been
+live since 0221, 0222, 0223, 0225, 0274, 0275, 0286, 0301, 0307, 0308, 0317 or 0054, and the two
+coupled migrations of this cut phase are still #1000's `0320` and #1030's `0321`, whose stanzas
+above are unchanged. On the chat lane a missing function is a typed refusal and the turn survives;
+**on the Work lane it is terminal**, so the three v6 additions inherit v6's own 0321 obligation and
+add none.
+
+**One module joined a frozen closure at this cut**: `lib/opening-parse.mjs`, because v22's tool
+imports it. THE COST IS EXACTLY THAT FILE — it has no relative imports of its own, so nothing
+travels with it, and #656 arranged that on purpose (its `OPENING_TB_REFUSAL_ENVELOPE_KEY` comment
+spells the producer's envelope key out rather than importing `lib/opening-tb-produce.mjs`, "the
+door must not gain an import edge into the producer, which would freeze the producer the day a
+Clara tool imports this door"). Its four other importers keep importing it and stay editable; what
+is frozen is this file's own text, so a behavioural change to the opening parse is now a NEW module
+plus a chatTurn successor that imports it, never an edit in place (owner ruling 2026-09-15).
+A versioned COPY under the frozen file set was the alternative and was refused: it would put a
+second derivation of a client's opening figures in the estate and break #656's own "the tool must
+not reimplement the core" clause, which is what makes "the same targets as the browser action"
+(#985 AC2) checkable at all.
+
+**Seven more modules joined the closure when #1135 applied the roster**, and the choice between
+freezing a live module and minting a versioned copy was made per module, on a measurement:
+
+| module | frozen how | why |
+|---|---|---|
+| `lib/trade-invoice-basis.ts` | SUCCEEDED by `lib/trade-invoice-basis.v2.ts` | already frozen under v21; its own header rules that a later change "ships as a NEW module beside this one" |
+| `lib/staff-expense-claim-basis.ts` | SUCCEEDED by `…-basis.v2.ts` | already frozen under v20 |
+| `lib/accrual-basis.ts` | SUCCEEDED by `lib/accrual-basis.v2.ts` | already frozen under v20; #937 and #942 land in ONE successor, as `wave4-lane03-fix.md` requires |
+| `lib/prepayment-schedule-basis.ts` | FROZEN IN PLACE | measured: its only other importers are its own unit cell and two comments. Freezing it costs nothing a caller was relying on, and a versioned copy would have put a second prepayment refusal vocabulary in the estate |
+| `lib/fa-particulars-proposal.ts` | FROZEN IN PLACE | same measurement, and the module's own report says it is written to be final |
+| `lib/revenue-recognition-basis.ts` | NEW, frozen on arrival | #941's own follow-up 3: a revenue twin beside the prepayment module rather than a widening of it |
+| `lib/payroll-fact-state.ts` | NEW, frozen on arrival | the parse and the refusal map, extracted so they can be driven without a database |
+
+The three SUCCEEDED modules re-export every unchanged symbol from their frozen predecessor BY
+REFERENCE rather than re-spelling it, so there is one claimant rule, one refusal sentence and one
+journal derivation on this estate rather than two that can drift.
+
+**What `statementFacts_v4` carries** (#1037, lane C2): ONE fact, on ONE channel, and nothing
+more. The two bullets below are that lane's own record of it.
 
 * **`statementFacts_v4`** (#1037, the producer half of #990) — ONE fact, on ONE channel. The TEXT
   reader, which is the only one shown the numbered `clara.witness_citation_regions` rendering, is
@@ -1718,6 +1936,21 @@ serialize and the reservation and the receipt commit together), which is exactly
 be papered over. A DB-side mirror of #936's own `pending` branch was considered and left out: no
 cell could ever drive it through the door, so it would be untestable defensive code inside a
 migration whose tail census cannot reach behaviour.
+
+### The chat half of that lane (#985), taken at the 2026-09-25 cut
+
+#656's successor contract — "a future `chatTurn_vN`" — is TAKEN: `read_opening_source` ships in
+`chatTurn_v22` (top of this file). It is the only tool in the estate that reaches this lane, and it
+reaches it the way the contract fixed: through `parseOpeningTargets`, never through
+`clara.record_opening_targets_parsed`, so there is ONE derivation of a client's opening figures and
+one op key behind both roads. `refreshOpeningTargets` HAS its chat tool now: #986's half
+landed in the same cut as roster entry A3 (`refresh_opening_source`, #1135), as a SECOND verb and
+never a flag on the read — a model that could pass `force` to the read could retire a basis's
+targets by accident. The two are a MATCHED PAIR and the pairing obligation is discharged: the
+read's `source_reread_since_parse` mapping is UNCHANGED, still a refusal and still not a retry,
+and what moved is the sentence beside it, which now names the refresh tool instead of describing a
+screen. That was the one thing to revisit, and it was revisited.
+
 ## The intake batch lane (#636)
 
 `lib/intake-batches.mjs` is a NEW, NON-FROZEN module carrying every line of batch logic:
@@ -1803,6 +2036,37 @@ CLR04 — which means its stored canceller has lost authority and no future swee
 because the fan-out cannot substitute an identity (`clara._work_door_ctx` hashes `{work, author}`).
 The blocked parent is logged by name and `clara.get_intake_batch` reports the same condition to the
 human as `cancel_blocked`.
+
+### #1030 — the source-correction re-derivation belt (0321)
+
+`lib/reconciler-work-source-correction.mjs` is one contained belt in `runReconcilerSweep`, after
+the accounting-work belt and before the trace prune, feature-detected per cycle on
+`clara.source_correction_rederivations(integer)` so an image that predates 0321 boots DORMANT.
+
+**What it does.** #885 retires every Work parked on a question about a document fact somebody
+corrects and admits nothing in its place, because deriving a basis from a corrected reading is an
+interpretation act that cannot be performed in SQL. This belt performs it: it reads the backlog of
+retirements still owed a successor, re-derives a basis through `lib/source-correction-rederive.mjs`
+(a pure function — figures off the document's LIVE facts, shape off the retired instruction),
+admits the successor through `clara.admit_journal_work` **for the person who made the correction**
+under the correction's own op key, and settles the correction through
+`clara.settle_source_corrected_rederivation`. Where the mapping is not obvious it DECLINES by name
+and records the decline, which leaves the estate exactly where #885 left it.
+
+**Why a belt and not the retired run**, measured rather than preferred: the retirement puts the
+parked task into `cancel_requested`, and the control listener then ABORTS that engine run as well
+as resuming its hook — so the retired run is not guaranteed to be resumed and a lane built on its
+resume would re-derive *sometimes*.
+
+**The crash window is safe by construction.** A crash between the admission and the settlement
+leaves a successor admitted and unclaimed; the next sweep reads the SAME correction, re-derives the
+same basis from the same live facts and re-admits under the SAME intent key, which
+`clara.admit_journal_work` answers as a REPLAY with the original work id. That is the whole reason
+the successor's intent key IS the correction's op key.
+
+Counters: `sourceCorrectionAdmitted`, `sourceCorrectionDeclined`, `sourceCorrectionFailed`,
+`sourceCorrectionDormant`, `sourceCorrectionOk`. A probe that THROWS reports `Ok: false` with
+`Dormant: false` — "absent" and "unreadable" must not say the same thing.
 
 **#1027 — LEG 4 CONVERGES BEFORE IT JUDGES.** The cross-firm poison leg used to make two
 single-shot observations (one sweep, one read, twice) of facts the World produces asynchronously,

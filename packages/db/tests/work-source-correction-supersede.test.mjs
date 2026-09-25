@@ -49,8 +49,12 @@ async function cohortApplied() {
     "select count(*)::int as n from clara.schema_migrations where version ~ $1", [STEM]);
   if (r.rows[0].n === 0) return false;
   // WHOLLY PRESENT OR WHOLLY ABSENT: a half-applied 0268 is a defect, not a narrower boundary.
+  // DISTINCT NAMES, not rows. This asks "are all five of 0268's routines here?", and #1030's 0321
+  // adds a THREE-argument sibling of `_fact_value_changed` (the field-typed notion) — a second row
+  // under a name this roster already carries. Counting rows made an OVERLOAD read as a
+  // half-applied migration, which is the opposite of what this guard is for.
   const fns = await rootQuery(
-    `select count(*)::int as n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+    `select count(distinct p.proname)::int as n from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
       where ns.nspname = 'clara' and p.proname = any($1::text[])`,
     [["_source_corrected_work", "_lock_source_corrected_work", "_supersede_source_corrected_work",
       "_question_source_corrected", "_fact_value_changed"]]);

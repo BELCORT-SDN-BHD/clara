@@ -208,8 +208,16 @@ export async function classifyConsentEvidenceDocument(
  *  attempted value back in `detail` so this surface can re-show it. Every other refusal
  *  (`field_path_syntax` / `field_path_namespace` from the canonical grammar,
  *  `field_path_not_revisable`, `typed_facts_not_supported`, `no_facts_to_revise`,
- *  `monetary_value_malformed`, `component_must_not_be_negative`, `live_bank_statement_present`)
- *  renders VERBATIM — this module replicates none of that judgement. */
+ *  `monetary_value_malformed`, `component_must_not_be_negative`, `live_bank_statement_present`,
+ *  `value_unchanged`) renders VERBATIM — this module replicates none of that judgement.
+ *
+ *  `value_unchanged` (#885, widened by #1030's 0321) is the one this list used to omit, and it
+ *  renders verbatim like the rest: the door refuses a revision that leaves the recorded value
+ *  where it was, BEFORE anything is written — judged per field against whatever canonical form the
+ *  estate keeps for it (the cents for money, the ISO 4217 code for `invoice.currency`, the
+ *  calendar day for `invoice.invoice_date`, and the trimmed text for everything else, where the
+ *  recorded spelling IS the fact). `detail` carries `field_path` and the `value` that was
+ *  attempted. */
 export async function reviseDocumentFact(
   documentId: string, fieldPath: string, value: string, observedVersion: number, reason: string,
   opts: Opts = {},

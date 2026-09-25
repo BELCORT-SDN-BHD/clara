@@ -41,6 +41,10 @@
       "note": "#652 — frozen BY CLOSURE, not by marker: chatTurn_v20 imports the accrual schema and `accrualFromInput`, so check-frozen-workflows.mjs's import closure hash-locks this file and apps/web does NOT import it — it cannot: nothing under apps/web imports @clara/runtime and no @clara/* package is in apps/web's dependencies (apps/web/lib/checkout/stripe-session.test.ts:444-446 states the same reason for the same app: \"apps/web cannot import @clara/runtime (it is not a dependency; this app builds for Workers off its own set)\"). The browser keeps a hand-maintained MIRROR of this vocabulary instead — ACCRUAL_METHODS / ACCRUAL_FREQUENCIES / ACCRUAL_DAY_RULES / ACCRUAL_TIMEZONE / ACCRUAL_DAY_OF_MONTH_MAX in apps/web/lib/accruals/api.ts, consumed by apps/web/lib/work/accrual-draft.ts — and this hash lock does NOT cover it, nor does any test pin the two to each other, so a change here needs the mirror moved in the same commit. DEPLOY ORDER: migration 0222 (clara.create_accrual_adjustment_for) must be live BEFORE this image serves a chat turn. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live.",
       "deployed": true
     },
+    "packages/runtime/lib/accrual-basis.v2.ts": {
+      "sha256": "6f892e07008705bdf61d1baa954b1b099aac4cc1400deb24cb1ddb60541ed7d4",
+      "note": ""
+    },
     "packages/runtime/lib/capability-registry-v2.mjs": {
       "sha256": "2024074b3a226c0c44cafdac668260fc3728c1d6eb67591a14d77f3692709857",
       "note": "",
@@ -55,6 +59,10 @@
       "sha256": "24b44be1ef3a56ef0399bac1287e81f9aa43e82dc5eb3b36346311459ca9cfdf",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/lib/fa-particulars-proposal.ts": {
+      "sha256": "49d583fc7dc9e89717dcdf1a285bbc2b1c0b757430d00d919b281fc307cd51c3",
+      "note": ""
     },
     "packages/runtime/lib/fixed-asset-acquisition.ts": {
       "sha256": "9846bdbdf33c374994fb9033ea8765f7b3dd64e9016867b6d2177a544868a6d9",
@@ -81,20 +89,44 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/lib/opening-parse.mjs": {
+      "sha256": "423f0ca6e4cf8cd7ffee37f841e2e76420cb7cc2f8494840e72bc146806c65b7",
+      "note": "#985 (the 2026-09-25 cut phase) - frozen BY CLOSURE, not by marker: chatTurn_v22's read_opening_source tool calls this module's parseOpeningTargets, the same route core src/openingRoutes.ts calls, so the freeze lint hash-locks it. THE COST IS EXACTLY THIS FILE: it has no relative imports of its own, so nothing travels with it, and #656 kept it that way on purpose (its OPENING_TB_REFUSAL_ENVELOPE_KEY comment spells the producer's envelope key out rather than importing lib/opening-tb-produce.mjs, 'the door must not gain an import edge into the producer, which would freeze the producer the day a Clara tool imports this door'). Its four other importers (src/openingRoutes.ts, lib/opening-tb-cells.mjs, lib/opening-tb-produce.mjs, lib/egress.mjs) keep importing it and stay editable; what is frozen is this file's own text. A behavioural change to the opening parse is therefore a NEW module plus a chatTurn successor that imports it, never an edit here (owner ruling 2026-09-15, packages/runtime/README.md). NOT deploy-locked yet."
+    },
+    "packages/runtime/lib/payroll-fact-state.ts": {
+      "sha256": "f98833037a9f3410c46a89655774f07eeb409208f295b7cf7f53b93758edae6f",
+      "note": ""
+    },
     "packages/runtime/lib/periodic-adjustment-basis.ts": {
       "sha256": "9670d5b96365a1c7613e25846069ad569be9bce95fc0865c7795f1b5220b6a5a",
       "note": "#643 — frozen BY CLOSURE, not by marker: chatTurn_v19 imports the adjustment schemas and basis builders, so check-frozen-workflows.mjs's import closure hash-locks this file and apps/web does NOT import it — nothing under apps/web imports @clara/runtime and no @clara/* package is in apps/web's dependencies. The periodic-adjustment form keeps a hand-maintained MIRROR of these rules in apps/web/lib/work/periodic-adjustment.ts (its header calls every rule there a mirror of one the database enforces); this hash lock does not cover it. Note corrected 2026-09-17 (wave 2026-09-15, successors re-review R2): the earlier sentence said the web form IMPORTS this module, which it cannot — the file's bytes and sha256 are untouched, only this prose moved. DEPLOY ORDER: migration 0194 must be live BEFORE this image serves a chat turn. NOT deploy-locked yet.",
       "deployed": true
+    },
+    "packages/runtime/lib/prepayment-schedule-basis.ts": {
+      "sha256": "bac097b27f45ea9b639d4fe8525e337f12268176a558d9fcca5587e7b86ccaa4",
+      "note": ""
+    },
+    "packages/runtime/lib/revenue-recognition-basis.ts": {
+      "sha256": "ba212504ded78fb7bfdc86650b497c0395fe9f12d22a9d4d72bca5f25d484abe",
+      "note": ""
     },
     "packages/runtime/lib/staff-expense-claim-basis.ts": {
       "sha256": "a3727b07502d0a52fd5f0a6317909cb15c5998cc4aff1f1f386fcca022f0f6df",
       "note": "#638 — frozen BY CLOSURE, not by marker: chatTurn_v20 imports the claim schema, `claimFromInput` and `localClaimRefusal`, so check-frozen-workflows.mjs's import closure hash-locks this file. It is subject to the SAME hash lock as a frozen body: after the ceremony stamps `deployed: true`, a change here ships only with a new chatTurn successor. DEPLOY ORDER: migration 0221 (clara.admit_staff_expense_claim_work) must be live BEFORE this image serves a chat turn. NOT deploy-locked yet — the ceremony stamps `deployed: true` after the image is live.",
       "deployed": true
     },
+    "packages/runtime/lib/staff-expense-claim-basis.v2.ts": {
+      "sha256": "e5d2ab70e2314e78150fa3d38c5f3ad3e046929dcd522953536aa421b33fcbc1",
+      "note": ""
+    },
     "packages/runtime/lib/trade-invoice-basis.ts": {
       "sha256": "a6e1a045d093b221025df38a0b29c0f0dbe35c2c433df7f2bd787ec3e84ea993",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/lib/trade-invoice-basis.v2.ts": {
+      "sha256": "22facb184321f51588221c58e17771ab7ef6ce684b6bd39b218c78c9385e9c90",
+      "note": ""
     },
     "packages/runtime/lib/work-trace-bounds.mjs": {
       "sha256": "dfc4d9425898cb99a8c75678e6ba22b2c353958671cfa8722008a43708de8f0f",
@@ -108,23 +140,23 @@
     },
     "packages/runtime/workflows/agreementFacts.v1.behavior.mjs": {
       "sha256": "ca335310315b3250444b26b8cc55ae25d027b61bc2aab5425b005e3265f0a5aa",
-      "note": "#948 \u2014 every decision the lane makes, kept out of the steps so it is unit-testable without a workflow engine, a database or a model. Not one arithmetic operation on a quoted figure and not one keyword test on a quoted heading appears in it: the column sums, the row identities, the price identity, the schedule reconciliation, the CLASSIFICATION and the channel comparison are all clara.evaluate_agreement_contract_state_v1's, inside the persist transaction."
+      "note": "#948 — every decision the lane makes, kept out of the steps so it is unit-testable without a workflow engine, a database or a model. Not one arithmetic operation on a quoted figure and not one keyword test on a quoted heading appears in it: the column sums, the row identities, the price identity, the schedule reconciliation, the CLASSIFICATION and the channel comparison are all clara.evaluate_agreement_contract_state_v1's, inside the persist transaction."
     },
     "packages/runtime/workflows/agreementFacts.v1.dispatch.mjs": {
       "sha256": "94cee62ec159b59a0ee3ffecabd19258dc1285a381e57912f2df7f9eda8430a5",
-      "note": "#948 \u2014 this family's OWN database reads and settle verbs rather than an import of witnessFacts.v1.dispatch.mjs or payrollFacts.v1.dispatch.mjs, both of which are frozen: an agreement fix needing one more read there would be an edit to another lane's frozen closure. It DOES reuse clara.witness_citation_regions, which is a region NUMBERING and not a questionnaire \u2014 inventing a third numbering would guarantee they drift."
+      "note": "#948 — this family's OWN database reads and settle verbs rather than an import of witnessFacts.v1.dispatch.mjs or payrollFacts.v1.dispatch.mjs, both of which are frozen: an agreement fix needing one more read there would be an edit to another lane's frozen closure. It DOES reuse clara.witness_citation_regions, which is a region NUMBERING and not a questionnaire — inventing a third numbering would guarantee they drift."
     },
     "packages/runtime/workflows/agreementFacts.v1.impl.ts": {
       "sha256": "b6192327a229f6d38be48a226251dad315089b74a56227ef11bea91ec9731d5b",
-      "note": "#948 \u2014 the four memoized steps: claim, text read, vision read, one atomic persist. The two reads are separate steps so a completed text read is not paid for twice on a replay. Reads its OWN services slot (__claraAgreementFactsServicesV1), because the slot carries the engine snapshot the behaviour refuses to egress without matching."
+      "note": "#948 — the four memoized steps: claim, text read, vision read, one atomic persist. The two reads are separate steps so a completed text read is not paid for twice on a replay. Reads its OWN services slot (__claraAgreementFactsServicesV1), because the slot carries the engine snapshot the behaviour refuses to egress without matching."
     },
     "packages/runtime/workflows/agreementFacts.v1.prompts.mjs": {
       "sha256": "9d8dfb603c94bd42869672e820926e00803efb4b253ce7eb232b549818a958eb",
-      "note": "#948 \u2014 the questionnaire, inside the closure by the same decision every sibling family made (a prompt tweak is a behavioural change and must be a new version). It carries the inert-data posture and the never-infer-never-compute rule VERBATIM from the invoice family's live prompt \u2014 pinned byte-for-byte by packages/runtime/tests/agreement-facts-v1.test.mjs, so \"verbatim\" is a checked fact \u2014 and adds the two rules this family needs: she never sums or subtracts one printed figure from another, and she never CLASSIFIES the page (she quotes what it calls itself; a deterministic evaluator reads that quote against a closed roster and decides)."
+      "note": "#948 — the questionnaire, inside the closure by the same decision every sibling family made (a prompt tweak is a behavioural change and must be a new version). It carries the inert-data posture and the never-infer-never-compute rule VERBATIM from the invoice family's live prompt — pinned byte-for-byte by packages/runtime/tests/agreement-facts-v1.test.mjs, so \"verbatim\" is a checked fact — and adds the two rules this family needs: she never sums or subtracts one printed figure from another, and she never CLASSIFIES the page (she quotes what it calls itself; a deterministic evaluator reads that quote against a closed roster and decides)."
     },
     "packages/runtime/workflows/agreementFacts.v1.ts": {
       "sha256": "6bdf6fd2b475030a5d47bc44ee4b7d0aff41d5f16c78a1b2c425e07f754dc15f",
-      "note": "#948 \u2014 agreementFacts_v1, the agreement contract's OWN questionnaire family on the contract_facts lane migration 0299 mints. A BRAND-NEW CLASS, never a version of witnessFacts and never of payrollFacts, and the ticket says why in its own first acceptance criterion: the questionnaire lives in a frozen closure of its own. Parent #926, owner ruling 2026-09-18 (option G). Deploy order is DATABASE FIRST (0299's header): the persist door validates the answer envelope, so an image answering a wider questionnaire than the live validator admits would be refused on every persist."
+      "note": "#948 — agreementFacts_v1, the agreement contract's OWN questionnaire family on the contract_facts lane migration 0299 mints. A BRAND-NEW CLASS, never a version of witnessFacts and never of payrollFacts, and the ticket says why in its own first acceptance criterion: the questionnaire lives in a frozen closure of its own. Parent #926, owner ruling 2026-09-18 (option G). Deploy order is DATABASE FIRST (0299's header): the persist door validates the answer envelope, so an image answering a wider questionnaire than the live validator admits would be refused on every persist."
     },
     "packages/runtime/workflows/autoDraft.v1.errors.ts": {
       "sha256": "382e1fc75eef8159ba1fc7465c6f7d7858c51a6bd533aaa750d99667a3c87187",
@@ -871,6 +903,26 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/chatTurn.v22.impl.ts": {
+      "sha256": "34b2c15389d2a8f4144b27d3e4bca03a8659337b1f8e4ab4c7dc0e910ccbc486",
+      "note": "#985 - chatTurn_v22's steps. runModelSegmentStepV22 is the one new step (the bundle gate derives that exact name from the registry pin); every other step is v10's or v21's, reached by import, so a run journalled under v21 resumes on identical step identities. NOT deploy-locked yet."
+    },
+    "packages/runtime/workflows/chatTurn.v22.prompt.ts": {
+      "sha256": "abf1006f63671193a55038c278040f0632cd10e244d1d4d92027391af707529f",
+      "note": "#985 - chatTurn_v22's prompt: v21's text plus ONE stanza, READING AN OPENING SOURCE. No new wire kind (ClaraPartV22 IS ClaraPartV21 by reference) and no new C-19 coding-intent arm - the tool mints no terminal card, so a successful read must not collect the coding-incomplete refusal. NOT deploy-locked yet."
+    },
+    "packages/runtime/workflows/chatTurn.v22.tools.ts": {
+      "sha256": "938c989787d2423cb8a8b567123efadec33cdf8f69f3332e395054133e5c71a7",
+      "note": "#985 - chatTurn_v22's tool map: buildToolsV21's thirty-nine by import plus read_opening_source. The tool calls the route core parseOpeningTargets(client, {seedId, firmId, reassert}) on a clara_runtime connection and never clara.record_opening_targets_parsed itself, and it restates the browser route's bookkeeper+ floor through clara.resolve_chat_principal rather than importing lib/authz.mjs (which would freeze the runtime's auth boundary for every route). NOT deploy-locked yet."
+    },
+    "packages/runtime/workflows/chatTurn.v22.ts": {
+      "sha256": "c6aba4b64ecb99a7cf4def9a387a647dfc0b1db605324f70e8e13d3116fd3156",
+      "note": "#985 - chatTurn_v22, the cut phase's chat successor and the body the contracts after it land in. No coupled migration: every door read_opening_source touches has been live since 0017 and 0006, and v21's own deploy-order obligations (0225, 0227, 0230) are inherited unchanged because v22 carries v21's whole tool map. NOT deploy-locked yet."
+    },
+    "packages/runtime/workflows/chatTurn.v22.usage.ts": {
+      "sha256": "0dba7493fa5f919952c3c488d35d55ece7c2264bd1cfdfbd4c4cac26e6796c83",
+      "note": "#985 - chatTurn_v22's engine stamp, chatturn-v22. The recorder stays v15's and is reached by import; only the label moves, and check-workflow-bundle.mjs refuses a built bundle that does not carry it. NOT deploy-locked yet."
+    },
     "packages/runtime/workflows/chatTurn.v3.errors.ts": {
       "sha256": "ab2b374a20443976058c5b90ee601d6e7c25226c8191ac36d8959372a85628cb",
       "note": "",
@@ -1245,6 +1297,34 @@
       "sha256": "44c819aa51c75ee12f85c99adaa628194ce52420ffc6b428d64f4580531d1009",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/workflows/claraWork.v6.bundle.ts": {
+      "sha256": "4d4032530560a002bcbfa86efc901fce35cfc02b07b00d1cbd1610be849441b9",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v6.errors.ts": {
+      "sha256": "356ecbecb0f0df8074d9f0088825fa2bde8ecbd4717a5adcb3dcab9f39129d08",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v6.impl.ts": {
+      "sha256": "b1f7a850ec6d948665d89a13eab4d212dce781ad5b254b22ead436e6604c52e4",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v6.prompt.ts": {
+      "sha256": "66f4f0a77b89bfbd4a7ab7438c0b32a10391cd2cd97088e4907485b0d3009657",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v6.schemas.ts": {
+      "sha256": "7fa7a0a32f12a6700b572288a339449b7c61583697b41564789f643568d5a285",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v6.tools.ts": {
+      "sha256": "a8a72ee7d5478cd06f7a7248fd72ea499c6a4e2196a2056a09c73b99fe33062f",
+      "note": ""
+    },
+    "packages/runtime/workflows/claraWork.v6.ts": {
+      "sha256": "73365a3f4802038466009ef8bcf9e0ecfc295fd62f443c782b73437f513036d7",
+      "note": ""
     },
     "packages/runtime/workflows/clientOnboarding.v1.ts": {
       "sha256": "e0c03498363833b0585904af1f41b77677efb2c81cad107e979623e7d95baa39",

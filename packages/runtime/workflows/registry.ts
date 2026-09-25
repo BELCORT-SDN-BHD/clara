@@ -30,11 +30,13 @@ import { chatTurn_v18 } from "./chatTurn.v18.js";
 import { chatTurn_v19 } from "./chatTurn.v19.js";
 import { chatTurn_v20 } from "./chatTurn.v20.js";
 import { chatTurn_v21 } from "./chatTurn.v21.js";
+import { chatTurn_v22 } from "./chatTurn.v22.js";
 import { claraWork_v1 } from "./claraWork.v1.js";
 import { claraWork_v2 } from "./claraWork.v2.js";
 import { claraWork_v3 } from "./claraWork.v3.js";
 import { claraWork_v4 } from "./claraWork.v4.js";
 import { claraWork_v5 } from "./claraWork.v5.js";
+import { claraWork_v6 } from "./claraWork.v6.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -218,7 +220,22 @@ export const workflows = {
   // `clara.get_knowledge_pack`, and changes no database state. Trade-invoice Works already
   // admitted keep their durable surfaces and their queued Work still runs under the claraWork pin;
   // depreciation periods already charged are journal entries and stay charged.
-  chatTurn: chatTurn_v21,
+  //
+  // THE CUT PHASE (wave 2026-09-25): REPOINTED v21 -> v22. #985 is the first ticket of that phase
+  // and it mints the whole `chatTurn.v22.*` file set for the contracts behind it to land in. v22
+  // is v21's thirty-nine tools plus ONE: `read_opening_source` (#985, the chat half #656 wrote
+  // and v21 deliberately left out — "a future chatTurn_vN, NOT this wave's v21").
+  //
+  // NO COUPLED MIGRATION AND NO DEPLOY-ORDER OBLIGATION OF ITS OWN. Every door the new tool
+  // touches has been live since 0017 (`clara.record_opening_targets_parsed`, EXECUTE to
+  // `clara_runtime`) and 0006 (`clara.resolve_chat_principal`), and the tool reaches the first
+  // ONLY through the route core `src/openingRoutes.ts` already calls. v21's own obligations
+  // (0225, 0227, 0230) are inherited unchanged, because v22 carries v21's whole tool map.
+  //
+  // ROLLBACK TO v21 stops offering the tool and changes no database state: opening targets
+  // already recorded are rows on a basis a person still has to approve, authored by the
+  // database's own re-derivation rather than by this image.
+  chatTurn: chatTurn_v22,
   // #623 — A NEW CLASS, never a repoint. `accounting_work` tasks are dispatched here by
   // src/workRoutes.ts's post-commit enqueue and by the reconciler's own `accounting_work`
   // re-enqueue arm (lib/reconciler-work.mjs); both resolve the body through THIS object, which
@@ -344,7 +361,7 @@ export const workflows = {
   // read-set rows already written stay readable. A Work parked on a v5 question stays ANSWERABLE
   // under a v4 image, but the resumed v4 run will not be told about drift — so a rollback should
   // drain parked questions first rather than assume they resume identically.
-  claraWork: claraWork_v5,
+  claraWork: claraWork_v6,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -970,6 +987,11 @@ export { chatTurn_v20 };
 // and the pinned v21 body is exported too so the rollback preflight can use the same uniform
 // census for every version.
 export { chatTurn_v21 };
+// #985 (the 2026-09-25 cut phase) repointed `chatTurn:` v21 -> v22. v21 remains exported by policy
+// (c) — it is the rollback target and the body any run parked on a v21 clarify hook resumes into
+// at cutover — and the pinned v22 body is exported too so the rollback preflight can use the same
+// uniform census for every version.
+export { chatTurn_v22 };
 // #629 repointed `claraWork:` v1 -> v2. v1 remains exported by policy (c) — it is the rollback
 // target and the body any Work parked on a v1 clarify hook resumes into at cutover — and the
 // pinned v2 body is exported too so the rollback preflight can use the same uniform census for
@@ -987,6 +1009,7 @@ export { claraWork_v4 };
 // cutover — and the pinned v5 body is exported too so the rollback preflight can use the same
 // uniform census for every version.
 export { claraWork_v5 };
+export { claraWork_v6 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
@@ -1071,11 +1094,13 @@ export const workflowBodies: readonly string[] = Object.freeze([
   "chatTurn_v19",
   "chatTurn_v20",
   "chatTurn_v21",
+  "chatTurn_v22",
   "claraWork_v1",
   "claraWork_v2",
   "claraWork_v3",
   "claraWork_v4",
   "claraWork_v5",
+  "claraWork_v6",
   "documentIngest_v1",
   "documentIngest_v2",
   "invoiceFacts_v1",
@@ -1116,8 +1141,8 @@ export const workflowBodies: readonly string[] = Object.freeze([
  *  preflight has to enumerate. */
 export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
   closeExample: "closeExampleV1",
-  chatTurn: "chatTurn_v21",
-  claraWork: "claraWork_v5",
+  chatTurn: "chatTurn_v22",
+  claraWork: "claraWork_v6",
   documentIngest: "documentIngest_v2",
   invoiceFacts: "invoiceFacts_v1",
   statementFacts: "statementFacts_v4",
