@@ -203,10 +203,28 @@ the declared one — the `-ge` floor check stays satisfied either way, and that 
 unnoticed for a stretch. Every file in this corpus is a flat battery of top-level `test(...)`
 calls (no file nests a subtest inside another), so the true cell count is re-derivable from disk
 the same way the gate chain already is: `p1126.floor.corpus` and `p1126.floor.roster` in
-`ci-frontier-leg-contract.test.mjs` sum `^test\(` lines across each slice list's own files (and
-the roster's) and assert the sum equals the list's declared `#!cells-floor:` — on every PR, with
-no database and no dispatch run needed. Raise or lower the declared number in the SAME PR that
-changes the corpus; this cell is what now refuses the PR that forgets to.
+`ci-frontier-leg-contract.test.mjs` sum top-level cell registrations across each slice list's own
+files (and the roster's) and assert the sum equals the list's declared `#!cells-floor:` — on every
+PR, with no database and no dispatch run needed. Raise or lower the declared number in the SAME PR
+that changes the corpus; this cell is what now refuses the PR that forgets to.
+
+> **What counts as one cell here, and the two shapes this corpus does not admit.** The leg's own
+> number is `CELLS=$((PASS + SKIP))` over the TAP summary, so the derivation counts `^test(` **and
+> `^test.skip(`** — quarantining a cell with `test.skip` is exactly the case where the leg's count
+> does not move, and a derivation that missed it would force the declared floor DOWN by one for a
+> cell that is still there. Two shapes are refused outright by `assertCountableCorpus`, because a
+> declared floor over them would stop meaning what it says: a registration at **non-zero indent**
+> (inside a loop, a helper or a `describe` — the leg runs and counts it, a top-level scan does not),
+> and **`test.todo(`** (measured on node 22: `# tests 3 / # pass 1 / # skipped 1 / # todo 1`, so a
+> todo cell lands in neither `# pass` nor `# skipped` and is bounded by neither `#!cells-floor:` nor
+> `#!skips-max:`). `p1126.floor.derivation` pins the counting rule against a known-good literal.
+>
+> **`#!skips-max:` stays hand-declared, deliberately.** Only the cell FLOOR is re-derived. A skip
+> count is not a property of the corpus on disk: it is how many of those cells stand down at ONE
+> frontier, which depends on which preintegration gates the frontier grants, so nothing static can
+> compute it. It remains a number someone measured and typed, bounded at run time by the leg and by
+> nothing else. Deriving it would need a run at each frontier; that half is a recorded residual of
+> #1126, not an oversight.
 
 **Every measured run in the leg also writes its own counts to the dispatch run's summary
 (#1126).** The bounds above prove a run met its declared numbers; before #1126 they printed the
