@@ -111,7 +111,9 @@ test("v23.payroll_posting: the doors are the queue and the document state, in th
   // driven without a database; what is worth pinning is which value is bound to which name.
   const src = codeOf(new URL("../workflows/chatTurn.v23.reads.ts", import.meta.url));
   assert.match(src, /clara\.wake_list_review_queue\(\$1::jsonb, \$2::jsonb, \$3::int\)/);
-  assert.match(src, /JSON\.stringify\(\{ client_id: clientId \}\), null, AGENT_QUEUE_LIMIT/);
+  // the SECOND argument is the cursor the scan carries forward, not a literal null: the door pages
+  // (ADV-K04-05), and one page of 200 read a truncation as an absence.
+  assert.match(src, /JSON\.stringify\(\{ client_id: clientId \}\), cursor, AGENT_QUEUE_LIMIT/);
   assert.match(src, /clara\.get_document_state\(\$1::uuid, \$2::uuid\)/);
   assert.match(src, /\[input\.document_id, clientId\]/);
   // #1136's "what the cut must NOT do": the ungranted verdict cores are never called, and no
@@ -390,4 +392,334 @@ test("v23.identity: the engine stamp is `chatturn-v23` and the registry pins v23
   }
   // the bundle gate's other hard name
   assert.equal(typeof v23Impl.runModelSegmentStepV23, "function");
+});
+
+// ---------------------------------------------------------------------------
+// 7 · THE FIX ROUND (waveK lane LC review). Every cell below DRIVES the shipped body against a
+//     pools double standing in for the database, because the round's finding was precisely that
+//     a constant asserted by name is not a sentence anybody can reach. The refusals are raised in
+//     the EXACT shape the doors raise them, read out of `pg_proc` on `clara_c04` first:
+//
+//       clara._list_review_queue_core : raise exception 'queue scope is malformed'
+//                                         using errcode='CLR10';          -- NO detail
+//       clara.wake_get_contract_terms : raise exception '…' using errcode='CLR03',
+//                                         detail='{"reason":"…"}';
+// ---------------------------------------------------------------------------
+
+/** The supervisor slot `pools()` reads, filled with a double whose read connection answers from
+ *  `handler`. Every call is recorded so a cell can pin what the tool asked the database for. */
+function withPools(handler) {
+  const calls = [];
+  const prior = globalThis.__claraPools;
+  globalThis.__claraPools = {
+    mintWakeCredentialObo: async () => ({ credentialId: "cred", secret: "s3cr3t" }),
+    mintWakeCredential: async () => ({ credentialId: "cred", secret: "s3cr3t" }),
+    mintWakeCredentialClientObo: async () => ({ credentialId: "cred", secret: "s3cr3t" }),
+    withReadWakeScoped: async (secret, fn) => fn({
+      query: async (sql, params) => {
+        calls.push({ sql, params, secret });
+        return handler(sql, params);
+      },
+    }),
+    withWriteWakeScoped: async () => { throw new Error("these three tools are READS"); },
+    withRuntime: async () => { throw new Error("these three tools never take the act credential"); },
+  };
+  calls.restore = () => { globalThis.__claraPools = prior; };
+  return calls;
+}
+
+/** A thrown Postgres error in node-postgres's own shape. `detail` is OMITTED where the door omits
+ *  it — which is the whole defect this section exists over. */
+function pgError(code, message, detail) {
+  return Object.assign(new Error(message), {
+    code,
+    detail: detail === undefined ? undefined : JSON.stringify(detail),
+  });
+}
+
+const QUEUE_CLR10 = () => { throw pgError("CLR10", "queue scope is malformed"); };
+
+test("v23.fix: a CLR10 from the queue read reaches the person as the cut's OWN sentence", async () => {
+  // SPEC-K-L04-01 / ADV-K04-04. `clara._list_review_queue_core` raises CLR10 with NO detail, so
+  // `authoringRefusal` derives reason=null and a map keyed on the TOKEN can never fire: the person
+  // was handed the door's internal wording, "queue scope is malformed". The map keys on the CODE.
+  const calls = withPools(QUEUE_CLR10);
+  try {
+    const posting = await v23Reads.runReadPayrollPostingState(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(posting.ok, false);
+    assert.equal(posting.code, "CLR10");
+    assert.equal(posting.reason, "client_not_found");
+    assert.equal(posting.message, v23Reads.PAYROLL_POSTING_STATE_REFUSALS.client_not_found);
+
+    const agreement = await v23Reads.runReadAgreementTerms(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(agreement.ok, false);
+    assert.equal(agreement.code, "CLR10");
+    assert.equal(agreement.reason, "client_not_found");
+    assert.equal(agreement.message, v23Reads.AGREEMENT_TERMS_REFUSALS.client_not_found);
+    assert.ok(calls.length > 0, "the door WAS reached — this is a mapping defect, not a wall");
+  } finally {
+    calls.restore();
+  }
+});
+
+test("v23.fix: a refused READ answers the READ's own CLR03 sentence, never the authoring one", async () => {
+  // SPEC-K-L04-03. All three sentences shipped as frozen constants and NONE was reachable: every
+  // map returned null for CLR03, so `authoringRefusal`'s own literal — "That authoring action is
+  // not permitted in this session." — was what a person read. Calling a READ an authoring action
+  // is wrong on its face, and the contract writes a sentence per tool.
+  const clr03 = () => { throw pgError("CLR03", "no valid agent read context"); };
+  const calls = withPools(clr03);
+  try {
+    const posting = await v23Reads.runReadPayrollPostingState(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(posting.code, "CLR03");
+    assert.equal(posting.message, v23Reads.PAYROLL_POSTING_STATE_REFUSALS.not_permitted);
+    assert.equal(posting.reason, "not_permitted");
+
+    const settlement = await v23Reads.runReadPayrollSettlementState(CTX, { client_id: CTX.clientId });
+    assert.equal(settlement.code, "CLR03");
+    assert.equal(settlement.message, v23Reads.PAYROLL_SETTLEMENT_STATE_REFUSALS.not_permitted);
+
+    const agreement = await v23Reads.runReadAgreementTerms(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(agreement.code, "CLR03");
+    assert.equal(agreement.message, v23Reads.AGREEMENT_TERMS_REFUSALS.not_permitted);
+
+    // and the DOOR'S OWN token still wins where a door sent one — this cut renames nothing.
+    calls.length = 0;
+    globalThis.__claraPools.withReadWakeScoped = async () => {
+      throw pgError("CLR03", "this read rides a named person's authority", { reason: "wake_authority_absent" });
+    };
+    const typed = await v23Reads.runReadPayrollPostingState(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(typed.reason, "wake_authority_absent");
+    assert.equal(typed.message, v23Reads.PAYROLL_POSTING_STATE_REFUSALS.not_permitted);
+  } finally {
+    calls.restore();
+  }
+});
+
+/** `clara.get_document_state`'s answer, as much of it as this tool reads. The shape is the door's
+ *  own, read out of `pg_proc` on `clara_c04`: `operation.entries` is `[{entry_id, status}]` and
+ *  `byte_extraction.status` is the reading task's own status. */
+const documentState = (entries, extraction = "done") => ({
+  document_id: DOC,
+  byte_extraction: { status: extraction, tasks: [] },
+  operation: { entries },
+});
+
+/** A pools double for the posting read: the queue answers `rows`, the state door answers `s`. */
+const postingDoors = ({ rows = [], state = null }) => (sql) =>
+  sql.includes("wake_list_review_queue")
+    ? { rows: [{ q: { rows, next_cursor: null } }], rowCount: 1 }
+    : { rows: [{ s: state }], rowCount: 1 };
+
+test("v23.fix: a payroll summary with no entry is NOT answered `posted`", async () => {
+  // SPEC-K-L04-02 and ADV-K04-02. #1136 §1's table carries TWO rows for the no-blocked-row branch
+  // and the cut implemented one: `status: "posted"` was returned unconditionally, so a document
+  // that does not exist, or belongs to ANOTHER client of the firm — both of which make
+  // `clara.get_document_state` return NULL rather than refuse (measured on `clara_c04`) — were
+  // answered "the run posted". The tool's own description tells the model to say why a payroll
+  // summary did or did not post, so the model says it posted. Nothing posted.
+  const missing = withPools(postingDoors({ state: null }));
+  try {
+    const r = await v23Reads.runReadPayrollPostingState(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(r.ok, false, "a document this client does not hold is never `posted`");
+    assert.equal(r.reason, "payroll_not_read");
+    assert.equal(r.message, v23Reads.PAYROLL_POSTING_STATE_REFUSALS.payroll_not_read);
+  } finally {
+    missing.restore();
+  }
+
+  // read, but nothing approved: the SAME refusal, and it names the reading task's own status
+  // rather than guessing one — #1136 §1's own words.
+  const unread = withPools(postingDoors({ state: documentState([], "running") }));
+  try {
+    const r = await v23Reads.runReadPayrollPostingState(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, "payroll_not_read");
+    assert.equal(r.details.reading_status, "running", "the task's own status, from the state door");
+  } finally {
+    unread.restore();
+  }
+
+  // a draft entry is not a posted one either
+  const draft = withPools(postingDoors({ state: documentState([{ entry_id: "e1", status: "draft" }]) }));
+  try {
+    const r = await v23Reads.runReadPayrollPostingState(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(r.ok, false, "`draft` is a proposal waiting on a person, not a posting");
+    assert.equal(r.reason, "payroll_not_read");
+  } finally {
+    draft.restore();
+  }
+});
+
+test("v23.fix: an APPROVED entry on the filing is what `posted` means, and it is named", async () => {
+  // The contract's other row: "no payroll_posting_blocked row AND an approved entry on the filing
+  // | NOT a refusal | report the entry". `approved` is the estate's posted state
+  // (`ck_journal_entries_status`: draft | approved | withdrawn).
+  const posted = withPools(postingDoors({
+    state: documentState([{ entry_id: "e9", status: "approved" }, { entry_id: "e8", status: "withdrawn" }]),
+  }));
+  try {
+    const r = await v23Reads.runReadPayrollPostingState(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(r.ok, true);
+    assert.equal(r.status, "posted");
+    assert.deepEqual(r.entries, [{ entry_id: "e9", status: "approved" }],
+      "only the approved entries; a withdrawn one posted nothing");
+    assert.ok(r.document_state, "the state is carried whole — the model reports it, this tool re-derives nothing");
+  } finally {
+    posted.restore();
+  }
+
+  // and a BLOCKED row still wins over both, with the database's own sentence verbatim
+  const blocked = withPools(postingDoors({
+    rows: [{ row_kind: "payroll_posting_blocked", document_id: DOC, question_text: "The payslip names no month.", entry_id: null }],
+    state: documentState([]),
+  }));
+  try {
+    const r = await v23Reads.runReadPayrollPostingState(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(r.status, "blocked");
+    assert.equal(r.question_text, "The payslip names no month.");
+  } finally {
+    blocked.restore();
+  }
+});
+
+test("v23.fix: the agreement extract asks for the DOOR'S OWN budget, not 200 characters", async () => {
+  // ADV-K04-03. `clara.get_document_extract`'s third argument is `p_max_chars` — a CHARACTER
+  // budget over the CONCATENATED envelopes and regions, whose own default is 20000
+  // (`v_budget := least(greatest(coalesce(p_max_chars,20000),0),100000)`, read out of `pg_proc`).
+  // The cut passed 200, transcribed from a contract that calls the argument `p_limit`. MEASURED on
+  // `clara_c04` for a real filed agreement: at 200 the envelope lengths are
+  // [agreement_text_facts 0, agreement_vision_facts 198, ocr 2]; at the door's own default they
+  // are [4814, 898, 2]. So the tool answered ok:true with the terms envelope STARVED TO EMPTY,
+  // while the prompt tells the model to quote eleven recorded terms as the page printed them.
+  assert.equal(v23Reads.AGREEMENT_EXTRACT_MAX_CHARS, null,
+    "null takes the door's own default and survives a change to it; a literal would not");
+  const calls = withPools((sql) =>
+    sql.includes("get_document_extract")
+      ? { rows: [{ extract: { extractions: [{ engine_kind: "agreement_text_facts" }, { engine_kind: "agreement_vision_facts" }] } }], rowCount: 1 }
+      : { rows: [{ q: { rows: [], next_cursor: null } }], rowCount: 1 });
+  try {
+    const r = await v23Reads.runReadAgreementTerms(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(r.ok, true);
+    const extract = calls.find((c) => c.sql.includes("get_document_extract"));
+    assert.deepEqual(extract.params, [DOC, CTX.clientId, null],
+      "the third argument is the BUDGET, and this tool states none");
+  } finally {
+    calls.restore();
+  }
+});
+
+test("v23.fix: `not_read_yet` carries this lane's own code, not the not-found one", async () => {
+  // The same reasoning as `payroll_not_read`: `CLR11` is what BOTH tenancy reads and the
+  // settlement read map to their `not_found` / `client_not_found` sentences in this very cut, so
+  // a surface branching on the code read "the reading has not finished" as "not in your firm".
+  const calls = withPools((sql) =>
+    sql.includes("get_document_extract")
+      ? { rows: [{ extract: { extractions: [{ engine_kind: "agreement_text_facts" }] } }], rowCount: 1 }
+      : { rows: [{ q: { rows: [], next_cursor: null } }], rowCount: 1 });
+  try {
+    const r = await v23Reads.runReadAgreementTerms(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, "not_read_yet");
+    assert.equal(r.code, v23Reads.LANE_REFUSAL_CODE);
+    assert.notEqual(r.code, "CLR11");
+  } finally {
+    calls.restore();
+  }
+});
+
+test("v23.fix: a narrowed settlement read that did not match is NOT the panel's empty state", async () => {
+  // SPEC-K-L04-04. #1136 §2's table separates the two cases, and the cut collapsed them: the
+  // empty sentence was computed from the POST-FILTER list, so a client with three open runs, asked
+  // about one already-settled summary, was told that no payroll run is waiting on its bank
+  // payment. The panel's sentence is about the CLIENT's whole queue; the narrowed miss has its
+  // own answer, and the contract's own words for it are "either already settled or not yet
+  // posted — never guess which".
+  const OTHER_DOC = "55555555-5555-4555-8555-555555555555";
+  const runs = [{ document_id: OTHER_DOC, month: "2026-08-01", net_cents: 480000 }];
+  const calls = withPools(() => ({ rows: [{ runs }], rowCount: 1 }));
+  try {
+    const narrowed = await v23Reads.runReadPayrollSettlementState(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(narrowed.ok, true);
+    assert.equal(narrowed.status, "not_offered");
+    assert.deepEqual(narrowed.runs, []);
+    assert.equal(narrowed.empty_sentence, null, "a run IS waiting — just not this one");
+    assert.equal(narrowed.not_offered_sentence, v23Reads.PAYROLL_RUN_NOT_OFFERED);
+    assert.match(v23Reads.PAYROLL_RUN_NOT_OFFERED, /read_payroll_posting_state/,
+      "the contract points at the posting half rather than guessing which of the two it is");
+
+    // the narrowing that DOES match is an ordinary read
+    const hit = await v23Reads.runReadPayrollSettlementState(CTX, { client_id: CTX.clientId, document_id: OTHER_DOC });
+    assert.equal(hit.status, "read");
+    assert.equal(hit.runs.length, 1);
+    assert.equal(hit.empty_sentence, null);
+
+    // and the panel's sentence is still the answer when the CLIENT has nothing waiting
+    calls.restore();
+    const none = withPools(() => ({ rows: [{ runs: [] }], rowCount: 1 }));
+    try {
+      const all = await v23Reads.runReadPayrollSettlementState(CTX, { client_id: CTX.clientId });
+      assert.equal(all.status, "read");
+      assert.equal(all.empty_sentence, v23Reads.NO_PAYROLL_RUN_AWAITING_PAYMENT);
+    } finally {
+      none.restore();
+    }
+  } finally {
+    calls.restore();
+  }
+});
+
+test("v23.fix: a blocked row past the first page is FOUND, not read as an absence", async () => {
+  // ADV-K04-05. `clara.wake_list_review_queue` PAGES — its core clamps the limit
+  // (`p_limit := least(greatest(coalesce(p_limit,50),1),500)`) and returns a `next_cursor` — and
+  // the cut took the first page and ignored it, so a blocked payroll summary sorting past the cap
+  // read as "posted" and a blocked agreement read as "read" with the gate's sentence dropped.
+  // DRIVEN on `clara_c04` first: a client with 3 queue rows answers 1 row at limit 1, and the
+  // cursor round-trips (3 pages of 1, then an empty page).
+  const cap = v23Reads.AGENT_QUEUE_LIMIT;
+  const filler = Array.from({ length: cap }, (_, i) => ({ row_kind: "draft", document_id: `d${i}` }));
+  const target = { row_kind: "payroll_posting_blocked", document_id: DOC, question_text: "The chart has no 5100.", entry_id: null };
+  const cursors = [];
+  const calls = withPools((sql, params) => {
+    if (!sql.includes("wake_list_review_queue")) return { rows: [{ s: null }], rowCount: 1 };
+    const cursor = params[1];
+    cursors.push(cursor);
+    return cursor === null
+      ? { rows: [{ q: { rows: filler, next_cursor: { tuple: ["1", "c", "", "2026-09-26", "x"] } } }], rowCount: 1 }
+      : { rows: [{ q: { rows: [target], next_cursor: null } }], rowCount: 1 };
+  });
+  try {
+    const r = await v23Reads.runReadPayrollPostingState(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(r.ok, true);
+    assert.equal(r.status, "blocked", "the second page carried the block; page one alone said `posted`");
+    assert.equal(r.question_text, "The chart has no 5100.");
+    assert.equal(cursors.length, 2, "one page, then the cursor the door handed back");
+    assert.equal(cursors[0], null);
+    assert.equal(JSON.parse(cursors[1]).tuple.length, 5, "the cursor is forwarded in the door's own shape");
+  } finally {
+    calls.restore();
+  }
+});
+
+test("v23.fix: a queue longer than the scan's ceiling REFUSES rather than concluding an absence", async () => {
+  // The honest end of the same finding: paging cannot be unbounded inside one turn, so the scan
+  // has a ceiling — and reaching it means "this read could not see the whole queue", which is not
+  // the same statement as "there is no block". A fault, not a governed refusal: the database
+  // refused nothing.
+  const cap = v23Reads.AGENT_QUEUE_LIMIT;
+  const full = Array.from({ length: cap }, (_, i) => ({ row_kind: "draft", document_id: `d${i}` }));
+  const calls = withPools((sql) =>
+    sql.includes("wake_list_review_queue")
+      ? { rows: [{ q: { rows: full, next_cursor: { tuple: ["1", "c", "", "2026-09-26", "x"] } } }], rowCount: 1 }
+      : { rows: [{ s: null }], rowCount: 1 });
+  try {
+    const r = await v23Reads.runReadPayrollPostingState(CTX, { client_id: CTX.clientId, document_id: DOC });
+    assert.equal(r.ok, false);
+    assert.equal(r.code, "internal");
+    assert.match(r.message, /queue/i);
+    const pages = calls.filter((c) => c.sql.includes("wake_list_review_queue")).length;
+    assert.equal(pages, v23Reads.AGENT_QUEUE_MAX_PAGES, "it stops at the ceiling rather than looping");
+  } finally {
+    calls.restore();
+  }
 });

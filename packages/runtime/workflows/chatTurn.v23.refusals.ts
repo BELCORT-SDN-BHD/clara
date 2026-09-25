@@ -86,6 +86,23 @@ export function clientMismatchRefusalV23(reason: string, message: string, client
  */
 export type MappedRefusalV23 = string | { reason?: string; message: string } | null;
 
+/**
+ * THE `CLR03` ARM EVERY READ OF THIS CUT OWES, and it is a correction rather than a convenience.
+ *
+ * `authoringRefusal` replaces the message of ANY `CLR03` with its own literal — "That authoring
+ * action is not permitted in this session." — which is the AUTHORING lane's sentence. The five
+ * reads of #1136 and #1137 each specify their own ("I cannot read your firm's inbox in this
+ * conversation.", and four siblings), and every one of them shipped as a constant no mapper
+ * reached: the review round drove a `CLR03` through the shipped mapper and read the authoring
+ * sentence back. Calling a READ an authoring action is also wrong on its face.
+ *
+ * The TOKEN is `not_permitted`, which is the refusal table's own word, and it is named only where
+ * the door named none: `governedRefusalV23` still lets a door's own token win.
+ */
+export function notPermittedV23(sentence: string): { reason: string; message: string } {
+  return { reason: "not_permitted", message: sentence };
+}
+
 export function governedRefusalV23(
   error: unknown,
   sentence: (reason: string, detail: Record<string, unknown>, code: string) => MappedRefusalV23,
