@@ -27,7 +27,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  buildWorkWorld, freshWorkClient, endPool, rootQuery, roleQuery, opk, namedCall,
+  buildWorkWorld, freshWorkClient, endPool, rootQuery, roleQuery, namedCall,
   ensureTiChart, vendor, billParticulars, billBasis, admitTradeInvoiceWork,
   probeTradeInvoiceDuplicatesFor, recordTradeInvoiceDuplicateAck, TI_KIND,
 } from "./trade-invoice-fixtures.mjs";

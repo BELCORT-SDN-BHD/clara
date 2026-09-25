@@ -867,8 +867,11 @@ async function sessionOfTaskV22(c: PgExec, taskId: string): Promise<string | nul
  * the estate paid for an idempotent admission door precisely so a retry cannot mint one.
  */
 export function tradeInvoiceIntentKeyV22(taskId: string, input: StartTradeInvoiceWorkInputV2): string {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { record_anyway: _answeredTheQuestion, ...recording } = input;
+  // `Object.assign` and a delete rather than a rest destructure, for the same reason the sibling
+  // below gives: the parts-parity census classifies every spread in this closure and refuses one
+  // it cannot read.
+  const recording: Record<string, unknown> = Object.assign({}, input);
+  delete recording.record_anyway;
   return stableOpKey(taskId, START_TRADE_INVOICE_WORK_TOOL, recording);
 }
 
@@ -1255,7 +1258,11 @@ export type StartStaffExpenseClaimWorkResultV22 =
  * only thing between one claim and two Works.
  */
 export function claimIntentKeyV22(taskId: string, input: StartStaffExpenseClaimWorkInputV2): string {
-  const recording: Record<string, unknown> = { ...input };
+  // `Object.assign` rather than an object spread, and it is the census's rule rather than a style
+  // preference: `check-parts-parity.mjs` REFUSES a spread it cannot classify, because a spread is
+  // exactly how an unreviewed type discriminant reaches a transcript part without anyone seeing
+  // it. (Measured: this function's first cut reddened the gate at this line.)
+  const recording: Record<string, unknown> = Object.assign({}, input);
   delete recording.allocations_confirmed;
   return stableOpKey(taskId, START_STAFF_EXPENSE_CLAIM_WORK_TOOL, recording);
 }

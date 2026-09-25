@@ -904,15 +904,15 @@
       "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v22.impl.ts": {
-      "sha256": "3f2c7a09a6e217c095971920d6f29d5225232662b41248d3d7104abaf2fa9431",
+      "sha256": "34b2c15389d2a8f4144b27d3e4bca03a8659337b1f8e4ab4c7dc0e910ccbc486",
       "note": "#985 - chatTurn_v22's steps. runModelSegmentStepV22 is the one new step (the bundle gate derives that exact name from the registry pin); every other step is v10's or v21's, reached by import, so a run journalled under v21 resumes on identical step identities. NOT deploy-locked yet."
     },
     "packages/runtime/workflows/chatTurn.v22.prompt.ts": {
-      "sha256": "1024b2a9dc71b25a414da9e7e62b54e560b085c997bc52a418d0aa3e5019fcc2",
+      "sha256": "abf1006f63671193a55038c278040f0632cd10e244d1d4d92027391af707529f",
       "note": "#985 - chatTurn_v22's prompt: v21's text plus ONE stanza, READING AN OPENING SOURCE. No new wire kind (ClaraPartV22 IS ClaraPartV21 by reference) and no new C-19 coding-intent arm - the tool mints no terminal card, so a successful read must not collect the coding-incomplete refusal. NOT deploy-locked yet."
     },
     "packages/runtime/workflows/chatTurn.v22.tools.ts": {
-      "sha256": "520ecad9c88a1dff6f1031a618929f188950ff91a7a1165ec4971a06b893ebac",
+      "sha256": "938c989787d2423cb8a8b567123efadec33cdf8f69f3332e395054133e5c71a7",
       "note": "#985 - chatTurn_v22's tool map: buildToolsV21's thirty-nine by import plus read_opening_source. The tool calls the route core parseOpeningTargets(client, {seedId, firmId, reassert}) on a clara_runtime connection and never clara.record_opening_targets_parsed itself, and it restates the browser route's bookkeeper+ floor through clara.resolve_chat_principal rather than importing lib/authz.mjs (which would freeze the runtime's auth boundary for every route). NOT deploy-locked yet."
     },
     "packages/runtime/workflows/chatTurn.v22.ts": {
@@ -1307,7 +1307,7 @@
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v6.impl.ts": {
-      "sha256": "9ef5987a5be68d8e5926021b5e77e76a645bec400b4a2cdc3cdf673ef48ddbf6",
+      "sha256": "b1f7a850ec6d948665d89a13eab4d212dce781ad5b254b22ead436e6604c52e4",
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v6.prompt.ts": {
@@ -1315,7 +1315,7 @@
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v6.schemas.ts": {
-      "sha256": "6c070ee6bb81ed1ef1249656977416b7c5e44fdbc1d54fca4691946db9f6191d",
+      "sha256": "7fa7a0a32f12a6700b572288a339449b7c61583697b41564789f643568d5a285",
       "note": ""
     },
     "packages/runtime/workflows/claraWork.v6.tools.ts": {
