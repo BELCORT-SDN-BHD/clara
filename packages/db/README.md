@@ -7655,6 +7655,37 @@ estate sits at admin (`clara.record_client_fact`, [0055](migrations/0055_client_
 rather than at the floor of the act it authorises. Owner rank clears it. §G carries the same floor
 for the same reason: standing an act and stopping it are one decision seen from two sides.
 
+### Two admins, one instruction: the rung and the one interleave it cannot close
+
+The recording door reads the firm's live row and then inserts. `for update` on a row that does not
+exist yet locks nothing, so two admins recording the same instruction in two tabs each saw the
+other's row as absent and both inserted; one of them met `uq_firm_standing_instructions_live` and
+was handed a **raw `23505`** — no CLR code, no `detail.reason`, nothing a surface can key on. Driven
+with two real connections in `p1050.record.race`, which proves the block from `pg_blocking_pids`
+rather than from a sleep.
+
+`clara.record_firm_standing_instruction` therefore takes
+`pg_advisory_xact_lock(203005009, hashtext(firm || ':' || instruction_key))` **after** its op-receipt
+reservation and **before** the live-row read — [0037](migrations/0037_wave_c_c_tieout.sql) §K's
+order, the same placement 0238's fix round used for the client rung and
+[0287](migrations/0287_client_birth_wall.sql) used for `203005008`. A rung of its own, not the firm
+rung `203005002` and not the client rung `203005004`: the key is (firm, instruction key), so two
+different standing instructions of one firm never wait on each other, and no body that takes an
+existing rung gains an ordered pair with this one. Once serialised, the second session reads the
+first one's committed row and takes the lawful version-forward branch — an unchanged re-recording is
+idempotent, so it is answered with the row that already stands.
+
+`clara.withdraw_firm_standing_instruction` needs no rung: its `for update` locks a row that exists,
+so a second withdrawal blocks on the row, re-evaluates `withdrawn_at is null` and is answered
+`CLR11 firm_standing_instruction_absent` — already typed.
+
+**The one interleave a rung cannot close** is an older SNAPSHOT. A caller in `repeatable read` waits
+for the rung, gets it (the writer ahead of it has committed and let go) and still reads the world
+without the row it waited for, because a snapshot is not a lock; the unique index is not
+snapshot-bound, so the insert meets it. That insert is wrapped and `unique_violation` is answered
+`CLR13 operation_in_flight` with the instruction key — the door's own retryable word, and a retry on
+a fresh snapshot takes the idempotent branch. Driven by `p1050.record.race_snapshot`.
+
 ### Why the pairing, and why the human door is not widened
 
 `standing_instruction` is admitted only together with an `authority_ref` of kind

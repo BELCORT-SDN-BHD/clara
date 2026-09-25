@@ -331,6 +331,22 @@ begin
           'axis','instruction_key_unknown', 'instruction_key', v_key)::text;
   end if;
 
+  -- SERIALISED ON (FIRM, INSTRUCTION KEY), and the rung is taken HERE -- after the op-receipt
+  -- reservation, before anything that reads the world (0037 §K's order, restated by 0238's own
+  -- fix round for the client rung). The read-then-insert pair below is a time-of-check/time-of-use
+  -- window: `for update` on a row that does not exist yet locks nothing, so two admins recording
+  -- the same instruction in two tabs each saw the other's row as absent and BOTH inserted. One of
+  -- them then met `uq_firm_standing_instructions_live` and was handed a raw 23505 with no CLR code
+  -- and no `detail.reason` -- an untyped refusal, which is exactly what this estate's doors do not
+  -- do. MEASURED with two real connections before this line existed (`p1050.record.race`, which
+  -- proves the block from `pg_blocking_pids` rather than from a sleep).
+  --
+  -- A RUNG OF ITS OWN (203005009), not the firm rung 203005002 and not the client rung 203005004:
+  -- this act is firm-level and key-level, so two DIFFERENT standing instructions of one firm never
+  -- wait on each other, and no body that takes one of the existing rungs gains an ordered pair
+  -- with this one. It is taken by these two doors and by nothing else.
+  perform pg_advisory_xact_lock(203005009, hashtext(v_firm::text || ':' || v_key));
+
   -- VERSION-FORWARD, NEVER MUTATE (0306 §B's fold). An unchanged re-recording is idempotent and
   -- must not move the interval under a live plan's citation; a RESTATED reason withdraws the live
   -- row and inserts a fresh one, so the basis a plan was written under stays readable for as long
@@ -347,9 +363,25 @@ begin
              withdraw_reason = 'superseded by a restated standing instruction'
        where id = v_existing.id;
     end if;
-    insert into clara.firm_standing_instructions(firm_id, instruction_key, reason, recorded_by)
-      values (v_firm, v_key, v_reason, v_actor)
-      returning id into v_id;
+    -- AND THE ONE INTERLEAVE THE RUNG CANNOT CLOSE, ANSWERED IN THE ESTATE'S OWN VOCABULARY. A
+    -- caller holding an OLDER SNAPSHOT (repeatable read) waits for the rung, gets it -- the writer
+    -- ahead of it has committed and let go -- and still reads the world without the row it waited
+    -- for, because a snapshot is not a lock. The unique index is not snapshot-bound, so the insert
+    -- meets it. `uq_firm_standing_instructions_live` is doing exactly its job there; what must not
+    -- reach a caller is its raw 23505, which carries no CLR code and no `detail.reason` for a
+    -- surface to key on. CLR13 `operation_in_flight` is this door's own word for "somebody else is
+    -- holding this right now, come back": retryable, and a retry on a fresh snapshot takes the
+    -- idempotent branch above. MEASURED by `p1050.record.race_snapshot` before this block existed.
+    begin
+      insert into clara.firm_standing_instructions(firm_id, instruction_key, reason, recorded_by)
+        values (v_firm, v_key, v_reason, v_actor)
+        returning id into v_id;
+    exception when unique_violation then
+      raise exception 'another member recorded this standing instruction a moment ago; read it and record again if it still needs restating'
+        using errcode='CLR13',
+          detail=jsonb_build_object('reason','operation_in_flight',
+            'instruction_key', v_key)::text;
+    end;
   end if;
 
   -- args stay REDACTED (ids and the key, never the reason text -- the reason lives on the row,
@@ -366,7 +398,7 @@ grant execute on function clara.record_firm_standing_instruction(text, text, tex
   to clara_authenticated;
 
 comment on function clara.record_firm_standing_instruction(text, text, text) is
-  '#1050: a named member of the firm records a firm-level standing instruction, with the one-line reason it is given under. Admin floor, clara_authenticated only -- no machine lane may reach it, because an instruction a machine recorded would name nobody. Version-forward: an unchanged re-recording by the same member is idempotent, a restated reason withdraws the live row and inserts a fresh one.';
+  '#1050: a named member of the firm records a firm-level standing instruction, with the one-line reason it is given under. Admin floor, clara_authenticated only -- no machine lane may reach it, because an instruction a machine recorded would name nobody. Version-forward: an unchanged re-recording by the same member is idempotent, a restated reason withdraws the live row and inserts a fresh one. SERIALISED on pg_advisory_xact_lock(203005009, firm || '':'' || instruction_key), taken after the op-receipt reservation and before the live-row read, so two admins recording at once do not both insert; a caller on an older snapshot, which no rung can serialise, is answered CLR13 operation_in_flight rather than the unique index''s raw 23505.';
 
 
 

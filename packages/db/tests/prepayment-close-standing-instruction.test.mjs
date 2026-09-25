@@ -22,6 +22,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { humanQuery } from "./rig-helpers.mjs";
+import { twoSessions, asHumanSession, waitBlockedByOrThrow } from "./binding-proposal-pr-1-helpers.mjs";
 import { ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, opk, caught, wake12 }
   from "./f-a4-pr2a-fixtures.mjs";
 
@@ -130,6 +131,106 @@ async (t) => {
   const all = await rootQuery(
     "select count(*)::int as n from clara.firm_standing_instructions where firm_id = $1", [sc.firm]);
   assert.equal(all.rows[0].n, 1, "the firm carries more than one standing-instruction row");
+});
+
+test("p1050.record.race -- two members recording the firm's standing instruction at the SAME "
+  + "moment are serialised at the door's own rung: the second blocks, then takes the lawful "
+  + "version-forward branch and is answered with an ordinary receipt, rather than leaking the "
+  + "unique index's raw 23505 with no CLR code and no reason a surface could read",
+async (t) => {
+  if (await standingGate(t)) return;
+  const sc = await prepaidScene("p1050race");
+  assert.equal(await liveRow(sc.firm), null, "the scene already carries an instruction -- fixture leak");
+
+  const settled = await twoSessions(async (cA, cB) => {
+    const pidA = await asHumanSession(cA, sc.alice);
+    const pidB = await asHumanSession(cB, sc.alice);
+    await cA.query("begin");
+    await cB.query("begin");
+
+    // A records INSIDE an open transaction: its row is invisible to B's snapshot, which is the
+    // window the unique index -- and nothing else -- was closing.
+    const a = (await cA.query(
+      "select clara.record_firm_standing_instruction($1,$2,$3) as r",
+      [KEY, REASON, opk("p1050-raceA")])).rows[0].r;
+    assert.ok(a.instruction_id, "session A's recording did not succeed");
+
+    // B asks the same question under its OWN op key -- two admins, two tabs, one firm -- so
+    // `clara._reserve_op` cannot answer it and it reaches the same live-row question A holds.
+    const racing = cB.query(
+      "select clara.record_firm_standing_instruction($1,$2,$3) as r",
+      [KEY, REASON, opk("p1050-raceB")])
+      .then((r) => ({ receipt: r.rows[0].r, error: null }), (error) => ({ receipt: null, error }));
+
+    // PROVEN from pg_stat_activity, never from a sleep (0287's own cell's rule).
+    await waitBlockedByOrThrow(pidB, pidA);
+
+    await cA.query("commit");
+    const out = await racing;
+    await cB.query("commit");
+    return { a, ...out };
+  });
+
+  assert.equal(settled.error, null,
+    `the racing session leaked an untyped failure: ${settled.error?.code} ${settled.error?.message}`);
+  assert.ok(settled.receipt?.instruction_id, "the racing session was answered with no instruction");
+  assert.equal(settled.receipt.instruction_id, settled.a.instruction_id,
+    "once serialised, an UNCHANGED re-recording is idempotent -- the second session must be "
+    + "answered with the row the first one wrote, not a second one");
+  assert.equal(settled.receipt.active, true);
+
+  const live = await rootQuery(
+    `select count(*)::int as n from clara.firm_standing_instructions
+      where firm_id = $1 and instruction_key = $2 and withdrawn_at is null`, [sc.firm, KEY]);
+  assert.equal(live.rows[0].n, 1, "the firm ended the race with more than one LIVE instruction");
+});
+
+test("p1050.record.race_snapshot -- the rung serialises, but a caller holding an OLDER SNAPSHOT "
+  + "(repeatable read) still cannot see the row it waited for; the door answers that with the "
+  + "estate's own retryable refusal rather than with the index's 23505",
+async (t) => {
+  if (await standingGate(t)) return;
+  const sc = await prepaidScene("p1050racesnap");
+  assert.equal(await liveRow(sc.firm), null, "the scene already carries an instruction -- fixture leak");
+
+  const settled = await twoSessions(async (cA, cB) => {
+    await asHumanSession(cA, sc.alice);
+    await asHumanSession(cB, sc.alice);
+
+    // B's SNAPSHOT IS TAKEN FIRST and then frozen: under repeatable read the advisory rung is
+    // free by the time B takes it (A has committed and released it), and B's own `select` still
+    // reads the world as it was before A wrote. The unique index is NOT snapshot-bound, so the
+    // insert meets it. This is the one interleave the rung cannot close.
+    await cB.query("begin isolation level repeatable read");
+    await cB.query("select 1");
+
+    await cA.query("begin");
+    const a = (await cA.query(
+      "select clara.record_firm_standing_instruction($1,$2,$3) as r",
+      [KEY, REASON, opk("p1050-snapA")])).rows[0].r;
+    await cA.query("commit");
+
+    const out = await cB.query(
+      "select clara.record_firm_standing_instruction($1,$2,$3) as r",
+      [KEY, REASON, opk("p1050-snapB")])
+      .then((r) => ({ receipt: r.rows[0].r, error: null }), (error) => ({ receipt: null, error }));
+    await cB.query("rollback");
+    return { a, ...out };
+  });
+
+  assert.ok(settled.error, "the stale-snapshot session wrote a second live instruction");
+  assert.equal(settled.error.code, "CLR13",
+    `an untyped refusal reached the caller: ${settled.error.code} ${settled.error.message}`);
+  const d = JSON.parse(settled.error.detail);
+  assert.equal(d.reason, "operation_in_flight",
+    "the refusal carries no reason a surface could key on");
+  assert.equal(d.instruction_key, KEY,
+    "the refusal does not name WHICH standing instruction was recorded underneath it");
+
+  const live = await rootQuery(
+    `select count(*)::int as n from clara.firm_standing_instructions
+      where firm_id = $1 and instruction_key = $2 and withdrawn_at is null`, [sc.firm, KEY]);
+  assert.equal(live.rows[0].n, 1, "the firm ended with more than one LIVE instruction");
 });
 
 // ---------------------------------------------------------------------------------------------
