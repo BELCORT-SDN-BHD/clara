@@ -49,6 +49,7 @@ export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
   lineCount,
   newRow,
   optionLabel,
+  sourceEnrolment,
   rowProps,
   amountLabel,
 }: {
@@ -69,6 +70,22 @@ export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
    *  it lists EVERY enrolment's advances; a caller already scoped to one claimant says so with the
    *  facts that actually tell two of that person's advances apart. */
   optionLabel?: (candidate: StaffAdvanceSummaryRow) => string;
+  /**
+   * #1052 — WHERE THIS ADVANCE CAME FROM, when that is not where the caller's subject sits.
+   *
+   * The owner's ruling of 2026-09-24 on #931 admits an advance held under ANOTHER live enrolment
+   * of the same client whose person label is the claimant's, on the condition that "the allocation
+   * editor shows, beside each such advance, the enrolment it came from, so the preparer's
+   * confirmation is a confirmation of that specific account".
+   *
+   * The CALLER decides which candidates are "such an advance" and writes the sentence, because
+   * only the caller knows what the subject is: a claim has a claimant enrolment, the register's
+   * book-application dialog has none at all. This component only renders the answer — appended to
+   * the chooser's option, so it is visible BEFORE the choice, and again as its own line beside the
+   * confirmed row, so it is visible AFTER it. Returning `null` (or omitting the prop, which the
+   * register's caller does) renders neither, byte for byte as before.
+   */
+  sourceEnrolment?: (candidate: StaffAdvanceSummaryRow) => string | null;
   /** Extra props for ONE row's own control (an id, a ref, an error wiring) — how a caller keeps an
    *  existing control id on the line that used to be its only one (#930 → #931) and addresses every
    *  later line by its own field path. */
@@ -88,6 +105,13 @@ export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
       c.person_label,
       `${fmtCents(c.outstanding_cents, tc("centsUnsafe"))} ${t("outstandingSuffix")}`,
     ].join(" — "));
+  /** ONE READER for "where did this advance come from", so the chooser and the confirmed row can
+   *  never say different things about the same candidate. */
+  const sourceOf = (c: StaffAdvanceSummaryRow): string | null => sourceEnrolment?.(c) ?? null;
+  const optionText = (c: StaffAdvanceSummaryRow): string => {
+    const source = sourceOf(c);
+    return source === null ? label(c) : [label(c), source].join(" — ");
+  };
 
   function updateAllocation(index: number, patch: Partial<T>) {
     onChange(allocations.map((a, i) => (i === index ? { ...a, ...patch } : a)));
@@ -142,10 +166,24 @@ export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
                   <option value="">{t("selectAdvance")}</option>
                   {candidates.map((c) => (
                     <option key={c.advance_id} value={c.advance_id}>
-                      {label(c)}
+                      {optionText(c)}
                     </option>
                   ))}
                 </NativeSelect>
+                {/* #1052 — AND BESIDE THE CONFIRMED ROW. A `<select>` shows the chosen option's
+                    text, but the preparer confirms a LIST and reads it back as a list; the ruling
+                    asks for the enrolment beside the advance, so it is a line of its own here and
+                    not only a suffix inside the control. */}
+                {(() => {
+                  const chosen = candidates.find((c) => c.advance_id === a.advance_id);
+                  const source = chosen === undefined ? null : sourceOf(chosen);
+                  return source === null ? null : (
+                    <p className="mt-1 text-xs text-muted-foreground"
+                       data-testid="allocation-source-enrolment">
+                      {source}
+                    </p>
+                  );
+                })()}
               </TableCell>
               {showAmount ? (
                 <TableCell>

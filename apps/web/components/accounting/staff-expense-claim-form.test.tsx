@@ -68,8 +68,9 @@ const ACCOUNTS: CoaAccountRow[] = [
 ];
 
 /** One LIVE enrolment: `1190` is Farah's, `1191` is not enrolled at all. */
+const FARAH_ENROLMENT = "44444444-4444-4444-8444-444444444444";
 const ENROLMENTS: StaffAdvanceEnrolmentRow[] = [
-  { id: "44444444-4444-4444-8444-444444444444", account_code: "1190", person_label: "Farah binti Idris" },
+  { id: FARAH_ENROLMENT, account_code: "1190", person_label: "Farah binti Idris" },
 ];
 
 /** The default, EMPTY staff-advance summary — most tests never touch the advance arm at all, so
@@ -89,7 +90,7 @@ function staffAdvanceSummary(advances: StaffAdvanceSummary["advances"]): StaffAd
 /** One row of `staff_advance_summary`, every field named so a test reads as data, not noise. */
 function advanceRow(patch: Partial<StaffAdvanceSummary["advances"][number]>): StaffAdvanceSummary["advances"][number] {
   return {
-    enrolment_id: "e0", account_code: "1190", person_label: "Farah binti Idris", advance_id: FARAH_ADVANCE,
+    enrolment_id: FARAH_ENROLMENT, account_code: "1190", person_label: "Farah binti Idris", advance_id: FARAH_ADVANCE,
     issue_date: "2026-02-01", amount_cents: 100000, outstanding_cents: 40000, days_outstanding: 30,
     purpose: null, reference: null, voided: false, particulars_complete: false, enrolment_active: true,
     ...patch,
@@ -768,6 +769,108 @@ test("ticket 931 deleting a line of a CONFIRMED split never restates the survivi
     assert.equal(sent[0]!.claim.advanceId, JAN_ADVANCE);
     assert.equal(sent[0]!.claim.advanceAllocations, undefined,
       "one advance carrying the whole claim crosses exactly as it did before ticket 931");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// #1052 — WHICH ENROLMENT AN OFFERED ADVANCE CAME FROM. The owner's ruling of 2026-09-24 on #931
+// admits an advance that is the claimant's by LABEL rather than by their own enrolment, on the
+// condition that "the allocation editor shows, beside each such advance, the enrolment it came
+// from, so the preparer's confirmation is a confirmation of that specific account".
+//
+// The editor's half of that is proved at the editor's own seam
+// (`components/registers/staff-advance-allocations-editor.test.tsx`). What only a mounted FORM can
+// prove is which candidates it calls "not this claimant's own", and the answer is a comparison of
+// ENROLMENTS, never of account codes: one advance account re-enrolled after a retirement carries a
+// second generation, and an advance issued under the first one is not the current claimant's own
+// however the code reads. That case is reachable through today's chooser, which is why it is the
+// cell.
+//
+// The chooser's own candidate FILTER — whether an advance on a SECOND account reaches this list at
+// all — is #1066's, not this ticket's, and is deliberately untouched here.
+// ---------------------------------------------------------------------------------------------
+
+test("ticket 1052 an offered advance issued under an EARLIER enrolment of the same account names that enrolment, and the claimant's own carries no extra line", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => staffAdvanceSummary([
+      // The claimant's own, under the LIVE enrolment on 1190.
+      advanceRow({}),
+      // 1190 was retired and re-enrolled after a name correction; this advance was issued under
+      // the FIRST generation, so it is offered (same account code) but it is not the current
+      // claimant enrolment's.
+      advanceRow({
+        enrolment_id: "e-first-generation", person_label: "Farah Idris",
+        advance_id: OTHER_CLAIMANT_ADVANCE, outstanding_cents: 30000, enrolment_active: false,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    const select = byId(h, F("advanceId"));
+    assert.deepEqual(optionsOf(select).map((o) => attrOf(o, "value")),
+      ["", FARAH_ADVANCE, OTHER_CLAIMANT_ADVANCE],
+      "both advances on the claimant's account are offered, exactly as before");
+
+    const texts = optionsOf(select).map((o) => o.textContent);
+    assert.ok(String(texts[2]).includes("Farah Idris") && String(texts[2]).includes("1190"),
+      `the advance from the earlier enrolment names it: ${String(texts[2])}`);
+    assert.ok(!String(texts[1]).includes("enrolment"),
+      `the claimant's own advance carries no extra text: ${String(texts[1])}`);
+
+    // AND BESIDE THE CONFIRMED ROW, once it is chosen.
+    assert.equal(
+      findAll(h.container, (n) => attrOf(n, "data-testid") === "allocation-source-enrolment").length,
+      0,
+      "nothing is claimed about a row that has chosen no advance yet",
+    );
+    await h.fireEvent(select, "change", (n) => setFieldValue(n, OTHER_CLAIMANT_ADVANCE));
+    await h.settle();
+    const lines = findAll(h.container, (n) => attrOf(n, "data-testid") === "allocation-source-enrolment");
+    assert.equal(lines.length, 1, "the confirmed row says which enrolment it discharges");
+    assert.ok(String(lines[0]!.textContent).includes("Farah Idris"),
+      `…naming the person that enrolment carries: ${String(lines[0]!.textContent)}`);
+
+    // AND CHOOSING THE CLAIMANT'S OWN TAKES IT AWAY AGAIN.
+    await h.fireEvent(select, "change", (n) => setFieldValue(n, FARAH_ADVANCE));
+    await h.settle();
+    assert.equal(
+      findAll(h.container, (n) => attrOf(n, "data-testid") === "allocation-source-enrolment").length,
+      0,
+      "a directly enrolled advance carries no extra line",
+    );
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1052 with the enrolment register unread, no advance is described as coming from somewhere else", async () => {
+  // The conservative direction, and the same one `claimantIsNew` already takes: a read this form
+  // uses to decide WHAT TO SAY must never invent a provenance it could not check.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => null,
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}),
+      advanceRow({
+        enrolment_id: "e-first-generation", person_label: "Farah Idris",
+        advance_id: OTHER_CLAIMANT_ADVANCE, outstanding_cents: 30000, enrolment_active: false,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    const texts = optionsOf(byId(h, F("advanceId"))).map((o) => String(o.textContent));
+    assert.ok(texts.every((x) => !x.includes("enrolment")),
+      `no option claims a source enrolment while the register is unread: ${texts.join(" | ")}`);
   } finally {
     await h.unmount();
   }

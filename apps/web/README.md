@@ -2221,3 +2221,43 @@ from a refused one in the database's own word, and the who/when/why behind a per
 **Copy is EN only**, for the reason #940 records above: this build ships a single static locale, so
 the brief's "en and zh copy" has no zh catalogue to land in. The namespace is `DeferredRevenue`,
 plus six keys in `PrepaymentAccounts` for the panel's purpose control and its row badges.
+
+## #1052 — the allocation editor says which enrolment an advance came from
+
+The owner's ruling of 2026-09-24 on #931 lets a claim discharge an advance held under ANOTHER live
+enrolment of the same client whose person label is the claimant's, on two conditions. The database
+half of the first one is migration `0340` (`packages/db/README.md`). The second is here, in the
+ruling's own words: "the allocation editor shows, beside each such advance, the enrolment it came
+from, so the preparer's confirmation is a confirmation of that specific account."
+
+**One optional prop, on the shared editor.** `components/registers/staff-advance-allocations-editor.tsx`
+takes `sourceEnrolment?: (candidate) => string | null` beside `optionLabel`. When it answers a
+sentence, the editor appends it to that candidate's option — so it is visible BEFORE the choice —
+and renders it again as its own line beside the confirmed row, `data-testid`
+`allocation-source-enrolment`, so it is visible AFTER it. A `<select>` only ever shows the chosen
+option's text, and the preparer confirms a LIST and reads it back as a list, which is why the line
+is not merely a suffix inside the control. A caller that passes nothing (the register's own
+`BookApplicationDialog`, whose default label already names the account and the person) renders
+exactly what it rendered before.
+
+**The CALLER decides what "another enrolment" means**, because only the caller knows what the
+subject is: a claim has a claimant enrolment, the book-application dialog has none at all.
+
+**The claim form's answer is a comparison of ENROLMENTS, never of account codes.**
+`staff-expense-claim-form.tsx` resolves the claimant's own live enrolment the way the door resolves
+it (`clara._claim_resolve_claimant`): the stated enrolment, or the live enrolment on the account
+dedicated to them. Any offered advance whose `enrolment_id` is not that one carries the line. That
+distinction is not academic — one advance account retired and re-enrolled after a name correction
+carries a second generation, and an advance issued under the first is not the current claimant
+enrolment's however the account code reads. With the enrolment register unread (`null`), nothing is
+claimed at all: the form knows of no enrolment to compare against, the same conservative direction
+`claimantIsNew` already takes.
+
+**What is deliberately NOT here.** Which candidates the claim form offers at all is untouched: the
+chooser still narrows `staff_advance_summary` to the claimant's own account code, so an advance on
+a SECOND enrolled account of the same person still does not reach the list. That filter, and the
+per-allocation account code and derived-preview legs a cross-account allocation would need on the
+wire, are #1066's, which rides on this prop.
+
+One key, `StaffExpenseClaim.advanceSourceEnrolment`. Copy is EN only, for the reason #940 records
+above.

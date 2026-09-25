@@ -299,6 +299,7 @@ components/registers/opening-target-document-panel.test.tsx
 components/registers/opening-tie-gates.test.tsx
 components/registers/prepayment-accounts-panel.test.tsx
 components/registers/register-refresh-siblings.test.tsx
+components/registers/staff-advance-allocations-editor.test.tsx
 components/registers/staff-advance-statement-panel.test.tsx
 components/registers/staff-advances-a11y.test.tsx
 components/registers/staff-advances-keyboard.test.tsx

@@ -69,7 +69,8 @@ import { FieldDescription, FieldLegend, FieldSet } from "@/components/ui/field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { listCoaAccounts } from "@/lib/journals/api";
 import {
-  getStaffAdvanceSummary, isOutstandingAdvance, type StaffAdvanceSummary,
+  getStaffAdvanceSummary, isOutstandingAdvance,
+  type StaffAdvanceSummary, type StaffAdvanceSummaryRow,
 } from "@/lib/registers/staff-advances-doors";
 import { StaffAdvanceAllocationsEditor } from "@/components/registers/staff-advance-allocations-editor";
 import { fmtCents } from "@/lib/registers/money";
@@ -265,6 +266,29 @@ export function StaffExpenseClaimFormView({
     if (code === "" || advancesRead.data === null) return [];
     return advancesRead.data.advances.filter((a) => a.account_code === code && isOutstandingAdvance(a));
   }, [advancesRead.data, draft.claimantAccountCode]);
+  /** #1052 — THE CLAIMANT'S OWN LIVE ENROLMENT, resolved the way the door resolves it (0221's
+   *  `clara._claim_resolve_claimant`): the stated enrolment, or the live enrolment on the account
+   *  dedicated to them. `null` while the register has not been read, or while the claimant is a
+   *  code with no enrolment yet — in both cases the form knows of no enrolment to compare against
+   *  and says nothing, the same conservative direction `claimantIsNew` takes. */
+  const claimantEnrolmentId = useMemo(() => {
+    const stated = draft.claimantEnrolmentId.trim();
+    if (stated !== "") return stated;
+    const code = draft.claimantAccountCode.trim();
+    if (code === "" || enrolments === null) return null;
+    return enrolments.find((e) => e.account_code === code)?.id ?? null;
+  }, [draft.claimantEnrolmentId, draft.claimantAccountCode, enrolments]);
+  /** #1052 — WHERE AN OFFERED ADVANCE CAME FROM, when it did not come from the claimant's own
+   *  enrolment. The owner's ruling of 2026-09-24 on #931 requires the editor to show it "beside
+   *  each such advance, […] so the preparer's confirmation is a confirmation of that specific
+   *  account", and the comparison is of ENROLMENTS, never of account codes: one account
+   *  re-enrolled after a retirement carries a second generation, and an advance issued under the
+   *  first is not the current claimant enrolment's however the code reads. */
+  const advanceSourceEnrolment = useCallback((c: StaffAdvanceSummaryRow): string | null => (
+    claimantEnrolmentId === null || c.enrolment_id === claimantEnrolmentId
+      ? null
+      : t("advanceSourceEnrolment", { account: c.account_code, person: c.person_label })
+  ), [claimantEnrolmentId, t]);
   /** #931 — the draft's allocation list in the shared editor's own row shape. The claim form keeps
    *  camelCase and the register keeps snake_case; this is the ONE place they meet, rather than one
    *  module bending to the other's spelling. */
@@ -703,6 +727,11 @@ export function StaffExpenseClaimFormView({
                 // HER advances apart: when it was paid, and what is still outstanding on it.
                 optionLabel={(a) =>
                   `${a.issue_date} — ${fmtCents(a.outstanding_cents, tcommon("centsUnsafe"))} ${t("advanceIdOutstandingSuffix")}`}
+                // #1052 — AND WHICH ENROLMENT IT CAME FROM, whenever that is not the
+                // claimant's own. The ruling of 2026-09-24 on #931 asks for it beside the
+                // advance in the chooser AND beside the confirmed row; the editor renders both
+                // from this one reader.
+                sourceEnrolment={advanceSourceEnrolment}
                 rowProps={(i, key) => controlProps(
                   allocationFieldId(i, key === "advance" ? "advanceId" : "amountCents"),
                   i === 0 && key === "advance",
