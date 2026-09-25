@@ -24,7 +24,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -252,4 +252,71 @@ test("p1041.total.declared the PR-time totality gate refuses a missing declarati
       `.github/actions/partition-total does not check for '${directive}' — the frontier legs are dispatch-only, `
       + "so a declaration missing from a list or from the roster would not be noticed until someone dispatched them");
   }
+});
+
+// #1126 — a DECLARED floor is a number someone typed into a comment; nothing on this branch
+// checked it against a MEASURED source of truth, so a corpus retarget or a census widening could
+// move the true cell count without moving the declared one, and the `-ge` floor check in
+// `.github/actions/frontier-leg` (never `=`) stays satisfied either way. That happened twice,
+// unnoticed for a stretch, per this ticket's own Agent Brief (follow-up 2 of
+// wave4-lane07-ticket1041.md, originating ticket #1041).
+//
+// THE MEASURED SOURCE OF TRUTH IS ALREADY ESTABLISHED, by `p1041.drill.floor` above: every file in
+// this corpus is a FLAT battery of top-level `test(...)` calls (no file nests a subtest inside
+// another), so `#!drill-cells-floor:` already equals a static count of `^test\(` lines in the
+// drill file it bounds, no database and no test run required. The SAME re-derivation, summed
+// across a whole list's files rather than one drill file, is exactly what the Agent Brief asks
+// for ("the same way the gate chain is already derived rather than hand-copied" — `#!cells-floor:`
+// is now derived the same way `scripts/print-gate-chain.mjs` derives the gate chain: from what is
+// literally on disk, not from a number someone typed and never rechecked).
+
+function listedFiles(text) {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+}
+
+function staticCellCount(file) {
+  return (readFileSync(path.join(TESTS_DIR, file), "utf8").match(/^test\(/gm) ?? []).length;
+}
+
+test("p1126.floor.corpus each slice list's declared #!cells-floor: equals the static test( count summed across its own listed files", () => {
+  for (const slice of SLICES) {
+    const listPath = path.join(TESTS_DIR, "split-lists", `test-list-${slice}.txt`);
+    const text = readFileSync(listPath, "utf8");
+    const floor = /^#!cells-floor:\s*(\d+)\s*$/m.exec(text);
+    assert.ok(floor, `test-list-${slice}.txt declares no '#!cells-floor:'`);
+    const files = listedFiles(text);
+    assert.ok(files.length > 0, `test-list-${slice}.txt lists no files`);
+    let total = 0;
+    for (const f of files) {
+      assert.ok(existsSync(path.join(TESTS_DIR, f)),
+        `test-list-${slice}.txt names a file that does not exist on disk: ${f}`);
+      total += staticCellCount(f);
+    }
+    assert.equal(total, Number(floor[1]),
+      `test-list-${slice}.txt declares a floor of ${floor[1]} while its own listed files carry ${total} top-level `
+      + "test( cell(s) on disk right now — the corpus moved (a cell was added or removed inside a listed file, or "
+      + "a file joined or left the list) without the declared floor moving with it; raise or lower #!cells-floor: "
+      + "in the SAME PR that changes the corpus, never separately (#1126)");
+  }
+});
+
+test("p1126.floor.roster the cross-slice contract roster's declared #!cells-floor: equals the static test( count summed across its own files", () => {
+  const rosterPath = path.join(TESTS_DIR, "split-lists", "test-list-contracts.txt");
+  const text = readFileSync(rosterPath, "utf8");
+  const floor = /^#!cells-floor:\s*(\d+)\s*$/m.exec(text);
+  assert.ok(floor, "test-list-contracts.txt declares no '#!cells-floor:'");
+  const files = listedFiles(text);
+  assert.ok(files.length > 0, "test-list-contracts.txt lists no files");
+  let total = 0;
+  for (const f of files) {
+    assert.ok(existsSync(path.join(TESTS_DIR, f)),
+      `test-list-contracts.txt names a file that does not exist on disk: ${f}`);
+    total += staticCellCount(f);
+  }
+  assert.equal(total, Number(floor[1]),
+    `test-list-contracts.txt declares a floor of ${floor[1]} while its own listed files carry ${total} top-level `
+    + `test( cell(s) on disk right now (#1126)`);
 });

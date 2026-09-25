@@ -196,6 +196,18 @@ declarations, the drill floor against the drill's own cell count, and the action
 them; `partition-total` refuses a missing declaration on the PR itself, days before anyone
 dispatches the legs.
 
+**A declared `#!cells-floor:` is itself checked against the corpus on disk (#1126).** The bounds
+above prove a RUN met its declared numbers; they never proved the declared numbers were still
+correct, so a corpus retarget or a census widening could move the true cell count without moving
+the declared one — the `-ge` floor check stays satisfied either way, and that happened twice,
+unnoticed for a stretch. Every file in this corpus is a flat battery of top-level `test(...)`
+calls (no file nests a subtest inside another), so the true cell count is re-derivable from disk
+the same way the gate chain already is: `p1126.floor.corpus` and `p1126.floor.roster` in
+`ci-frontier-leg-contract.test.mjs` sum `^test\(` lines across each slice list's own files (and
+the roster's) and assert the sum equals the list's declared `#!cells-floor:` — on every PR, with
+no database and no dispatch run needed. Raise or lower the declared number in the SAME PR that
+changes the corpus; this cell is what now refuses the PR that forgets to.
+
 **A fixture that runs at two frontiers is not a gate.** A gate lets a cell stand down; a
 FRONTIER-COMPAT fixture keeps the cell running on both sides of the migration that changed a
 door's grammar. `fa-authority-sign-compat.mjs` holds both of the x41 rig's:
