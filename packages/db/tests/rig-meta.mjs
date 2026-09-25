@@ -3373,6 +3373,25 @@ export const SCHEDULE_TERM_CORRECTION_0317_COHORT = [
 ];
 // #941 END
 
+// #1056 [0344, the payroll lane of the human fact door] — its own cohort, the same "wholly present
+// or wholly absent" reason 0217's and 0317's carry: the `db-slice-frontiers` matrix runs this
+// package against databases pinned at earlier frontiers where 0296/0297 have applied and 0344 has
+// not.
+//
+//   THE WHOLE COHORT IS UNGRANTED, and that is the boundary claim. 0344 adds no door and widens no
+//   grant: it gives `clara.revise_document_fact` — already on
+//   DOCUMENT_SOURCE_REVISION_0217_HUMAN_FNS, and deliberately NOT listed a second time here — a
+//   payroll lane, and every helper that lane needs is reached from inside that one definer body.
+//   A grant on any of them would be a second, unwalled way into the payroll facts chain from
+//   outside the door that carries the agent wall and the bookkeeper floor. Listed so an accidental
+//   grant FAILS instead of passing quietly, and so a half-applied 0344 is reported as one rather
+//   than as a silently narrower rule.
+const PAYROLL_FACT_REVISION_0344_UNGRANTED_FNS = [
+  "_revisable_payroll_run_field", "_revisable_fact_lane",
+];
+export const PAYROLL_FACT_REVISION_0344_COHORT = [...PAYROLL_FACT_REVISION_0344_UNGRANTED_FNS];
+// #1056 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -4349,6 +4368,13 @@ export async function grantMatrixFailures() {
   if (correctionLive.length !== 0) {
     failures.push(...cohortFailures("#939 AC4 / #941 AC3 0317 schedule term correction",
       SCHEDULE_TERM_CORRECTION_0317_COHORT, liveNames));
+  }
+  // #1056 [0344] -- bimodal, same reasoning as 0317's above: wholly present once 0344 applies,
+  // wholly absent before it.
+  const payrollRevisionLive = PAYROLL_FACT_REVISION_0344_COHORT.filter((n) => liveNames.has(n));
+  if (payrollRevisionLive.length !== 0) {
+    failures.push(...cohortFailures("#1056 0344 payroll fact revision",
+      PAYROLL_FACT_REVISION_0344_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
