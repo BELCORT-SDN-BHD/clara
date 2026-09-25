@@ -37,6 +37,18 @@
 -- forever. A row that ages out of the window is dead weight the wall will never read again, and
 -- nothing has ever removed it.
 --
+-- WHAT THE SWEEP COSTS THE WALL, MEASURED RATHER THAN ESTIMATED (fix round, ADV-L07-02). A verb
+-- that disables a trigger holds ShareRowExclusive on the WHOLE table, not on the rows it deletes,
+-- and the real bound on the stall is not "as long as the batched delete takes" — it is the
+-- slowest OTHER transaction holding RowExclusive, which is unbounded. Worse, the QUEUE amplifies:
+-- with connection A holding an ordinary open INSERT and B queued for ShareRowExclusive, a third
+-- connection C attempting a completely unrelated wall write was refused 55P03 after 3003 ms,
+-- blocked by B's queued request rather than by A. Both verbs below therefore carry
+-- `lock_timeout = '3s'` as a function SET clause, so the sweep gives up rather than queueing, and
+-- packages/runtime/lib/reconciler.mjs treats a 55P03 the way it already treats a missing function:
+-- this cycle's limb is a no-op and the belt tries again next turn. Neither verb ever changes the
+-- append-only trigger's posture either; see the block above §A's first verb for that measurement.
+--
 -- =====================================================================================
 -- WHY A PAIR OF VERBS, AND WHY EACH ONE DISABLES ITS OWN TRIGGER INSIDE ITSELF RATHER THAN AS A
 -- ONE-SHOT STATEMENT IN THIS FILE'S OWN BODY.
@@ -257,13 +269,48 @@ create index if not exists ix_invite_preview_attempts_attempted_at
 create index if not exists ix_confirmation_attempts_attempted_at
   on clara.confirmation_attempts (attempted_at);
 
+-- FIX ROUND (ADV-L07-02 / ADV-L07-06), and the two SET clauses and the `v_tg` dance below are
+-- what it bought. MEASURED on the lane rig with three connections before either was written:
+--
+--   * `lock_timeout`. `alter table … disable trigger` takes ShareRowExclusive on the whole table,
+--     which conflicts with the RowExclusive every wall write holds. A held that is ordinary and
+--     brief; the QUEUE is not. Connection A opened a plain INSERT into clara.confirmation_attempts
+--     and stayed open; B called this verb and queued for ShareRowExclusive; C then attempted an
+--     UNRELATED wall write — different digest, different origin, no row conflict with A at all —
+--     and was refused 55P03 after 3003 ms, blocked by B's QUEUED request rather than by A. Without
+--     a `lock_timeout` of its own C would simply have waited, so a single long-running transaction
+--     anywhere near these tables shuts the whole pre-session auth wall for as long as it lives.
+--     Three seconds is the bound: an uncontended call measured 5 ms, the belt retries every cycle,
+--     and a sweep that cannot get the lock is a no-op rather than an outage. The caller catches the
+--     55P03 (packages/runtime/lib/reconciler.mjs) so a skipped sweep is silent, not a belt error.
+--     It is set HERE, on the function, rather than in the caller: the verb's bound must hold for
+--     every caller, including an operator holding clara_fn_owner.
+--
+--   * THE TRIGGER POSTURE IS RESTORED, NOT DEFAULTED. The first cut ended with a bare
+--     `enable trigger`, which is ENABLE ORIGIN whatever it found. Measured inside a rolled-back
+--     transaction: tgenabled 'O' → `enable always` → 'A' → ONE call to this verb → back to 'O'.
+--     Impact today is nil (the estate ships 'O' and nothing sets session_replication_role), but a
+--     later operator hardening these tables to ENABLE ALWAYS would have it silently undone by the
+--     next belt turn, with no error and no receipt. The verb now reads `tgenabled` before the
+--     disable and puts back exactly what it found — including 'D', because a guard an operator
+--     deliberately turned off is not this verb's to turn back on. THE GUARANTEE, stated once: this
+--     verb never changes the append-only trigger's posture, in either direction.
 create or replace function clara.prune_invite_preview_attempts(p_before timestamptz, p_limit int default 10000)
-  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
-declare v_deleted bigint;
+  returns jsonb language plpgsql security definer
+  set search_path = clara, pg_temp
+  set lock_timeout = '3s' as $$
+declare v_deleted bigint; v_tg "char";
 begin
   if p_before > now() - interval '15 minutes' then
     raise exception '#1046: prune_invite_preview_attempts refuses a threshold inside the wall''s own 15-minute window (got %, floor %)',
       p_before, (now() - interval '15 minutes') using errcode = 'CLR10';
+  end if;
+  select t.tgenabled into v_tg from pg_trigger t
+   where t.tgrelid = 'clara.invite_preview_attempts'::regclass
+     and t.tgname = 't_invite_preview_attempts_append_only';
+  if v_tg is null then
+    raise exception '#1046: prune_invite_preview_attempts cannot find t_invite_preview_attempts_append_only on clara.invite_preview_attempts -- refusing rather than deleting from a table whose append-only guard has moved'
+      using errcode = 'CLR10';
   end if;
   alter table clara.invite_preview_attempts disable trigger t_invite_preview_attempts_append_only;
   with doomed as (
@@ -274,22 +321,38 @@ begin
   )
   delete from clara.invite_preview_attempts t using doomed d where t.id = d.id;
   get diagnostics v_deleted = row_count;
-  alter table clara.invite_preview_attempts enable trigger t_invite_preview_attempts_append_only;
-  return jsonb_build_object('pruned_before', p_before, 'attempts_deleted', v_deleted);
+  if v_tg = 'A' then
+    alter table clara.invite_preview_attempts enable always trigger t_invite_preview_attempts_append_only;
+  elsif v_tg = 'R' then
+    alter table clara.invite_preview_attempts enable replica trigger t_invite_preview_attempts_append_only;
+  elsif v_tg = 'O' then
+    alter table clara.invite_preview_attempts enable trigger t_invite_preview_attempts_append_only;
+  end if;
+  return jsonb_build_object('pruned_before', p_before, 'attempts_deleted', v_deleted, 'trigger_posture', v_tg::text);
 end $$;
 
 revoke execute on function clara.prune_invite_preview_attempts(timestamptz,int) from public;
 grant execute on function clara.prune_invite_preview_attempts(timestamptz,int) to clara_runtime;
 comment on function clara.prune_invite_preview_attempts(timestamptz,int) is
-  '#1046: retention sweep for clara.invite_preview_attempts (0309''s own evidence table). Disables t_invite_preview_attempts_append_only, deletes rows strictly older than p_before (bounded by p_limit, oldest first), re-enables the trigger -- all inside this one call, which is the only way to prune a table whose append-only guard raises unconditionally for every role including its owner. Refuses (CLR10) a p_before inside the wall''s own 15-minute window, so a caller mistake cannot silently corrupt an active rate wall. clara_runtime only, called from packages/runtime/lib/reconciler.mjs pruneTraces() on the existing belt -- no new scheduler.';
+  '#1046: retention sweep for clara.invite_preview_attempts (0309''s own evidence table). Disables t_invite_preview_attempts_append_only, deletes rows strictly older than p_before (bounded by p_limit, oldest first), then RESTORES the trigger to the posture it found (tgenabled O/A/R/D, returned as trigger_posture) -- all inside this one call, which is the only way to prune a table whose append-only guard raises unconditionally for every role including its owner. It never changes that posture in either direction, and refuses (CLR10) if the trigger is not there at all. Refuses (CLR10) a p_before inside the wall''s own 15-minute window, so a caller mistake cannot silently corrupt an active rate wall. Carries lock_timeout = 3s on the function: the disable takes ShareRowExclusive on the whole table and a QUEUED request for it blocks every unrelated wall write behind it, so a sweep that cannot get the lock gives up (55P03) and the belt retries next cycle instead of shutting the pre-session auth wall. clara_runtime only, called from packages/runtime/lib/reconciler.mjs pruneTraces() on the existing belt -- no new scheduler.';
 
+-- The same two properties, for the same two reasons — see the block above the first verb.
 create or replace function clara.prune_confirmation_attempts(p_before timestamptz, p_limit int default 10000)
-  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
-declare v_deleted bigint;
+  returns jsonb language plpgsql security definer
+  set search_path = clara, pg_temp
+  set lock_timeout = '3s' as $$
+declare v_deleted bigint; v_tg "char";
 begin
   if p_before > now() - interval '15 minutes' then
     raise exception '#1046: prune_confirmation_attempts refuses a threshold inside the wall''s own 15-minute window (got %, floor %)',
       p_before, (now() - interval '15 minutes') using errcode = 'CLR10';
+  end if;
+  select t.tgenabled into v_tg from pg_trigger t
+   where t.tgrelid = 'clara.confirmation_attempts'::regclass
+     and t.tgname = 't_confirmation_attempts_append_only';
+  if v_tg is null then
+    raise exception '#1046: prune_confirmation_attempts cannot find t_confirmation_attempts_append_only on clara.confirmation_attempts -- refusing rather than deleting from a table whose append-only guard has moved'
+      using errcode = 'CLR10';
   end if;
   alter table clara.confirmation_attempts disable trigger t_confirmation_attempts_append_only;
   with doomed as (
@@ -300,14 +363,20 @@ begin
   )
   delete from clara.confirmation_attempts t using doomed d where t.id = d.id;
   get diagnostics v_deleted = row_count;
-  alter table clara.confirmation_attempts enable trigger t_confirmation_attempts_append_only;
-  return jsonb_build_object('pruned_before', p_before, 'attempts_deleted', v_deleted);
+  if v_tg = 'A' then
+    alter table clara.confirmation_attempts enable always trigger t_confirmation_attempts_append_only;
+  elsif v_tg = 'R' then
+    alter table clara.confirmation_attempts enable replica trigger t_confirmation_attempts_append_only;
+  elsif v_tg = 'O' then
+    alter table clara.confirmation_attempts enable trigger t_confirmation_attempts_append_only;
+  end if;
+  return jsonb_build_object('pruned_before', p_before, 'attempts_deleted', v_deleted, 'trigger_posture', v_tg::text);
 end $$;
 
 revoke execute on function clara.prune_confirmation_attempts(timestamptz,int) from public;
 grant execute on function clara.prune_confirmation_attempts(timestamptz,int) to clara_runtime;
 comment on function clara.prune_confirmation_attempts(timestamptz,int) is
-  '#1046: retention sweep for clara.confirmation_attempts (0163''s own evidence table). Same shape as clara.prune_invite_preview_attempts (0348): disables t_confirmation_attempts_append_only, deletes rows strictly older than p_before (bounded by p_limit, oldest first), re-enables the trigger, all inside this one call. Never touches t_confirmation_attempt_settle_stamp (the settle trigger, BEFORE UPDATE) -- this verb only deletes. Refuses (CLR10) a p_before inside the wall''s own 15-minute window. clara_runtime only, called from packages/runtime/lib/reconciler.mjs pruneTraces() on the existing belt -- no new scheduler.';
+  '#1046: retention sweep for clara.confirmation_attempts (0163''s own evidence table). Same shape as clara.prune_invite_preview_attempts (0348): disables t_confirmation_attempts_append_only, deletes rows strictly older than p_before (bounded by p_limit, oldest first), then restores the trigger to the posture it found (returned as trigger_posture, never changed in either direction), all inside this one call, and under the same lock_timeout = 3s so a queued ShareRowExclusive cannot shut the wall. Never touches t_confirmation_attempt_settle_stamp (the settle trigger, BEFORE UPDATE) -- this verb only deletes. Refuses (CLR10) a p_before inside the wall''s own 15-minute window, and (CLR10) if the append-only trigger is absent. clara_runtime only, called from packages/runtime/lib/reconciler.mjs pruneTraces() on the existing belt -- no new scheduler.';
 
 reset role;
 
@@ -349,15 +418,17 @@ declare
   v_floor_raised boolean;
 begin
   -- T.1 · BOTH VERBS INSTALLED WITH THE EXACT POSTURE: owned by clara_fn_owner, SECURITY DEFINER,
-  -- VOLATILE, search_path pinned, EXECUTE granted to clara_fn_owner (implicit) and clara_runtime
-  -- alone -- no PUBLIC, no human lane, no agent lane, no wake lane.
+  -- VOLATILE, search_path pinned, lock_timeout pinned at 3s (the fix round's ADV-L07-02 bound --
+  -- a verb whose SET clause lost it would queue for ShareRowExclusive again and shut the wall, so
+  -- the bound is pinned here rather than merely written above), EXECUTE granted to clara_fn_owner
+  -- (implicit) and clara_runtime alone -- no PUBLIC, no human lane, no agent lane, no wake lane.
   select pg_get_userbyid(p.proowner) || ' | ' || p.prosecdef::text || ' | ' || p.provolatile::text || ' | '
          || coalesce(array_to_string(p.proconfig, ','), '<none>') || ' | '
          || coalesce(array_to_string(p.proacl, ','), '<null>')
     into v_posture from pg_proc p
    where p.oid = 'clara.prune_invite_preview_attempts(timestamptz,int)'::regprocedure;
   if v_posture is distinct from
-     'clara_fn_owner | true | v | search_path=clara, pg_temp | clara_fn_owner=X/clara_fn_owner,clara_runtime=X/clara_fn_owner' then
+     'clara_fn_owner | true | v | search_path=clara, pg_temp,lock_timeout=3s | clara_fn_owner=X/clara_fn_owner,clara_runtime=X/clara_fn_owner' then
     raise exception '#1046 tail T.1: clara.prune_invite_preview_attempts has the wrong posture; got {%}', v_posture
       using errcode = 'CLR10';
   end if;
@@ -367,7 +438,7 @@ begin
     into v_posture from pg_proc p
    where p.oid = 'clara.prune_confirmation_attempts(timestamptz,int)'::regprocedure;
   if v_posture is distinct from
-     'clara_fn_owner | true | v | search_path=clara, pg_temp | clara_fn_owner=X/clara_fn_owner,clara_runtime=X/clara_fn_owner' then
+     'clara_fn_owner | true | v | search_path=clara, pg_temp,lock_timeout=3s | clara_fn_owner=X/clara_fn_owner,clara_runtime=X/clara_fn_owner' then
     raise exception '#1046 tail T.1: clara.prune_confirmation_attempts has the wrong posture; got {%}', v_posture
       using errcode = 'CLR10';
   end if;

@@ -7440,13 +7440,44 @@ IDEMPOTENT, REDO-SAFE verbs — `clara.prune_invite_preview_attempts(timestamptz
 `clara.prune_confirmation_attempts(timestamptz,int)`, one per table, each `SECURITY DEFINER` owned
 by `clara_fn_owner` — that a caller can invoke repeatedly, each call disabling its table's
 append-only trigger, deleting its own bounded batch (oldest first, `LIMIT p_limit`), and
-re-enabling the trigger, **all inside one statement**. That is the sense in which "this migration"
+restoring the trigger, **all inside one statement**. That is the sense in which "this migration"
 disables and re-enables the trigger: it mints the verb that does so, on every call, for as long as
 the estate exists. `clara_runtime` — the only role either verb is granted to — holds no `ALTER
 TABLE` on either relation and needs none: the DEFINER's privilege is what the disable/enable runs
 under, verified live (a `security definer` function owned by `clara_fn_owner`, called under `set
 role clara_runtime`, disabled the trigger, deleted zero rows and re-enabled it, with no privilege
 error).
+
+**What the sweep costs the wall, and why both verbs carry `lock_timeout`** (fix round,
+ADV-L07-02). `alter table … disable trigger` takes `ShareRowExclusive` on the WHOLE table, which
+conflicts with the `RowExclusive` every wall write holds — so while the sweep runs, the table is
+shut to every key, not only to the rows being deleted. That much was disclosed from the start. What
+was not is the real bound: it is **not** "as long as the batched delete takes", it is the slowest
+OTHER transaction holding `RowExclusive`, and a QUEUED request amplifies it. Measured on the lane
+rig with three connections: A held an ordinary open INSERT into `clara.confirmation_attempts`; B
+called the prune verb and queued for `ShareRowExclusive`; C then attempted a completely unrelated
+wall write — different digest, different origin, no row conflict with A — and was refused `55P03`
+after 3003 ms, blocked by **B's queued request**, not by A. Without a `lock_timeout` of its own, C
+would have waited as long as A lived.
+
+Both verbs therefore carry `set lock_timeout = '3s'` as a function SET clause (not a caller
+setting: the bound has to hold for every caller, including an operator holding `clara_fn_owner`).
+An uncontended call measures 5 ms, so three seconds is slack rather than a budget, and a sweep that
+cannot get the lock gives up. `packages/runtime/lib/reconciler.mjs` catches the resulting `55P03`
+exactly the way it already catches a missing function: that cycle's limb is a no-op, the belt turns
+again next cycle, and nothing is logged. The tables are swept a little later instead of the
+pre-session auth wall being shut a lot longer.
+
+**Neither verb ever changes the trigger's posture** (fix round, ADV-L07-06). The first cut ended
+with a bare `enable trigger`, which is `ENABLE ORIGIN` whatever it found. Measured inside a
+rolled-back transaction: `tgenabled` `'O'` → `enable always` → `'A'` → one call to the verb → back
+to `'O'`. Impact today is nil (the estate ships `'O'` and nothing sets `session_replication_role`),
+but an operator who hardened these tables to `ENABLE ALWAYS` would have had it silently undone by
+the next belt turn, with no error and no receipt. Each verb now reads `tgenabled` first and puts
+back exactly what it found — including `'D'`, because a guard an operator deliberately turned off
+is not this verb's to turn back on — and returns that posture as `trigger_posture` on its own
+result. If the trigger is absent altogether the verb refuses (`CLR10`) rather than deleting from a
+table whose append-only guard has moved.
 
 **The safe margin is a refusal, not a convention.** Both walls hardcode the same 15-minute window
 (`attempted_at > now() - interval '15 minutes'`, in `clara.preview_invite_by_token` and
@@ -7550,14 +7581,35 @@ SQLSTATE (`42501`), never `CLR10`:
 member, and `clara.admit_autodraft_task`'s own successful path writes no `clara.sweep_run_items`
 row at all — only `clara.op_receipts`, through `clara._finish_op`
 (`packages/db/migrations/0036_wave_c0_deferred_belts.sql:1468-1470`). Every OTHER return arm the
-same function carries (`noop_existing`, `refused_attempts`, `skipped_lane` for a sales
-mis-route or a lane change, `refused_budget`) DOES write a run-bound `sweep_run_items` row when
-`p_run_id` is not null (0036:1182, 1190, 1232, 1240, 1251, 1337, 1367, 1400, 1411, and the
+same function carries DOES write a run-bound `sweep_run_items` row when `p_run_id` is not null —
+ten inserts in all (0036:1182, 1190, 1232, 1240, 1251, 1337, 1367, 1400, 1411, and the
 `unique_violation` handler's own noop at 1476). A reader who assumes every admission outcome is
 visible on `sweep_run_items` therefore reads NOTHING for a genuinely successful one, and if they
 instead read whatever a LATER settlement wrote for that filing, they read what the task's own
 posting attempt decided, which can silently disagree with what admission itself decided (a task
 `admitted` now can settle `failed` later for an unrelated reason during its own posting attempt).
+
+**What those ten inserts actually write** — re-measured on the live `prosrc` with line comments
+stripped, because the first cut of this section and of the catalog comment got it wrong in two
+directions at once (fix round, ADV-L07-04):
+
+| the row's `outcome` | how many inserts | which returned outcomes reach it |
+|---|---|---|
+| `noop_existing` | 4 | `noop_existing`, and **`already_done`** |
+| `refused_attempts` | 2 | `refused_attempts` |
+| `skipped_lane` | 3 | **`skipped_direction`** (twice: sales mis-route, sales backlog held) and **`lane_changed`** |
+| `refused_concurrency` | 1 | `refused_concurrency` |
+
+`refused_budget` is **not** one of them. It occurs three times in the body and every occurrence is
+inside a comment recording that the 15-drafts/day cap which once wrote it was retired; the token
+survives in the column's own CHECK, which this file deliberately does not touch, and nowhere else.
+
+And the second half of the table is the sharp edge of the trap this file exists to disclose: the
+sweep row's label is **coarser than the decision**. Three distinct returned outcomes —
+`already_done`, `skipped_direction`, `lane_changed` — are recorded under two labels, so a reader of
+`sweep_run_items` alone cannot tell a filing that was already done from one that was a no-op, nor a
+sales mis-route from a lane change. The refusal token in the same row carries the finer reason
+(`sales_direction`, `sales_backlog_held`, `lane_changed`), but the `outcome` column does not.
 
 **Two candidate fixes, and why this file takes the documentation one.** #1132's own Agent Brief
 names two paths: document the trap and name the correct read, or widen
@@ -7569,9 +7621,12 @@ and re-measured byte-for-byte in the tail.
 
 **Where to actually read a successful admission's outcome.** `clara.op_receipts` where
 `fn='admit_autodraft_task'` and `op_key='autodraft:'||filing_id||':'||origin` — the `result`
-column carries `{outcome, task_id, reserved_tokens}` with `outcome` one of `admitted` or
-`re_admitted`. This is the same read `tests/x34-autodraft-retry-door.test.mjs`'s own
-`receiptFor()` fixture already uses, and the one the catalog comment now names.
+column carries `{outcome, task_id, reserved_tokens}`, and `outcome` is one of **three** tokens,
+not two: the success return is a CASE over `re_admitted_after_withdrawal`, `re_admitted` and
+`admitted` (0036:1468-1470). A reader who follows this disclosure and then only recognises two of
+them is back in a trap of the same shape, which is why the third is named here and in the catalog
+comment. This is the same read `tests/x34-autodraft-retry-door.test.mjs`'s own `receiptFor()`
+fixture already uses.
 
 **Grounded, not only read off the body text** (wave-3 addendum: "a door's behaviour is asserted
 only after it was driven"). `tests/admit-autodraft-task-outcome-disclosure.test.mjs`'s

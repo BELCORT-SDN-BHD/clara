@@ -50,7 +50,9 @@ const PRUNE_MAX_BATCHES = Number(process.env.CLARA_TRACE_PRUNE_MAX_BATCHES || 20
 // long. clara.prune_invite_preview_attempts / clara.prune_confirmation_attempts (0348) both
 // REFUSE (CLR10) a threshold inside the wall's own window regardless of what this constant is
 // set to, so a misconfigured override here cannot silently corrupt an active wall — it can only
-// make the sweep call fail loudly.
+// make the sweep call fail loudly. Loudly, but LOCALLY: since the fix round the two rate-wall
+// lanes are contained, so that CLR10 is reported as a named belt error instead of aborting
+// pruneTraces() and taking the trace-prune counters and the sibling lane down with it.
 const RATE_WALL_ATTEMPT_RETENTION_MINUTES = Number(process.env.CLARA_RATE_WALL_ATTEMPT_RETENTION_MINUTES || 60);
 const RATE_WALL_PRUNE_BATCH = Number(process.env.CLARA_RATE_WALL_PRUNE_BATCH || 1000);
 const RATE_WALL_PRUNE_MAX_BATCHES = Number(process.env.CLARA_RATE_WALL_PRUNE_MAX_BATCHES || 20);
@@ -129,44 +131,74 @@ export async function expireClarifies(client, opts = {}) {
 // Trace prune — audited, keyed on started_at, bounded batches (§3.7 / §0.8).
 // ---------------------------------------------------------------------------
 
+/**
+ * ONE batched delete loop, called once per retention lane below.
+ *
+ * Four copies of this shape lived here before (#1046's standards round, STD-1): the same `for` up
+ * to `maxBatches`, the same `catch` swallowing one SQLSTATE, the same accumulate-and-break, with
+ * only the SQL text and the accumulator's name varying. The variance that matters is now
+ * parameters, so a fix to the loop is a fix to every lane — which is not hypothetical here: #1046's
+ * own vacuity control caught a bug in exactly this shape.
+ *
+ * @param {import("pg").ClientBase} client a clara_runtime connection
+ * @param {{
+ *   sql: string, params: unknown[], batch: number, maxBatches: number,
+ *   tolerate: string[], contain?: boolean, lane?: string,
+ * }} spec `tolerate` lists SQLSTATEs that END the lane quietly (a lane that is not there, a lock
+ *   this cycle could not take). `contain` decides what happens to anything else: false (the
+ *   default, and the two trace lanes' long-standing contract) rethrows it out of `pruneTraces`;
+ *   true records it and lets the remaining lanes and the counters already earned through.
+ * @returns {Promise<{ n: number, error: string|null }>}
+ */
+async function pruneBatched(client, { sql, params, batch, maxBatches, tolerate, contain = false, lane = "prune" }) {
+  let n = 0;
+  for (let i = 0; i < maxBatches; i++) {
+    let deleted = 0;
+    try {
+      const r = await client.query(sql, params);
+      deleted = Number(r.rows[0]?.n ?? 0);
+    } catch (err) {
+      if (tolerate.includes(err?.code)) break;
+      if (!contain) throw err;
+      return { n, error: `${lane}: ${err?.code ?? "?"} ${err?.message ?? err}` };
+    }
+    n += deleted;
+    if (deleted < batch) break; // caught up
+  }
+  return { n, error: null };
+}
+
 /** @param {import("pg").ClientBase} client  a clara_runtime connection */
 export async function pruneTraces(client, opts = {}) {
   const days = opts.retentionDays ?? TRACE_RETENTION_DAYS;
   const batch = opts.batchSize ?? PRUNE_BATCH;
   const maxBatches = opts.maxBatches ?? PRUNE_MAX_BATCHES;
-  let pruned = 0;
-  for (let i = 0; i < maxBatches; i++) {
-    // prune_trace_spans returns jsonb { pruned_before, spans_deleted }.
-    const r = await client.query(
-      "select (clara.prune_trace_spans((now() - ($1 || ' days')::interval), $2) ->> 'spans_deleted')::bigint as n",
-      [String(days), batch],
-    );
-    const n = Number(r.rows[0]?.n ?? 0);
-    pruned += n;
-    if (n < batch) break; // caught up
-  }
+  const errors = [];
+  // prune_trace_spans returns jsonb { pruned_before, spans_deleted }. NOTHING is tolerated here:
+  // this lane's contract predates every rider below it and an error from it still aborts the sweep
+  // call, exactly as before.
+  const { n: pruned } = await pruneBatched(client, {
+    sql: "select (clara.prune_trace_spans((now() - ($1 || ' days')::interval), $2) ->> 'spans_deleted')::bigint as n",
+    params: [String(days), batch],
+    batch,
+    maxBatches,
+    tolerate: [],
+    lane: "trace spans",
+  });
   // #631 · THE WORK EXECUTION TRACE RIDES THIS LANE. Same window, same batch bound, same audited
   // definer verb shape (migration 0195's clara.prune_work_execution_traces mirrors 0006's
   // clara.prune_trace_spans). It is a SEPARATE relation with its own retention sweep rather than a
   // second column on trace_spans, and it runs here rather than on a timer of its own so "bounded
   // retention" is one pass an operator can reason about. Inert below 0195: an undefined_function
   // is swallowed, exactly as a missing lane is elsewhere in this module.
-  let prunedWorkTraces = 0;
-  for (let i = 0; i < maxBatches; i++) {
-    let n = 0;
-    try {
-      const r = await client.query(
-        "select (clara.prune_work_execution_traces((now() - ($1 || ' days')::interval), $2) ->> 'traces_deleted')::bigint as n",
-        [String(days), batch],
-      );
-      n = Number(r.rows[0]?.n ?? 0);
-    } catch (err) {
-      if (err?.code !== '42883') throw err;
-      break;
-    }
-    prunedWorkTraces += n;
-    if (n < batch) break;
-  }
+  const { n: prunedWorkTraces } = await pruneBatched(client, {
+    sql: "select (clara.prune_work_execution_traces((now() - ($1 || ' days')::interval), $2) ->> 'traces_deleted')::bigint as n",
+    params: [String(days), batch],
+    batch,
+    maxBatches,
+    tolerate: ['42883'],
+    lane: "work execution traces",
+  });
   // #1046 (0348) — THE TWO PRE-SESSION RATE-WALL EVIDENCE TABLES RIDE THIS SAME LANE.
   // clara.invite_preview_attempts (0309) and clara.confirmation_attempts (0163) are both
   // append-only with no sweep of their own, so each grows forever even though its own wall only
@@ -182,39 +214,43 @@ export async function pruneTraces(client, opts = {}) {
   const rwMinutes = opts.rateWallRetentionMinutes ?? RATE_WALL_ATTEMPT_RETENTION_MINUTES;
   const rwBatch = opts.rateWallBatchSize ?? RATE_WALL_PRUNE_BATCH;
   const rwMaxBatches = opts.rateWallMaxBatches ?? RATE_WALL_PRUNE_MAX_BATCHES;
-  let prunedInvitePreviewAttempts = 0;
-  for (let i = 0; i < rwMaxBatches; i++) {
-    let n = 0;
-    try {
-      const r = await client.query(
-        "select (clara.prune_invite_preview_attempts((now() - ($1 || ' minutes')::interval), $2) ->> 'attempts_deleted')::bigint as n",
-        [String(rwMinutes), rwBatch],
-      );
-      n = Number(r.rows[0]?.n ?? 0);
-    } catch (err) {
-      if (err?.code !== '42883') throw err;
-      break;
-    }
-    prunedInvitePreviewAttempts += n;
-    if (n < rwBatch) break;
-  }
-  let prunedConfirmationAttempts = 0;
-  for (let i = 0; i < rwMaxBatches; i++) {
-    let n = 0;
-    try {
-      const r = await client.query(
-        "select (clara.prune_confirmation_attempts((now() - ($1 || ' minutes')::interval), $2) ->> 'attempts_deleted')::bigint as n",
-        [String(rwMinutes), rwBatch],
-      );
-      n = Number(r.rows[0]?.n ?? 0);
-    } catch (err) {
-      if (err?.code !== '42883') throw err;
-      break;
-    }
-    prunedConfirmationAttempts += n;
-    if (n < rwBatch) break;
-  }
-  return { pruned, prunedWorkTraces, prunedInvitePreviewAttempts, prunedConfirmationAttempts };
+  // THE TWO RIDERS ARE CONTAINED, AND THE TWO ORIGINAL LANES ARE NOT (fix round). A rider that can
+  // abort pruneTraces() takes the trace counters down with it -- the belt wrapper's fallback is
+  // `{ pruned: 0 }` -- and skips whatever lane comes after it. That is a real cost for a lane whose
+  // whole job is housekeeping, so anything these two raise that is not tolerated below is RECORDED
+  // and the sweep carries on. The one case that would otherwise do it: a
+  // CLARA_RATE_WALL_ATTEMPT_RETENTION_MINUTES set below 15, which both verbs answer with CLR10.
+  //
+  // 55P03 (lock_not_available) is TOLERATED, not recorded: 0348's verbs carry lock_timeout = 3s
+  // precisely so a sweep that cannot take ShareRowExclusive gives up instead of queueing, and a
+  // queued request for that lock blocks every unrelated wall write behind it (measured: an
+  // unrelated confirmation-attempt write refused 55P03 after 3s, blocked by the QUEUED prune
+  // rather than by the transaction actually holding the table). A skipped sweep is the designed
+  // outcome of that race, not a fault; the table is swept on the next turn of this same belt.
+  const RATE_WALL_TOLERATED = ['42883', '55P03'];
+  const invitePreview = await pruneBatched(client, {
+    sql: "select (clara.prune_invite_preview_attempts((now() - ($1 || ' minutes')::interval), $2) ->> 'attempts_deleted')::bigint as n",
+    params: [String(rwMinutes), rwBatch],
+    batch: rwBatch,
+    maxBatches: rwMaxBatches,
+    tolerate: RATE_WALL_TOLERATED,
+    contain: true,
+    lane: "invite preview attempts",
+  });
+  if (invitePreview.error) errors.push(invitePreview.error);
+  const confirmation = await pruneBatched(client, {
+    sql: "select (clara.prune_confirmation_attempts((now() - ($1 || ' minutes')::interval), $2) ->> 'attempts_deleted')::bigint as n",
+    params: [String(rwMinutes), rwBatch],
+    batch: rwBatch,
+    maxBatches: rwMaxBatches,
+    tolerate: RATE_WALL_TOLERATED,
+    contain: true,
+    lane: "confirmation attempts",
+  });
+  if (confirmation.error) errors.push(confirmation.error);
+  const prunedInvitePreviewAttempts = invitePreview.n;
+  const prunedConfirmationAttempts = confirmation.n;
+  return { pruned, prunedWorkTraces, prunedInvitePreviewAttempts, prunedConfirmationAttempts, errors };
 }
 
 // ---------------------------------------------------------------------------
@@ -862,6 +898,14 @@ export async function runReconcilerSweep(client, deps) {
     () => reconcileIntakeBatchCancellations(client, { log, withRuntime: deps.withRuntime ?? null }),
     { batchCancelOk: false });
   const prune = deps.prune ? await belt("trace prune", () => pruneTraces(client, {}), { pruned: 0 }) : { pruned: 0 };
+  // #1046 fix round: pruneTraces()'s two rate-wall lanes CONTAIN their own faults so they cannot
+  // take the trace counters or each other down. A contained fault is still a belt fault, so it
+  // reaches the receipt and the log by the same two routes every other belt fault does — the
+  // `[reconcile] <name> error:` idiom, verbatim, every cycle, never de-duplicated.
+  for (const err of prune.errors ?? []) {
+    beltErrors.push(`trace prune/${err.split(":")[0]}`);
+    log(`[reconcile] trace prune error: ${err}`);
+  }
   // A FAILED BELT CONTRIBUTES NO COUNTERS, deliberately: a zeroed fallback would claim "nothing
   // to settle" where the truth is "we do not know", and it would let a caller's `"key" in swept`
   // assertion pass for a belt that never ran. `beltErrors` names them positively instead — the

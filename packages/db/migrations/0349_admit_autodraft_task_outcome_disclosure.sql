@@ -18,12 +18,27 @@
 -- clara.admit_autodraft_task(uuid,text,uuid,text,bigint) — last recut at
 -- packages/db/migrations/0036_wave_c0_deferred_belts.sql:1159-1485, UNTOUCHED by this file (no
 -- later migration patches it: grepped both ways, confirmed again in this file's own prestate) —
--- carries several return arms. Every refusal/noop arm (noop_existing x4, refused_attempts x2,
--- skipped_direction, lane_changed, refused_budget x2) writes a run-bound clara.sweep_run_items
--- row when p_run_id is not null (0036:1182, 1190, 1232, 1240, 1251, 1337, 1367, 1400, 1411, and
--- the unique_violation handler's own noop at 1476). The ONE genuinely successful arm —
--- 0036:1468-1470, returning
--- through clara._finish_op with outcome 'admitted' or 're_admitted' — writes ONLY
+-- carries several return arms. Every refusal/noop arm writes a run-bound clara.sweep_run_items
+-- row when p_run_id is not null — ten inserts in all (0036:1182, 1190, 1232, 1240, 1251, 1337,
+-- 1367, 1400, 1411, and the unique_violation handler's own noop at 1476).
+--
+-- WHAT THOSE TEN INSERTS ACTUALLY WRITE, re-measured on the live prosrc with line comments
+-- stripped (fix round, ADV-L07-04 — the first cut of this header and of the catalog comment got
+-- it wrong in two directions at once):
+--
+--   * EXACTLY FOUR outcome literals reach the column: noop_existing (x4), refused_attempts (x2),
+--     skipped_lane (x3), refused_concurrency (x1). `refused_budget` is NOT among them — it occurs
+--     three times in the body and every one is inside a comment saying the 15-drafts/day cap that
+--     once wrote it was retired. The token survives in the column's own CHECK, which this file
+--     deliberately does not touch, and nowhere else.
+--   * THE ROW'S LABEL IS COARSER THAN THE RETURNED OUTCOME, which is the sharp edge of the trap
+--     this file exists to disclose: `already_done` is recorded as noop_existing, and both
+--     `skipped_direction` and `lane_changed` are recorded as skipped_lane. Three distinct
+--     decisions, two labels; a reader of clara.sweep_run_items cannot tell them apart.
+--
+-- The genuinely successful arm — 0036:1468-1470, returning
+-- through clara._finish_op with outcome 'admitted', 're_admitted' or
+-- 're_admitted_after_withdrawal' (a CASE over all THREE tokens, not two) — writes ONLY
 -- clara.op_receipts (via clara._finish_op → clara.op_receipts, the idempotency ledger every
 -- admit_autodraft_task call reads and writes through clara._reserve_op / clara._finish_op).
 -- No sweep_run_items insert exists on that return path. A reader who assumes every admission
@@ -143,7 +158,7 @@ end $pre$;
 -- the comment fresh, so a second run over this file's own effects reads back identically.
 -- =================================================================================================
 comment on function clara.admit_autodraft_task(uuid,text,uuid,text,bigint) is
-  '#1132: a successful (''admitted'' or ''re_admitted'') outcome from this function writes no clara.sweep_run_items row -- only a refusal or a registry short-circuit (skipped_lane, refused_budget, refused_concurrency, refused_attempts, noop_existing) writes one, and only when p_run_id is not null. To read the REAL admission outcome for a successful admission, read clara.op_receipts where fn=''admit_autodraft_task'' and op_key=''autodraft:''||filing_id||'':''||origin -- the result column carries {outcome, task_id, reserved_tokens}. clara.sweep_run_items.outcome''s CHECK carries no ''admitted'' member by deliberate choice (documentation over enum-widening, #1132''s own ruling): a caller that assumes a sweep_run_item always reflects what THIS function decided reads nothing for a genuinely admitted filing, or reads whatever a LATER settlement wrote instead, which can silently disagree with the admission decision itself.';
+  '#1132: a successful outcome from this function -- ''admitted'', ''re_admitted'' or ''re_admitted_after_withdrawal'', all three -- writes no clara.sweep_run_items row. Only a refusal or a short-circuit writes one, and only when p_run_id is not null. MEASURED on the live body with comments stripped, this function writes EXACTLY FOUR sweep_run_items outcomes: noop_existing, refused_attempts, skipped_lane, refused_concurrency. It never writes refused_budget (the 15-drafts/day cap that once did was retired; the token survives in the column''s CHECK and in this body''s comments only). AND THE SWEEP ROW''S LABEL IS NOT ALWAYS THE RETURNED OUTCOME: ''already_done'' is recorded as noop_existing, and both ''skipped_direction'' and ''lane_changed'' are recorded as skipped_lane -- three returned outcomes the sweep row cannot tell apart. To read the REAL outcome, read clara.op_receipts where fn=''admit_autodraft_task'' and op_key=''autodraft:''||filing_id||'':''||origin -- the result column carries {outcome, task_id, reserved_tokens}. clara.sweep_run_items.outcome''s CHECK carries no ''admitted'' member by deliberate choice (documentation over enum-widening, #1132''s own ruling): a caller that assumes a sweep_run_item always reflects what THIS function decided reads nothing for a genuinely admitted filing, reads a coarser label for three of the refusals, or reads whatever a LATER settlement wrote instead.';
 
 -- =================================================================================================
 -- §T — TAIL. Every premise re-measured, never trusted.

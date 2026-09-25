@@ -15,8 +15,11 @@
 // (packages/db/migrations/0036_wave_c0_deferred_belts.sql:1468-1470, unmoved by this file and
 // re-pinned in the tail) returns through clara._finish_op on a genuine 'admitted' outcome, which
 // writes ONLY clara.op_receipts -- no clara.sweep_run_items insert exists on that return arm.
-// EVERY OTHER return arm the same function carries (noop_existing, refused_attempts,
-// skipped_lane x2, refused_budget x2) DOES insert a run-bound clara.sweep_run_items row when
+// EVERY OTHER return arm the same function carries DOES insert a run-bound
+// clara.sweep_run_items row under one of exactly four labels (noop_existing x4,
+// refused_attempts x2, skipped_lane x3, refused_concurrency x1 -- NOT refused_budget, which the
+// live body writes nowhere outside its own comments; p1132.disclosure re-derives all of this
+// from the body rather than restating it) when
 // p_run_id is not null. p1132.trap drives BOTH arms on the SAME filing and the SAME run --
 // first a genuine 'admitted' admission (no item), then an immediate re-admission of the same
 // filing on the same run, which the registry short-circuit answers 'noop_existing' (one item) --
@@ -64,7 +67,34 @@ const FN_SIG = "clara.admit_autodraft_task(uuid,text,uuid,text,bigint)";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 2;
+const EXPECTED_CELLS = 3;
+
+/**
+ * The live body of `clara.admit_autodraft_task`, LINE COMMENTS STRIPPED, reduced to the two facts
+ * the #1132 disclosure claims about it. Deriving them here rather than restating them is the whole
+ * point of the fix round (ADV-L07-04): the first cut of the comment named `refused_budget` — which
+ * the live body writes nowhere outside its own comments — and named two success tokens where the
+ * body returns three.
+ *
+ * WHY THE FIRST QUOTED LITERAL IN EACH `values(...)` IS THE OUTCOME: every one of the ten inserts
+ * writes the column list `(run_id, filing_id, firm_id, client_id, document_id, outcome[,
+ * refusal_token])`, and the first five values are identifiers (`p_run_id`, `a.filing_id`, …), never
+ * literals. So the first `'…'` in the values list is the `outcome` column, and the refusal token's
+ * own literals come after it.
+ */
+function disclosedFacts(prosrc) {
+  const body = prosrc.replace(/--[^\n]*/g, "");
+  const written = new Set();
+  for (const m of body.matchAll(/insert\s+into\s+clara\.sweep_run_items[\s\S]*?;/gi)) {
+    const values = /values\s*\(([\s\S]*)\)/i.exec(m[0]);
+    const first = values && /'([a-z_]+)'/.exec(values[1]);
+    if (first) written.add(first[1]);
+  }
+  const success = new Set();
+  const caseArm = /'outcome'\s*,\s*case\b([\s\S]*?)\bend\b/i.exec(body);
+  if (caseArm) for (const t of caseArm[1].matchAll(/'([a-z_]+)'/g)) success.add(t[1]);
+  return { body, written: [...written].sort(), success: [...success].sort() };
+}
 
 /** True iff a migration whose version matches the stem is recorded applied. Catalog-probed
  *  against `clara.schema_migrations`, never inferred from a file listing. */
@@ -114,6 +144,66 @@ cell("p1132.comment.discloses_no_sweep_item_and_names_op_receipts", async () => 
   }
   assert.match(comment, /no[a-z ]*sweep[- _]run[- _]item|writes no .*sweep_run_items/i,
     `the comment must plainly state that a successful admission writes no sweep-run-item row (got: ${JSON.stringify(comment)})`);
+});
+
+// ---------------------------------------------------------------------------------------------
+// AC1 -- THE DISCLOSURE IS MEASURED AGAINST THE BODY, NOT AGAINST ITS AUTHOR'S MEMORY.
+//
+// ADV-L07-04 found the first cut of this disclosure wrong in three ways at once, and every one of
+// them was a claim about the body that nobody re-derived FROM the body. This cell derives the
+// facts and requires the comment and the README to agree with them, so the disclosure cannot drift
+// from its subject again -- which matters more here than anywhere else in this file, because the
+// disclosure IS the whole deliverable of #1132.
+// ---------------------------------------------------------------------------------------------
+cell("p1132.disclosure.agrees_with_the_live_body", async () => {
+  const src = await rootQuery(`select p.prosrc from pg_proc p where p.oid = $1::regprocedure`, [FN_SIG]);
+  const { written, success } = disclosedFacts(src.rows[0].prosrc);
+  const c = await rootQuery(`select obj_description($1::regprocedure, 'pg_proc') as c`, [FN_SIG]);
+  const comment = c.rows[0]?.c ?? "";
+  const readme = readFileSync(README_PATH, "utf8");
+  const idx = readme.indexOf("## 0349");
+  const nextIdx = readme.indexOf("\n## ", idx + 7);
+  const section = nextIdx >= 0 ? readme.slice(idx, nextIdx) : readme.slice(idx);
+
+  // The floors: a body that stopped writing sweep rows, or stopped returning a success CASE,
+  // would make every assertion below pass over an empty set.
+  assert.ok(written.length >= 3, `the live body still writes sweep_run_items outcomes (found ${JSON.stringify(written)})`);
+  assert.ok(success.length >= 2, `the live body still returns a success CASE (found ${JSON.stringify(success)})`);
+
+  for (const outcome of written) {
+    assert.ok(comment.includes(outcome), `the catalog comment must name the sweep outcome ${outcome}, which the live body writes`);
+    assert.ok(section.includes(outcome), `the 0349 README section must name the sweep outcome ${outcome}`);
+  }
+  for (const token of success) {
+    assert.ok(comment.includes(token), `the catalog comment must name the success outcome ${token}, which the live body returns`);
+    assert.ok(section.includes(token), `the 0349 README section must name the success outcome ${token}`);
+  }
+
+  // The other direction, which is the half the first cut got wrong: a sweep outcome the body
+  // CANNOT write must not be presented as one it does. `refused_budget` is the measured case --
+  // the 15-drafts/day cap that once wrote it was retired, the token survives in the column's own
+  // CHECK, and the first cut of this comment listed it among the arms that write a row.
+  const phantom = ["refused_budget", "drafted", "posted"].filter((o) => !written.includes(o));
+  assert.ok(phantom.includes("refused_budget"), "refused_budget is still absent from the live body -- otherwise this control means nothing");
+  // Only the AFFIRMATIVE sentences: the comment is required BELOW to say "never writes
+  // refused_budget", which is the opposite claim and must not trip this one.
+  const affirmative = comment.split(/(?<=\.)\s+/).filter((sentence) => !/\bnever writes\b/i.test(sentence)).join(" ");
+  for (const o of phantom) {
+    assert.equal(
+      new RegExp(`writes[^.]*\\b${o}\\b`, "i").test(affirmative),
+      false,
+      `the catalog comment must not present ${o} as an outcome this function writes -- it does not`,
+    );
+  }
+  assert.match(comment, /never writes refused_budget|It never writes refused_budget/i,
+    "the comment must say plainly that refused_budget is NOT written, since the CHECK still carries it");
+
+  // And the coarser-label hazard, which is the trap the ticket exists to disclose: three returned
+  // outcomes are recorded under two labels.
+  for (const pair of [["already_done", "noop_existing"], ["skipped_direction", "skipped_lane"], ["lane_changed", "skipped_lane"]]) {
+    assert.ok(comment.includes(pair[0]), `the comment must name the returned outcome ${pair[0]}, which is recorded as ${pair[1]}`);
+    assert.ok(section.includes(pair[0]), `the README section must name the returned outcome ${pair[0]}`);
+  }
 });
 
 // ---------------------------------------------------------------------------------------------
