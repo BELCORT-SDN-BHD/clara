@@ -279,6 +279,31 @@ export function claimAllocations(draft: ClaimDraft): ClaimAllocationDraft[] {
   }));
 }
 
+/**
+ * WHICH ADVANCE ACCOUNT THIS CLAIM ACTUALLY CREDITS — the head allocation's OWN account.
+ *
+ * `clara._assert_claim_basis` (0340) refuses a claim whose `advance_account_code` disagrees with
+ * the confirmed list's first entry, so the head's real account is what the claim carries, not the
+ * value the preparer typed. Every claim before #1066 could only choose an advance on the typed
+ * account, so the two were always the same figure; this is that equality made explicit.
+ *
+ * FIX ROUND (ADV-04) — IT IS ONE READER BECAUSE THREE CALLERS NEED THE SAME ANSWER. The wire sent
+ * the head's real account while `validateClaimDraft` asked the chart about the TYPED one, so a
+ * restored draft naming an advance on an account that had since left the active chart passed the
+ * form and was refused `unknown_account` at the door, pointing at a field whose displayed value
+ * was fine. Validating, previewing and sending now read the same function.
+ *
+ * `advanceAccountCodes` omitted or `null` (every pre-#1066 caller) resolves to the typed field,
+ * byte for byte as before.
+ */
+export function claimAdvanceAccountCode(
+  draft: ClaimDraft,
+  advanceAccountCodes: ReadonlyMap<string, string> | null = null,
+): string {
+  const rows = claimAllocations(draft);
+  return advanceAccountCodes?.get(rows[0]?.advanceId ?? "") ?? draft.advanceAccountCode.trim();
+}
+
 /** The control that holds allocation line `index`: the first line IS #930's chooser. */
 export function allocationFieldId(index: number, key: "advanceId" | "amountCents"): ClaimFieldId {
   if (index === 0 && key === "advanceId") return "advanceId";
@@ -357,6 +382,11 @@ export function validateClaimDraft(
   draft: ClaimDraft,
   knownAccountCodes: ReadonlySet<string> | null,
   enrolledAccountCodes: ReadonlySet<string> | null = null,
+  /** FIX ROUND (ADV-04) — the SAME advance_id → real-account lookup `toClaimWire` takes, so the
+   *  chart check runs against the account the wire will actually carry rather than the one the
+   *  preparer typed. Omitted or `null` (every pre-#1066 caller) validates the typed field, byte
+   *  for byte as before. */
+  advanceAccountCodes: ReadonlyMap<string, string> | null = null,
 ): ClaimIssue[] {
   const issues: ClaimIssue[] = [];
   const account = (field: ClaimFieldId, code: string, required: boolean) => {
@@ -445,8 +475,13 @@ export function validateClaimDraft(
   }
 
   // ---- the settlement's ONE credit leg -------------------------------------------------------
+  // VALIDATE WHAT IS SENT (fix round, ADV-04): for an advance application the leg the wire carries
+  // is the HEAD allocation's own account, which is not always the typed field.
   const legField = settlementFieldId(draft.settlement);
-  account(legField, settlementAccountCode(draft), true);
+  const legCode = draft.settlement === "advance_application"
+    ? claimAdvanceAccountCode(draft, advanceAccountCodes)
+    : settlementAccountCode(draft);
+  account(legField, legCode, true);
   if (draft.settlement === "advance_application") {
     // #931 — THE CONFIRMED ALLOCATION LIST. Every rule here mirrors one migration 0301 enforces:
     // each line names an advance (NO SILENT FIFO, WD-R10), no advance is named twice, every line
@@ -477,8 +512,7 @@ export function validateClaimDraft(
       issues.push({ field: "advanceAllocations", code: "allocationsNotExact" });
     }
   }
-  const credit = settlementAccountCode(draft);
-  if (credit !== "" && draft.items.some((i) => !isPendingItem(i) && i.expenseAccountCode.trim() === credit)) {
+  if (legCode !== "" && draft.items.some((i) => !isPendingItem(i) && i.expenseAccountCode.trim() === legCode)) {
     issues.push({ field: legField, code: "accountsMustDiffer" });
   }
 
@@ -506,7 +540,14 @@ export function firstInvalidClaimField(issues: readonly ClaimIssue[]): ClaimFiel
  * `already_settled` IS NOT "no journal": the expense debits land against the stated payment
  * account. A settlement producing one leg is a refusal, not a shortcut.
  */
-export function derivedLines(draft: ClaimDraft): JournalDraftLine[] {
+export function derivedLines(
+  draft: ClaimDraft,
+  /** #1066 — the SAME advance_id → real-account lookup `toClaimWire` takes, so the preview never
+   *  shows a different posting than the door will actually make. `null`/omitted (every pre-#1066
+   *  caller) resolves every allocation to the claim's own typed `advanceAccountCode`, collapsing
+   *  to the single leg this function always produced. */
+  advanceAccountCodes: ReadonlyMap<string, string> | null = null,
+): JournalDraftLine[] {
   const lines: JournalDraftLine[] = draft.items
     .filter((i) => !isPendingItem(i))
     .map((item) => ({
@@ -515,6 +556,44 @@ export function derivedLines(draft: ClaimDraft): JournalDraftLine[] {
       credit_cents: 0,
       description: item.description.trim().slice(0, ITEM_DESCRIPTION_MAX_CHARS),
     }));
+  if (draft.settlement === "advance_application") {
+    // #1066 — ONE CREDIT LEG PER ADVANCE ACCOUNT, mirroring `clara._claim_journal_basis`'s own
+    // widening (migration 0301) exactly: each confirmed allocation's REAL account (falling back to
+    // the claim's own head account when unknown), summed per account, in ACCOUNT-CODE ORDER — the
+    // same grouping `packages/db/tests/staff-expense-claim-allocations.test.mjs`'s own
+    // `allocatedBasis` helper computes as the independent expected shape for `p931.accounts`. A
+    // single-account claim (every allocation resolves to the same account) collapses to exactly
+    // the one leg this function always produced.
+    const rows = claimAllocations(draft);
+    const headAccount = claimAdvanceAccountCode(draft, advanceAccountCodes);
+    // FIX ROUND (ADV-05) — ONLY A LIST THAT ADDS UP IS A LIST THE DOOR WOULD POST.
+    // `validateClaimDraft` already says `allocationsNotExact` about a split that is short or
+    // over-allocated; previewing its per-account legs beside that message would render an entry
+    // whose debits and credits differ — a journal that cannot exist. Until the split adds up the
+    // preview stays the ONE balanced leg on the head's own account, which is what this function
+    // always produced.
+    const allocated = rows.reduce(
+      (n, r) => n + (Number.isSafeInteger(r.amountCents) ? r.amountCents : 0), 0);
+    if (allocated === claimTotalCents(draft)) {
+      const byAccount = new Map<string, number>();
+      for (const r of rows) {
+        const code = advanceAccountCodes?.get(r.advanceId) ?? headAccount;
+        byAccount.set(code, (byAccount.get(code) ?? 0) + r.amountCents);
+      }
+      for (const code of [...byAccount.keys()].sort()) {
+        lines.push({
+          account_code: code, debit_cents: 0, credit_cents: byAccount.get(code)!,
+          description: draft.settlement,
+        });
+      }
+      return lines;
+    }
+    lines.push({
+      account_code: headAccount, debit_cents: 0, credit_cents: claimTotalCents(draft),
+      description: draft.settlement,
+    });
+    return lines;
+  }
   lines.push({
     account_code: settlementAccountCode(draft),
     debit_cents: 0,
@@ -544,8 +623,16 @@ export function toClaimWire(
   draft: ClaimDraft,
   knownAccountCodes: ReadonlySet<string> | null,
   enrolledAccountCodes: ReadonlySet<string> | null = null,
+  /** #1066 — advance_id → the account it REALLY sits on, the caller's own `staff_advance_summary`
+   *  read (never guessed here). `null`/omitted is every pre-#1066 caller, and resolves every row
+   *  to the claim's own typed `advanceAccountCode`, byte-identical to before this ticket. */
+  advanceAccountCodes: ReadonlyMap<string, string> | null = null,
 ): Record<string, unknown> | null {
-  if (validateClaimDraft(draft, knownAccountCodes, enrolledAccountCodes).length > 0) return null;
+  // FIX ROUND (ADV-04): the SAME lookup the head account is derived from, so a draft whose head
+  // sits on an account that has left the chart assembles NO body rather than one the door refuses.
+  if (validateClaimDraft(draft, knownAccountCodes, enrolledAccountCodes, advanceAccountCodes).length > 0) {
+    return null;
+  }
   const claimant: Record<string, unknown> = {};
   if (draft.claimantEnrolmentId.trim() !== "") claimant.enrolmentId = draft.claimantEnrolmentId.trim();
   if (draft.claimantAccountCode.trim() !== "") claimant.accountCode = draft.claimantAccountCode.trim();
@@ -576,15 +663,35 @@ export function toClaimWire(
   };
   if (draft.settlement === "reimbursement") out.payableAccountCode = draft.payableAccountCode.trim();
   if (draft.settlement === "advance_application") {
-    out.advanceAccountCode = draft.advanceAccountCode.trim();
     const rows = claimAllocations(draft);
     // THE HEAD fills `clara.staff_expense_claims.advance_id`, which is NOT NULL for this settlement.
     out.advanceId = rows[0]?.advanceId ?? "";
+    // #1066 — `claim.advance_account_code` FOLLOWS THE HEAD'S REAL ACCOUNT, never the raw typed
+    // field. `clara._assert_claim_basis` (0340) refuses a claim whose `advance_account_code`
+    // disagrees with the confirmed list's own first entry (`packages/db/tests/
+    // staff-expense-claim-allocations.test.mjs`'s own `allocClaim` helper states the same rule:
+    // `advanceAccountCode: allocations[0].account_code ?? SECHART.advance`). Every claim before
+    // this ticket could only ever choose an advance on the typed account, so the head's real
+    // account and the typed one were always the same value; this is that equality made explicit
+    // rather than assumed. Unknown (`advanceAccountCodes` omitted, or the head's id not in it)
+    // falls back to the typed field, byte-identical to before.
+    const headAccount = claimAdvanceAccountCode(draft, advanceAccountCodes);
+    out.advanceAccountCode = headAccount;
     // A ONE-LINE LIST IS THE SINGLE-ADVANCE CLAIM, and it crosses exactly as it did before #931 —
     // the door normalises `advance_id` into the same one-element list either way, so sending the
-    // key would be a second spelling of one claim.
+    // key would be a second spelling of one claim. (A lone advance on a SECOND account needs no
+    // list either: `advanceAccountCode` above already carries its real account.)
     if (rows.length > 1) {
-      out.advanceAllocations = rows.map((r) => ({ advanceId: r.advanceId, amountCents: r.amountCents }));
+      out.advanceAllocations = rows.map((r) => {
+        const one: Record<string, unknown> = { advanceId: r.advanceId, amountCents: r.amountCents };
+        // #1066 — STATED ONLY WHEN THIS ROW SITS ON A DIFFERENT ACCOUNT THAN THE HEAD.
+        // `clara._claim_allocations` (0301) defaults a bare row's account to the claim's own
+        // `advance_account_code`, so a row that already matches the head needs no restating —
+        // the SAME "the caller decides, the door defaults" shape 0301 already documents.
+        const code = advanceAccountCodes?.get(r.advanceId);
+        if (code !== undefined && code !== headAccount) one.accountCode = code;
+        return one;
+      });
     }
   }
   if (draft.settlement === "already_settled") out.paymentAccountCode = draft.paymentAccountCode.trim();

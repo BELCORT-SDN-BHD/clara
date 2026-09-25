@@ -100,6 +100,7 @@ function row(over: Partial<WorkListRow> = {}): WorkListRow {
     intent_key: "w623:journal_entry:2026-09-01:office-rent",
     claim_id: null,
     claimant_label: null,
+    allocation_count: null,
     memo: "Office rent, September",
     posting_date: "2026-09-01",
     currency: "MYR",
@@ -237,8 +238,13 @@ test("rows render the memo, the client, the state WORD and a link to the Work's 
 // once end-to-end through the rendered list below to prove it is actually wired in.
 // ===========================================================================================
 {
-  const t = (key: string, values?: Record<string, string>) => {
+  const t = (key: string, values?: Record<string, string | number>) => {
     if (key === "claimLabel") return `Staff expense claim — ${values?.claimant ?? ""}`;
+    // #1069 (fix round, L03-SPEC-01) — the SAME label, plus how many advances the claim settles.
+    if (key === "claimLabelWithCount") {
+      const n = Number(values?.count ?? 0);
+      return `Staff expense claim — ${values?.claimant ?? ""} (settles ${n} advance${n === 1 ? "" : "s"})`;
+    }
     if (key === "purposeLabels.journal_entry") return "Journal entry";
     if (key === "purposeLabels.periodic_stock_adjustment") return "Periodic stock adjustment";
     throw new Error(`unexpected key in workRowKindLabel test double: ${key}`);
@@ -246,25 +252,31 @@ test("rows render the memo, the client, the state WORD and a link to the Work's 
 
   test("workRowKindLabel: a claim row (claim_id set) renders the claimant label, not the purpose", () => {
     assert.equal(
-      workRowKindLabel({ purpose: "journal_entry", claim_id: "claim-1", claimant_label: "Farah binti Idris" }, t),
+      workRowKindLabel({
+        purpose: "journal_entry", claim_id: "claim-1", claimant_label: "Farah binti Idris",
+        allocation_count: null,
+      }, t),
       "Staff expense claim — Farah binti Idris",
     );
   });
 
   test("workRowKindLabel: a plain row (claim_id null) with a KNOWN purpose is unchanged", () => {
     assert.equal(
-      workRowKindLabel({ purpose: "journal_entry", claim_id: null, claimant_label: null }, t),
+      workRowKindLabel({ purpose: "journal_entry", claim_id: null, claimant_label: null, allocation_count: null }, t),
       "Journal entry",
     );
     assert.equal(
-      workRowKindLabel({ purpose: "periodic_stock_adjustment", claim_id: null, claimant_label: null }, t),
+      workRowKindLabel({
+        purpose: "periodic_stock_adjustment", claim_id: null, claimant_label: null,
+        allocation_count: null,
+      }, t),
       "Periodic stock adjustment",
     );
   });
 
   test("workRowKindLabel: a plain row with a purpose this build has not learned renders it VERBATIM", () => {
     assert.equal(
-      workRowKindLabel({ purpose: "vendor_bill_stub", claim_id: null, claimant_label: null }, t),
+      workRowKindLabel({ purpose: "vendor_bill_stub", claim_id: null, claimant_label: null, allocation_count: null }, t),
       "vendor_bill_stub",
     );
   });
@@ -273,8 +285,60 @@ test("rows render the memo, the client, the state WORD and a link to the Work's 
   // never carries this combination; asserted so a malformed wire answer degrades rather than throws.
   test("workRowKindLabel: claim_id set with a null claimant_label renders an empty claimant, never throws", () => {
     assert.equal(
-      workRowKindLabel({ purpose: "journal_entry", claim_id: "claim-1", claimant_label: null }, t),
+      workRowKindLabel({ purpose: "journal_entry", claim_id: "claim-1", claimant_label: null, allocation_count: null }, t),
       "Staff expense claim — ",
+    );
+  });
+
+  // =========================================================================================
+  // #1069 (fix round, review finding L03-SPEC-01) — HOW MANY ADVANCES, ON THE ROW ITSELF.
+  //
+  // The ticket's AC2 is "the Work LIST card renders that count when it is greater than 1", and
+  // its stated value is giving a reviewer that WITHOUT OPENING THE CLAIM. The first cut rendered
+  // it on the Work DETAIL view only. The threshold is the ticket's own: a single-advance claim's
+  // row must stay byte-identical to what it was, and so must a reimbursement's (count 0) and a
+  // plain Work's (count null).
+  // =========================================================================================
+  test("workRowKindLabel: a claim settling MORE THAN ONE advance says how many, on the row itself", () => {
+    assert.equal(
+      workRowKindLabel({
+        purpose: "journal_entry", claim_id: "claim-1", claimant_label: "Farah binti Idris",
+        allocation_count: 3,
+      }, t),
+      "Staff expense claim — Farah binti Idris (settles 3 advances)",
+    );
+  });
+
+  test("workRowKindLabel: one advance, none, or not a claim at all leaves the label exactly as it was", () => {
+    const unchanged = "Staff expense claim — Farah binti Idris";
+    for (const [count, why] of [
+      [1, "a single-advance claim has nothing to disambiguate — the ticket's own threshold"],
+      [0, "a reimbursement discharges no advance at all"],
+      [null, "a door below the 0341 frontier answers no count during a deploy window"],
+    ] as [number | null, string][]) {
+      assert.equal(
+        workRowKindLabel({
+          purpose: "journal_entry", claim_id: "claim-1", claimant_label: "Farah binti Idris",
+          allocation_count: count,
+        }, t),
+        unchanged,
+        why,
+      );
+    }
+    // …and a wire answer that OMITS the key entirely, the same degrade claim_id already has.
+    assert.equal(
+      workRowKindLabel({
+        purpose: "journal_entry", claim_id: "claim-1", claimant_label: "Farah binti Idris",
+      } as unknown as Parameters<typeof workRowKindLabel>[0], t),
+      unchanged,
+      "an absent allocation_count is an absence, never a count",
+    );
+    // A NON-CLAIM row carrying a count is still not a claim: claim_id decides, as it always did.
+    assert.equal(
+      workRowKindLabel({
+        purpose: "journal_entry", claim_id: null, claimant_label: null, allocation_count: 3,
+      }, t),
+      "Journal entry",
     );
   });
 
@@ -290,7 +354,7 @@ test("rows render the memo, the client, the state WORD and a link to the Work's 
       "Journal entry",
     );
     assert.equal(
-      workRowKindLabel({ purpose: "journal_entry", claim_id: "", claimant_label: null }, t),
+      workRowKindLabel({ purpose: "journal_entry", claim_id: "", claimant_label: null, allocation_count: null }, t),
       "Journal entry",
       "an empty claim id is not a claim either",
     );
@@ -414,6 +478,55 @@ test("880 the claim label reaches the DESKTOP sub-line too, and a plain row's de
       assert.match(compact[0]!, /Staff expense claim — Farah binti Idris/);
       assert.match(compact[1]!, /Journal entry/);
       assert.ok(byTestId(h.container, "work-row-compact-line") !== null, "the compact line still exists");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+// ===========================================================================================
+// #1069 (fix round, review finding L03-SPEC-01) — THE RENDERED ROW, through the REAL message.
+//
+// The branch cells above drive the decision with a test double; this one mounts the list with the
+// project's OWN `en.json` so the ICU plural, the key name and the wiring onto BOTH lines are
+// proved together. AC2's threshold is asserted on the SAME page: the three-advance claim names
+// its count, the single-advance claim beside it is byte-identical to what #880 shipped.
+// ===========================================================================================
+test("1069 a claim settling three advances says so ON THE LIST, and a single-advance claim's row is unchanged", async () => {
+  await withMockedEnv(async () => {
+    const h = await renderComponent(App({
+      load: async () => ({
+        rows: [
+          row({
+            claim_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", claimant_label: "Farah binti Idris",
+            allocation_count: 3,
+          }),
+          row({
+            id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", memo: "One advance",
+            claim_id: "ffffffff-ffff-4fff-8fff-ffffffffffff", claimant_label: "Lim Wei Jie",
+            allocation_count: 1,
+          }),
+        ],
+        next_cursor: null,
+        truncated: false,
+      }),
+    }));
+    try {
+      await h.settle();
+      const compact = allByTestId(h.container, "work-row-compact-line").map(textOfNode);
+      const desktop = allByTestId(h.container, "work-row-wide-line").map(textOfNode);
+      assert.equal(compact.length, 2, "one compact line per row");
+
+      assert.match(compact[0]!, /Staff expense claim — Farah binti Idris \(settles 3 advances\)/,
+        "the multi-advance claim names how many it settles, WITHOUT the reviewer opening it");
+      assert.match(desktop[0]!, /Staff expense claim — Farah binti Idris \(settles 3 advances\)/,
+        "…on the always-visible desktop line too, the one a wide reader actually reads");
+
+      assert.match(compact[1]!, /Staff expense claim — Lim Wei Jie/,
+        "a single-advance claim still reads exactly as ticket 880 shipped it");
+      assert.doesNotMatch(compact[1]!, /settles/,
+        "…with nothing added: one advance is the ticket's own threshold");
+      assert.doesNotMatch(desktop[1]!, /settles/, "…on its desktop line either");
     } finally {
       await h.unmount();
     }

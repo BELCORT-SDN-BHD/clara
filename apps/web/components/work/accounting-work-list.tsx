@@ -151,14 +151,27 @@ const KNOWN_ORIGIN_LABELS = new Set(["user_direct", "clara_interpreted"]);
  * A claim id with a null `claimant_label` cannot happen on a live row (the claim relation's own
  * `claimant_label` column is NOT NULL, 0221) — the `?? ""` renders an empty claimant rather than
  * throwing on a malformed answer.
+ *
+ * #1069 (fix round, review finding L03-SPEC-01) — AND HOW MANY ADVANCES IT SETTLES, when there is
+ * more than one to name. The ticket's own threshold: a claim that discharges ONE advance reads
+ * exactly as it did before this field existed, and so does a reimbursement (0) and a row from a
+ * door below the 0341 frontier (absent or null). Only a genuine multi-advance claim gains the
+ * count — which is the whole point of the ticket, a reviewer learning it WITHOUT opening the
+ * claim. `typeof … === "number"` rather than `> 1` alone, because an absent key is `undefined`
+ * and `undefined > 1` is false only by accident; the shape is stated, not relied on.
  */
 export function workRowClaimLabel(
-  row: Pick<WorkListRow, "purpose" | "claim_id" | "claimant_label">,
-  t: (key: string, values?: Record<string, string>) => string,
+  row: Pick<WorkListRow, "purpose" | "claim_id" | "claimant_label" | "allocation_count">,
+  t: (key: string, values?: Record<string, string | number>) => string,
 ): string | null {
   const claim = row.claim_id;
   if (typeof claim !== "string" || claim === "") return null;
-  return t("claimLabel", { claimant: row.claimant_label ?? "" });
+  const claimant = row.claimant_label ?? "";
+  const settles = row.allocation_count;
+  if (typeof settles === "number" && settles > 1) {
+    return t("claimLabelWithCount", { claimant, count: settles });
+  }
+  return t("claimLabel", { claimant });
 }
 
 /**
@@ -168,8 +181,8 @@ export function workRowClaimLabel(
  * applies).
  */
 export function workRowKindLabel(
-  row: Pick<WorkListRow, "purpose" | "claim_id" | "claimant_label">,
-  t: (key: string, values?: Record<string, string>) => string,
+  row: Pick<WorkListRow, "purpose" | "claim_id" | "claimant_label" | "allocation_count">,
+  t: (key: string, values?: Record<string, string | number>) => string,
 ): string {
   const claim = workRowClaimLabel(row, t);
   if (claim !== null) return claim;

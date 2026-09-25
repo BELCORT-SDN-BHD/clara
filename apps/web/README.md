@@ -2327,3 +2327,154 @@ cell this walk has ever had.
 **The plan-not-active face says "none of the remedies", not "neither".** All three are plan-lane
 doors that refuse `plan_ended` / `plan_paused`; the row stays (the double count has not gone away)
 and the controls go, which is the same 裁-187 law #938's fix round applied to the first two.
+## #1052 — the allocation editor says which enrolment an advance came from
+
+The owner's ruling of 2026-09-24 on #931 lets a claim discharge an advance held under ANOTHER live
+enrolment of the same client whose person label is the claimant's, on two conditions. The database
+half of the first one is migration `0340` (`packages/db/README.md`). The second is here, in the
+ruling's own words: "the allocation editor shows, beside each such advance, the enrolment it came
+from, so the preparer's confirmation is a confirmation of that specific account."
+
+**One optional prop, on the shared editor.** `components/registers/staff-advance-allocations-editor.tsx`
+takes `sourceEnrolment?: (candidate) => string | null` beside `optionLabel`. When it answers a
+sentence, the editor appends it to that candidate's option — so it is visible BEFORE the choice —
+and renders it again as its own line beside the confirmed row, `data-testid`
+`allocation-source-enrolment`, so it is visible AFTER it. A `<select>` only ever shows the chosen
+option's text, and the preparer confirms a LIST and reads it back as a list, which is why the line
+is not merely a suffix inside the control. A caller that passes nothing (the register's own
+`BookApplicationDialog`, whose default label already names the account and the person) renders
+exactly what it rendered before.
+
+**The CALLER decides what "another enrolment" means**, because only the caller knows what the
+subject is: a claim has a claimant enrolment, the book-application dialog has none at all.
+
+**The claim form's answer is a comparison of ENROLMENTS, never of account codes.**
+`staff-expense-claim-form.tsx` resolves the claimant's own live enrolment the way the door resolves
+it (`clara._claim_resolve_claimant`): the stated enrolment, or the live enrolment on the account
+dedicated to them. Any offered advance whose `enrolment_id` is not that one carries the line. That
+distinction is not academic — one advance account retired and re-enrolled after a name correction
+carries a second generation, and an advance issued under the first is not the current claimant
+enrolment's however the account code reads. With the enrolment register unread (`null`), nothing is
+claimed at all: the form knows of no enrolment to compare against, the same conservative direction
+`claimantIsNew` already takes.
+
+**What is deliberately NOT here.** Which candidates the claim form offers at all is untouched: the
+chooser still narrows `staff_advance_summary` to the claimant's own account code, so an advance on
+a SECOND enrolled account of the same person still does not reach the list. That filter, and the
+per-allocation account code and derived-preview legs a cross-account allocation would need on the
+wire, are #1066's, which rides on this prop.
+
+One key, `StaffExpenseClaim.advanceSourceEnrolment`. Copy is EN only, for the reason #940 records
+above.
+
+## #1066 — the chooser's own candidate filter reaches a second enrolled account
+
+#1052's "What is deliberately NOT here" paragraph above said the chooser still narrowed
+`staff_advance_summary` to the claimant's own account code alone, and named this ticket as the one
+that widens it. This is that ticket, and that paragraph is no longer current: an advance on a
+DIFFERENT enrolled account of the same client now reaches the chooser too, when the wall
+(`clara._assert_claim_basis`, 0340) would admit it — arm (b) of the claimant-ownership match.
+
+**`advanceCandidates` in `staff-expense-claim-form.tsx`** now admits a `staff_advance_summary` row
+whose `account_code` differs from `draft.claimantAccountCode` when, and only when, its own
+`enrolment_active` is true (mirroring the wall's `sa2.active`: a RETIRED second-account enrolment
+still fails arm (b) at the door and is not offered here either) AND its `person_label`, normalised
+`.trim().toLowerCase()`, equals the claimant's own resolved label, normalised the same way — the
+identical case/whitespace-tolerant match 0340 put at the wall, kept in lockstep on purpose so the
+chooser never offers a candidate the door would refuse, and never hides one the door would admit.
+The claimant's own label is read off the enrolment register (`listStaffAdvanceEnrolments`) via the
+claimant's OWN resolved enrolment (`claimantEnrolmentId`, moved above `advanceCandidates` because
+the filter now needs it too) — `null` while the register is unread or the claimant's own account
+carries no live enrolment yet, in which case no second-account candidate is offered: the same
+conservative direction `advanceSourceEnrolment` already takes for naming one.
+
+**The naming comes for free.** #1052's `advanceSourceEnrolment` already compares `enrolment_id`
+against the claimant's own resolved enrolment and names any candidate that differs; a second-account
+candidate's `enrolment_id` is by construction never the claimant's own, so it is named exactly the
+way an earlier-generation, same-account candidate already was. No change to that reader, or to the
+shared editor, was needed.
+
+**What is unchanged.** The claimant's own account's candidates are exactly as `#930`/`#931` left
+them — `account_code === draft.claimantAccountCode`, `isOutstandingAdvance`, nothing more — so a
+single-account claim (no second live enrolment shares the claimant's label) behaves byte for byte
+as before. `suggestAllocationsByDate` is untouched: it is already account-agnostic (oldest
+`issue_date` first, across whatever candidates it is given), so a claim spanning two accounts
+suggests correctly with no change there either.
+
+**The wire and the preview needed the per-allocation account too, and this ticket owns that as
+well** (#1052's own paragraph named it: "the per-allocation account code and derived-preview legs a
+cross-account allocation would need on the wire, are #1066's"). Offering a second-account candidate
+in the chooser is not enough on its own: `clara._assert_claim_basis` (0340) refuses a claim whose
+`claim.advance_account_code` disagrees with the confirmed list's own first entry, and
+`clara._claim_allocations` (0301) defaults any allocation missing its own `account_code` to that
+same field — so a confirmed row on the second account would silently be treated as living on the
+claimant's own account and refused `not_this_client`, or worse, credited to the wrong one.
+
+- **`toClaimWire`** takes a fourth, optional `advanceAccountCodes: ReadonlyMap<string, string> | null`
+  (advance_id → its real account). `claim.advance_account_code` now follows the confirmed list's
+  HEAD allocation's real account — falling back to the typed field when the lookup is absent or
+  does not know that id, byte-identical to every caller before this ticket, since the head's real
+  account and the typed field were always the same value when only one account could ever be
+  offered. A non-head row states its own `accountCode` only when it differs from the head's,
+  mirroring 0301's own "the caller decides, the door defaults" shape.
+- **`derivedLines`** takes the same lookup as its second, optional argument and, for an
+  `advance_application` claim, groups the confirmed allocations by their REAL account (again
+  falling back to the head's account when unknown) instead of always emitting one leg on
+  `settlementAccountCode(draft)` — one credit leg per account, summed, in account-code order,
+  mirroring `clara._claim_journal_basis`'s own widening (migration 0301) exactly. A single-account
+  claim collapses to the one leg this function has always produced.
+- **The form** builds the lookup once, `advanceAccountCodes` — every row of the SAME
+  `staff_advance_summary` read `advanceCandidates` narrows, keyed by `advance_id`, not only the
+  offered rows, so a stored draft naming an advance a later read no longer offers still resolves —
+  and passes it to both.
+- **The independent source of truth for the exact wire shape and the exact grouping** is
+  `packages/db/tests/staff-expense-claim-allocations.test.mjs`'s own `p931.accounts` cell, already
+  proved end to end through the real door: its `allocClaim` helper states
+  `advanceAccountCode: allocations[0].account_code ?? SECHART.advance` and its `allocatedBasis`
+  helper groups exactly `a.account_code ?? c.advance_account_code`. Neither number nor rule here
+  was invented for this ticket; both are read off that file.
+
+**What is deliberately out of scope**, per the ticket: no staff master, and no widening of the chat
+tool's own allocation handling beyond its existing successor contract (`chatTurn_v22`).
+
+## #1068 — the empty allocation list still focuses something real
+
+#931 replaced the advance-application arm's single `advanceId` `<select>` with the shared
+allocation-list editor, whose "×" on a row has no floor at one: a preparer can remove EVERY row,
+leaving `draft.advanceAllocations` truly empty. `claimAllocations`
+(`lib/work/staff-expense-claim.ts`) still has to say what an empty confirmed list means for
+validation, and it says the same thing it always has — nothing is named, so it synthesises one
+phantom row (`{advanceId: "", amountCents: claimTotalCents(draft)}`) purely so
+`validateClaimDraft` can raise its ordinary `advanceRequired` issue, addressed by
+`allocationFieldId(0, "advanceId")` — the literal field id `"advanceId"`, exactly as it would be
+for a real row 0. **That addressing was never the bug and is unchanged by this ticket.**
+
+The bug was on the DOM side: `StaffAdvanceAllocationsEditor`'s empty state rendered only its own
+"Add allocation" button, carrying no id at all. `errorFor("advanceId")`'s message still rendered
+(the `<Field>` wrapper around the whole arm renders its error paragraph unconditionally), but the
+existing focus/scroll-to-error mechanism (`fields.current.get("advanceId")?.focus()`) found nothing
+registered under that id and silently did nothing — a refusal a preparer could not be moved to.
+
+**The fix is one conditional prop-spread on the shared editor, nothing in `lib/work/`.** When
+`allocations.length === 0`, the "Add allocation" button now also receives
+`rowProps?.(0, "advance")` — the SAME call a real row 0 would have received. For the claim form
+that means the button inherits row 0's `id` (`"advanceId"`), the `ref` that registers it as the
+focus target, and its `aria-invalid`/`aria-describedby` wiring; `disabled` is the OR of the
+button's own `candidates.length === 0` guard and whatever `rowProps` states, so the button stays
+correctly disabled while busy or while there is nothing to add. A NON-empty list never reaches this
+branch, so a real row 0 never has its id contested. A caller that passes no `rowProps` at all — the
+staff-advance register's own `BookApplicationDialog`, which has no field-id-addressed validation to
+begin with — is untouched: the spread is empty and the button renders byte for byte as before.
+
+**The seam is the editor, not only the claim form**, for the same reason #1052's own section above
+gives: two callers mount this component, and a cell that only drove the claim form would leave the
+register's caller free to drift. `components/registers/staff-advance-allocations-editor.test.tsx`
+proves the mechanism directly (empty list + `rowProps` given → the button carries row 0's props;
+non-empty list → the real row keeps the id, never the button; no `rowProps` at all, the register's
+own shape → nothing changes); `staff-expense-claim-form.test.tsx` proves the end-to-end seam the
+ticket actually names — a mounted form, the last row removed by its own "×", a submit attempt, and
+`document.activeElement` landing on a real, enabled, rendered node.
+
+**What is deliberately out of scope**, per the ticket: the validation rule itself (an advance is
+still required for this settlement type) and the allocation editor's non-empty behaviour, neither of
+which changed.

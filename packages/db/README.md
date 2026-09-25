@@ -8551,6 +8551,287 @@ The count is in fact three on both chains, with different members —
 exactly why a count was the wrong assertion. `p1050.authority.human_lane_unwidened` holds both
 facts from the test side, on either chain.
 
+## 0339 — an `advance_allocations` array that is present carries at least one allocation, by name (#1067, riders sweep wave, lane 03)
+
+`0339_staff_expense_claim_empty_allocation.sql` recuts exactly one body,
+`clara._assert_claim_basis(uuid,jsonb,boolean)`, at 0301's post-image byte for byte plus one new
+rule. It creates nothing, drops nothing, grants nothing and mints no new name, so it carries no
+`rig-meta.mjs` cohort; its frontier is the stem `staff_expense_claim_empty_allocation$` and its
+sweep escape hatch is `tests/staff-expense-claim-empty-allocation-preintegration-gate.mjs`
+(`CLARA_ALLOW_MISSING_SEC_EMPTY_ALLOCATION=1`), last in the gate chain, in migration order.
+
+**What was live.** 0301's payload half opens the allocation block with `v_listed := jsonb_typeof(…)
+= 'array' and jsonb_array_length(…) > 0`, and asks every list rule under `if v_listed`. A
+present-but-EMPTY array is therefore not a list at all to that validator, so the settlement rule,
+the distinctness rule, the exact sum and the head rule are all skipped. Driven on the lane database
+(`clara_l06`, chain 0001..0318) before the fix, in three shapes:
+
+- an advance application carrying `advance_allocations: []` **and** `advance_id` was **ADMITTED** —
+  `clara._claim_allocations` falls through to its single-advance branch, so the door posted the
+  claim against an advance the stated list does not name. Evidence: cell `p1067.empty` red with
+  "the call SUCCEEDED (no error)" before the recut, green after.
+- the same claim **without** `advance_id` was refused, but with the world half's
+  `advance_allocation_mismatch` / `claim.advance_id` / `present` — the very refusal a claim that
+  named no advance at all receives, so "I sent an empty list" and "I told you nothing" were one
+  refusal. Cell `p1067.tellapart`.
+- on any other settlement the key was **IGNORED**: a reimbursement carrying `advance_allocations:
+  []` was admitted and posted, because the rule that refuses a list on a non-advance settlement is
+  itself gated on `v_listed`. Cell `p1067.settlement`, red on the admission before the recut.
+
+The ticket frames this as the two layers disagreeing about who catches an empty list, and they did:
+`packages/runtime/src/workRoutes.ts` already refuses one (`advance_allocations` / `at_least_one`),
+while the database — the boundary any caller can reach — relied on an exact-sum check that never
+runs against an empty array.
+
+**The rule, and where it sits.** The new check is asked immediately after "is it an array?" and
+immediately before anything that reads what the array says, which is the same two-step
+`claim.items` is already judged in (`array`, then `at_least_one`). It therefore holds regardless of
+the claim's total (#1067 AC1's own words) and regardless of the settlement, and it makes `v_listed`
+honest: after this file `v_listed` is false only when the key is absent or JSON `null`, so no
+present list shape can skip the four rules any more. A claim carrying no `advance_allocations` key
+is untouched (#1067 AC3) and so is one carrying JSON `null`, which 0221's type rule admits as
+"absent" and this file does not move.
+
+**The word.** `reason` stays `advance_allocation_mismatch` and the new `constraint` is
+`at_least_one`, the word the runtime already uses, so both layers now say the same thing. #1067 AC2
+is met by the constraint alone: `at_least_one` and `exact_sum` are two named specialisations of one
+reason at one field, and the tail drives both in the same run. No web change was needed —
+`fieldForClaimPath` (`apps/web/lib/work/staff-expense-claim.ts`) already maps
+`claim.advance_allocations` onto the `advanceAllocations` control.
+
+**Redo (#957) and the first-apply branch.** The single statement is a `create or replace function`
+and the prestate detects its own redo by the marker `#1067 (0339` in the live validator, skipping
+only the recut pin; the ten non-regression pins are checked on both branches. The FIRST APPLY
+branch ran through `pnpm db:migrate` (`#1067 prestate: clean (FIRST apply)`), and was additionally
+re-proved by hand inside a rolled-back transaction with 0301's own body restored, so the sha branch
+the redo can never take was seen to pass on its own.
+
+**The vacuity control.** With 0301's body put back on the lane database byte for byte (live sha
+`e439346cbf68a267b143aa2fe03c5285acd7eed3f769b0c0c6a0c31c38aae04a`), the three behaviour cells fail
+and the AC3 pin stays green: `p1067.empty` and `p1067.settlement` report "the call SUCCEEDED (no
+error)", and `p1067.tellapart` reports the empty list answering `claim.advance_id` / `present` —
+byte-identical to the claim that named no advance at all, which is the conflation AC2 names. The
+recut was then restored through the supported redo mode
+(`CLARA_MIGRATION_REDO=0339_staff_expense_claim_empty_allocation`), post-image sha
+`5c55fc8d860bc74c4fd721a81442b4ea19ed66240ef3d20386efd53e2a2cd294`, and a second redo over that
+post-image exercised the prestate's REDO branch (`clean (REDO apply)`).
+
+**Tail T.6 is structurally unreachable, and is kept anyway — say so rather than read it as
+evidence** (fix round, adversarial finding ADV-06; this section is corrected in place because
+0339 is this lane's own unmerged file). T.6 counts stored claims whose canonical basis carries
+`advance_allocations` as an array of length 0. It can never be anything but 0 on any database,
+hosted included: `clara._claim_basis_canonical` appends that key only under `case when
+jsonb_array_length(clara._claim_allocations(p_claim)) >= 2`, and `clara._claim_allocations` turns a
+present-but-empty array into the one-element `advance_id` shape — both bodies re-read from
+`pg_proc` on the lane database to confirm it. So the wave-3 rule "a data-dependent branch must be
+entered once" cannot be met for T.6, and it proves nothing about real rows; it is a belt-and-braces
+catalogue assertion that the shape this file refuses was never storable in the first place, and the
+real guard for that is the `sha256(prosrc)` pin on `clara._claim_basis_canonical` in the same tail,
+which fixes the `>= 2` rule itself. It is not dropped because the migration is applied on every
+lane rig and an applied file is never edited: `CLARA_MIGRATION_REDO` takes the HIGHEST applied
+version only (0341 here), and editing 0339's bytes would abort every later `migrate` on those
+databases with checksum drift — a disproportionate price for deleting an assertion that costs one
+sequential scan and can only ever pass.
+
+**`set local statement_timeout` — the lane's decision, recorded** (fix round, adversarial finding
+ADV-07). 0341 opens with `set local statement_timeout = '5min'` and calls it "the runner rule";
+0339 and 0340 do not set it at all. Repo practice is genuinely mixed (17 of the last 30 migrations
+set it; 0301, 0310, 0316 and 0318 do not), so neither spelling breaches a documented house rule —
+but three files written by one lane in one week should not disagree with each other about a rule
+one of them names. **The decision: setting it is the better default** (a long `create or replace`
+on a loaded hosted database should not inherit an unbounded timeout), and it is a note for the NEXT
+migration this family writes rather than a change to 0339/0340, for the same immutability and
+checksum-drift reason above. Both files are single `create or replace function` statements, so the
+practical exposure is nil either way.
+
+## 0340 — the #931 label arm matches on `lower(btrim(person_label))`, the first of the owner's two conditions (#1052, riders sweep wave, lane 03)
+
+`0340_staff_expense_claim_label_case.sql` recuts exactly one body,
+`clara._assert_claim_basis(uuid,jsonb,boolean)`, at its LIVE post-image — which on this branch is
+0339's, not 0301's, because #1067 landed earlier in the same lane — byte for byte apart from two
+`lower(...)` calls and the comments that say why. It creates nothing, drops nothing, grants nothing
+and mints no new name, so it carries no `rig-meta.mjs` cohort; its frontier is the stem
+`staff_expense_claim_label_case$` and its sweep escape hatch is
+`tests/staff-expense-claim-label-case-preintegration-gate.mjs`
+(`CLARA_ALLOW_MISSING_SEC_LABEL_CASE=1`), last in the gate chain, in migration order.
+
+**The ruling this file answers.** The owner ruled on #931 on 2026-09-24 that arm (b) of the
+claimant-ownership wall stands — an advance held under ANOTHER live enrolment of the same client
+whose `person_label` is the claimant's — "under two conditions the wall must keep: the label match
+is exact after normalisation (case and surrounding whitespace only, never a substring or a fuzzy
+match), and the allocation editor shows, beside each such advance, the enrolment it came from". The
+first condition is this migration's; the second is a web change and carries no database object.
+
+**What was live, measured rather than read off the ticket.** Driven on `clara_l06` at chain
+0001..0339 before this file was written:
+
+- SURROUNDING WHITESPACE is already normalised AT ENROLMENT, not at the wall. Both doors that write
+  a label store `nullif(btrim(coalesce(…,'')),'')` — `clara.enrol_staff_advance_account`
+  (0043:1980) and 0221's auto-enrolment inside the claim door (0221:1149) — so an admin who types
+  `"  farah BINTI idris  "` leaves `farah BINTI idris` on the row. Cell `p1052.label.case` reads
+  the stored label back off `clara.staff_advance_accounts` and says so.
+- CASE was normalised nowhere. 0301 compared `btrim(sa2.person_label) = btrim(sa.person_label)`
+  (0301:753 and 0301:791, carried forward by 0339 at its lines 519 and 557), so a claim by the
+  claimant enrolled as `Farah binti Idris` allocating against an advance under the client's second
+  live enrolment labelled `farah BINTI idris` was REFUSED `CLR10` /
+  `advance_allocation_mismatch` / `not_this_claimant` — the same refusal a genuinely different
+  person's advance gets. Cell `p1052.label.case` was red exactly there before the recut.
+
+**The change.** `lower(btrim(...))` on both sides, and nothing looser. The claimant's side is
+lowered once where `v_claim_label` is read, so the loop compares two already-normalised strings and
+there is exactly one place either side can drift. Not a substring, not `like`, not a similarity,
+not `unaccent`; not a collation change and not a `citext` column. `btrim` stays at the wall for a
+row that predates the trimming doors — the tail's probe plants exactly such a row (`"  ali  "`) so
+that `btrim` is exercised rather than assumed.
+
+**What it widens, plainly.** Two different people of one client labelled `Ali` and `ali` were two
+claimants to this wall and are now one, exactly as two labelled `Ali` and `Ali` already were. That
+is the ruling's own trade; the staff master (#1049, re-parented to the mainline on 2026-09-25) is
+the real fix. Nothing else moves: the same client, an ACTIVE enrolment, the whole label, and the
+per-advance cap and the claimant floor untouched. The change only ever admits an allocation the
+ruling calls lawful, and never widens whose books a claim may reach.
+
+**The tail is DRIVEN, on real rows.** The label arm lives in the world half, which needs a client,
+a chart, live enrolments and advances to reach, so the tail builds them by hand and unwinds them in
+a `CLR99` sub-transaction (the 0018 / 0019 / 0020 / 0146 / 0260 / 0302 probe idiom). It proves, at
+apply time: `Ali` matches `"  ali  "` (admitted); `Ali` does not match `Ali B` (refused
+`advance_allocation_mismatch` / `not_this_claimant` at `claim.advance_allocations[2].advance_id`);
+#1067's empty-list rule still fires by name; an advance this client does not hold is still refused
+`not_this_client`; and an advance under a RETIRED enrolment is still refused however its label
+reads. `T.4` then counts, always and without branching, how many ordered pairs of live enrolments
+on the database become one claimant under the normalised match — `2` on this lane database at first
+apply, and the number a hosted apply should be read against. Nothing is backfilled: the wall is
+asked per claim.
+
+**Redo (#957) and the first-apply branch.** The single statement is a `create or replace function`
+and the prestate detects its own redo by the marker `#1052 (0340` in the live validator, skipping
+only the recut pin; the eleven non-regression pins and #1067's marker are checked on both branches.
+The FIRST APPLY ran through `pnpm db:migrate` (`#1052 prestate: clean (FIRST apply)`), and the
+first-apply branch was additionally re-proved by hand inside a rolled-back transaction with 0339's
+own body restored, so the sha branch a redo can never take was seen to pass on its own. Both redo
+branches were exercised: `CLARA_MIGRATION_REDO=0340_staff_expense_claim_label_case` over 0339's
+restored body took the sha branch, and a second redo over this file's own post-image took the
+marker branch (`clean (REDO apply)`).
+
+**The vacuity control.** With 0339's body put back on the lane database byte for byte (live sha
+`5c55fc8d860bc74c4fd721a81442b4ea19ed66240ef3d20386efd53e2a2cd294`), `p1052.label.case` fails with
+`that advance was not issued to this claimant` and `p1052.label.distinct` stays green — correctly,
+because it pins behaviour this file must not move. The recut was then restored through the
+supported redo mode; post-image sha
+`d1dff7654eda906324b534d723511ba9d4fd5b091f994a84200680c3fb164ffd`.
+
+## 0341 — the Work card names how many advances a staff expense claim discharges (#1069, riders sweep wave, lane 03)
+
+`0341_work_claim_allocation_count.sql` recuts three bodies — `clara.get_work_claim_origin(uuid)` at
+its 0221 pre-image, `clara.list_accounting_work(...)` at its 0267 pre-image and
+`clara.get_accounting_work_row(uuid)` at its 0266 pre-image — each byte for byte plus one new
+projected key, `allocation_count` (the fix round below says why the two list-surface bodies joined
+the file). It creates no relation, drops nothing, grants nothing and mints no new name, so it
+carries no `rig-meta.mjs` cohort; its frontier is the stem `work_claim_allocation_count$` and its sweep escape hatch is
+`tests/work-claim-allocation-count-preintegration-gate.mjs`
+(`CLARA_ALLOW_MISSING_WORK_CLAIM_ALLOCATION_COUNT=1`), last in the gate chain, in migration order.
+
+**What was live.** `clara.get_work_claim_origin` (0221) labels a claim Work's identity block on the
+Work detail page with the claimant and the settlement kind alone. Since #931 (0301) a single claim
+can discharge SEVERAL open advances through its own confirmed allocation list
+(`clara.staff_expense_claim_allocations`), but neither the door nor the web line it feeds
+(`apps/web/components/work/work-detail.tsx`'s `PostedEntrySection`,
+`data-testid="work-claim-origin"`) said so: a claim that discharges one advance and a claim that
+discharges three rendered byte-identically. Verified by reading 0221's live
+`jsonb_build_object(...)`, which carried no such key.
+
+**The measurement.** `allocation_count` is a bare `select count(*) from
+clara.staff_expense_claim_allocations where claim_id = sec.id` — no `coalesce(...,1)`, no
+settlement branch. That is exact for EVERY claim the door has ever answered for, not only ones
+admitted after 0301, because 0301 itself makes it so: SECTION G backfills one allocation row per
+pre-0301 `advance_application` claim at 0301's own apply time (unconditional, run once), every
+claim admitted after 0301 gets its row(s) from `admit_staff_expense_claim_work` SECTION 8a whose
+`clara._claim_allocations` normaliser gives a legacy single-`advance_id` submission its own
+one-element list, and #1067 (0339) closed the one gap (a present-but-empty `advance_allocations`
+array) that could have left a live claim with zero rows. So the count is 1 for a single-advance
+claim, the matching row count for a multi-advance one, and 0 for a claim that discharges no advance
+at all (`reimbursement`, `already_settled`) — the honest count of an arm that is not there. Tail T.2
+DRIVES all three shapes to prove it rather than trust the inventory: it admits a reimbursement, a
+single-advance and a two-advance claim through the REAL door (`admit_staff_expense_claim_work` takes
+its author as an explicit argument, not from a JWT, so it is callable directly inside a migration
+DO block) and reads each back through the REAL recut door under a faked
+`request.jwt.claims` GUC (`clara._human_ctx` reads exactly that), the same mechanism PostgREST sets.
+This is a new pattern in this migration family — earlier tickets in this lane drove `_assert_claim_
+basis` directly rather than the admission door — introduced here because `allocation_count`'s
+correctness is a property of ADMITTED rows, not of the validator alone.
+
+**Fix round (review finding L03-SPEC-01): the LIST surface, which is what the ticket asked for.**
+The first cut projected `allocation_count` on `clara.get_work_claim_origin` alone and rendered it on
+the Work DETAIL view. #1069's AC2 is "the Work LIST card renders that count when it is greater than
+1", and its stated value is giving a reviewer that information *without opening the claim* — which a
+detail-view line cannot deliver. The Work list renders from `clara.list_accounting_work`'s own
+projection (0266 put `claim_id`/`claimant_label` there for exactly this reason, deliberately without
+a second per-row call to the detail read), so the count belongs there, and on
+`clara.get_accounting_work_row` beside it: 0266's own comment calls that door "ONE Work in the SAME
+projection clara.list_accounting_work emits", `tests/work-list.test.mjs`'s wl.13 asserts it, and
+`apps/web/lib/work/work-list.ts` types both doors' answers as one `WorkListRow`, so widening the
+list alone would have made all three false at once and left a deep-linked claim silently without its
+count.
+
+Both list doors are SECURITY INVOKER (the detail read is DEFINER), so the new subquery is read by
+the signed-in role rather than by a definer. That is safe and deliberate:
+`clara.staff_expense_claim_allocations` is FORCE-RLS, `SELECT` is granted to `clara_authenticated`
+alone, and its one read policy is `p_sec_allocations_read … for select to clara_authenticated using
+(firm_id = clara.jwt_firm())` (0301, re-measured on the lane rig before the file was written) — so a
+caller can only ever count allocations of their own firm's claims, and the row the count hangs off
+is already firm-scoped by `clara.accounting_work`'s own RLS. Tail T.2f/T.2g DRIVE both list doors
+**as `clara_authenticated`** under the probe's faked JWT (`set_config('role', …)` inside the same
+rolled-back sub-transaction), so the count is proved through RLS rather than around it: 0 for the
+reimbursement, 1 for the single-advance claim, 2 for the two-advance one on the list page, the same
+2 on the addressed row, and the `allocation_count` key present on every row of the page. Tail
+T.1g/T.1h additionally pin both doors' owner, INVOKER posture, `search_path`, `plan_cache_mode`,
+PUBLIC-revoked/`clara_authenticated`-only ACL, this file's marker, the `{rows, next_cursor,
+truncated}` envelope and that each body reads the register **exactly once**.
+
+**What this file does not touch, and pins.** `clara._claim_allocations` (the normaliser whose
+single-advance branch is why a legacy claim's row exists at all) and
+`clara.admit_staff_expense_claim_work` (SECTION 8a, the writer of every row this count reads) —
+neither is CALLED by the recut body, but both are pinned because a future change to either could
+silently break the invariant this field leans on without touching a byte of `get_work_claim_origin`
+itself, which is exactly the drift a pin is for.
+
+**The web half** ships in the same ticket's commits and carries no database object:
+`apps/web/lib/work/staff-expense-claim-reads.ts`'s `WorkClaimOrigin` type gains
+`allocation_count: number`, and `work-detail.tsx`'s identity block renders
+`StaffExpenseClaim.origin.allocationCount` (`"settles {count, plural, one {# advance} other {#
+advances}}"`, `data-testid="work-claim-allocation-count"`) beside the existing claimant/settlement
+line only when `allocation_count > 1` — a single-advance claim's card is byte-identical to today's.
+`apps/web/e2e/staff-expense-claim-mock.mjs`'s `get_work_claim_origin` handler was widened the same
+way, for the same reason 0266's own header gives for restating a mock: an inaccurate mock is a
+silent hole a real regression could hide in. The fix round adds the LIST half:
+`apps/web/lib/work/work-list.ts`'s `WorkListRow` gains `allocation_count: number | null` (null for a
+Work that is not a claim, the same honest absence `claim_id` already carries), and
+`apps/web/components/work/accounting-work-list.tsx`'s `workRowClaimLabel` names the count on the
+claim label it already renders on every row — again only when it is greater than 1, so a
+single-advance claim's row is byte-identical to today's.
+
+**Redo (#957) and the first-apply branch.** The single statement is a `create or replace function`
+and the prestate detects its own redo by the marker `#1069 (0341` in the live door. Both branches
+were exercised FOR REAL on the lane database, in chronological order rather than simulated: the
+TRUE first apply ran through `pnpm db:migrate` (`#1069 prestate: clean (FIRST apply)`, tail T.2's
+three DRIVEN shapes all green), and `CLARA_MIGRATION_REDO=0341_work_claim_allocation_count`
+re-applied it over its own post-image (`#1069 prestate: clean (REDO apply)`, same tail green
+again), post-image sha `f7d1b9944349da60a0a8e9e8f7fd2418ace8fc2b08084cee0009578b280a99e2`.
+
+The fix round then edited this same unmerged file and re-applied it the supported way,
+`CLARA_MIGRATION_REDO=0341_work_claim_allocation_count` (ledger checksum
+`6fac2a872e965baa00215e5fd304ea937c4eab89e3698a413e1183524bb6741f`, 312 files, max `0341`). Because
+`CLARA_MIGRATION_REDO` only ever takes the redo branch, the two NEW prestate pins (the 0267 and 0266
+pre-images, each with its own marker-tolerant redo branch) had their FIRST-APPLY branch proved by
+hand: inside one transaction that was rolled back, 0267's and 0266's own `create or replace`
+statements were re-run to restore the pre-images, the `$p1069_pre$` block was run verbatim and
+passed against them, and a negative control that drifted `get_accounting_work_row`'s pre-image by
+one comment was refused `CLR10 … has DRIFTED from its pinned pre-image`. Post-image shas after the
+redo: `clara.get_work_claim_origin`
+`4c0dad6effd1883eaad3bbdff489fdcbf03e26228c80ea5e11a12b718c9771e4`, `clara.list_accounting_work`
+`fc679a2d4d96341d664d881b9e43da54ed1d8d2e5fe04f4ca45351ff7dbf8dbc`,
+`clara.get_accounting_work_row`
+`28aba20bdb39b0f6f5deb2ddf24937f1fa847c0b1128c3d6a4eeaae08781713e`.
 ## 0361 — one map of "which door releases this claim", and the carry-down stops naming one that cannot (#1078 fix round, riders sweep wave, lane 02)
 
 [0361_reservation_release_advice.sql](migrations/0361_reservation_release_advice.sql) closes the

@@ -354,6 +354,72 @@ test("p931.accounts allocations on two enrolled accounts produce TWO credit legs
     "accounts: the claim row's own account column carries the HEAD of the confirmed list");
 });
 
+test("p1066.head the CROSS-ACCOUNT HEAD shape the claim form actually sends is admitted and posts both legs", async (t) => {
+  if (await gateAlloc(t)) return;
+  const client = await allocClient("allochead");
+  // WHY THIS CELL EXISTS (fix round, L03-SPEC-04). #1066's AC1 is that a claimant with two
+  // dedicated advance accounts can CONFIRM advances from both THROUGH THE FORM. p931.accounts
+  // above posts the opposite shape: its head sits on the claimant's own account and only the
+  // SECOND row states an account. The shape `toClaimWire` emits when the preparer confirms the
+  // second account's advance FIRST was asserted only in a pure-function cell, never driven
+  // through the real door -- so this drives exactly that wire:
+  //
+  //   claim.advance_account_code = 1191 (the HEAD's own account, which the wire makes the column
+  //                                      follow, because 0340 refuses a column that disagrees)
+  //   advance_allocations[1]     = { advance_id: C }            -- the head, stating NO account
+  //   advance_allocations[2]     = { advance_id: A, account_code: 1190 }
+  //
+  // THE WORKED EXAMPLE. C = 30,000 sen on 1191, A = 40,000 sen on 1190. The 60,500 claim takes
+  // 30,000 from C and 30,500 from A, so the entry credits 1191 by 30,000 and 1190 by 30,500.
+  await enrolAdvanceFor(ALICE(), {
+    client, code: SECHART.advanceFresh, person: "Farah binti Idris",
+  });
+  const advA = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const advC = (await seedAdvance(ALICE(), BOB(), {
+    client, code: SECHART.advanceFresh, cents: 30000, issueDate: "2026-02-01",
+  })).advance;
+
+  const c = allocClaim({
+    allocations: [
+      { advance_id: advC.id, amount_cents: 30000 },                                 // the BARE head
+      { advance_id: advA.id, amount_cents: 30500, account_code: SECHART.advance },
+    ],
+    // …and the column the wire makes FOLLOW that head, which `allocClaim` would otherwise take
+    // from the head row's own (absent) account_code.
+    advanceAccountCode: SECHART.advanceFresh,
+  });
+  assert.equal(c.advance_allocations[0].account_code, undefined,
+    "head: the head row states no account of its own -- exactly what toClaimWire emits");
+  assert.equal(c.advance_account_code, SECHART.advanceFresh,
+    "head: …and the claim's own column carries the head's real account");
+
+  const a = await armed({ client, claim: c });
+  const out = await post(a);
+  assert.equal(out.posted, true, "head: a cross-account HEAD is admitted and posts");
+
+  const lines = await linesWithIds(out.entry_id);
+  const credits = lines.filter((l) => Number(l.credit_cents) > 0);
+  assert.equal(credits.length, 2, "head: ONE credit leg per advance ACCOUNT, and there are two");
+  const byCode = new Map(credits.map((l) => [l.account_code, l]));
+  assert.equal(String(byCode.get(SECHART.advanceFresh).credit_cents), "30000",
+    "head: the head's own account carries the head's own amount");
+  assert.equal(String(byCode.get(SECHART.advance).credit_cents), "30500");
+
+  const apps = await applicationsForEntry(out.entry_id);
+  const appOf = new Map(apps.map((r) => [r.advance_id, r]));
+  assert.equal(appOf.get(advC.id).application_line_id, byCode.get(SECHART.advanceFresh).id,
+    "head: each allocation is keyed to the credit leg on ITS OWN advance account");
+  assert.equal(appOf.get(advA.id).application_line_id, byCode.get(SECHART.advance).id);
+
+  assert.equal(await advanceOutstanding(advC.id, SEC_DATE.posting), 0, "head: C is fully discharged");
+  assert.equal(await advanceOutstanding(advA.id, SEC_DATE.posting), 9500, "head: A keeps 9,500 sen");
+
+  const row = await claimRow(a.claim_id);
+  assert.equal(row.advance_account_code, SECHART.advanceFresh,
+    "head: the stored column is the SECOND account -- the head's, not the claimant's own");
+  assert.equal(row.advance_id, advC.id, "head: …and the stored advance_id is that head advance");
+});
+
 // ===========================================================================================
 // 4 · p931.sum / p931.twice / p931.claimant — the list's own walls.
 // ===========================================================================================
@@ -777,4 +843,318 @@ test("p931.claimant.samelabel two enrolments of ONE client sharing a person_labe
     "samelabel: the confirmed list discharges an advance enrolled to the OTHER row — arm (b), "
     + "on a byte-equal person_label and nothing else",
   );
+});
+
+// ===========================================================================================
+// 9 · #1067 [0339] — AN ALLOCATION LIST THAT IS PRESENT CARRIES AT LEAST ONE ALLOCATION.
+//
+// 0301 reads the list through `v_listed`, which is "an array with MORE THAN ZERO members", so a
+// present-but-EMPTY array is not a list at all to this validator: every rule the list has —
+// its settlement, its distinctness, its exact sum and its head — is skipped, and what the claim
+// is then judged on is whatever ELSE it happens to carry. The runtime's own wire schema refuses
+// an empty list (`workRoutes.ts`, `advance_allocations` / `at_least_one`), but the door is the
+// boundary any caller can reach, so the rule belongs here too and under the same word.
+//
+// THIS SECTION'S OWN FRONTIER, layered on top of `gateAlloc` above. 0301's stem is true from its
+// own migration onward, long before 0339 exists, so these cells need their OWN stem check —
+// prepayment-stated-term.test.mjs's own two-frontier idiom.
+// ===========================================================================================
+
+export const SEC_EMPTY_ALLOC_STEM = "staff_expense_claim_empty_allocation$";
+
+let _empty = null;
+async function emptyLaneReady() {
+  if (_empty === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [SEC_EMPTY_ALLOC_STEM]);
+      _empty = r.rows[0].n > 0;
+    } catch {
+      _empty = false;
+    }
+  }
+  return _empty;
+}
+
+async function gateEmpty(t) {
+  if (await emptyLaneReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_SEC_EMPTY_ALLOCATION === "1") {
+    markSkip();
+    t.skip(`#1067 empty-allocation refusal absent (no ${SEC_EMPTY_ALLOC_STEM} migration applied)`);
+    return true;
+  }
+  assert.fail(
+    "#1067: the empty-allocation refusal is absent. Apply "
+    + "0339_staff_expense_claim_empty_allocation.sql (or its numbered suite copy), or set "
+    + "CLARA_ALLOW_MISSING_SEC_EMPTY_ALLOCATION=1 for the package-wide pre-integration sweep.",
+  );
+  return true;
+}
+
+test("p1067.empty an advance application that states an allocation list and allocates NOTHING is refused by its own name, at the list's own field", async (t) => {
+  if (await gateAlloc(t) || await gateEmpty(t)) return;
+  const client = await allocClient("emptyalloc");
+  // THE WORKED EXAMPLE. The rig claim totals 60,500 sen and ONE 80,000-sen advance stands ready
+  // to carry it, so every other rule this door has would admit this submission: the exact-sum
+  // check cannot fire (an empty list is never compared), the cap is not reached, the claimant
+  // owns the advance. The list is present and it allocates nothing — that alone is the refusal.
+  const adv = (await seedAdvance(ALICE(), BOB(), { client, cents: 80000, issueDate: "2026-01-10" })).advance;
+  const c = claim({
+    settlement: SETTLEMENT.advance,
+    advanceAccountCode: SECHART.advance,
+    advanceId: adv.id,
+    payableAccountCode: null,
+  });
+  c.advance_allocations = [];
+  const { detail } = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: c }), "empty");
+  assert.equal(detail.field, "claim.advance_allocations");
+  assert.equal(detail.constraint, "at_least_one");
+});
+
+test("p1067.tellapart the empty list, the list that does not add up and the claim that names no advance at all are THREE refusals a reader can tell apart", async (t) => {
+  if (await gateAlloc(t) || await gateEmpty(t)) return;
+  const client = await allocClient("emptytell");
+  // Two real advances, 40,000 and 30,000 sen, against the rig claim's 60,500 total.
+  const advA = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const advB = (await seedAdvance(ALICE(), BOB(), { client, cents: 30000, issueDate: "2026-02-01" })).advance;
+  const bare = () => claim({
+    settlement: SETTLEMENT.advance,
+    advanceAccountCode: SECHART.advance,
+    payableAccountCode: null,
+  });
+
+  // (1) THE LIST IS PRESENT AND ALLOCATES NOTHING. Before 0339 this was the refusal at (3): the
+  // submission said "here are my allocations: none" and was answered "name an advance".
+  const empty = bare();
+  empty.advance_allocations = [];
+  const one = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: empty }), "tellapart/empty");
+
+  // (2) THE LIST DOES NOT ADD UP: 40,000 + 20,000 = 60,000 against 60,500.
+  const short = bare();
+  short.advance_id = advA.id;
+  short.advance_allocations = [
+    { advance_id: advA.id, amount_cents: 40000 },
+    { advance_id: advB.id, amount_cents: 20000 },
+  ];
+  const two = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: short }), "tellapart/sum");
+
+  // (3) NO LIST AND NO ADVANCE AT ALL — 0301's own WD-R10 refusal, at its own field, unmoved.
+  const none = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: bare() }), "tellapart/none");
+
+  assert.deepEqual(
+    [one, two, none].map((r) => [r.detail.field, r.detail.constraint]),
+    [
+      ["claim.advance_allocations", "at_least_one"],
+      ["claim.advance_allocations", "exact_sum"],
+      ["claim.advance_id", "present"],
+    ],
+    "tellapart: one reason, three named constraints, two fields",
+  );
+  assert.equal(Number(two.detail.allocated_cents), 60000);
+  assert.equal(Number(two.detail.amount_cents), 60500);
+  assert.equal(one.detail.allocated_cents, undefined,
+    "tellapart: the empty-list refusal states no sum, because there is nothing to add up");
+});
+
+test("p1067.settlement an empty allocation list is refused on a REIMBURSEMENT and on an ALREADY-SETTLED claim too, because the rule is the key's own shape", async (t) => {
+  if (await gateAlloc(t) || await gateEmpty(t)) return;
+  const client = await allocClient("emptysettle");
+  // Neither settlement discharges anything, so neither may carry an allocation list at all —
+  // 0301 says so and refuses a NON-EMPTY one. An EMPTY one used to be ADMITTED, because the rule
+  // that refuses it is itself asked under `v_listed`: the key travelled, meant nothing, and the
+  // claim posted. Nothing about the claim's own accounting is wrong here, which is exactly why
+  // only a rule about the KEY catches it.
+  const reimbursement = claim({ settlement: SETTLEMENT.reimbursement });
+  reimbursement.advance_allocations = [];
+  const one = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: reimbursement }),
+    "settlement/reimbursement");
+
+  const settled = claim({ settlement: SETTLEMENT.settled, payableAccountCode: null });
+  settled.advance_allocations = [];
+  const two = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: settled }),
+    "settlement/already_settled");
+
+  for (const [label, r] of [["reimbursement", one], ["already_settled", two]]) {
+    assert.equal(r.detail.field, "claim.advance_allocations", `${label}: at the list's own field`);
+    assert.equal(r.detail.constraint, "at_least_one", `${label}: under the list's own new word`);
+  }
+});
+
+test("p1067.absent a claim carrying NO allocations key, and one carrying JSON null under it, are both still admitted and still read back as a ONE-element list", async (t) => {
+  if (await gateAlloc(t) || await gateEmpty(t)) return;
+  const client = await allocClient("emptyabsent");
+  // #1067 AC3: the single-advance shape every claim written before 0301 carries is untouched. The
+  // JSON-null arm is the boundary of the new rule rather than a feature: 0221's type rule admits
+  // `null` under this key as "absent" (it lists 'null' beside 'array'), and 0339 refuses an
+  // ARRAY of zero members, not an absent list. 200,000 sen outstanding carries both 60,500 claims.
+  const adv = (await seedAdvance(ALICE(), BOB(), { client, cents: 200000, issueDate: "2026-01-10" })).advance;
+  const bare = () => claim({
+    settlement: SETTLEMENT.advance,
+    advanceAccountCode: SECHART.advance,
+    advanceId: adv.id,
+    payableAccountCode: null,
+  });
+
+  const noKey = await admitStaffExpenseClaimWork({ client, author: ALICE(), claim: bare() });
+  const withNull = bare();
+  withNull.advance_allocations = null;
+  const jsonNull = await admitStaffExpenseClaimWork({ client, author: ALICE(), claim: withNull });
+
+  for (const [label, admitted] of [["no key", noKey], ["json null", jsonNull]]) {
+    const stored = await getStaffExpenseClaim(ALICE(), admitted.claim_id);
+    assert.deepEqual(
+      stored.advance_allocations.map((x) => [x.advance_id, Number(x.amount_cents)]),
+      [[adv.id, 60500]],
+      `${label}: the single-advance shape still stores its ONE-element confirmed list`,
+    );
+    assert.equal((await claimRow(admitted.claim_id)).advance_id, adv.id,
+      `${label}: …and the claim row's own advance is that head`);
+  }
+});
+
+// ===========================================================================================
+// 10 · #1052 [0340] — THE LABEL ARM, UNDER THE OWNER'S TWO CONDITIONS.
+//
+// The owner's ruling of 2026-09-24 on #931 lets arm (b) stand — an advance held under ANOTHER
+// live enrolment of the same client whose `person_label` is the claimant's — on two conditions.
+// The first is this section's: "the label match is exact after normalisation (case and
+// surrounding whitespace only, never a substring or a fuzzy match)".
+//
+// WHERE EACH HALF OF THE NORMALISATION ACTUALLY HAPPENS, measured rather than assumed:
+//   * SURROUNDING WHITESPACE is already normalised AT ENROLMENT. Both enrolment doors store
+//     `nullif(btrim(coalesce(...,'')),'')` (0043's `clara.enrol_staff_advance_account`, and
+//     0221's auto-enrolment inside the claim door), so no stored label carries padding.
+//   * CASE is not normalised anywhere. 0301's wall compared `btrim(person_label)` on both sides,
+//     so `Farah` and `farah` were two people to it. That is the defect #1052 names.
+//
+// The cells below therefore type the padding AND the case difference into the real enrolment
+// door, exactly as an admin would, and judge the claim through `admit_staff_expense_claim_work`.
+// ===========================================================================================
+
+export const SEC_LABEL_CASE_STEM = "staff_expense_claim_label_case$";
+
+let _label = null;
+async function labelLaneReady() {
+  if (_label === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [SEC_LABEL_CASE_STEM]);
+      _label = r.rows[0].n > 0;
+    } catch {
+      _label = false;
+    }
+  }
+  return _label;
+}
+
+async function gateLabel(t) {
+  if (await labelLaneReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_SEC_LABEL_CASE === "1") {
+    markSkip();
+    t.skip(`#1052 case-insensitive label arm absent (no ${SEC_LABEL_CASE_STEM} migration applied)`);
+    return true;
+  }
+  assert.fail(
+    "#1052: the case-insensitive claimant-label arm is absent. Apply "
+    + "0340_staff_expense_claim_label_case.sql (or its numbered suite copy), or set "
+    + "CLARA_ALLOW_MISSING_SEC_LABEL_CASE=1 for the package-wide pre-integration sweep.",
+  );
+  return true;
+}
+
+/** The label a live enrolment actually STORES — read straight off the register, so a cell can say
+ *  which half of the normalisation the door already did and which half the wall must still do. */
+async function storedLabel(enrolment) {
+  const r = await rootQuery(
+    "select person_label from clara.staff_advance_accounts where id = $1", [enrolment]);
+  return r.rows[0]?.person_label ?? null;
+}
+
+test("p1052.label.case an advance under ANOTHER live enrolment is this claimant's when the two labels differ only by CASE and surrounding space", async (t) => {
+  if (await gateAlloc(t) || await gateLabel(t)) return;
+  const client = await allocClient("alloclabelcase");
+  // 1190 is enrolled by the rig to "Farah binti Idris". 1191 is enrolled here to THE SAME PERSON,
+  // typed by another admin on another day: padded on both sides and in a different case — the
+  // ruling's own two normalisations, and nothing else.
+  await enrolAdvanceFor(ALICE(), {
+    client, code: SECHART.advanceFresh, person: "  farah BINTI idris  ",
+  });
+  const enrolOne = await liveEnrolment(client, SECHART.advance);
+  const enrolTwo = await liveEnrolment(client, SECHART.advanceFresh);
+  assert.notEqual(enrolOne, enrolTwo, "label.case: two distinct live enrolment rows");
+  assert.equal(await storedLabel(enrolOne), "Farah binti Idris",
+    "label.case: the claimant's own enrolment carries the canonical spelling");
+  assert.equal(await storedLabel(enrolTwo), "farah BINTI idris",
+    "label.case: the enrolment door already btrimmed the padding, so CASE is the only difference "
+    + "left for the wall to see");
+
+  const mine = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const hers = (await seedAdvance(ALICE(), BOB(), {
+    client, code: SECHART.advanceFresh, cents: 30000, issueDate: "2026-02-01",
+  })).advance;
+  assert.equal(hers.enrolment_id, enrolTwo, "label.case: the second advance sits on the OTHER enrolment");
+
+  // THE WORKED EXAMPLE: the rig claim is 60,500 sen (48,000 flight + 12,500 dinner). 40,000 of it
+  // discharges the advance on her own account and 20,500 the advance on the second one.
+  const a = await armed({
+    client,
+    claim: allocClaim({
+      allocations: [
+        { advance_id: mine.id, amount_cents: 40000 },
+        { advance_id: hers.id, amount_cents: 20500, account_code: SECHART.advanceFresh },
+      ],
+    }),
+  });
+  const stored = await getStaffExpenseClaim(ALICE(), a.claim_id);
+  assert.deepEqual(
+    stored.advance_allocations.map((x) => [x.advance_id, Number(x.amount_cents)]),
+    [[mine.id, 40000], [hers.id, 20500]],
+    "label.case: the confirmed list discharges the advance held under the OTHER enrolment, whose "
+    + "label differs from the claimant's only by case and the padding the door already removed",
+  );
+});
+
+test("p1052.label.distinct a label that merely STARTS WITH the claimant's is a different person, and the normalisation never becomes a substring match", async (t) => {
+  if (await gateAlloc(t) || await gateLabel(t)) return;
+  const client = await allocClient("alloclabeldiff");
+  // 1191 is enrolled to a DIFFERENT person whose written name begins with the claimant's: the
+  // ruling admits case and surrounding whitespace and forbids "a substring or a fuzzy match" by
+  // name, so this advance stays hers and the refusal keeps the arm's own word.
+  await enrolAdvanceFor(ALICE(), {
+    client, code: SECHART.advanceFresh, person: "Farah binti Idris B",
+  });
+  const enrolTwo = await liveEnrolment(client, SECHART.advanceFresh);
+  assert.equal(await storedLabel(enrolTwo), "Farah binti Idris B",
+    "label.distinct: the second enrolment's label is the claimant's plus a suffix");
+
+  const mine = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const hers = (await seedAdvance(ALICE(), BOB(), {
+    client, code: SECHART.advanceFresh, cents: 30000, issueDate: "2026-02-01",
+  })).advance;
+
+  const r = await refusesAlloc(client, "CLR10", "advance_allocation_mismatch",
+    () => admitStaffExpenseClaimWork({
+      client,
+      author: ALICE(),
+      claim: allocClaim({
+        allocations: [
+          { advance_id: mine.id, amount_cents: 40000 },
+          { advance_id: hers.id, amount_cents: 20500, account_code: SECHART.advanceFresh },
+        ],
+      }),
+    }),
+    "label.distinct");
+  assert.equal(r.detail.constraint, "not_this_claimant",
+    "label.distinct: refused under the arm's own word, not admitted by a looser match");
+  assert.equal(r.detail.field, "claim.advance_allocations[2].advance_id",
+    "label.distinct: …at the allocation that carries the other person's advance");
+  assert.equal(r.detail.advance_id, hers.id,
+    "label.distinct: …naming THAT advance, so the preparer knows which line to change");
 });
