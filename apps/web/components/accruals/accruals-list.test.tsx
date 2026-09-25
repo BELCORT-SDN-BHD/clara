@@ -306,6 +306,10 @@ const FULL_PAGE = Array.from({ length: 50 }, (_, i) => ({
   accrual_id: `dddddddd-dddd-4ddd-8ddd-${String(i).padStart(12, "0")}`,
   purpose: `First page accrual ${i}`,
 }));
+/** The LAST row of the first page, spelled out rather than indexed off FULL_PAGE: the cursor the
+ *  component must echo back is a fact about the door's answer, so the cell states it independently
+ *  instead of re-deriving it from the fixture it is checking. */
+const LAST_OF_FIRST_PAGE = `dddddddd-dddd-4ddd-8ddd-${String(49).padStart(12, "0")}`;
 const SECOND_PAGE = [
   { ...ROW, accrual_id: "cccccccc-cccc-4ccc-8ccc-cccccccccc01", purpose: "Second page accrual A" },
   { ...ROW, accrual_id: "cccccccc-cccc-4ccc-8ccc-cccccccccc02", purpose: "Second page accrual B" },
@@ -322,12 +326,12 @@ test("1152.list.loadMore — the register renders a Load more control on a FULL 
     // back — so a component that rendered a control but never carried the cursor forward would
     // get page one again and the appended rows below would be the wrong ones.
     const cursor = body.p_cursor as { tuple?: string[] } | null;
-    if (cursor?.tuple?.[2] === FULL_PAGE[49].accrual_id) {
+    if (cursor?.tuple?.[2] === LAST_OF_FIRST_PAGE) {
       return jsonResponse({ client_id: CLIENT, from: null, to: null, side: null, accruals: SECOND_PAGE, next_cursor: null });
     }
     return jsonResponse({
       client_id: CLIENT, from: null, to: null, side: null, accruals: FULL_PAGE,
-      next_cursor: { tuple: ["2026-07-01", "2026-07-01T02:00:00.000000", FULL_PAGE[49].accrual_id] },
+      next_cursor: { tuple: ["2026-07-01", "2026-07-01T02:00:00.000000", LAST_OF_FIRST_PAGE] },
     });
   }) as typeof fetch;
 
@@ -350,7 +354,7 @@ test("1152.list.loadMore — the register renders a Load more control on a FULL 
       for (let i = 0; i < 6; i++) await h.settle();
 
       assert.equal(bodies.length, 2, "clicking Load more makes a SECOND round trip to the door");
-      assert.deepEqual((bodies[1]?.p_cursor as { tuple?: string[] } | null)?.tuple?.[2], FULL_PAGE[49].accrual_id,
+      assert.deepEqual((bodies[1]?.p_cursor as { tuple?: string[] } | null)?.tuple?.[2], LAST_OF_FIRST_PAGE,
         "…carrying the FIRST page's own next_cursor back verbatim, never a cursor this component built");
 
       const text = h.text();
