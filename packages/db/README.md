@@ -8503,31 +8503,39 @@ not 0308's. The first cut of this file pinned only 0308's, which meant it could 
 0330 at all; and an unconditional recut written against 0308 would have silently reverted #1051 on
 the very chain it runs on.
 
-**§E is therefore ONE STATIC BODY that asks the catalog which route exists.** Where
-`clara._assert_plan_authority` is present the twin `perform`s it — which is exactly what #1051
-wants of it — and where it is absent the twin carries 0308's own block, character for character.
-§0 pins BOTH pre-images (`2049c1c4…` for 0308 §D, `149b4a3d…` for 0330 §C, the latter measured off
-lane L1's own migration file and equal to the sha L1's ticket report records), so a THIRD shape —
-L1 moving its body again before the merge — refuses BY NAME and says what to re-derive.
+**§E delegates to #1051's predicate unconditionally — recut at integration.** As written on the
+lane it was ONE STATIC BODY that asked the catalog which route existed: where
+`clara._assert_plan_authority` was present the twin `perform`ed it, and where it was absent the
+twin carried 0308's own block, character for character. That branch existed only because the two
+lanes were built in parallel and neither could assume the other's merge order. The merge settled
+it: 0330 and 0338 ship together and 0330 is the lower number, so no chain this file can reach
+lacks the predicate. The `else` arm is gone, §0 gained check 4c, which REFUSES to apply this file
+without the predicate, and the twin now delegates every kind but its own.
+
+**Why the dormant copy could not simply be left.** #1051's own cells measure it.
+`p1051.wall.one_definition` refuses any clara body that both CALLS the predicate and keeps a copy
+of the wall's sentence, and `p1080.wall.one_spelling` re-asks the same question across the whole
+schema; on the integrated chain this body was both, and both cells went red at the merge. A second
+copy of an authority wall, even an unreachable one, is exactly the drift #1051 exists to close.
+
+§0 still pins BOTH pre-images (`2049c1c4…` for 0308 §D, `149b4a3d…` for 0330 §C, the latter
+measured off lane L1's own migration file and equal to the sha L1's ticket report records), so a
+THIRD shape refuses BY NAME and says what to re-derive. What the recut moved is the body this file
+INSTALLS, never the bodies it accepts finding.
 
 **Not two `create or replace` statements chosen by a `do` block**, which is what the first cut of
 this fix did: that is dynamic function-creating DDL, and `scripts/check-wiki-dynamic-sql.mjs`
 refuses it without a contract-level `DYNAMIC_SQL_ALLOWLIST` waiver — measured, the lint named this
-exact statement — while its own first piece of advice is *write the statement as plain SQL*. The
-runtime branch is plain SQL, and the tail can read every relation it names.
+exact statement — while its own first piece of advice is *write the statement as plain SQL*. After
+the integration recut there is no branch left to choose at all: one static body, plain SQL.
 
-**The fallback is not a weaker wall, and no estate ever runs two live copies.** It is 0308's block,
-admitting the same three reference kinds and raising the same payloads the predicate raises, and it
-is reachable only while the predicate does not exist. The whole `else` arm can be deleted the day
-#1051 is on every chain. Driven both ways: `p1050.authority.wall_route` proves the ROUTE inside one
-rolled-back transaction (absent → 0308's `invalid_authority_kind`; a stand-in at the exact
-signature → the twin delegates to it; and this file's own `standing_instruction` kind never reaches
-it either way), and the eight authority axes were driven through `clara._obo_plan_core` with L1's
-REAL predicate created from its own migration file in a rolled-back transaction: identical on both
-routes, code and `detail` byte for byte — `authority_rule_unsupported`, `invalid_authority_kind`,
+**The eight authority axes were driven on both routes before the recut** and were identical, code
+and `detail` byte for byte — `authority_rule_unsupported`, `invalid_authority_kind`,
 `authority_ref_invalid` on each of `object` / `kind` / `id`, the explicit-with-standing-ref
 pairing, and `authority_ref_unresolved` on both the chat-task and the standing-instruction
-reference.
+reference — which is why deleting the fallback changes no behaviour any chain could observe.
+`p1050.authority.wall_route` still proves the ROUTE inside one rolled-back transaction, and it too
+was recut at integration so that both arms stay reachable on a chain that carries 0330.
 
 **The second kind stays OUTSIDE the shared predicate, and that is a decision.**
 `clara._assert_plan_authority` admits exactly one authority kind and is called by the human plan

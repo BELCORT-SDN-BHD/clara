@@ -302,8 +302,8 @@ async (t) => {
 
 test("p1050.authority.wall_route -- the twin asks the CATALOG which wall to use: where lane L1's "
   + "shared predicate exists it DELEGATES to it, and where it does not it carries 0308's own "
-  + "block. Driven inside one rolled-back transaction, which makes BOTH arms reachable whether "
-  + "or not lane L1's 0330 is on the chain",
+  + "block. RECUT AGAIN AT INTEGRATION: that fallback arm no longer exists, so what is driven "
+  + "here is the delegation itself and the one kind that never reaches it",
 async (t) => {
   if (await standingGate(t)) return;
 
@@ -314,49 +314,40 @@ async (t) => {
   // creating L1's real predicate from its own migration file inside a rolled-back transaction
   // (recorded in this lane's fix report); this cell holds the part a merge can move.
   //
-  // BIMODAL ON THE CHAIN, recut at integration (riders sweep wave, L1's 0330 against L2's 0338).
-  // This cell used to ASSERT that clara._assert_plan_authority is absent, which is true on lane
-  // L2's own rig and false the moment L1 merges: 0330_plan_authority_wall_predicate.sql mints it
-  // and 0338 §E then routes to it. Both chains are real ones this file ships on, so the cell now
-  // READS the catalog instead of pinning it, names the shape it found, and drops the predicate
-  // inside this same rolled-back transaction when it is there -- which keeps the fallback arm
-  // reachable and keeps every assertion below exactly as strong as it was. A plpgsql body naming
-  // a function resolves at run time and records no pg_depend edge, so the drop needs no cascade
-  // and the three plan bodies that call the predicate are untouched by it.
+  // RECUT AT INTEGRATION (riders sweep wave, L1's 0330 against L2's 0338), twice, and the second
+  // recut is the one that matters. As written on the lane this cell asserted that
+  // clara._assert_plan_authority is ABSENT and then drove 0338 §E's FALLBACK arm -- 0308's own
+  // wall, which §E carried for a chain that had not yet taken #1051. Both facts died at the merge.
+  // The predicate is always present now (0330 is the lower number and ships in the same release),
+  // and the fallback arm was DELETED from §E, because #1051's own census cells refuse any body
+  // that both calls the predicate and keeps a copy of the wall's sentence. So there is no second
+  // arm left to drive and this cell no longer pretends there is. What it holds instead is exactly
+  // what the recut body claims: the twin keeps no wall of its own, it calls the predicate for
+  // every kind but one, and its own kind never reaches the predicate.
   const MARKER = "p1050 stand-in predicate was called";
   const out = await asRoot(async (c) => {
     await c.query("begin");
     try {
-      // THE CHAIN STATE, read rather than assumed.
+      // 1 - THE TWIN KEEPS NO WALL OF ITS OWN, read off the catalog. This is the claim §E's
+      //     integration recut makes, seen from the side #1051's own census measures it from.
+      const body = await c.query(
+        `select p.prosrc as src from pg_proc p
+          where p.oid = 'clara._obo_plan_core(text,uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)'::regprocedure`);
+      assert.equal(body.rows.length, 1, "the on-behalf twin is absent");
+      const twin = body.rows[0].src.replace(/\s+/g, " ");
+      assert.ok(twin.includes("clara._assert_plan_authority("),
+        "the twin does not reach #1051's shared predicate at all");
+      assert.ok(!twin.includes("a plan authority reference names an accounting_work"),
+        "the twin still carries its own copy of the wall -- 0338 §E's integration recut was lost");
+
+      // 2 - AND #1051's PREDICATE IS THERE TO BE CALLED. 0338's own §0 refuses to apply without
+      //     it, so this is the chain's prerequisite restated here, read rather than believed.
       const before = await c.query(
         "select to_regprocedure('clara._assert_plan_authority(text,jsonb,uuid,uuid)') is null as absent");
-      const predicateOnChain = before.rows[0].absent === false;
-      if (predicateOnChain) {
-        await c.query("set local role clara_fn_owner");
-        await c.query("drop function clara._assert_plan_authority(text,jsonb,uuid,uuid)");
-        await c.query("reset role");
-        const gone = await c.query(
-          "select to_regprocedure('clara._assert_plan_authority(text,jsonb,uuid,uuid)') is null as absent");
-        assert.equal(gone.rows[0].absent, true,
-          "#1051's predicate survived the drop inside this transaction");
-      }
+      assert.equal(before.rows[0].absent, false,
+        "#1051's predicate is absent -- 0338 §E delegates to it unconditionally and could not have applied");
 
-      // THE FALLBACK ARM, on the chain as it stands.
-      await c.query("savepoint probe1");
-      const fell = await c.query(
-        `select (select count(*) from (select clara._obo_plan_core('amortisation_schedule',
-            $1::uuid, $2::uuid, $3::uuid, 'route probe', 'nonsense',
-            jsonb_build_object('kind','chat_task','id',$4::text), 'monthly', 'last_day', null,
-            'Asia/Kuala_Lumpur', current_date, current_date + 30,
-            jsonb_build_object('lines', jsonb_build_array()))) q) as n`,
-        [NOWHERE, NOWHERE, NOWHERE, NOWHERE]).then(() => null, (e) => e);
-      await c.query("rollback to savepoint probe1");
-      assert.ok(fell, "the twin admitted an unknown authority kind");
-      assert.equal(fell.code, "CLR10");
-      assert.equal(JSON.parse(fell.detail).reason, "invalid_authority_kind",
-        "the fallback arm is not 0308's own wall");
-
-      // NOW #1051 EXISTS. A stand-in at the exact signature, raising a marker of its own.
+      // 3 - THE ROUTE. A stand-in at the exact signature, raising a marker of its own.
       await c.query("set local role clara_fn_owner");
       await c.query(
         `create or replace function clara._assert_plan_authority(
@@ -398,28 +389,21 @@ async (t) => {
       assert.equal(d.reason, "authority_ref_invalid",
         "the standing-instruction kind was handed to the shared predicate, which does not admit it");
       assert.equal(d.constraint, "kind");
-      return predicateOnChain ? "driven-with-0330" : "driven-without-0330";
+      return "driven";
     } finally {
       await c.query("rollback");
     }
   });
-  assert.ok(out === "driven-with-0330" || out === "driven-without-0330", out);
+  assert.equal(out, "driven");
 
-  // THE TRANSACTION LEFT NOTHING BEHIND. Rolled back, and re-read rather than assumed: the
-  // stand-in is gone either way, and where the chain carries #1051's real predicate the rollback
-  // put it back. Both are the SAME assertion -- the catalog is exactly what it was before.
+  // THE TRANSACTION LEFT NOTHING BEHIND. Re-read rather than assumed: the shared predicate is
+  // still there, there is exactly one of it, and it is L1's own body rather than the stand-in
+  // this cell wrote over it -- the marker is nowhere in it.
   const after = await rootQuery(
-    "select to_regprocedure('clara._assert_plan_authority(text,jsonb,uuid,uuid)') is null as absent");
-  assert.equal(after.rows[0].absent, out === "driven-without-0330",
-    "the transaction moved clara._assert_plan_authority outside its own rollback");
-  if (out === "driven-with-0330") {
-    // …and it is L1's body, not the stand-in's: the marker this cell installs is nowhere in it.
-    const src = await rootQuery(
-      `select p.prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-        where n.nspname = 'clara' and p.proname = '_assert_plan_authority'`);
-    assert.equal(src.rowCount, 1, "more than one shared predicate is live");
-    assert.ok(!src.rows[0].prosrc.includes(MARKER), "the stand-in predicate outlived its transaction");
-  }
+    `select p.prosrc as src from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname = '_assert_plan_authority'`);
+  assert.equal(after.rowCount, 1, "the shared predicate is gone, or there is more than one of it");
+  assert.ok(!after.rows[0].src.includes(MARKER), "the stand-in predicate outlived its transaction");
 });
 
 test("p1050.authority.resolve -- clara._authority_ref_refusal resolves a firm_standing_instruction "

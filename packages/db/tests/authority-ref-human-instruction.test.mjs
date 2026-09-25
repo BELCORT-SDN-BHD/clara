@@ -264,15 +264,37 @@ test("p977.definition.one both doors REACH clara._authority_ref_refusal — the 
   // names it once for both — which is the same claim ("no door keeps its own copy") counted at
   // the place the copies actually live. Still an EXACT closed world in either branch: a reader
   // outside the expected roster still reds this cell.
+  // #1050 (0338) GIVES THE TWIN ONE KIND OF ITS OWN, and that makes it a reader again. Recut at
+  // integration (riders sweep wave, L1's 0330 against L2's 0338). The owner's re-brief of #1050
+  // lets a named member of the firm record a FIRM-LEVEL STANDING INSTRUCTION, and the unattended
+  // prepayment lane cites that row as its directing human. 0338 §E answers that one kind inside
+  // `clara._obo_plan_core` and hands every other kind to #1051's shared predicate, deliberately:
+  // folding `standing_instruction` into the predicate would admit a firm's blanket delegation at
+  // the HUMAN plan door too, which the ruling gives it to nobody and which 0338's own tail item 6
+  // refuses. Answering it there means resolving it, and it is resolved through THIS definition —
+  // the same #977 resolver every other kind goes through, at firm scope. So the twin is back on
+  // the roster, and that is #977's rule holding on the machine lane rather than escaping it.
+  //
+  // MEASURED, never assumed, the same way the twin's own presence is: 0338 mints
+  // `clara.firm_standing_instructions`, so the catalog carrying that relation is the fact that
+  // says this chain has the second kind on it. Everything else stays an EXACT closed world — a
+  // reader outside the expected roster still reds this cell.
+  const standingKindLive = (await rootQuery(
+    "select to_regclass('clara.firm_standing_instructions') is not null as ok")).rows[0].ok;
+  const oboReads = oboTwinLive && standingKindLive;
   assert.deepEqual(readers,
     // `order by p.proname` above is the catalog's own C ordering (proname is `name`), so the
     // underscore-led names sort first.
     planWallLive
-      ? ["_assert_plan_authority", "sign_depreciation_authority"]
+      ? (oboReads
+        ? ["_assert_plan_authority", "_obo_plan_core", "sign_depreciation_authority"]
+        : ["_assert_plan_authority", "sign_depreciation_authority"])
       : [...(oboTwinLive ? ["_obo_plan_core"] : []),
         "create_accounting_plan", "sign_depreciation_authority"],
     "…and exactly the two doors the ruling names — plus #941's on-behalf twin of the plan door, "
-    + "counted at #1051's shared wall once that is live — read the one definition");
+    + "counted at #1051's shared wall once that is live, and counted again in its own right once "
+    + "#1050's standing-instruction kind gives it a reference of its own to resolve — read the "
+    + "one definition");
 });
 
 // ===========================================================================================

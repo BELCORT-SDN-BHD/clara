@@ -159,7 +159,11 @@ begin
 
   -- 4b · clara._obo_plan_core -- THE BODY TWO LANES WRITE, in ONE of its THREE admissible shapes:
   --      0308 §D's (a chain without lane L1), 0330 §C's (the integrated chain, L1 first), or this
-  --      file's own recut. §E writes whichever of the two it finds; anything else refuses by name.
+  --      file's own recut. Anything else refuses by name. RECUT AT INTEGRATION: §E used to write
+  --      whichever shape it found; it now always writes the DELEGATING one, because 0330 ships in
+  --      the same merge at a lower number, so the predicate is on every chain this file can reach.
+  --      Check 4c below makes that a refusal rather than an assumption. The 0308 arm is kept in
+  --      this pin because a pre-image that is neither shape must still refuse BY NAME.
   select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex'), p.prosrc into v_sha, v_src
     from pg_proc p where p.oid = v_obo::regprocedure;
   if v_sha is null then
@@ -173,6 +177,17 @@ begin
   else
     raise exception '0338 prestate: % is none of its three admissible shapes -- not 0308 §D (%), not 0330 §C''s post-image (%), and not this file''s own recut; live sha %. Lane L1 moved it again: re-derive §E''s POST-#1051 branch against the new body and re-measure this pin.',
       v_obo, v_obo_pre[1], v_obo_pre[2], v_sha using errcode='CLR10';
+  end if;
+
+  -- 4c · LANE L1's SHARED PREDICATE IS ON THIS CHAIN. Added at integration, with §E's recut:
+  --      §E now DELEGATES unconditionally instead of carrying 0308's wall as a fallback, so the
+  --      predicate is no longer optional for this file -- it is a prerequisite, and a prerequisite
+  --      is a prestate refusal rather than a body that would fail at its first call. 0330 is the
+  --      lower number and ships in the same merge, so on every chain this file can reach it is
+  --      already there; this check is what makes that a fact rather than a belief.
+  if to_regprocedure('clara._assert_plan_authority(text,jsonb,uuid,uuid)') is null then
+    raise exception '0338 prestate: clara._assert_plan_authority is absent -- §E delegates to it unconditionally since the integration recut, so 0330_plan_authority_wall_predicate must apply first'
+      using errcode='CLR10';
   end if;
 
   -- 5 · THE NEIGHBOURS ARE EXACTLY WHAT THIS FILE WAS WRITTEN AGAINST.
@@ -703,7 +718,7 @@ end $c0338_arr$;
 create or replace function clara._obo_plan_core(p_kind text, p_firm uuid, p_client uuid, p_author uuid, p_purpose text, p_authority_kind text, p_authority_ref jsonb, p_frequency text, p_day_rule text, p_day_of_month integer, p_timezone text, p_effective_from date, p_effective_to date, p_basis jsonb)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $c0338_obo$
 declare
-  v_plan uuid; v_rev uuid; v_digest text; v_ref_kind text; v_ref_id uuid; v_reason text;
+  v_plan uuid; v_rev uuid; v_digest text; v_ref_id uuid; v_reason text;
   v_warning jsonb; v_next jsonb; v_via text;
 begin
   -- THE KIND IS A CLOSED SET, and an unknown one RAISES rather than writing a plan row the CHECK
@@ -735,22 +750,26 @@ begin
   -- which this file's own tail item 6 refuses. So the twin answers its own kind here and hands
   -- EVERY other kind, unchanged, to the one wall.
   --
-  -- AND THE WALL IS REACHED BY WHICHEVER ROUTE THE CHAIN HAS. This file and #1051 (0330) both
-  -- write this body, and the sweep plan merges L1 FIRST -- so on the integrated chain the shared
-  -- predicate exists and the twin must `perform` it, while on a chain without #1051 (this lane's
-  -- own rig, and any from-scratch chain that stops below 0330) it does not exist and the twin must
-  -- carry 0308's wall itself. The choice is made at RUN TIME off the catalog rather than at apply
-  -- time off a `create or replace` this file picks, for two reasons: a single unconditional recut
-  -- would silently REVERT #1051 on the very chain it runs on, and the alternative -- two
-  -- `create or replace` statements chosen by a `do` block -- is dynamic function-creating DDL,
-  -- which `scripts/check-wiki-dynamic-sql.mjs` refuses without a contract-level waiver and whose
-  -- own advice is "write the statement as plain SQL". This is plain SQL.
+  -- AND THE WALL IS REACHED THROUGH #1051's ONE PREDICATE. RECUT AT INTEGRATION (riders sweep
+  -- wave, L1's 0330 against this file). As written on the lane, this body chose its wall at RUN
+  -- TIME: where `clara._assert_plan_authority` existed it delegated, and where it did not it
+  -- carried 0308's own block verbatim, so the file could apply to a chain that had not yet taken
+  -- #1051. Its own note ended "the whole elsif arm can be deleted the day #1051 is on every
+  -- chain", and this merge is that day: 0330 and 0338 ship together, 0330 is the lower number,
+  -- and §0 check 4c now refuses to apply this file without the predicate. So the fallback is
+  -- gone and the delegation is unconditional.
   --
-  -- THE FALLBACK IS NOT A WEAKER WALL: it is 0308's own block, character for character, admitting
-  -- the same three reference kinds and raising the same payloads the predicate raises (driven on
-  -- both shapes across all eight authority axes, code and `detail` byte for byte). It is reachable
-  -- ONLY while `clara._assert_plan_authority` does not exist, so no estate ever runs two live
-  -- copies of the wall, and the whole `elsif` arm can be deleted the day #1051 is on every chain.
+  -- WHY IT WAS DELETED RATHER THAN LEFT DORMANT. #1051's own cells MEASURE it. Its census refuses
+  -- any clara body that both CALLS the predicate and keeps the wall's sentence of its own, and
+  -- #1080's does the same across the whole schema; on the integrated chain this body was both, so
+  -- p1051.wall.one_definition and p1080.wall.one_spelling went red at the merge. A dormant second
+  -- copy of an authority wall is exactly the drift #1051 exists to close, and riders wave 4's
+  -- fourth lesson is that a disclosed residual is only safe while nothing measures it.
+  --
+  -- WHAT DID NOT CHANGE. The `standing_instruction` arm below is untouched: it is this file's own
+  -- kind, deliberately OUTSIDE the shared predicate (tail item 6), and it resolves through the
+  -- same #977 resolver every other kind goes through. §0's pin still admits BOTH pre-images, so
+  -- what moved is the body this file INSTALLS, never the bodies it accepts finding.
   if p_authority_kind = 'standing_instruction' then
     if p_authority_ref is null or jsonb_typeof(p_authority_ref) <> 'object' then
       raise exception 'a plan authority names the instruction that carries it'
@@ -781,47 +800,23 @@ begin
         using errcode='CLR10',
           detail=jsonb_build_object('reason',v_reason,'kind','firm_standing_instruction','id',v_ref_id)::text;
     end if;
-  elsif to_regprocedure('clara._assert_plan_authority(text,jsonb,uuid,uuid)') is not null then
-    -- #1051 (0330) IS ON THIS CHAIN: the ONE wall, shared with clara.create_accounting_plan.
-    perform clara._assert_plan_authority(p_authority_kind, p_authority_ref, p_firm, p_client);
   else
-    -- #1051 IS NOT ON THIS CHAIN: 0308's own block, verbatim. See the note above.
-    if p_authority_kind = 'authority_rule' then
-      raise exception 'an authority rule cannot yet authorise a plan; record the explicit instruction instead'
-        using errcode='CLR10', detail='{"reason":"authority_rule_unsupported"}';
-    end if;
-    if p_authority_kind is distinct from 'explicit_instruction' then
-      raise exception 'unknown plan authority kind %', coalesce(p_authority_kind,'(null)')
-        using errcode='CLR10', detail='{"reason":"invalid_authority_kind"}';
-    end if;
-    if p_authority_ref is null or jsonb_typeof(p_authority_ref) <> 'object' then
-      raise exception 'a plan authority names the instruction that carries it'
-        using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"object"}';
-    end if;
-    v_ref_kind := p_authority_ref ->> 'kind';
-    if v_ref_kind is null or v_ref_kind not in ('accounting_work','chat_task','contract_confirmation') then
-      raise exception 'a plan authority reference names an accounting_work, a chat_task or a contract_confirmation'
-        using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"kind"}';
-    end if;
-    begin
-      v_ref_id := (p_authority_ref ->> 'id')::uuid;
-    exception when others then
-      v_ref_id := null;
-    end;
-    if v_ref_id is null then
-      raise exception 'a plan authority reference names a row by id'
-        using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"id"}';
-    end if;
-    v_reason := clara._authority_ref_refusal(v_ref_kind, v_ref_id, p_firm, p_client);
-    if v_reason = 'authority_ref_not_human_instruction' then
-      raise exception 'the instruction this plan cites is not a person''s instruction'
-        using errcode='CLR10',
-          detail=jsonb_build_object('reason',v_reason,'kind',v_ref_kind,'id',v_ref_id)::text;
-    elsif v_reason is not null then
-      raise exception 'the instruction this plan cites does not exist for this client'
-        using errcode='CLR10',
-          detail=jsonb_build_object('reason',v_reason,'kind',v_ref_kind,'id',v_ref_id)::text;
-    end if;
+    -- #1051 (0330) IS ON THIS CHAIN: the ONE wall, shared with clara.create_accounting_plan and,
+    -- from #1080 (0331), with clara._accrual_plan_core. RECUT AT INTEGRATION (riders sweep wave,
+    -- L1's 0330 against this file): this arm used to be an `elsif` on
+    -- `to_regprocedure('clara._assert_plan_authority(text,jsonb,uuid,uuid)')` with an `else` that
+    -- carried 0308's own wall block verbatim, so that this file could apply to a chain that had
+    -- not yet taken #1051. The note above said of that block: "it is reachable ONLY while
+    -- clara._assert_plan_authority does not exist ... and the whole elsif arm can be deleted the
+    -- day #1051 is on every chain". That day is this merge -- 0330 and 0338 ship together and
+    -- 0330 is the lower number, so no chain this file can ever apply to lacks the predicate.
+    -- The block was deleted rather than left dormant because #1051's own cells MEASURE it:
+    -- p1051.wall.one_definition and p1080.wall.one_spelling refuse ANY body that both calls the
+    -- predicate and keeps a copy of the wall's sentence, and a dormant copy is exactly the drift
+    -- #1051 exists to close (riders wave 4, lesson 4: a disclosed residual is only safe when
+    -- nothing measures it). §0 still admits BOTH pre-images, so the prestate is unchanged: what
+    -- moved is the body this file installs, not the bodies it accepts finding.
+    perform clara._assert_plan_authority(p_authority_kind, p_authority_ref, p_firm, p_client);
   end if;
 
   if p_purpose is null or btrim(p_purpose) = '' then
