@@ -425,9 +425,30 @@ group role no client credential is a member of. The block renders above the cont
 the link, with the firm, the role and the masked address; an unknown, expired, revoked or
 already-accepted token gets ONE identical refusal, and the signed-out surface renders NOTHING for
 it — no verdict, no second place that blocks an invitation, the sign-in step unchanged. The read
-is rate-walled (fifteen minutes, five per token and five per address) and a walled read simply
-leaves the block out. The credential never reaches the browser: this app holds only
-`CLARA_AUTH_WALL_SERVICE_TOKEN` and the runtime holds the DSN.
+is rate-walled (fifteen minutes, five per token and five per address). The credential never
+reaches the browser: this app holds only `CLARA_AUTH_WALL_SERVICE_TOKEN` and the runtime holds
+the DSN.
+
+CORRECTED (ticket 1095, 2026-09-25) — "a walled read simply leaves the block out" no longer
+describes the rate-limited case. It is now the ONE indefinite reason the confirm stage renders
+something for: a short notice saying the link has been looked up too many times just now and to
+reload in a little while, distinct from the firm/role/email block (which still needs an `ok: true`
+read) and from the two OTHER indefinite reasons, `transport` and `unreadable`, which still render
+nothing at all — there is nothing for the visitor to do about either. The invitation itself stays
+untouched — this is still a courtesy, never a second admission gate.
+
+**The notice publishes no wait, and that is a decision, not an omission** (ticket 1095, fix round).
+`clara.preview_invite_by_token` walls on TWO limbs — five loads per token and five per origin in
+fifteen minutes — computes each limb's wait independently and advertises the MAXIMUM, with no
+`scope` field, because "naming them would tell a prober which of two budgets it exhausted"
+(`0309_invite_preview_public_door.sql`:461-499, its own comment). On an anonymous page that
+maximum is an activity oracle for a third party: measured on the lane rig, a first-ever request
+from a cold address against a token somebody else had loaded five times four minutes earlier came
+back `rate_limited, 660` with zero rows of the caller's own — and 900 − 660 dates that party's
+fifth-oldest load to the second. So the wait stops at the runtime's `Retry-After` header, where a
+machine reads it; `lib/firm/invite-preview-public.ts`'s outcome type carries no number at all, and
+the copy does not tell this visitor they did the checking (behind a shared NAT, or when the real
+invitee is the one reloading, that was untrue).
 
 CLOSED (ticket 872, migration 0269): a fifth, READ-TIME-ONLY effective status, `issuer_lapsed`,
 now covers exactly the gap the paragraph below used to describe. When a still-`pending`
@@ -541,6 +562,28 @@ See [Cloudflare MCP](https://github.com/cloudflare/mcp) and
 - `RESEND_API_KEY`
 - `STRIPE_SECRET_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
+
+`CLARA_AUTH_WALL_SERVICE_TOKEN` gates three pre-session runtime routes, not one: the confirm wall
+(`/api/auth-wall/confirm`), the resend wall (`/api/auth-wall/resend`, #621) and the signed-out
+invite preview (`/api/invite-preview`, #871). Sharing one value is deliberate — one secret for the
+operator to rotate instead of three — but that means rotating it stops all three at the same time.
+The runtime compares each request's bearer token against the identical `CLARA_AUTH_WALL_SERVICE_TOKEN`
+it holds as its own Fly secret on `clara-runtime` (`packages/runtime/src/authWallRoutes.ts`,
+`packages/runtime/src/invitePreviewRoutes.ts`), so rotate this Worker secret and the matching Fly
+secret together, in the same change: an operator who rotates only one side breaks email
+confirmation, code resend and invite preview all at once, not just the route they meant to touch.
+
+**What a half-rotation looks like in the log**, because the two halves fail differently and an
+operator who greps for the wrong status loses an hour:
+
+| what is wrong | runtime answers | what the runtime log says | what the visitor sees |
+|---|---|---|---|
+| the two copies DISAGREE (this Worker rotated, Fly not, or the other way round) | **401** `{"error":"unauthorized"}` | nothing — a bearer mismatch is a normal refusal, so it is not logged | the confirm wall renders its honest "we couldn't check" (`{kind:"unavailable"}`), and the invite preview block is simply absent (`indefinite("transport")`) |
+| the runtime's copy is UNSET or blank | **503** `{"outcome":"unavailable"}` / `{"error":…}` | `[clara-runtime] … REFUSED: CLARA_AUTH_WALL_SERVICE_TOKEN is not configured` | the same two surfaces, identically |
+
+Both halves are answered above every other probe on purpose: the lane-DSN checks sit BELOW the
+bearer so an anonymous caller cannot read which lane is wired. Nothing the visitor sees
+distinguishes the two cases, which is why the runtime log is the only place to tell them apart.
 
 Build the Cloudflare bundle in Linux with a Linux-native `pnpm install`; it provisions this
 package's Node runtime. Do not reuse this Windows checkout's `node_modules` from WSL because
@@ -772,6 +815,40 @@ reload or a shared link could not reach the Matching tab at all. **No new route 
 `router.replace` creates no history entry — the house's existing behaviour on the registers
 workbench, and the right answer for a sub-nav, where a tab is a view of one page rather than a
 place. **A multi-selection stays OUT of the URL**: a selection set is a draft, not an address.
+
+**#1060 — the registry's `bank` ROW now names that query.** No new route, still: `ACCOUNTING_ITEMS`'s
+existing `bank` entry (`lib/navigation/tree.ts`) gained `tab: "matching"`, the same field
+`receivables`/`assets` already carry to deep-link past the registers workbench's own default. The
+bank workbench's own default stays "accounts" (unchanged, above); the registry now points every
+caller — the sidebar, the accounting hub, ⌘K's Go palette, and `lib/firm/needs-you-links.ts`'s
+`payroll_net_pay_unsettled`/`rent_payable_unsettled` rows — at Matching instead, since that is
+where `PayrollSettlementsSection` and `RentSettlementsSection` actually render the accept act each
+row exists to dispatch to.
+
+**#1059 fix round — the reverse route is DURABLE and RESUMABLE.** The first cut kept the accept
+receipt in `PayrollSettlementsSection`'s React state, so the route to undo a settlement existed only
+inside the mount that made it; a reload left the person back on the two general-purpose doors the
+ticket exists to replace. `lib/bank/payroll-settlement-reversals.ts` derives the list from the ledger
+on every hydration instead, through RLS-scoped table reads this estate already grants
+(`journal_entries.flags` carries 0298's `payroll_settlement` marker;
+`bank_match_entry_members`/`bank_matches` carry the match) — **no new door, no new view, no
+migration**, and no jsonb filter operator guessed: the marker test is done in TypeScript over rows
+the server filtered on ordinary columns. It reports three states, because the ledger has three:
+`settled` (both doors owed), `unmatched` (the bank line was already freed — only `reverse_entry`
+is owed) and `awaiting_checker` (0298's high-stakes DRAFT, whose remedy is `clara.withdraw_draft`,
+not a reversal). That third state is what makes the ceremony resumable: a `reverse_entry` refusal
+after a successful unmatch used to leave a half-reversed ledger whose only visible next step could
+never succeed, because `unmatch_bank_match` refuses an already-unmatched match by name. The panel
+also reads a CLR10 `already_unmatched` DURING the composition as "that half landed", never as a
+failure. **The panel remembers nothing.**
+
+**#1060 fix round — one decider for the bank destination.** `components/bank/bank-workbench.tsx`'s
+`TABS` tuple and `lib/navigation/tree.ts`'s `BankTab` union were two hand-copies with no link, so a
+renamed view would not have redded the registry entry that deep-links to it; the workbench now
+imports `BankTab` and is checked against it in both directions at compile time. And
+`client-bank-summary.tsx` — the one surface that spelled `/clients/:id/bank` by hand — goes
+through `accountingHref` like every other caller, so the sidebar, the accounting hub, ⌘K and the
+client-home card give ONE answer. `lib/navigation/tree.test.ts` scans for a second decider.
 
 **ONE DECISION, ONE KEY, on `match_bank_line` only** (`lib/bank/match-opkey.ts`). Its operation
 key is DERIVED from the intent tuple `{client, sorted line ids, sorted entry ids, cents, ack
@@ -2105,6 +2182,54 @@ Three things that component now says which neither surface said before:
 The accrual form's method hint is rule-dependent for the same reason (#937): it stated that one rule
 exists, beside a control that offers two.
 
+## #1070 — the accrual detail view renders the per-period schedule
+
+`clara.get_accrual_adjustment` (0303/#937) has answered with `period_amounts` since the door was
+widened; `components/accruals/accrual-detail.tsx` (#652) never read it, so a reader of a
+`stated_period_amount` accrual's OWN detail page saw only the window-total `amount_cents` and no
+breakdown by due date — the create and correction forms both already rendered the block
+(`AccrualPeriodAmountsBlock`, above), and the side was already on this same page (#942's own note at
+`accrual-detail.tsx:90-93`), so the detail view was the one surface still missing a fact the register
+and both forms already told a reader.
+
+**Read-only, and absent rather than empty.** The array is always present — `[]` under `stated_amount`
+— so the new section renders when `period_amounts.length > 0` and not at all otherwise; there is no
+third state to invent for "this accrual does not use this rule". Each row is the due date and its
+own stated amount, the same two fields `AccrualPeriodAmountsBlock` edits, under the SAME heading key
+(`periodAmountsHeading`, "Amount for each period") so a reader who has seen either form recognises
+the label. Unlike the form's block this is not a control: no select, no remove button, no running
+total — the amounts are already admitted, and a detail page does not offer to change a row the door
+already wrote.
+
+`components/accruals/accrual-detail.test.tsx` is the first dedicated unit test file for this
+component (none existed before this ticket): it proves the per-period schedule renders its own due
+dates and amounts, that the section is absent for a `stated_amount` row, and that the side (already
+built) renders labelled consistently with the list and forms.
+
+## #1071 — the register's Amount column names whether its figure is per period or a window total
+
+`clara.list_accrual_adjustments` answers `amount_cents` with two different meanings depending on
+`method.rule`: under `stated_amount` it is the figure THIS accrual posts every period; under
+`stated_period_amount` (#937) it is the TOTAL across the whole authority window, and the per-period
+figures live only in `period_amounts`, which the register does not render (that is #1070's detail
+view, by #1070's own out-of-scope line). `components/accruals/accruals-list.tsx`'s Amount column
+printed the bare figure for both rows alike, so a reader scanning the register could not tell — from
+the Amount column alone — which fact they were looking at. The Term column's method sentence
+(`methodLabel`, unchanged by this ticket) already states the same fact in different words, but not
+beside the money, which is where a reader who reads figures first needs it.
+
+**A new short label beside the money, for both rows.** `amountKindLabel` (beside `sideLabel` and
+`methodLabel`, same honest raw-value fallback for a rule this build has not enumerated) maps
+`stated_amount` → "Per period" and `stated_period_amount` → "Window total"
+(`amountKindPerPeriod` / `amountKindWindowTotal`), rendered as a `text-xs` line under the figure —
+the same shape `occurrenceCount` already uses under the State badge. Both cases are labelled rather
+than leaving the per-period case silent, so the column reads the same way for every row instead of
+asking a reader to infer "no label means per period".
+
+`components/accruals/accruals-list.test.tsx`'s `1071.list.amount-kind` cell is the coverage: one
+`stated_amount` row and one `stated_period_amount` row, distinguishable amounts, and the label tied
+to the right row's own figure in both directions (neither label leaks onto the other row's amount).
+
 ## #940 — which accounts hold prepayments, and what the surfaces say when none do
 
 Before migration 0306 any ordinary asset account could be amortised: the prepaid-leg wall is
@@ -2221,3 +2346,212 @@ from a refused one in the database's own word, and the who/when/why behind a per
 **Copy is EN only**, for the reason #940 records above: this build ships a single static locale, so
 the brief's "en and zh copy" has no zh catalogue to land in. The namespace is `DeferredRevenue`,
 plus six keys in `PrepaymentAccounts` for the panel's purpose control and its row badges.
+
+## #1073 — a third remedy for "a bill posted inside an accrued period", and what makes it a third
+
+The `accrual_bill_conflict` item offered two remedies (#938): **Reverse now**, which calls
+`clara.request_plan_catch_up` over the window `[the flagged due date, its scheduled reversal date]`,
+and **Skip this period's next occurrence**, which settles a FUTURE period and touches the flagged one
+not at all. Neither is "book the correcting entry for exactly this one period". **Reverse this period
+only** is, and it calls `clara.reverse_plan_occurrence` (0333) with the flagged period's own due
+date — `p_plan`, `p_due`, `p_op_key`, and nothing else.
+
+**The surface computes no window, because it no longer has to.** `reverseAccrualNow` still mirrors
+`clara._plan_reversal_date` by hand (`accrualReversalDate` in `lib/accruals/api.ts`) in order to
+build the catch-up's `p_to`; `reverseAccrualPeriod` sends a PERIOD and the database resolves that
+date itself. The mirror stays for the remedy that needs it and is not part of the new act — a
+schedule rule with two homes eventually has two answers.
+
+**The sentence beside the control claims no ledger difference, because there is none.** On this lane
+both remedies admit the same occurrence and leave the same amount on the books for the period —
+measured on two identically configured clients in
+`packages/db/tests/plan-occurrence-reversal-door.test.mjs` (`p1073.one_period`), not inferred. What
+differs is the ACT: its own receipt, its own audit verb, and a refusal that names the OCCURRENCE
+(`not_yet_due`) where the catch-up names the window (`catch_up_in_future`). The copy says exactly
+that: *"books the reversing entry for this period alone, and can never touch another period. It
+leaves the same amount on the books for this period as Reverse now does."*
+
+**Two conditions behind that sentence, recorded so they are a decision rather than an accident**
+(review round 2026-09-25, SPEC-05 and ADV-L01-02).
+
+* *"the same amount"* is unconditional as written, and it is true of every schedule this estate
+  admits — but only because one wall elsewhere makes the counter-example unreachable. "Reverse now"
+  is a CATCH-UP over `[dueDate, accrualReversalDate(dueDate)]`, and on a monthly schedule due on the
+  1st that window's last day would also be the NEXT period's accrual day, so the catch-up would
+  admit a second event. `clara._assert_plan_schedule` refuses exactly that plan shape by name
+  (`reversal_collides_with_next_occurrence`), which is why no such accrual exists to contradict the
+  copy. If that wall is ever relaxed, this sentence is the first thing that becomes false; the
+  owner's call is whether to keep it or name the period instead.
+* The two remedies leave the same LEDGER and a different HISTORY. "Reverse now" commits its receipt
+  whether or not the occurrence was admitted, so a refusal it reaches (for instance a period whose
+  accrual never posted) stays recorded on the plan for a colleague to read. "Reverse this period
+  only" refuses by raising, which rolls the record back with the act and frees the idempotency key
+  for a real retry. Both behaviours are right for their own shape; the person pressing one of two
+  buttons is not told which they get. Driven through both doors by
+  `packages/db/tests/plan-occurrence-reversal-door.test.mjs`'s
+  `p1073.history.refusal_record_diverges`.
+
+**One component, both surfaces.** `components/firm/accrual-bill-conflict-affordance.tsx` is what the
+firm-wide Needs-you inbox mounts through `NEEDS_YOU_AFFORDANCES` and what the Accruals page's own
+conflict section (`components/accruals/accrual-bill-conflicts.tsx`) mounts directly — the shape #938's
+fix round collapsed to one copy. A third control added there reaches both surfaces by construction,
+and the unit battery asserts the registry entry rather than assuming it. The browser walk
+(`accrual.walk.reversePeriod`) drives the control on the Accruals page and proves the one thing only
+a browser can: a governed refusal reaches the person VERBATIM — `CLR10 · not_yet_due` and the
+database's own sentence — instead of the act appearing to have worked. It is also the first refusal
+cell this walk has ever had.
+
+**The plan-not-active face says "none of the remedies", not "neither".** All three are plan-lane
+doors that refuse `plan_ended` / `plan_paused`; the row stays (the double count has not gone away)
+and the controls go, which is the same 裁-187 law #938's fix round applied to the first two.
+## #1052 — the allocation editor says which enrolment an advance came from
+
+The owner's ruling of 2026-09-24 on #931 lets a claim discharge an advance held under ANOTHER live
+enrolment of the same client whose person label is the claimant's, on two conditions. The database
+half of the first one is migration `0340` (`packages/db/README.md`). The second is here, in the
+ruling's own words: "the allocation editor shows, beside each such advance, the enrolment it came
+from, so the preparer's confirmation is a confirmation of that specific account."
+
+**One optional prop, on the shared editor.** `components/registers/staff-advance-allocations-editor.tsx`
+takes `sourceEnrolment?: (candidate) => string | null` beside `optionLabel`. When it answers a
+sentence, the editor appends it to that candidate's option — so it is visible BEFORE the choice —
+and renders it again as its own line beside the confirmed row, `data-testid`
+`allocation-source-enrolment`, so it is visible AFTER it. A `<select>` only ever shows the chosen
+option's text, and the preparer confirms a LIST and reads it back as a list, which is why the line
+is not merely a suffix inside the control. A caller that passes nothing (the register's own
+`BookApplicationDialog`, whose default label already names the account and the person) renders
+exactly what it rendered before.
+
+**The CALLER decides what "another enrolment" means**, because only the caller knows what the
+subject is: a claim has a claimant enrolment, the book-application dialog has none at all.
+
+**The claim form's answer is a comparison of ENROLMENTS, never of account codes.**
+`staff-expense-claim-form.tsx` resolves the claimant's own live enrolment the way the door resolves
+it (`clara._claim_resolve_claimant`): the stated enrolment, or the live enrolment on the account
+dedicated to them. Any offered advance whose `enrolment_id` is not that one carries the line. That
+distinction is not academic — one advance account retired and re-enrolled after a name correction
+carries a second generation, and an advance issued under the first is not the current claimant
+enrolment's however the account code reads. With the enrolment register unread (`null`), nothing is
+claimed at all: the form knows of no enrolment to compare against, the same conservative direction
+`claimantIsNew` already takes.
+
+**What is deliberately NOT here.** Which candidates the claim form offers at all is untouched: the
+chooser still narrows `staff_advance_summary` to the claimant's own account code, so an advance on
+a SECOND enrolled account of the same person still does not reach the list. That filter, and the
+per-allocation account code and derived-preview legs a cross-account allocation would need on the
+wire, are #1066's, which rides on this prop.
+
+One key, `StaffExpenseClaim.advanceSourceEnrolment`. Copy is EN only, for the reason #940 records
+above.
+
+## #1066 — the chooser's own candidate filter reaches a second enrolled account
+
+#1052's "What is deliberately NOT here" paragraph above said the chooser still narrowed
+`staff_advance_summary` to the claimant's own account code alone, and named this ticket as the one
+that widens it. This is that ticket, and that paragraph is no longer current: an advance on a
+DIFFERENT enrolled account of the same client now reaches the chooser too, when the wall
+(`clara._assert_claim_basis`, 0340) would admit it — arm (b) of the claimant-ownership match.
+
+**`advanceCandidates` in `staff-expense-claim-form.tsx`** now admits a `staff_advance_summary` row
+whose `account_code` differs from `draft.claimantAccountCode` when, and only when, its own
+`enrolment_active` is true (mirroring the wall's `sa2.active`: a RETIRED second-account enrolment
+still fails arm (b) at the door and is not offered here either) AND its `person_label`, normalised
+`.trim().toLowerCase()`, equals the claimant's own resolved label, normalised the same way — the
+identical case/whitespace-tolerant match 0340 put at the wall, kept in lockstep on purpose so the
+chooser never offers a candidate the door would refuse, and never hides one the door would admit.
+The claimant's own label is read off the enrolment register (`listStaffAdvanceEnrolments`) via the
+claimant's OWN resolved enrolment (`claimantEnrolmentId`, moved above `advanceCandidates` because
+the filter now needs it too) — `null` while the register is unread or the claimant's own account
+carries no live enrolment yet, in which case no second-account candidate is offered: the same
+conservative direction `advanceSourceEnrolment` already takes for naming one.
+
+**The naming comes for free.** #1052's `advanceSourceEnrolment` already compares `enrolment_id`
+against the claimant's own resolved enrolment and names any candidate that differs; a second-account
+candidate's `enrolment_id` is by construction never the claimant's own, so it is named exactly the
+way an earlier-generation, same-account candidate already was. No change to that reader, or to the
+shared editor, was needed.
+
+**What is unchanged.** The claimant's own account's candidates are exactly as `#930`/`#931` left
+them — `account_code === draft.claimantAccountCode`, `isOutstandingAdvance`, nothing more — so a
+single-account claim (no second live enrolment shares the claimant's label) behaves byte for byte
+as before. `suggestAllocationsByDate` is untouched: it is already account-agnostic (oldest
+`issue_date` first, across whatever candidates it is given), so a claim spanning two accounts
+suggests correctly with no change there either.
+
+**The wire and the preview needed the per-allocation account too, and this ticket owns that as
+well** (#1052's own paragraph named it: "the per-allocation account code and derived-preview legs a
+cross-account allocation would need on the wire, are #1066's"). Offering a second-account candidate
+in the chooser is not enough on its own: `clara._assert_claim_basis` (0340) refuses a claim whose
+`claim.advance_account_code` disagrees with the confirmed list's own first entry, and
+`clara._claim_allocations` (0301) defaults any allocation missing its own `account_code` to that
+same field — so a confirmed row on the second account would silently be treated as living on the
+claimant's own account and refused `not_this_client`, or worse, credited to the wrong one.
+
+- **`toClaimWire`** takes a fourth, optional `advanceAccountCodes: ReadonlyMap<string, string> | null`
+  (advance_id → its real account). `claim.advance_account_code` now follows the confirmed list's
+  HEAD allocation's real account — falling back to the typed field when the lookup is absent or
+  does not know that id, byte-identical to every caller before this ticket, since the head's real
+  account and the typed field were always the same value when only one account could ever be
+  offered. A non-head row states its own `accountCode` only when it differs from the head's,
+  mirroring 0301's own "the caller decides, the door defaults" shape.
+- **`derivedLines`** takes the same lookup as its second, optional argument and, for an
+  `advance_application` claim, groups the confirmed allocations by their REAL account (again
+  falling back to the head's account when unknown) instead of always emitting one leg on
+  `settlementAccountCode(draft)` — one credit leg per account, summed, in account-code order,
+  mirroring `clara._claim_journal_basis`'s own widening (migration 0301) exactly. A single-account
+  claim collapses to the one leg this function has always produced.
+- **The form** builds the lookup once, `advanceAccountCodes` — every row of the SAME
+  `staff_advance_summary` read `advanceCandidates` narrows, keyed by `advance_id`, not only the
+  offered rows, so a stored draft naming an advance a later read no longer offers still resolves —
+  and passes it to both.
+- **The independent source of truth for the exact wire shape and the exact grouping** is
+  `packages/db/tests/staff-expense-claim-allocations.test.mjs`'s own `p931.accounts` cell, already
+  proved end to end through the real door: its `allocClaim` helper states
+  `advanceAccountCode: allocations[0].account_code ?? SECHART.advance` and its `allocatedBasis`
+  helper groups exactly `a.account_code ?? c.advance_account_code`. Neither number nor rule here
+  was invented for this ticket; both are read off that file.
+
+**What is deliberately out of scope**, per the ticket: no staff master, and no widening of the chat
+tool's own allocation handling beyond its existing successor contract (`chatTurn_v22`).
+
+## #1068 — the empty allocation list still focuses something real
+
+#931 replaced the advance-application arm's single `advanceId` `<select>` with the shared
+allocation-list editor, whose "×" on a row has no floor at one: a preparer can remove EVERY row,
+leaving `draft.advanceAllocations` truly empty. `claimAllocations`
+(`lib/work/staff-expense-claim.ts`) still has to say what an empty confirmed list means for
+validation, and it says the same thing it always has — nothing is named, so it synthesises one
+phantom row (`{advanceId: "", amountCents: claimTotalCents(draft)}`) purely so
+`validateClaimDraft` can raise its ordinary `advanceRequired` issue, addressed by
+`allocationFieldId(0, "advanceId")` — the literal field id `"advanceId"`, exactly as it would be
+for a real row 0. **That addressing was never the bug and is unchanged by this ticket.**
+
+The bug was on the DOM side: `StaffAdvanceAllocationsEditor`'s empty state rendered only its own
+"Add allocation" button, carrying no id at all. `errorFor("advanceId")`'s message still rendered
+(the `<Field>` wrapper around the whole arm renders its error paragraph unconditionally), but the
+existing focus/scroll-to-error mechanism (`fields.current.get("advanceId")?.focus()`) found nothing
+registered under that id and silently did nothing — a refusal a preparer could not be moved to.
+
+**The fix is one conditional prop-spread on the shared editor, nothing in `lib/work/`.** When
+`allocations.length === 0`, the "Add allocation" button now also receives
+`rowProps?.(0, "advance")` — the SAME call a real row 0 would have received. For the claim form
+that means the button inherits row 0's `id` (`"advanceId"`), the `ref` that registers it as the
+focus target, and its `aria-invalid`/`aria-describedby` wiring; `disabled` is the OR of the
+button's own `candidates.length === 0` guard and whatever `rowProps` states, so the button stays
+correctly disabled while busy or while there is nothing to add. A NON-empty list never reaches this
+branch, so a real row 0 never has its id contested. A caller that passes no `rowProps` at all — the
+staff-advance register's own `BookApplicationDialog`, which has no field-id-addressed validation to
+begin with — is untouched: the spread is empty and the button renders byte for byte as before.
+
+**The seam is the editor, not only the claim form**, for the same reason #1052's own section above
+gives: two callers mount this component, and a cell that only drove the claim form would leave the
+register's caller free to drift. `components/registers/staff-advance-allocations-editor.test.tsx`
+proves the mechanism directly (empty list + `rowProps` given → the button carries row 0's props;
+non-empty list → the real row keeps the id, never the button; no `rowProps` at all, the register's
+own shape → nothing changes); `staff-expense-claim-form.test.tsx` proves the end-to-end seam the
+ticket actually names — a mounted form, the last row removed by its own "×", a submit attempt, and
+`document.activeElement` landing on a real, enabled, rendered node.
+
+**What is deliberately out of scope**, per the ticket: the validation rule itself (an advance is
+still required for this settlement type) and the allocation editor's non-empty behaviour, neither of
+which changed.

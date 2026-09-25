@@ -359,6 +359,13 @@ export type SourceRevisionsResult = {
   facts_version: number;
   authoritative_extraction_id: string | null;
   current_facts_extraction_id: string | null;
+  /** #1056 (migration 0344) — the PAYROLL chain's own count, BESIDE the invoice chain's rather
+   *  than instead of it. `facts_version` counts done `invoice_facts` extractions and reads 0 on a
+   *  payroll summary, which carries none; a payroll revision quoted against that number would
+   *  refuse CLR19 every time. OPTIONAL on purpose: a database below the 0344 frontier answers
+   *  without the key at all, and the surface then offers no payroll control. */
+  payroll_facts_version?: number | null;
+  current_payroll_facts_extraction_id?: string | null;
   lineage: SourceLineageEntry[];
 };
 

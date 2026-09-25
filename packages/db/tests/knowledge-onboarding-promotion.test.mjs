@@ -16,7 +16,7 @@ import {
 } from "./knowledge-fixtures.mjs";
 
 const EXPECTED_CELLS = 13;
-const PAIR_EXPECTED_CELLS = 1; // kp.14 -- #1031's pair-wall cohort (0310 + 0318) on top of 0192
+const PAIR_EXPECTED_CELLS = 2; // kp.14, kp.15 -- #1031's pair-wall cohort (0310 + 0318) on top of 0192
 let live = false;
 let pairWallLive = false;
 let executed = 0;
@@ -555,4 +555,48 @@ pairCell("kp.14 an IMPOSSIBLE year-end pair on a committed plan withholds that o
     live_.records.map((r) => r.knowledge_key).sort(),
     ["entity_type", "financial_year_end_month"],
     "the refused day must not be live in Knowledge");
+});
+// =============================================================================================
+// kp.15 — #1096 (this lane, ticket #1096; the disclosed residual 0318's header names at
+// "DISCLOSED RESIDUAL" and its own function comment repeat, and packages/db/README.md's `## 0318`
+// section discloses under "Disclosed residual"). The pair rule is `clara.set_client_fy_end`'s own
+// calendar rule (0041) copied verbatim, and that rule admits `month = 2 and day = 29`: the pair
+// carries no YEAR to judge a leap year against, so 29 February is accepted UNCONDITIONALLY, in
+// every year, not only a leap one. This is the deliberate, disclosed gap #1096 asks to be PINNED
+// -- no cell anywhere drove month 2 day 29 and asserted the accepted outcome before this one.
+// =============================================================================================
+
+pairCell("kp.15 a 29-February year-end pair is ACCEPTED, in every year -- the disclosed residual #1096 pins (0318's header, its function comment, and packages/db/README.md's ## 0318 section already name it; no year is carried to tell a leap year from any other)", async () => {
+  const w = await knowledgeWorld("p15");
+  // Month 2 (February), day 29: a REAL calendar day in a leap year and an IMPOSSIBLE one
+  // otherwise -- but the year-end pair records no year, so `clara._knowledge_assert_fye_pair`
+  // cannot and does not distinguish the two. Two keys that have nothing to do with the year end
+  // ride beside it, exactly as kp.14's broken pair does, so this cell is its mirror image.
+  const plan = await committedPlan({ firm: w.firm, client: w.clientA, committedBy: w.admin,
+    answers: {
+      entity_type: { value: "sdn_bhd", answeredBy: w.admin },
+      fye: { value: 2, answeredBy: w.admin },
+      fye_day: { value: 29, answeredBy: w.admin },
+    } });
+
+  const receipt = await promoteAsHuman(w.admin, plan);
+
+  // ALL THREE KEYS PROMOTED -- unlike kp.14's day 31, day 29 raises no CLR37 and withholds
+  // nothing, because the pair rule's calendar check admits `v_month = 2 and v_day = 29`
+  // unconditionally (0318 §A, the "DISCLOSED RESIDUAL" comment immediately above that branch).
+  assert.deepEqual(
+    receipt.promoted.map((x) => x.knowledge_key).sort(),
+    ["entity_type", "financial_year_end_day", "financial_year_end_month"],
+    `29 February must be ACCEPTED, not withheld -- this is the disclosed residual, not a new refusal: ${JSON.stringify(receipt)}`);
+  assert.deepEqual(receipt.withheld, [], "no key is withheld when the day is 29 and the month is 2");
+
+  // …AND THE PAIR IS LIVE IN KNOWLEDGE, day 29 included, at the value captured.
+  const live_ = await listKnowledge(w.admin, w.clientA);
+  const byKey = Object.fromEntries(live_.records.map((r) => [r.knowledge_key, r.value]));
+  assert.deepEqual(
+    Object.keys(byKey).sort(),
+    ["entity_type", "financial_year_end_day", "financial_year_end_month"],
+    "29 February must be live in Knowledge, not withheld");
+  assert.equal(byKey.financial_year_end_month, 2);
+  assert.equal(byKey.financial_year_end_day, 29);
 });

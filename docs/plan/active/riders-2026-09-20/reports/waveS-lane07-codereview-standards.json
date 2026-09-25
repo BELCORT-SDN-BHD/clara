@@ -1,0 +1,55 @@
+{
+  "axis": "standards",
+  "lane": "waveS-lane07",
+  "fixed_point": "7bc5a710f",
+  "reviewer_role": "read-only reviewer",
+  "sources": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    "docs/plan/active/riders-2026-09-20/SWEEP-PLAN.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "packages/db/README.md (house migration law)",
+    "apps/web/README.md"
+  ],
+  "verification_performed": [
+    "Read all nine per-ticket reports (waveS-lane07-ticket{1047,1098,1046,1132,1096,1099,1094,1095,1058}.md)",
+    "git diff 7bc5a710f...HEAD --stat and full diffs of migrations, reconciler.mjs, reconcile.test.mjs, invite-preview-public.ts/.test.ts, invite-accept-form.tsx, en.json, README.md files, package.json, rig-meta.mjs",
+    "Grepped all 4 new migrations for SECURITY DEFINER / search_path / owner / grant / revoke / create table to confirm house shape",
+    "Confirmed no applied migration was edited (git diff --name-only on migrations/ shows only 4 new files: 0347-0350)",
+    "Confirmed README.md and apps/web/README.md diffs are pure additions except one explicitly-annotated 'CORRECTED' paragraph (#1095), matching house convention",
+    "Confirmed every commit message ends with the required Co-Authored-By attribution line (19/19 commits)",
+    "Independently re-ran (not merely trusted) 5 of the load-bearing test files against the live lane database (127.0.0.1:55749/clara_l09) and reproduced the reports' own counts exactly: collation-pin-scan.test.mjs (12/12), entry-post-receipts-via-wake-kind-disclosure.test.mjs (3/3), rate-wall-attempts-retention.test.mjs (8/8), operation-census.test.mjs (10/10), rig-isolation.test.mjs (22 pass/1 known skip)",
+    "Verified the 0348 vacuity-control bug narrative (v_floor_raised flag pattern) against the actual migration tail code",
+    "Checked git log for horizontal-slicing risk across all 19 commits; each is a bounded, self-contained slice (no whole battery of red tests committed before any implementation)"
+  ],
+  "findings": [
+    {
+      "id": "STD-1",
+      "ticket": 1046,
+      "severity": "minor",
+      "kind": "smell:duplicated-code",
+      "title": "pruneTraces() now carries four near-identical batch-delete loops instead of one shared helper",
+      "evidence": "packages/runtime/lib/reconciler.mjs:150-216. The #1046 diff adds two more copies (prunedInvitePreviewAttempts at lines 185-199, prunedConfirmationAttempts at lines 201-215) of the exact same shape already used for `pruned` (line 137ish) and `prunedWorkTraces` (lines 150-168): a `for` loop up to maxBatches, a try/catch swallowing only `42883` (undefined_function), accumulate `n`, break when `n < batch`. The only per-copy variance is the SQL text and the accumulator/param names.",
+      "required_fix": "Judgement call, not a hard violation — the diff follows an existing (already-smelly) local convention rather than introducing a new one. Fowler's fix applies: extract one `pruneBatched(client, {sql, unit, amount, batch, maxBatches})` helper and call it four times; would remove roughly 35 duplicated lines. A documented repo standard does not forbid this shape and the ticket's own report cites the precedent explicitly as deliberate ('the same batched-loop way prune_trace_spans / prune_work_execution_traces are already called'), so this is reported as a smell to weigh, not a rule violation.",
+      "failure_scenario": "Not a correctness risk today (all four loops are independently well-tested and green), but a fifth evidence table needing the same retention treatt would be the third copy-paste, compounding the drift risk Duplicated Code names: a bug fixed in one copy (as very nearly happened here — see the 0348 floor-check vacuity-control bug) has three more places it could still be lurking."
+    }
+  ],
+  "no_violations_found_in": [
+    "Migration house shape (header, prestate with sha256(prosrc)/pg_get_constraintdef pins measured live on the lane database, SS/tail structure, preintegration gate module with stable stem, rig-meta cohort where a grant is minted, gate-chain entry appended in migration order) — all four new migrations (0347, 0348, 0349, 0350) conform",
+    "SECURITY DEFINER / owner / search_path / ACL — 0347 and 0348's new functions are all `security definer`, owned by clara_fn_owner, `search_path = clara, pg_temp`, minimally granted (0347: EXECUTE to nobody; 0348: EXECUTE to clara_runtime only, confirmed via grep and via the tail's own live re-measurement)",
+    "No recut of any existing function body anywhere in this lane's diff — nothing to check ACL-preservation against",
+    "No new relation (no `create table`) in any of the four migrations, so the FORCE-RLS/zero-application-role-DML rule is not engaged",
+    "No applied migration edited — confirmed via `git diff --name-only 7bc5a710f...HEAD -- packages/db/migrations/` returning only the four new files",
+    "No frozen-manifest diff — every report's `check-frozen-workflows.mjs` run (with the documented `FREEZE_BASE_REF=7bc5a710f` override for the lane's pre-cut-phase base) is clean; #1058's migration header/test explicitly measures the nine frozen workflow files that mention `via_wake_kind` and touches none of them",
+    "No PRD.md or ARCHITECTURE.md edit anywhere in the diff",
+    "Shared files (package.json $GATES list, rig-meta.mjs, en.json, README.md files) all edited as minimal, sorted-position appends with no reordering or edits to prior sections/entries — verified directly in the diffs",
+    "TDD seams: every test drives a real public interface (a SQL door, a catalog comment/README read, `readPublicInvitePreview`'s courier seam, `InviteAcceptForm`'s render, `pruneTraces()`) — no test reaches a private helper or an internal collaborator; fetch is mocked (a system boundary) in the web courier tests, nothing else is mocked",
+    "No tautological assertions — every expected value across the sampled test files (rate-wall retention, invite-preview wait clamping, create_client idempotence, FYE pair, via_wake_kind disclosure) is an independent literal (a fixed second, a fixed sha256, a fixed 900-second ceiling, a fixed CHECK-constraint string), never a value recomputed the way the subject computes it",
+    "No horizontal slicing — 19 commits across 8 tickets, each a bounded vertical slice (a migration + its own first test cells land together, or one focused test addition per commit); no commit adds a whole battery of red tests with implementation following later",
+    "Vacuity controls present and genuine for every ticket whose whole deliverable is a test or a disclosure, including two that caught and reported a real bug in the vacuity exercise itself (0348's floor-check swallowing its own CLR10 inside the exception handler) rather than glossing over it",
+    "Independent re-execution of 5 of the lane's test files against the live rig reproduced the reports' claimed pass counts exactly, with no discrepancy found"
+  ],
+  "overall_assessment": "This is an unusually well-evidenced lane. Every one of the nine tickets' reports makes claims that are falsifiable and, on spot re-execution against the live lane database, true. House migration law is followed exactly across all four new migrations; no applied migration, frozen workflow, PRD/ARCHITECTURE file, or shared-file ordering convention was violated. The one standards-axis finding is a minor, judgement-call code smell (Duplicated Code in the runtime reconciler) that follows rather than introduces the file's own existing duplication pattern."
+}

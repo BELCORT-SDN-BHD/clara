@@ -40,7 +40,9 @@ import { parkedWork } from "./work-question-fixtures.mjs";
 // world, so this file's gate stays independent of that lane's own fixture surface. 0221 sits BELOW
 // 0266 on the chain (strict migration order), so `claimLabelReady()` alone is the honest frontier:
 // a database old enough to carry 0266 has already applied 0221.
-import { admitStaffExpenseClaimWork, claim, ensureSecChart } from "./staff-expense-claim-fixtures.mjs";
+import {
+  admitStaffExpenseClaimWork, claim, ensureSecChart, seedAdvance, SETTLEMENT, SECHART,
+} from "./staff-expense-claim-fixtures.mjs";
 
 const CLR04 = "CLR04";
 const CLR06 = "CLR06";
@@ -165,6 +167,41 @@ async function gateReceiptWindow(t) {
       + " for an estate sweep against a pre-PR chain.");
   }
   t.skip(`#905 receipt-dated window absent (no ${RECEIPT_WINDOW_STEM} migration applied)`);
+  return true;
+}
+
+// #1069 - the `allocation_count` projection lives in ITS OWN migration (0341), a fourth frontier
+// on the SAME two doors: a slice-frontier CI leg can be pinned anywhere below it and the cell
+// below must skip cleanly there rather than red on a field that does not exist yet.
+const ALLOCATION_COUNT_STEM = "work_claim_allocation_count$";
+let _allocationCountReady = null;
+async function allocationCountReady() {
+  if (_allocationCountReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [ALLOCATION_COUNT_STEM]);
+      _allocationCountReady = r.rows[0].n > 0;
+    } catch {
+      _allocationCountReady = false;
+    }
+  }
+  return _allocationCountReady;
+}
+
+async function gateAllocationCount(t) {
+  if (await allocationCountReady()) return false;
+  // A SKIP IS NOT EVIDENCE, and a FOCUSED run says so out loud (review finding L09-ADV-08), the
+  // same shape gateClaimLabel and gateReceiptWindow above already carry.
+  if (process.env.CLARA_ALLOW_MISSING_WORK_CLAIM_ALLOCATION_COUNT !== "1") {
+    throw new Error(
+      `#1069 allocation_count projection absent (no ${ALLOCATION_COUNT_STEM} row in clara.schema_migrations)`
+      + " and CLARA_ALLOW_MISSING_WORK_CLAIM_ALLOCATION_COUNT is unset -- this is a FOCUSED run"
+      + " and must fail loudly, not skip. Preload"
+      + " ./tests/work-claim-allocation-count-preintegration-gate.mjs for an estate sweep against"
+      + " a pre-PR chain.");
+  }
+  t.skip(`#1069 allocation_count projection absent (no ${ALLOCATION_COUNT_STEM} migration applied)`);
   return true;
 }
 
@@ -1240,4 +1277,68 @@ test("wl.32 the admission-dated and receipt-dated bounds combine as an intersect
     [both.work_id, admissionOnly.work_id, receiptOnly.work_id].sort(),
     "wl.32 an omitted pair (on both axes) reproduces today's page — no Work is silently dropped",
   );
+});
+
+// ===========================================================================================
+// wl.33 - #1069 (fix round, review finding L03-SPEC-01): HOW MANY ADVANCES A CLAIM DISCHARGES,
+// ON THE LIST'S OWN PAGE.
+//
+// #1069's AC2 is "the Work LIST card renders that count when it is greater than 1", and its
+// stated value is giving a reviewer that information WITHOUT OPENING THE CLAIM. The first cut
+// projected `allocation_count` on `clara.get_work_claim_origin` alone - the Work DETAIL read -
+// which is the one surface that cannot deliver that. The list renders from
+// `clara.list_accounting_work`'s own projection (0266 put `claim_id`/`claimant_label` there for
+// exactly this reason, deliberately WITHOUT a second per-row call to the detail door), so the
+// count belongs there, and on the ADDRESSED-row door beside it: 0266's own comment calls that
+// door "the SAME projection clara.list_accounting_work emits", wl.13 asserts it, and
+// `apps/web/lib/work/work-list.ts` types both doors' answers as one `WorkListRow`.
+//
+// THE EXPECTED VALUES ARE READ OFF THE REGISTER ITSELF (`clara.staff_expense_claim_allocations`,
+// #931/0301), never off the door being tested.
+// ===========================================================================================
+test("wl.33 a claim row carries how many advances it discharges, on the page and on the addressed row", async (t) => {
+  if (await gate(t)) return;
+  if (await gateClaimLabel(t)) return;
+  if (await gateAllocationCount(t)) return;
+  const client = await freshWorkClient(ALICE(), "wl33");
+  await ensureSecChart(ALICE(), client, "wl33");
+
+  // TWO real advances on the claimant's own enrolled account, disbursed through the estate's own
+  // doors, then ONE claim that discharges both. 40,000 + 20,500 = 60,500, the claim's own total.
+  const advA = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const advB = (await seedAdvance(ALICE(), BOB(), { client, cents: 30000, issueDate: "2026-02-01" })).advance;
+  const twoAdvances = claim({
+    settlement: SETTLEMENT.advance, advanceAccountCode: SECHART.advance, payableAccountCode: null,
+  });
+  twoAdvances.advance_allocations = [
+    { advance_id: advA.id, amount_cents: 40000, account_code: SECHART.advance },
+    { advance_id: advB.id, amount_cents: 20500, account_code: SECHART.advance },
+  ];
+  const multi = await admitStaffExpenseClaimWork({ client, author: ALICE(), claim: twoAdvances });
+
+  // ...a REIMBURSEMENT claim, which discharges no advance at all, on the same page...
+  const reimbursed = await admitStaffExpenseClaimWork({ client, author: ALICE(), claim: claim() });
+  // ...and a plain journal Work, which is not a claim at all.
+  const plain = await admitJournalWork({ client, author: ALICE(), basis: basis({ memo: "wl33 plain" }) });
+
+  const registerCount = Number((await rootQuery(
+    "select count(*)::int as n from clara.staff_expense_claim_allocations where claim_id = $1",
+    [multi.claim_id])).rows[0].n);
+  assert.equal(registerCount, 2, "wl.33 the register itself holds the two confirmed allocations");
+
+  const page = await listWork(BOB(), { client, limit: 25 });
+  const byId = new Map(page.rows.map((r) => [r.id, r]));
+
+  assert.equal(byId.get(multi.work_id).allocation_count, registerCount,
+    "wl.33 the LIST row says how many advances this claim settles - the register's own row count");
+  assert.equal(byId.get(reimbursed.work_id).allocation_count, 0,
+    "wl.33 a reimbursement claim discharges none: the honest 0, never a fabricated 1");
+  assert.equal(byId.get(plain.work_id).allocation_count, null,
+    "wl.33 a Work that is not a claim carries NULL - the same honest absence claim_id carries");
+
+  // ...AND THE ADDRESSED ROW AGREES, because the two projections are one projection.
+  assert.equal((await getWorkRow(BOB(), multi.work_id)).allocation_count, registerCount,
+    "wl.33 the addressed-row door carries the SAME count");
+  assert.equal((await getWorkRow(BOB(), plain.work_id)).allocation_count, null,
+    "wl.33 ...and the SAME null for a Work that is not a claim");
 });

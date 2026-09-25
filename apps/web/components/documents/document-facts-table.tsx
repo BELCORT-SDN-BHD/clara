@@ -21,7 +21,7 @@ import { EmptyState, StateBanner } from "@/components/common/state";
 import { isAgreementFactPath, isPayrollFactPath, type EvidenceRegion } from "@/lib/documents/extract-shape";
 import type { SourceRevisionResult } from "@/lib/documents/types";
 import { cn } from "@/lib/utils";
-import { DocumentRevisionDialog, isRevisableFieldPath } from "./document-revision-dialog";
+import { DocumentRevisionDialog, revisableFactLane } from "./document-revision-dialog";
 
 /** #646 — what a per-row Revise control needs in order to exist at all. The caller passes it only
  *  when the source-revision read succeeded, which is the SAME bookkeeper floor the write door
@@ -31,11 +31,36 @@ import { DocumentRevisionDialog, isRevisableFieldPath } from "./document-revisio
  *  directions rather than re-implemented here. */
 export type FactRevisionAffordance = {
   documentId: string;
-  /** The facts version every revision opened from this table must quote. */
+  /** The INVOICE chain's facts version, which every invoice revision opened from this table must
+   *  quote. */
   factsVersion: number;
+  /** #1056 — the PAYROLL chain's facts version, which every payroll revision must quote instead.
+   *
+   *  TWO NUMBERS BECAUSE THERE ARE TWO CHAINS, and a revision refuses CLR19 against the wrong one.
+   *  `clara.list_source_revisions` counts the two extraction kinds separately, so a payroll summary
+   *  reads `facts_version` 0 (it carries no invoice reading) beside a payroll version of 1 or more.
+   *  A payroll control quoted against 0 would refuse every time it was pressed.
+   *
+   *  `null` means the read could not report it — a server below the 0344 frontier answers without
+   *  the key at all — and a payroll row then gets NO control, for the same reason a viewer gets no
+   *  column: an affordance whose door would refuse is worse than no affordance. */
+  payrollFactsVersion: number | null;
   busy: boolean;
   onRevised: (result: SourceRevisionResult) => void;
 };
+
+/** The source version a revision of this row must quote, or `null` when this surface has no number
+ *  for that row's own chain. Stated once so the control's EXISTENCE and the number it carries are
+ *  one decision: a row that gets a control always gets the right version with it. */
+function laneVersion(
+  revise: FactRevisionAffordance, lane: "invoice" | "payroll" | null,
+): number | null {
+  if (lane === null) return null;
+  const version = lane === "payroll" ? revise.payrollFactsVersion : revise.factsVersion;
+  // A chain with no reading on file is not a chain a revision can be written against: the door
+  // refuses `no_facts_to_revise` at 0, so offering the control there would be offering a refusal.
+  return version === null || version <= 0 ? null : version;
+}
 
 /** The human label for a fact's `field_path`.
  *
@@ -253,24 +278,30 @@ export function DocumentFactsTable<T extends EvidenceRegion>({
               </TableCell>
               {revise ? (
                 <TableCell className="align-top">
-                  {/* ONLY WHERE THE DOOR WOULD ADMIT IT. `clara._revisable_invoice_field` is a
-                      CLOSED set, and a layout fragment or a statement-lane path is not in it — so a
-                      row that cannot be revised says so plainly instead of offering a control that
-                      would refuse CLR10 on confirm. */}
-                  {isRevisableFieldPath(region.field_path) ? (
-                    <DocumentRevisionDialog
-                      key={`${region.id}:${revise.factsVersion}`}
-                      documentId={revise.documentId}
-                      fieldPath={region.field_path}
-                      fieldLabel={label}
-                      currentValue={factValue(region, t)}
-                      factsVersion={revise.factsVersion}
-                      busy={revise.busy}
-                      onRevised={(result) => { setWorkEffect(result); revise.onRevised(result); }}
-                    />
-                  ) : (
-                    <span className="text-xs text-muted-foreground">{t("factNotRevisable")}</span>
-                  )}
+                  {/* ONLY WHERE THE DOOR WOULD ADMIT IT. `clara._revisable_fact_lane` is the
+                      arbiter over two CLOSED sets, and a layout fragment, a statement-lane path or
+                      a per-employee payroll cell is in neither — so a row that cannot be revised
+                      says so plainly instead of offering a control that would refuse CLR10 on
+                      confirm. #1056: the version the control carries is its own lane's, because a
+                      revision quoted against the other chain's number refuses CLR19. */}
+                  {(() => {
+                    const lane = revisableFactLane(region.field_path);
+                    const version = laneVersion(revise, lane);
+                    return lane !== null && version !== null && region.field_path !== null ? (
+                      <DocumentRevisionDialog
+                        key={`${region.id}:${version}`}
+                        documentId={revise.documentId}
+                        fieldPath={region.field_path}
+                        fieldLabel={label}
+                        currentValue={factValue(region, t)}
+                        factsVersion={version}
+                        busy={revise.busy}
+                        onRevised={(result) => { setWorkEffect(result); revise.onRevised(result); }}
+                      />
+                    ) : (
+                      <span className="text-xs text-muted-foreground">{t("factNotRevisable")}</span>
+                    );
+                  })()}
                 </TableCell>
               ) : null}
             </TableRow>

@@ -1,0 +1,149 @@
+{
+  "lens": "adversarial",
+  "lane": "riders wave S, lane 03",
+  "branch": "riders/wS-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\656",
+  "fixed_point": "7bc5a710f",
+  "head": "51c50bd88",
+  "tickets": [1067, 1052, 1066, 1068, 1069],
+  "database": "clara_l06 @ 127.0.0.1:55746 (312 files, max 0341_work_claim_allocation_count)",
+  "verdict": "accept-with-fixes",
+  "summary": "Seven findings. The authorisation core of this lane holds: I drove clara._assert_claim_basis and clara.get_work_claim_origin on the lane database inside rolled-back transactions and could not get a claim past the advance existence, ownership or cap walls, could not read another firm's claim, and could not reach the recut read from clara_runtime or clara_agent_ro. What breaks is the WEB half. #1068's empty-state focus target is the DISABLED 'Add allocation' button whenever the claimant has no outstanding advance, so the ticket's first acceptance criterion is unmet in a reachable state and the cell covering that state is green only because the harness's .focus() stub ignores 'disabled'. The same wiring hands the button the field's element id, so the <Label htmlFor> now renames it for assistive technology. #1066 guards its NEW second-account arm with enrolment_active but leaves the pre-existing same-account arm unguarded, and #1052 now positively attributes a candidate the door refuses not_this_claimant (proven by drive). Two minor divergences in toClaimWire/derivedLines and two notes close the list.",
+  "findings": [
+    {
+      "id": "ADV-01",
+      "ticket": 1068,
+      "severity": "major",
+      "kind": "acceptance-criterion-unmet / vacuous cell",
+      "title": "With no outstanding advances the empty-list focus target is a DISABLED button, so focus is a silent no-op",
+      "where": "apps/web/components/registers/staff-advance-allocations-editor.tsx:230-232 (the Add button's disabled expression); apps/web/components/accounting/staff-expense-claim-form.test.tsx, cell 'ticket 1068 the SAME empty-list focus holds when the claim never had an open advance to begin with'",
+      "evidence": "#1068 AC1 asks that the empty-list submit show the error 'focused/scrolled to a real, VISIBLE control'. The Add button renders disabled={candidates.length === 0 || Boolean(emptyStateProps.disabled)}, so in the no-candidates state the node carrying id 'staff-expense-claim-advanceId' is disabled. The form's own comment at apps/web/components/accounting/staff-expense-claim-form.tsx:377-380 states the rule: '.focus() on a DISABLED element is a silent no-op'; the repo's own focusability helper agrees (apps/web/test/keyboardWalk.ts:55, 'if (has(node, \"disabled\")) return false;'). DRIVEN: a temporary probe copy of the form test (removed afterwards; worktree verified clean at 51c50bd88) mounted the form with loadAdvances -> staffAdvanceSummary([]), removed the one row, submitted, and read the node back. PROBE-A printed: tag= BUTTON  disabled= \"\"  inFocusableSet= false  stubActiveId= staff-expense-claim-advanceId. The control probe with one candidate (PROBE-B) printed: tag= BUTTON  disabled= null  inFocusableSet= true. The lane's own second #1068 cell asserts only that a node with that id exists and that focusedId() names it; it deliberately omits the assert.equal(attrOf(node,'disabled'), null) the FIRST cell makes, and passes only because apps/web/test/domInspect.ts:279-282 implements node.focus = () => { doc.activeElement = node; } unconditionally, with no disabled check. reports/waveS-lane03-ticket1068.md discloses the stub-focus reliance in general but never says this state's target is disabled.",
+      "failure_scenario": "A preparer opens a staff expense claim for a claimant with no outstanding advance (the form already shows its own 'advance-no-candidates' line), chooses the advance-application settlement, removes the placeholder allocation row, and submits. validateClaimDraft raises advanceRequired at field id 'advanceId'; focusField('advanceId') calls .focus() on the disabled Add button; in a real browser nothing takes focus and nothing scrolls, which is exactly the defect #1068 was filed to remove.",
+      "required_fix": "Either keep the empty-state stand-in enabled while it carries row 0's field id (candidates.length === 0 is an emptiness of OPTIONS, not a reason the error anchor may not be focused), or render a dedicated focusable empty-state element (e.g. a tabindex=-1 container) and address the issue to it. Then harden the cell: assert the target is in focusableElements(h.container), not merely that focusedId() names it.",
+      "proof_command": "cp apps/web/components/accounting/staff-expense-claim-form.test.tsx apps/web/components/accounting/zzz-review-probe.test.tsx ; append PROBE-A/PROBE-B ; node --import ./test/bootstrap.mjs --import tsx --test components/accounting/zzz-review-probe.test.tsx"
+    },
+    {
+      "id": "ADV-02",
+      "ticket": 1068,
+      "severity": "major",
+      "kind": "accessibility regression",
+      "title": "The empty-state Add button inherits the field's <Label htmlFor>, so its accessible name becomes 'Which advance' instead of 'Add allocation'",
+      "where": "apps/web/components/registers/staff-advance-allocations-editor.tsx:120-126 and 229-232 (emptyStateProps spread onto <Button>); apps/web/components/accounting/staff-expense-claim-form.tsx:953 (<Label htmlFor={claimFieldId(field)}>)",
+      "evidence": "rowProps(0,'advance') returns controlProps('advanceId', true) = { id: 'staff-expense-claim-advanceId', ref, disabled, aria-invalid, aria-describedby } (staff-expense-claim-form.tsx:519-525). The claim form's <Field field=\"advanceId\"> wrapper renders <Label htmlFor=\"staff-expense-claim-advanceId\">{t(\"advanceId\")}</Label> at line 953. <button> is a labelable element in HTML, and for a labelable control the associated <label> supplies the accessible name ahead of the element's own contents. DRIVEN: probe PROBE-C on the mounted empty state printed: labelsFor= 1  labelText= \"Which advance\"  targetTag= BUTTON  targetText= \"Add allocation\"  expectedButtonText= \"Add allocation\". The repo's own checkAccessibility(h.container) has no rule for this and reported only pre-existing target-size/heading-order violations, so nothing in the suite catches it. The lane report's 'unverified' section flags that aria-invalid/aria-describedby on a <button> were not checked against a real accessibility tree, but never mentions the label association.",
+      "failure_scenario": "A screen-reader user on the empty allocation list tabs to the only affordance in that state and hears 'Which advance, button' rather than 'Add allocation'. The one control that adds a row is announced as the chooser it replaced.",
+      "required_fix": "Do not reuse the field's own element id on the button. Give the empty-state affordance its own id, register it as the focus target under the 'advanceId' key through the ref alone, and carry the error wiring with aria-describedby / aria-errormessage; or pass aria-label={t('addAllocation')} so the button keeps its own name."
+    },
+    {
+      "id": "ADV-03",
+      "ticket": 1052,
+      "severity": "major",
+      "kind": "chooser/wall divergence",
+      "title": "The chooser offers - and #1052 now positively attributes - an advance the door refuses not_this_claimant",
+      "where": "apps/web/components/accounting/staff-expense-claim-form.tsx:263-275 (advanceCandidates) and 300-311 (advanceSourceEnrolment); packages/db/migrations/0340_staff_expense_claim_label_case.sql, arm (b) of the world half",
+      "evidence": "advanceCandidates admits any advance with a.account_code === draft.claimantAccountCode && isOutstandingAdvance(a); isOutstandingAdvance (apps/web/lib/registers/staff-advances-doors.ts:188-190) checks only outstanding_cents > 0 && !voided and never enrolment_active. #1066's NEW second-account arm in the same expression DOES require a.enrolment_active - that is the asymmetry. The door's arm (b) requires sa2.id = v_adv_enrol and sa2.client_id = p_client and sa2.active and lower(btrim(sa2.person_label)) = v_claim_label, so an advance whose own enrolment is retired fails it. DRIVEN on clara_l06 inside rolled-back transactions: S1 baseline (live enrolment, own advance) => ADMITTED; S3 (enrolment retired, the SAME account re-enrolled with the same label - the exact shape the lane's own cell 'ticket 1052 an offered advance issued under an EARLIER enrolment of the same account...' builds and offers) => REFUSED CLR10 {\"field\":\"claim.advance_id\",\"reason\":\"advance_allocation_mismatch\",\"constraint\":\"not_this_claimant\"}. #1052's new sourceEnrolment line renders on exactly this candidate, so the ruling's 'the preparer's confirmation is a confirmation of that specific account' is attached to an account the preparer may not confirm. Reachability of a retired enrolment still carrying an advance outstanding TODAY: clara.retire_staff_advance_account guards on clara._adv_outstanding(a.id, 'infinity'::date) > 0, while clara.staff_advance_summary reports clara._adv_outstanding(a.id, v_as_of) - a repayment or settling claim posted with a FUTURE posting date is settled at 'infinity' (retirement allowed) and still outstanding at today's as-of (the row is offered).",
+      "failure_scenario": "A claim is settled with a forward-dated posting date, the enrolment on 1190 is retired and 1190 re-enrolled after a name correction. The preparer opens a claim for that claimant, the chooser offers the old advance with the reassuring line 'held under <person>'s enrolment on 1190', they confirm and submit, and the door refuses not_this_claimant at claim.advance_id - a refusal the chooser told them would not happen.",
+      "required_fix": "Apply the same guard on both arms (e.g. 'if (a.account_code === code) return a.enrolment_active;', or filter enrolment_active before the account test) so the chooser's admission set is the door's admission set. If the retired-generation advance must stay visible, render it as an explicitly non-selectable note rather than as an attributed option."
+    },
+    {
+      "id": "ADV-04",
+      "ticket": 1066,
+      "severity": "minor",
+      "kind": "validate-one-thing-send-another",
+      "title": "toClaimWire now submits an advance account the form never validated",
+      "where": "apps/web/lib/work/staff-expense-claim.ts:613-623 (out.advanceAccountCode = headAccount)",
+      "evidence": "validateClaimDraft checks the settlement leg with account(legField, settlementAccountCode(draft), true) (staff-expense-claim.ts:447-448), i.e. the TYPED draft.advanceAccountCode, against knownAccountCodes (the client's ACTIVE chart); enrolledAccountCodes is only ever consulted for the CLAIMANT's own account (staff-expense-claim.ts:377-378), never for the advance leg. toClaimWire then replaces that value with advanceAccountCodes?.get(rows[0]?.advanceId ?? '') ?? draft.advanceAccountCode.trim(). The form builds advanceAccountCodes from EVERY advance in advancesRead.data.advances (staff-expense-claim-form.tsx:283-295), not only the offered ones - deliberately, per its own comment - so a restored draft naming an advance on an account that is no longer active in the chart resolves headAccount to that account and submits it with no accountUnknown issue raised. The door then refuses unknown_account (0340 world half (ii)) at field claim.advance_account_code, which the form maps onto the advanceAccountCode picker, a control still showing the old, valid code the preparer typed.",
+      "failure_scenario": "A draft saved yesterday names an advance on account 1191; overnight 1191's chart row is deactivated. Today the preparer reopens the draft, sees 1190 in the advance-account field and no validation error, submits, and gets a server refusal pointing at a field whose displayed value is fine.",
+      "required_fix": "Validate what is sent: derive the head account inside validateClaimDraft (or pass advanceAccountCodes to it) so the chart check runs against the account the wire will actually carry, and surface the issue on the chooser row rather than on the typed field."
+    },
+    {
+      "id": "ADV-05",
+      "ticket": 1066,
+      "severity": "minor",
+      "kind": "preview behaviour change",
+      "title": "The derived-entry preview can now render an entry that does not balance",
+      "where": "apps/web/lib/work/staff-expense-claim.ts:525-546 (the advance_application branch of derivedLines)",
+      "evidence": "Before #1066 the advance arm pushed exactly one credit leg for claimTotalCents(draft), so the preview always balanced against the non-pending item debits. The new branch pushes sum(allocation.amountCents) per account and returns early, so a split that is short or over-allocated - the very state validateClaimDraft flags as allocationsNotExact at field advanceAllocations (staff-expense-claim.ts:472-478) - now renders debits and credits that differ. The preview is fed straight into <JournalBasisFields lines={lines} ... disabled /> (staff-expense-claim-form.tsx:875-882), which carries no balance guard.",
+      "failure_scenario": "A preparer apportions 40,000 + 20,000 against a 60,500 claim. The derived-entry section shows 60,500 of debits against 60,000 of credits - a journal that cannot exist - beside the allocationsNotExact message.",
+      "required_fix": "Either suppress the per-account credit legs while the list does not add up (render the single balanced leg, as before, until allocationsNotExact clears), or label the shortfall explicitly so an unbalanced preview reads as a stated gap rather than as a derived entry."
+    },
+    {
+      "id": "ADV-06",
+      "ticket": 1067,
+      "severity": "note",
+      "kind": "dead tail branch",
+      "title": "0339 tail T.6 is a data-dependent branch that can never be entered",
+      "where": "packages/db/migrations/0339_staff_expense_claim_empty_allocation.sql:784-790",
+      "evidence": "T.6 counts stored claims whose canonical basis carries advance_allocations as an array of length 0. clara._claim_basis_canonical appends that key only under 'case when jsonb_array_length(clara._claim_allocations(p_claim)) >= 2', and clara._claim_allocations turns a present-but-empty array into the one-element advance_id shape (both bodies dumped from pg_proc on clara_l06 during this review). The count is therefore structurally 0 on every database, hosted included, so the wave-3 addendum's rule - 'a data-dependent branch must be entered once' - cannot be met for it. Harmless as a guard, but it is an assertion that can never fail and so proves nothing about the migration's safety on real rows.",
+      "failure_scenario": "No runtime failure. A future reader treats T.6 as evidence that legacy empty-array claims were checked for, when the shape it looks for could never have been stored.",
+      "required_fix": "Either state in the header that T.6 is structurally unreachable and kept as a belt-and-braces catalogue assertion, or drop it and lean on the existing sha pin of clara._claim_basis_canonical, which already fixes the '>= 2' rule."
+    },
+    {
+      "id": "ADV-07",
+      "ticket": 1067,
+      "severity": "note",
+      "kind": "intra-lane inconsistency",
+      "title": "0339 and 0340 omit the 'set local statement_timeout' their own sibling 0341 calls the runner rule",
+      "where": "packages/db/migrations/0339_staff_expense_claim_empty_allocation.sql and 0340_staff_expense_claim_label_case.sql (absent) vs 0341_work_claim_allocation_count.sql:92 (present)",
+      "evidence": "grep -c 'set local statement_timeout' returns 0 for 0339 and 0340 and 1 for 0341, whose line is commented '-- runner rule: the first executable statement'. Repo practice is mixed (17 of the last 30 migrations set it; 0301, 0310, 0316 and 0318 do not), so this is not a documented house-rule breach - but three migrations written by one lane in one week should not disagree with each other about a rule one of them names.",
+      "failure_scenario": "No functional failure on the rig. On a loaded hosted database a long create-or-replace under the default statement_timeout behaves differently from its sibling, and the next reader cannot tell which of the two spellings the estate intends.",
+      "required_fix": "Pick one and record the decision in the lane report; an applied file is never edited, so if the rule is real it is a note for the next migration rather than a change to 0339/0340."
+    }
+  ],
+  "attacks_that_did_not_land": [
+    {
+      "attack": "Tenant isolation on the recut read clara.get_work_claim_origin (#1069)",
+      "result": "HELD. Driven on clara_l06 as clara_authenticated with request.jwt.claims set per actor, each inside a rolled-back transaction: a same-firm VIEWER got {allocation_count: 2, claimant_label: 'Farah binti Idris'} on a two-allocation claim; an OTHER-firm OWNER got NULL - the same answer a Work that is not a claim gets, so no existence oracle; an unknown actor got CLR04 'actor has no active membership'."
+    },
+    {
+      "attack": "Role floor on the recut read",
+      "result": "HELD. 'set local role clara_runtime' and 'clara_agent_ro' both got 42501 'permission denied for function get_work_claim_origin'. 0341 re-grants EXECUTE to clara_authenticated alone and revokes PUBLIC; its tail T.1b/T.1c assert both."
+    },
+    {
+      "attack": "allocation_count wrong for a legacy (pre-0301) single-advance claim, or eaten by FORCE-RLS on clara.staff_expense_claim_allocations",
+      "result": "HELD. 0301 section G backfills one row per pre-0301 advance_application claim (where sec.settlement='advance_application' and sec.advance_id is not null, 0301:1301-1312) and section 8a writes one row per confirmed allocation, so the count is exact. The probe above read 2 through the real definer for a two-allocation claim, so RLS is not eating rows in that path."
+    },
+    {
+      "attack": "#1067's fix leaves an authorisation hole (the sweep plan claimed 'no advance existence, ownership or cap check at all' for an empty array)",
+      "result": "THE PLAN'S CLAIM IS WRONG AND 0339'S HEADER CORRECTS IT. With an empty array v_listed is false, but clara._claim_allocations falls through to its single-advance branch, so the world half still loops over that one allocation and asks existence, ownership and the cap. What was skipped was the PAYLOAD half only: the settlement rule, the distinctness rule, the exact sum and the head rule. 0339's header says exactly this. The new rule closes it: p1067.empty / p1067.tellapart / p1067.settlement / p1067.absent all pass."
+    },
+    {
+      "attack": "Migration chain would fail or mis-apply on a database with real rows",
+      "result": "NO DEFECT FOUND. 0340 pins 0339's post-image (5c55fc8d...) and additionally asserts the '#1067 (0339' marker by name; 0341 pins its own neighbours. All three are single create-or-replace statements with redo branches keyed on their own markers. The ledger on clara_l06 reads 312 files / 0341, and both markers are live in pg_proc (positions 8873 and 21227)."
+    },
+    {
+      "attack": "Splice anchors or dynamic SQL that could match twice or zero times; a missing firm-scope-db-pins corpus entry",
+      "result": "NOT APPLICABLE. None of the three migrations uses EXECUTE or pg_get_functiondef, so no REVIEWED_DYNAMIC_SQL_BARRIERS entry is owed. apps/web/tests/firm-scope-db-pins.test.ts passes 22/22 unchanged: MIGRATION_FILES is read from disk, so the new files are already inside the corpus."
+    },
+    {
+      "attack": "Integer cents, Asia/Kuala_Lumpur calendar days, idempotency under replay with the same key and a different payload",
+      "result": "HELD. derivedLines and toClaimWire stay on integer cents (the Number.isSafeInteger guards are unchanged) and no date arithmetic was added on either side. clara.admit_staff_expense_claim_work is pinned and not recut, and p638.replay ('a repeated admission converges on ONE Work and ONE claim; a changed claim is a typed conflict') passes."
+    },
+    {
+      "attack": "apps/web/messages/en.json duplicate keys (the shared-file rule)",
+      "result": "CLEAN. An independent character-level scanner (not JSON.parse) over the file found 0 duplicate full paths; 'advanceSourceEnrolment' and the 'allocationCount' key each occur once. The apostrophe in 'held under {person}\u2019s enrolment on {account}' is U+2019, not the ASCII quote ICU would treat as an escape."
+    },
+    {
+      "attack": "#1052's lower() widening lets one person reach another's advance",
+      "result": "ONLY AS RULED. The arm still requires the same client, an ACTIVE enrolment and an EXACT match after lower(btrim()). Two genuinely different people whose labels differ only by case would now match - the widening the ticket asks for, and the reason #1049 (re-parented to the mainline) retires the arm. Recorded as the known cost of the stopgap, not as a defect."
+    },
+    {
+      "attack": "Cross-lane / shared-file collisions",
+      "result": "NO DEFECT FOUND. The three preintegration-gate entries are appended to packages/db/package.json's $GATES in migration order after schedule-term-correction (0317); apps/web/test/manifest.txt gains one line at the sorted position; packages/db/tests/rig-meta.mjs is untouched, which is correct because none of the three migrations mints a new name (the file's own 0318 note states the same reasoning)."
+    }
+  ],
+  "cells_rerun_by_this_review": [
+    "packages/db: node --test --test-concurrency=1 $GATES tests/staff-expense-claim-allocations.test.mjs tests/staff-expense-claim.test.mjs -> 45 tests, 45 pass, 0 fail, 0 skipped",
+    "apps/web: components/accounting/staff-expense-claim-form.test.tsx -> 24/24",
+    "apps/web: components/registers/staff-advance-allocations-editor.test.tsx -> 6/6",
+    "apps/web: components/work/work-detail.test.tsx -> 57/57",
+    "apps/web: lib/work/staff-expense-claim.test.ts -> 23/23",
+    "apps/web: tests/firm-scope-db-pins.test.ts -> 22/22"
+  ],
+  "not_run_by_this_review": [
+    "pnpm typecheck, pnpm lint and CI=true GITHUB_ACTIONS=true pnpm lint - the standards reviewer's and the lane's own gate, not re-run here",
+    "the whole apps/web unit suite and the Playwright walks",
+    "a from-scratch 0001 to 0341 chain, which is the integrator's proof"
+  ],
+  "status_requests_received_mid_task": "none",
+  "worktree_state_after_review": "clean; the temporary probe files under apps/web/components/accounting/ were removed and git status --short is empty at 51c50bd88"
+}

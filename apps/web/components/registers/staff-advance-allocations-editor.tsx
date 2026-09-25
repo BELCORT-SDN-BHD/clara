@@ -49,6 +49,7 @@ export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
   lineCount,
   newRow,
   optionLabel,
+  sourceEnrolment,
   rowProps,
   amountLabel,
 }: {
@@ -69,6 +70,22 @@ export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
    *  it lists EVERY enrolment's advances; a caller already scoped to one claimant says so with the
    *  facts that actually tell two of that person's advances apart. */
   optionLabel?: (candidate: StaffAdvanceSummaryRow) => string;
+  /**
+   * #1052 — WHERE THIS ADVANCE CAME FROM, when that is not where the caller's subject sits.
+   *
+   * The owner's ruling of 2026-09-24 on #931 admits an advance held under ANOTHER live enrolment
+   * of the same client whose person label is the claimant's, on the condition that "the allocation
+   * editor shows, beside each such advance, the enrolment it came from, so the preparer's
+   * confirmation is a confirmation of that specific account".
+   *
+   * The CALLER decides which candidates are "such an advance" and writes the sentence, because
+   * only the caller knows what the subject is: a claim has a claimant enrolment, the register's
+   * book-application dialog has none at all. This component only renders the answer — appended to
+   * the chooser's option, so it is visible BEFORE the choice, and again as its own line beside the
+   * confirmed row, so it is visible AFTER it. Returning `null` (or omitting the prop, which the
+   * register's caller does) renders neither, byte for byte as before.
+   */
+  sourceEnrolment?: (candidate: StaffAdvanceSummaryRow) => string | null;
   /** Extra props for ONE row's own control (an id, a ref, an error wiring) — how a caller keeps an
    *  existing control id on the line that used to be its only one (#930 → #931) and addresses every
    *  later line by its own field path. */
@@ -88,6 +105,13 @@ export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
       c.person_label,
       `${fmtCents(c.outstanding_cents, tc("centsUnsafe"))} ${t("outstandingSuffix")}`,
     ].join(" — "));
+  /** ONE READER for "where did this advance come from", so the chooser and the confirmed row can
+   *  never say different things about the same candidate. */
+  const sourceOf = (c: StaffAdvanceSummaryRow): string | null => sourceEnrolment?.(c) ?? null;
+  const optionText = (c: StaffAdvanceSummaryRow): string => {
+    const source = sourceOf(c);
+    return source === null ? label(c) : [label(c), source].join(" — ");
+  };
 
   function updateAllocation(index: number, patch: Partial<T>) {
     onChange(allocations.map((a, i) => (i === index ? { ...a, ...patch } : a)));
@@ -98,6 +122,43 @@ export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
   function addAllocation() {
     onChange([...allocations, newRow()]);
   }
+
+  /**
+   * #1068 — WHEN THE LIST IS TRULY EMPTY, THE "ADD" BUTTON IS ROW ZERO'S OWN STAND-IN.
+   *
+   * A caller that addresses row 0's advance control by field id (the claim form's
+   * `claimAllocations` synthesises exactly one phantom row for validation, addressed by
+   * `allocationFieldId(0, "advanceId")`, whenever the CONFIRMED list has nothing left in it —
+   * `lib/work/staff-expense-claim.ts`'s own header) still needs something on screen carrying that
+   * id once every row is gone, or the existing focus/scroll-to-error behaviour silently finds
+   * nothing to focus. `rowProps(0, "advance")` is the SAME call a real row 0 would receive, so the
+   * id, the ref that registers the focus target, and the aria-invalid/aria-describedby wiring all
+   * land on the ONE control the empty state actually renders — never invented afresh, and never
+   * borrowed by any row that is genuinely there (a NON-empty list never reaches this branch).
+   *
+   * A caller that passes no `rowProps` at all — the staff-advance register's own dialog, which has
+   * no field-id-addressed validation to begin with — is untouched: `rowProps?.(...)` is undefined,
+   * the spread below is empty, and the button renders byte for byte as before.
+   *
+   * FIX ROUND (ADV-01, ADV-02) — TWO THINGS THE FIRST CUT GOT WRONG, both only in the state a
+   * caller ADDRESSES this button in.
+   *
+   *   * IT MUST STAY OPERABLE. `disabled` used to follow `candidates.length === 0` alone, so a
+   *     claimant with nothing outstanding got a DISABLED node as the refusal's focus target —
+   *     and `.focus()` on a disabled element is a silent no-op (the claim form's own measured
+   *     note, and `test/keyboardWalk.ts`'s own rule). An empty CANDIDATE list is an emptiness of
+   *     OPTIONS, not a reason the one addressed node may not take focus; adding a row with an
+   *     empty chooser is exactly what a preparer in that state should be able to do. A caller
+   *     that addresses nothing keeps the old "nothing to add" disabled button.
+   *   * IT MUST KEEP ITS OWN NAME. `<button>` is a labelable element, so the claim form's
+   *     `<Label htmlFor={claimFieldId("advanceId")}>` would supply its accessible name and the
+   *     one control that ADDS a row would be announced as "Which advance". An explicit
+   *     `aria-label` outranks a native label, so the button says what it does.
+   */
+  const addressesEmptyState = allocations.length === 0 && rowProps !== undefined;
+  const emptyStateProps: Record<string, unknown> = addressesEmptyState
+    ? { ...(rowProps?.(0, "advance") ?? {}), "aria-label": t("addAllocation") }
+    : {};
 
   return (
     <div className="flex flex-col gap-2">
@@ -142,10 +203,24 @@ export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
                   <option value="">{t("selectAdvance")}</option>
                   {candidates.map((c) => (
                     <option key={c.advance_id} value={c.advance_id}>
-                      {label(c)}
+                      {optionText(c)}
                     </option>
                   ))}
                 </NativeSelect>
+                {/* #1052 — AND BESIDE THE CONFIRMED ROW. A `<select>` shows the chosen option's
+                    text, but the preparer confirms a LIST and reads it back as a list; the ruling
+                    asks for the enrolment beside the advance, so it is a line of its own here and
+                    not only a suffix inside the control. */}
+                {(() => {
+                  const chosen = candidates.find((c) => c.advance_id === a.advance_id);
+                  const source = chosen === undefined ? null : sourceOf(chosen);
+                  return source === null ? null : (
+                    <p className="mt-1 text-xs text-muted-foreground"
+                       data-testid="allocation-source-enrolment">
+                      {source}
+                    </p>
+                  );
+                })()}
               </TableCell>
               {showAmount ? (
                 <TableCell>
@@ -169,7 +244,10 @@ export function StaffAdvanceAllocationsEditor<T extends AdvanceAllocationRow>({
           ))}
         </TableBody>
       </Table>
-      <Button type="button" variant="outline" size="sm" onClick={addAllocation} disabled={candidates.length === 0}>
+      <Button type="button" variant="outline" size="sm" onClick={addAllocation}
+        {...emptyStateProps}
+        disabled={(candidates.length === 0 && !addressesEmptyState)
+          || Boolean(emptyStateProps.disabled)}>
         {t("addAllocation")}
       </Button>
       {candidates.length === 0 ? <p className="text-xs text-muted-foreground">{t("noOutstanding")}</p> : null}

@@ -69,17 +69,97 @@ const RECUT = [
   // and put 0300's three-kind wall into 0308's pasted body; that commit derives a7c108d5... from
   // 0308's own pasted text, whose pre-edit sha256 reproduced c8e99098... exactly, and the
   // from-scratch chain confirms it against the live catalog.
-  // What this pin is FOR is unaffected by either recut and is re-checked below against the LIVE
-  // body, structurally rather than by transcription: the client rung 203005004 still sits above
-  // any clara.accounting_plans row lock, and the advisory is still passed this door's own plan
-  // id. That is the point of pinning the text rather than the migration number.
+  // RE-BASED A THIRD TIME. #1051 (0330_plan_authority_wall_predicate.sql, riders sweep wave lane
+  // 01) FOLDS this body's authority wall out into one shared predicate,
+  // `clara._assert_plan_authority`, which `clara._obo_plan_core` calls too — the two walls were
+  // two hand-written copies and 0308's "verbatim" claim about them was no longer true. One block
+  // of this body becomes one `perform`, and the three declarations that block alone used go with
+  // it; nothing else in the body moves, and nothing this door admits or refuses moves either
+  // (all three authority_ref kinds survive on BOTH doors — see plan-authority-wall.test.mjs's
+  // own both-doors drive). That takes a7c108d5... to 544cd88e..., measured on the lane rig after
+  // 0330 applied and re-derived from 0330's own file text.
+  // What this pin is FOR is unaffected by any of the three recuts and is re-checked below
+  // against the LIVE body, structurally rather than by transcription: the client rung 203005004
+  // still sits above any clara.accounting_plans row lock, and the advisory is still passed this
+  // door's own plan id. That is the point of pinning the text rather than the migration number.
   { fn: "clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)",
-    sha: "a7c108d5dd4febbae9f98a87b42b69468aec31f1731336b2185c8e91b1b0951c" },
+    sha: "544cd88ecaa5b5237969aff36b1bd0d8a5cdf41aacea234e6415d3df54b523ea" },
   { fn: "clara.revise_accounting_plan(uuid,text,text,int,text,date,date,jsonb,text,text)",
     sha: "8a6e69efac967592592bf3e8d08683145e5b43456a63fe673788337349382886" },
+  // RE-CUT BY #1080 (0331_accrual_plan_authority_wall.sql, riders sweep wave lane 01), the
+  // sibling of the #1051 re-base recorded above and for the same reason: this body carried the
+  // THIRD hand-written copy of the plan authority wall, plus 0222's own inline `exists` probes
+  // against clara.agent_tasks, which never read a named chat task's kind or author. 0331 points
+  // it at clara._assert_plan_authority — the predicate #1051 minted — so a wake task or an
+  // autodraft run can no longer authorise an accrual plan through the on-behalf entrance. One
+  // block becomes one `perform`, the three declarations that block alone used go with it, and
+  // 0331's own tail proves nothing else moved by putting 0222's block back and re-hashing to
+  // 31adc6d4... That takes 31adc6d4... to 89d2ac3a..., measured on the lane rig after 0331
+  // applied.
+  // What this pin is FOR is unaffected, and is re-checked below against the LIVE body
+  // structurally rather than by transcription: the client rung 203005004 still sits above any
+  // clara.accounting_plans row lock and the advisory is still passed this door's own plan id.
   { fn: "clara._accrual_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,int,text,date,date,jsonb)",
-    sha: "31adc6d4ae74d220b33fc950d164b0a256cafc914b2e1486400db20124939bc5" },
+    sha: "89d2ac3a33e8dcda53b0f42a6c500a6a9aefd567af57ecfe181ce82eaa248625" },
 ];
+
+// #1137 [0353_tenancy_agent_twins_obo_confirmations.sql, riders sweep wave lane L8] SPLITS the
+// revision door. Its body moves, BYTE FOR BYTE, into
+// clara._revise_accounting_plan_core(p_firm, p_actor, …) so the tenancy lane's on-behalf-of
+// escalation confirmation revises through the SAME body a person does, and
+// clara.revise_accounting_plan becomes a thin delegate over it whose op-key wall still runs FIRST
+// and whose floor and firm wall are still clara._plan_door_ctx's.
+//
+// The claims (T.4) makes are about the COMPUTATION — the client rung above any plan row lock, and
+// the advisory called with this door's own plan id — so from that generation on they are checked
+// where the computation is, and the thin delegate is pinned separately. 0353's own §0 and §TAIL
+// prove the move is byte for byte by reversing it and hashing back to 8a6e69ef… above.
+const REVISE_DOOR = "clara.revise_accounting_plan(uuid,text,text,int,text,date,date,jsonb,text,text)";
+const REVISE_SPLIT_STEM = "tenancy_agent_twins_obo_confirmations$";
+const REVISE_SPLIT = {
+  core: {
+    fn: "clara._revise_accounting_plan_core(uuid,uuid,uuid,text,text,int,text,date,date,jsonb,text,text)",
+    sha: "0908c2b7c026fe39bd9b8f3ce7aa3e34b196cb8086300c8c9a665ee17a1f596c",
+  },
+  delegate: { fn: REVISE_DOOR, sha: "94804ddc1dccd444c5bb5294524634db4afea043499eb8746dd7aae16b02ad77" },
+};
+
+// …and the FOURTH plan writer the estate gained in the same file [fix round, SPEC-L08-1137-E].
+// clara._tenancy_plan_core is the OBO lane's stand-in for clara.create_accounting_plan: it CREATES
+// an accounting plan, it takes the #929 client rung and it calls the overlap advisory. It belongs
+// on this roster for exactly the reason the other three are on it, and the first cut left it off.
+// Sha-pinned like the rest, so an edit to it is a red here rather than an unwatched change.
+//
+// It is also the duplication README section 0353 follow-up 1 exists to remove: once
+// clara._obo_plan_core absorbs `recurring_journal` (after #1051 and #1080), this body becomes a
+// two-line caller and drops off this roster the way a thin delegate does. The entry stays until
+// then, because an unwatched fourth writer is exactly how ADV-L08-01 happened.
+//
+// RE-MEASURED AT INTEGRATION (riders sweep wave, L1's 0330 against lane L8's 0353). Half of that
+// follow-up landed in the merge rather than later: this lane was cut from the cut head, which has
+// no 0330, so 0353 pasted 0300's AUTHORITY BLOCK into this body whole -- a FOURTH hand-written
+// copy of the wall #1051 folds, and the only one that would have been left standing. #1051's own
+// census refuses any body that both calls the shared predicate and keeps a copy of the wall's
+// sentence, so the integration recut points this step at clara._assert_plan_authority exactly as
+// 0330 pointed the two plan doors. That moved the body and nothing else: what it admits, what it
+// refuses, its SQLSTATE and its typed detail are all unchanged, which is what 0353's own
+// p1137.obo.refusals_match and p1137.obo.plan_step_parity measure. The body still CREATES a plan
+// and still takes the #929 client rung, so it stays on this roster, at its new sha.
+//   3065a41f... -- the body 0353 wrote on a chain without #1051.
+//   9560414f... -- the same body with its authority block folded into the shared predicate.
+const TENANCY_PLAN_STEP = {
+  fn: "clara._tenancy_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)",
+  sha: "9560414f256f80e641cb04a60d140fa4bd0189c722db0f9f97b47a797e3699a3",
+};
+
+/** The bodies that HOLD the computation (T.4), per generation. */
+async function recutRoster() {
+  const split = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [REVISE_SPLIT_STEM])
+  ).rows[0].n > 0;
+  if (!split) return RECUT;
+  return [...RECUT.map((s) => (s.fn === REVISE_DOOR ? REVISE_SPLIT.core : s)), TENANCY_PLAN_STEP];
+}
 
 let world = null;
 let ready = false;
@@ -331,7 +411,7 @@ test("p929.tail -- outside-in re-proof of 0283's own tail: the template arm is g
   // (T.4) THE THREE RECUT CALLERS: each at the body 0283's own text produces, each taking the
   //       client rung (FIX 2) ABOVE any clara.accounting_plans row lock, each passing its own plan
   //       id to the advisory (FIX 1).
-  for (const sig of RECUT) {
+  for (const sig of await recutRoster()) {
     const c = await rootQuery(
       `select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha, p.prosrc as src
          from pg_proc p where p.oid = to_regprocedure($1)`, [sig.fn]);
@@ -342,11 +422,37 @@ test("p929.tail -- outside-in re-proof of 0283's own tail: the template arm is g
     assert.ok(rung > 0, `${sig.fn} does not take the client rung 203005004`);
     assert.match(src, /clara\._plan_overlap_warning\([^)]*, (?:v_plan|p_plan)\)/,
       `${sig.fn} calls the advisory without passing its own plan id`);
-    const rowLock = src.indexOf("from clara.accounting_plans where id");
+    // #1137 [0353]: measured at the LOCK rather than at any read of clara.accounting_plans. The
+    // revision core opens with a firm-walled RE-RESOLUTION of the plan — the wall
+    // clara._plan_door_ctx applied ABOVE the door before the split, now inside the core because
+    // the OBO entrance has no JWT to resolve it from — and that is an ordinary read which takes no
+    // lock at all. The claim (T.4) makes is, and always was, that the client rung sits above any
+    // plan ROW LOCK; the old substring was a proxy for one, and this is the lock itself. Nothing
+    // else in this roster carries `for update` at all (measured on the live catalog), so no body
+    // that was checked before is skipped now.
+    const rowLock = src.search(/from clara\.accounting_plans where id [^;]*for update/);
     if (rowLock > 0) {
       assert.ok(rung < rowLock,
         `${sig.fn} takes the client rung AFTER locking a clara.accounting_plans row -- 0238's order for this rung is the other way round`);
     }
+  }
+
+  // (T.5) …AND, FROM #1137's GENERATION ON, THE THIN DELEGATE THAT FRONTS THE REVISION CORE. It is
+  //       pinned so a later edit to it is a red here rather than an unwatched change, and it is
+  //       asserted to be a DELEGATE rather than a second copy: it names the core and holds no rung
+  //       and no row lock of its own.
+  if ((await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [REVISE_SPLIT_STEM])
+  ).rows[0].n > 0) {
+    const d = await rootQuery(
+      `select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha, p.prosrc as src
+         from pg_proc p where p.oid = to_regprocedure($1)`, [REVISE_SPLIT.delegate.fn]);
+    assert.equal(d.rows[0].sha, REVISE_SPLIT.delegate.sha,
+      `${REVISE_SPLIT.delegate.fn} is not at the body 0353 writes -- either that migration changed or another ticket recut it`);
+    assert.match(d.rows[0].src, /clara\._revise_accounting_plan_core\(/,
+      "the revision door no longer delegates to the core that holds its computation");
+    assert.doesNotMatch(d.rows[0].src, /pg_advisory_xact_lock|for update/,
+      "the thin delegate has grown a rung or a row lock of its own -- the computation is the core's");
   }
 });
 
@@ -423,7 +529,7 @@ test("p1036.containment-closed -- clara._propose_adjustment_template_core has NO
   assert.equal(wrapper.rowCount, 1, "0140's prepayment wrapper resolves at exactly one signature");
   assert.match(wrapper.rows[0].acl, /clara_wake_interactive=X\/clara_fn_owner/);
   const allowKinds = (await rootQuery(
-    `select coalesce(array_agg(wake_kind order by wake_kind), '{}'::text[]) as kinds
+    `select coalesce(array_agg(wake_kind order by wake_kind collate "C"), '{}'::text[]) as kinds
        from clara.wake_fn_allowlist
       where function_name = 'wake_establish_prepayment_schedule'`)).rows[0].kinds;
   assert.deepEqual(allowKinds, ["close_prep"]);

@@ -243,7 +243,18 @@ export type AccrualCreated = {
 /** Every accrual of one client, optionally windowed on `effective_from`. A malformed client id
  *  never reaches PostgREST (the `lib/client-id.ts` guard `lib/work/reads.ts` states in full): on a
  *  `uuid` argument it is a 400 `22P02`, which throws and lands on the route's error boundary
- *  instead of this page's own not-found state. */
+ *  instead of this page's own not-found state.
+ *
+ *  THE SIDE FILTER IS SERVER-SIDE AND DELIBERATELY NOT SENT YET (#1075, migration 0334).
+ *  `clara.list_accrual_adjustments` now takes a fourth argument, `p_side text default null`
+ *  (`expense` | `revenue`), which narrows the rows in the database. This caller still sends only
+ *  `{p_client, p_from, p_to}` and `components/accruals/accruals-list.tsx` still narrows the fully
+ *  read page in the browser, because without pagination both return the same rows and a refetch
+ *  per keystroke on the filter would be worse. #1075's AC2 — "the register's side filter control
+ *  uses the server-side parameter ONCE PAGINATION EXISTS, rather than filtering a fully-read page
+ *  client-side" — is therefore still OWED, and it is owed HERE: whoever adds pagination to this
+ *  register adds `p_side` to this call and deletes the client-side narrowing beside it. Recorded
+ *  in code rather than only in a ticket report (spec review 2026-09-25, SPEC-03). */
 export async function loadAccruals(
   clientId: string,
   window: { from?: string | null; to?: string | null } = {},
@@ -495,6 +506,32 @@ export async function skipNextAccrualOccurrence(
   return callDoor(
     "skip_plan_occurrence",
     { p_plan: planId, p_after_due: afterDue, p_reason: reason, p_op_key: crypto.randomUUID() },
+    opts(o),
+  );
+}
+
+/**
+ * "Reverse this period only" (#1073) -- `clara.reverse_plan_occurrence` (0333), the THIRD remedy
+ * for the same conflict row and the only one that is a single scoped act. It takes the FLAGGED
+ * PERIOD's own due date and nothing else: the database resolves that period's scheduled reversal
+ * date itself (`clara._plan_reversal_date`) and admits exactly ONE occurrence, so this caller
+ * computes no window and mirrors no schedule rule -- unlike `reverseAccrualNow` above, which has
+ * to build `[dueDate, accrualReversalDate(dueDate)]` for the catch-up door.
+ *
+ * On this lane the two leave the SAME ledger for that period (measured, not assumed:
+ * `packages/db/tests/plan-occurrence-reversal-door.test.mjs`, `p1073.one_period`). What differs is
+ * the act: its own receipt, its own audit verb, and a refusal that names the OCCURRENCE rather
+ * than a window -- `not_yet_due` where the catch-up says `catch_up_in_future`. Every refusal is a
+ * real DoorRefusal and surfaces verbatim; nothing here pretends a reversal happened.
+ */
+export async function reverseAccrualPeriod(
+  planId: string,
+  dueDate: string,
+  o: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "reverse_plan_occurrence",
+    { p_plan: planId, p_due: dueDate, p_op_key: crypto.randomUUID() },
     opts(o),
   );
 }

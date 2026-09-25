@@ -271,6 +271,17 @@ export function DocumentDetail({
   const { facts, layout } = partitionRegions(data.regions);
   const layoutCount = layout.reduce((n, group) => n + group.regions.length, 0);
   const factsVersion = revisions.data?.facts_version ?? null;
+  /** #1056 — the payroll chain's own version. `undefined` (a database below the 0344 frontier) and
+   *  an explicit null both mean "this surface has no number for a payroll row", which the table
+   *  renders as no control rather than as a control that would refuse. */
+  const payrollFactsVersion = revisions.data?.payroll_facts_version ?? null;
+  /** THE NUMBER THE NOTE PRINTS is whichever chain this document actually carries a reading in.
+   *  A payroll summary carries no invoice reading, so the invoice count is 0 on it, and printing
+   *  "source version 0" under a table of payroll figures would be this surface stating something
+   *  the document never said. A document carrying both reports the invoice one, which is the
+   *  chain the note has always meant. */
+  const notedVersion = (invoiceVersion: number): number =>
+    invoiceVersion > 0 ? invoiceVersion : (payrollFactsVersion ?? invoiceVersion);
 
   return (
     <div className="flex flex-col gap-4">
@@ -335,7 +346,8 @@ export function DocumentDetail({
           <DocumentFactsTable
             facts={facts}
             revise={factsVersion === null ? null : {
-              documentId, factsVersion, busy: busy || revisions.busy, onRevised: reloadAll,
+              documentId, factsVersion, payrollFactsVersion,
+              busy: busy || revisions.busy, onRevised: reloadAll,
             }}
           />
           {/* The partition is total, so the regions NOT in the facts table are accounted for by
@@ -349,7 +361,7 @@ export function DocumentDetail({
             </p>
           ) : (
             <p className="text-xs text-muted-foreground" data-testid="facts-version">
-              {t("factsVersionNote", { version: factsVersion })}
+              {t("factsVersionNote", { version: notedVersion(factsVersion) })}
             </p>
           )}
           <DoorFeedback err={revisions.err} clr={revisions.clr} />

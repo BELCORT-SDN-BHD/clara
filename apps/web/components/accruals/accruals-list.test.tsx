@@ -215,3 +215,53 @@ test("942.list.filter — the register can be narrowed to one side, and says so 
     },
   );
 });
+
+// ==============================================================================================
+// #1071 — THE AMOUNT COLUMN NAMES ITS OWN KIND. `amount_cents` means two different things
+// depending on `method.rule`: under `stated_amount` it is the figure THIS accrual posts EVERY
+// period; under `stated_period_amount` (#937) it is the TOTAL across the whole authority window,
+// and the per-period figures live only in `period_amounts` (rendered on the detail view, #1070 —
+// the register never shows them, by that ticket's own "out of scope" line). Before this ticket the
+// Amount column printed the bare figure for both rows alike, so a reader scanning the register
+// could not tell — FROM THE AMOUNT COLUMN ALONE — which fact they were looking at. The Term
+// column's method sentence (asserted by `942.list.side` et al. via `methodLabel`) already answers
+// this, but not beside the money, which is where a reader who skips straight to the figure needs
+// it. The Term column is deliberately left untouched by this ticket.
+// ==============================================================================================
+
+const PERIOD_TOTAL_ROW = {
+  ...ROW,
+  accrual_id: "dddddddd-dddd-4ddd-8ddd-ddddddddddaa",
+  purpose: "Unbilled consulting retainer, stated per period",
+  method: { rule: "stated_period_amount" },
+  // Deliberately NOT the same figure as ROW's, and not a round multiple of it, so a cell that
+  // matched the wrong row's amount cannot pass by accident.
+  amount_cents: 200000,
+};
+
+test("1071.list.amount-kind — the Amount column names whether its figure is per period or a window total", async () => {
+  await withMockedEnv(
+    rpcRouter({ list_accrual_adjustments: { client_id: CLIENT, accruals: [ROW, PERIOD_TOTAL_ROW] } }),
+    async () => {
+      const h = await renderComponent(app(createElement(AccrualsList, { clientId: CLIENT })));
+      try {
+        for (let i = 0; i < 6; i++) await h.settle();
+        const text = h.text();
+        // AC1 — a `stated_amount` row's figure is unambiguously per-period, and now says so.
+        assert.match(text, /1,200\.00Per period/,
+          "ROW's Amount cell names its own figure as the per-period one, right beside the money");
+        // AC2 — a `stated_period_amount` row's figure is unambiguously the window total, and says
+        // so rather than looking like the same kind of figure as ROW's.
+        assert.match(text, /2,000\.00Window total/,
+          "PERIOD_TOTAL_ROW's Amount cell names its own figure as the window total, not a per-period one");
+        // The two labels differ, so the column is distinguishable row to row (AC3) and neither
+        // label leaked onto the other row's figure.
+        assert.doesNotMatch(text, /1,200\.00Window total/);
+        assert.doesNotMatch(text, /2,000\.00Per period/);
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});

@@ -114,6 +114,46 @@ export const INLINE_CHAT_LANE_EXISTENCE = "from clara.agent_tasks t where t.id =
 /** The one function that owns the answer after #977. */
 export const REFUSAL_FN_SIG = "clara._authority_ref_refusal(text,uuid,uuid,uuid)";
 
+/** #1051 (0330) — THE SHARED PLAN AUTHORITY WALL, and why this module has to know about it. #977
+ *  wired BOTH doors directly at `REFUSAL_CALL`. 0330 folds the plan lane's whole authority wall
+ *  (the two authority-kind refusals, the three `authority_ref` shape refusals and this very
+ *  resolution) out of `clara.create_accounting_plan` and `clara._obo_plan_core` into ONE
+ *  predicate, so on a post-0330 chain the two plan bodies reach #977's definition THROUGH it
+ *  rather than by naming it. The claim #977 makes — one definition, no door keeping its own copy
+ *  — is unchanged; the SHAPE of the census that proves it is not, so the census cell measures
+ *  which chain it is on rather than assuming one. */
+export const PLAN_WALL_FN_SIG = "clara._assert_plan_authority(text,jsonb,uuid,uuid)";
+export const PLAN_WALL_CALL = "clara._assert_plan_authority(";
+
+/** #1080 (0331) — THE LAST CARRIER OF THE INLINE PROBE. 0250 could not reach
+ *  `clara._accrual_plan_core` (its own header says so at line 63) and pinned the surviving inline
+ *  chat-lane existence test to exactly that one function in its tail (0250:604). 0331 points that
+ *  body at #1051's shared predicate, and with it the probe leaves the catalog entirely, which is
+ *  the state 0250's own prose always wanted and could not have. So the census cell's expected
+ *  roster is `["_accrual_plan_core"]` below 0331 and `[]` from 0331 on.
+ *
+ *  MEASURED OFF THE APPLIED CHAIN, never off the body under test. `PLAN_WALL_FN_SIG` can be
+ *  feature-detected with `to_regprocedure` because 0330 MINTS a name; 0331 mints none — it recuts
+ *  one body — so the only honest instrument is the chain itself, on 0331's STABLE STEM. Asking
+ *  the body whether it still carries the probe would be asking the subject under test what it
+ *  should be. */
+export const ACCRUAL_PLAN_AUTHORITY_WALL_STEM = "accrual_plan_authority_wall$";
+
+let _accrualWall = null;
+export async function accrualPlanAuthorityWallReady() {
+  if (_accrualWall === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [ACCRUAL_PLAN_AUTHORITY_WALL_STEM]);
+      _accrualWall = r.rows[0].n > 0;
+    } catch {
+      _accrualWall = false;
+    }
+  }
+  return _accrualWall;
+}
+
 /** Normalize a `prosrc` the way 0250's tail assertions do. */
 export const normalizeSrc = (src) =>
   String(src).replace(/--[^\n]*/g, "").toLowerCase().replace(/\s+/g, " ").trim();

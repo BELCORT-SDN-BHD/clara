@@ -1,0 +1,64 @@
+{
+  "axis": "standards",
+  "lane": "waveS-lane03",
+  "fixed_point": "7bc5a710f",
+  "diff_command": "git diff 7bc5a710f...HEAD",
+  "commit_range": "git log 7bc5a710f..HEAD --oneline",
+  "tickets_in_lane": ["#1067", "#1052", "#1066", "#1068", "#1069"],
+  "sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    "docs/plan/active/riders-2026-09-20/SWEEP-PLAN.md",
+    ".claude/skills/tdd/SKILL.md (and tests.md/mocking.md, referenced by the work order)",
+    "packages/db/README.md house-law sections (0339, 0340, 0341)",
+    "apps/web/README.md (#1052, #1066, #1068 sections)",
+    "per-ticket reports: reports/waveS-lane03-ticket{1067,1052,1066,1068,1069}.md"
+  ],
+  "verification_performed": [
+    "Re-measured all pinned prosrc sha256 values live on clara_l06 for clara._assert_claim_basis and its ten/eleven neighbour bodies; matched every prestate/tail pin in 0339 and 0340.",
+    "Re-ran packages/db/tests/staff-expense-claim-allocations.test.mjs + staff-expense-claim.test.mjs with the full $GATES chain (128 --import flags): 45 pass, 0 fail.",
+    "Re-ran apps/web unit tests for all four touched/new web test files together: 110 pass, 0 fail.",
+    "Re-ran apps/web/tests/firm-scope-db-pins.test.ts (the shared migration-pins corpus, rule (d)): 22 pass, 0 fail.",
+    "Re-ran `pnpm typecheck` at repo root: clean (apps/web, packages/runtime both Done).",
+    "Re-ran `CI=true GITHUB_ACTIONS=true pnpm lint` at repo root: freeze-lint failed, but the failure is entirely REMOVED-VS-BASE/REGISTRY-DOWNGRADE noise from origin/main having advanced to 061a6992b (PR #1140, the unrelated riders-cut integration merge) since this lane's base (7bc5a710f); none of the flagged files or workflow classes (chatTurn/claraWork/statementFacts, packages/runtime/lib/*.v2.ts) appear anywhere in this lane's diff (git diff --stat touches only apps/web and packages/db). This is environmental drift in a shared worktree during a concurrent multi-lane session, not a lane-03 defect."
+  ],
+  "findings": [
+    {
+      "ticket": 1069,
+      "severity": "minor",
+      "category": "standards-compliance-documentation",
+      "title": "Ticket #1069's own report omits the SWEEP-PLAN rule-(d) gate for the migration-pins corpus",
+      "file": "docs/plan/active/riders-2026-09-20/reports/waveS-lane03-ticket1069.md",
+      "rule": "docs/plan/active/riders-2026-09-20/SWEEP-PLAN.md, SWEEP-WAVE RULES (d): \"The web pins corpus apps/web/tests/firm-scope-db-pins.corpus.ts is in scope whenever a migration file changed, even a comment.\"",
+      "evidence": "0341_work_claim_allocation_count.sql is a new migration file, so rule (d) puts apps/web/tests/firm-scope-db-pins.test.ts in scope for ticket #1069. The #1067 and #1052 ticket reports (reports/waveS-lane03-ticket1067.md:258 and reports/waveS-lane03-ticket1052.md:316) both explicitly ran it and recorded '22 pass, 0 fail — no corpus edit needed'. reports/waveS-lane03-ticket1069.md's Gates section (the full 'Gates, with counts' block) has no line for this test at all — grepped for 'firm-scope-db-pins' and 'pins corpus' in that file with zero hits.",
+      "verified": "Re-ran `node --import ./test/bootstrap.mjs --import tsx --test tests/firm-scope-db-pins.test.ts` from apps/web on the current lane state (post-0341): 22 pass, 0 fail — the same result #1067/#1052 recorded. There is no live defect; the gate does pass. This is a reporting-completeness gap against a documented rule, not a functional regression.",
+      "required_fix": "Add the firm-scope-db-pins.test.ts run and its result to ticket #1069's report (or confirm it was run and simply not recorded), so the per-ticket evidence trail matches SWEEP-PLAN rule (d) the same way #1067 and #1052 did."
+    }
+  ],
+  "smell_baseline_notes": [
+    {
+      "smell": "Duplicated Code (suppressed by documented standard)",
+      "where": "packages/db/migrations/0339, 0340 each carry clara._assert_claim_basis's full ~450-line body, byte-for-byte apart from the one new rule/normalisation each file adds.",
+      "verdict": "Not flagged. The repo's own migration house law (WORK-ORDER.md addendum, 'Migrations': an applied migration is immutable, a body change ships as a new file carrying the predecessor's body plus the delta, with prestate pins on the pre-image) explicitly mandates this shape. The repo overrides the baseline here."
+    },
+    {
+      "smell": "Cross-purposing a form control's id/ref/aria wiring onto a <Button> (judgement call, not flagged as a violation)",
+      "where": "apps/web/components/registers/staff-advance-allocations-editor.tsx: `emptyStateProps` spreads `rowProps(0, \"advance\")` (an id, a focus ref, aria-invalid, aria-describedby meant for row 0's <select>) onto the empty-state \"Add allocation\" <Button> (#1068).",
+      "verdict": "Not flagged as a defect. It is deliberate and narrowly scoped (only when allocations.length === 0, and only for a caller that passes rowProps at all — the register's own dialog is provably untouched), documented at length in the component's own comment and the ticket report, and driven by three dedicated tests plus two end-to-end tests proving the boundary (empty vs non-empty, with/without rowProps). Worth a reviewer's eye only because aria-invalid/aria-describedby are unusual on a plain action button, but the accessibility intent (keep the one addressable id alive so focus/scroll-to-error never targets a missing node) is sound and tested."
+    }
+  ],
+  "tdd_process_review": {
+    "vertical_slices": "Confirmed for every ticket by commit-order inspection (git log --stat 7bc5a710f..HEAD). #1067: fix(db) [migration + tail assertions + first test cell] then test(db) [more cells]. #1052: fix(db) then feat(web). #1066: fix(web) -> test(web) -> docs(web) -> fix(web) -> fix(web), three small increments (chooser filter, wire, preview) each landing behaviour then its own test before the next increment. #1068: fix(web) -> test(web) -> docs(web). #1069: fix(db) -> test(db) -> fix(web) -> test(web) -> docs(db). No ticket committed a batch of red tests before any implementation (the anti-pattern named in .claude/skills/tdd/SKILL.md).",
+    "seam_discipline": "Every new test drives a public interface: the SQL door clara.admit_staff_expense_claim_work / clara.get_work_claim_origin (never an internal helper directly), or a mounted React component's rendered DOM/injected read seam (renderComponent + injected loadX props). No test reaches an internal collaborator or a private function. No mocking of anything the repo controls; grepped all four new/touched web test files for mock/jest.fn/vi.fn/spyOn and found none.",
+    "independent_expected_values": "packages/db/tests/staff-expense-claim-allocations.test.mjs computes its own `allocatedBasis` from the ruling's prose rather than re-deriving what clara._claim_journal_basis computes; apps/web's #1066 wire-shape cells state expected values read off that same independently-computed worked example (p931.accounts), not off the implementation under test."
+  },
+  "migration_house_law_review": {
+    "0339": "PASS — header states spec of record and measurement; prestate pins the one recut body's live pre-image plus ten neighbour bodies not touched; owner/SECURITY DEFINER/search_path/ACL asserted in tail T.1/T.1b; tail T.2-T.6 DRIVE both settlement arms, the exact_sum contrast, the two non-refused shapes, the single-advance non-regression, the ten neighbour pins re-measured, and a live-data zero-count invariant; redo marker/branch present; no new relation so no rig-meta cohort owed (correct).",
+    "0340": "PASS — recuts from 0339's LIVE post-image (not 0301's), correctly required by name in its own prestate; adds only the two lower() calls; tail T.1-T.1g assert structural posture and the exact comparison text; tail T.2 DRIVES the case/whitespace admit, the substring-is-not-a-match refusal, #1067's rule carried forward, a foreign client's advance still refused, and a retired enrolment still refused, all inside a CLR99 rollback sub-transaction so no fixture survives; T.4 is an always-evaluated data count (not a data-dependent branch skipped when zero), matching the wave-3 addendum's own rule.",
+    "0341": "PASS — recuts clara.get_work_claim_origin at its true 0221 pre-image (no intervening migration touches it, confirmed by grep); adds one projected key with no default/coalesce branch, and the header's own reasoning for why none is needed is independently verified by reading 0301's backfill and admission-door sections; tail DRIVES all three shapes (0/1/2-advance claims) through the real admission door and the real recut door under a faked JWT; grant matrix (viewer-floored, clara_authenticated only, not clara_runtime/clara_agent_ro) asserted in tail T.1c/T.1d; both FIRST-APPLY and #957 REDO branches exercised per the report, with two different post-image shas explained (a comment-text edit between applies).",
+    "shared_files": "en.json key inserted at the sorted position within its own section (advanceAllocationAmount < advanceSourceEnrolment < advancesUnavailable, ASCII order). apps/web/test/manifest.txt entry inserted at the sorted position. packages/db/package.json's $GATES list appended in migration order (0339, 0340, 0341) at the end, per house rule. No rig-meta.mjs change — correct, since none of the three migrations mint a new relation/cohort name. No PRD.md/ARCHITECTURE.md edit. No applied (pre-0339) migration edited."
+  },
+  "summary": "Standards axis: high-quality, disciplined work across all five tickets. Migration house law (prestate/tail pins, owner/SECURITY DEFINER/search_path/ACL preservation, redo safety, immutable-migration recut convention) is followed correctly and was independently re-verified live on the lane database (all pinned shas match, all tail assertions re-run and pass). TDD vertical-slice discipline is followed throughout — no horizontal batching of tests. Tests drive public interfaces only, use independent expected-value sources, and mock nothing the repo controls. Shared files (en.json, manifest.txt, package.json's $GATES, firm-scope-db-pins corpus) are touched correctly and minimally. One minor finding: ticket #1069's own report does not document running the SWEEP-PLAN rule-(d)-required migration-pins corpus test, though independently re-running it now confirms it passes (22/22) — a reporting-completeness gap, not a code defect. The `pnpm lint` freeze-workflow failure observed during this review is environmental (origin/main advanced past this lane's base via an unrelated concurrent integration merge, PR #1140) and does not implicate any file in this lane's diff."
+}

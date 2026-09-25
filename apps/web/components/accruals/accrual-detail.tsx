@@ -112,6 +112,35 @@ function Body({ clientId, row }: { clientId: string; row: AccrualDetailRow }) {
         </dl>
       </section>
 
+      {row.period_amounts.length === 0 ? null : (
+        // #1070 — THE PER-PERIOD SCHEDULE. `factMethod` above already names the RULE
+        // (`stated_period_amount`); this renders what that rule STATED, one row per due date, in
+        // the same due-date/amount shape `AccrualPeriodAmountsBlock` (the two forms' own block)
+        // uses — read-only here, because a detail view never offers a control whose only outcome
+        // is editing a row the door has already admitted. The array is always present
+        // (`lib/accruals/api.ts`'s own `period_amounts` comment): `[]` under `stated_amount`, so
+        // this section is absent rather than empty for every accrual that does not use it.
+        <section className="flex flex-col gap-2">
+          <SectionHeader level={2}>{t("periodAmountsHeading")}</SectionHeader>
+          <DataTableCard label={t("periodAmountsHeading")}>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t("colDue")}</TableHead>
+                <TableHead>{t("colAmount")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {row.period_amounts.map((period) => (
+                <TableRow key={period.due_date}>
+                  <TableCell className="tabular-nums">{period.due_date}</TableCell>
+                  <TableCell className="tabular-nums">{formatCents(period.amount_cents)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </DataTableCard>
+        </section>
+      )}
+
       {row.corrects_accrual_id === null && row.corrected_by_accrual_id === null ? null : (
         // #936 — THE CORRECTION LINEAGE. `corrects_accrual_id` and `corrected_by_accrual_id` are
         // 0222's own columns, first WRITTEN by `clara.correct_accrual_adjustment` (0284): they name

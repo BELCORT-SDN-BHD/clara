@@ -69,7 +69,8 @@ import { FieldDescription, FieldLegend, FieldSet } from "@/components/ui/field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { listCoaAccounts } from "@/lib/journals/api";
 import {
-  getStaffAdvanceSummary, isOutstandingAdvance, type StaffAdvanceSummary,
+  getStaffAdvanceSummary, isOutstandingAdvance,
+  type StaffAdvanceSummary, type StaffAdvanceSummaryRow,
 } from "@/lib/registers/staff-advances-doors";
 import { StaffAdvanceAllocationsEditor } from "@/components/registers/staff-advance-allocations-editor";
 import { fmtCents } from "@/lib/registers/money";
@@ -95,6 +96,7 @@ import {
   PENDING_FACT_MAX_CHARS,
   allocationFieldId,
   allocationsAreApportioned,
+  claimAdvanceAccountCode,
   claimTotalCents,
   defaultMemo,
   derivedLines,
@@ -255,16 +257,86 @@ export function StaffExpenseClaimFormView({
     () => (enrolments === null ? null : new Set(enrolments.map((e) => e.account_code))),
     [enrolments],
   );
+  /** #1052 — THE CLAIMANT'S OWN LIVE ENROLMENT, resolved the way the door resolves it (0221's
+   *  `clara._claim_resolve_claimant`): the stated enrolment, or the live enrolment on the account
+   *  dedicated to them. `null` while the register has not been read, or while the claimant is a
+   *  code with no enrolment yet — in both cases the form knows of no enrolment to compare against
+   *  and says nothing, the same conservative direction `claimantIsNew` takes. Moved ABOVE
+   *  `advanceCandidates` (#1066): the chooser's own filter now needs it too. */
+  const claimantEnrolmentId = useMemo(() => {
+    const stated = draft.claimantEnrolmentId.trim();
+    if (stated !== "") return stated;
+    const code = draft.claimantAccountCode.trim();
+    if (code === "" || enrolments === null) return null;
+    return enrolments.find((e) => e.account_code === code)?.id ?? null;
+  }, [draft.claimantEnrolmentId, draft.claimantAccountCode, enrolments]);
+  /** #1066 — THE CLAIMANT'S OWN LABEL, normalised the same way the wall normalises it (0340:
+   *  `lower(btrim(...))`, case and surrounding whitespace only, nothing looser) — so the chooser
+   *  can recognise a SECOND enrolled account as this claimant's exactly the way
+   *  `clara._assert_claim_basis` does. `null` while the enrolment register has not been read or
+   *  the claimant's own account carries no live enrolment yet: in both cases nothing is claimed
+   *  about a second account, the same conservative direction `advanceSourceEnrolment` takes. */
+  const claimantLabel = useMemo(() => {
+    if (claimantEnrolmentId === null || enrolments === null) return null;
+    const label = enrolments.find((e) => e.id === claimantEnrolmentId)?.person_label ?? null;
+    return label === null ? null : label.trim().toLowerCase();
+  }, [claimantEnrolmentId, enrolments]);
   /** #930 — the CLAIMANT's own outstanding, unvoided advances: `staff_advance_summary`'s
    *  `advances`, narrowed to this account_code by `isOutstandingAdvance` — the very SYMBOL
    *  `staff-advances-register.tsx` filters its own allocation editor's candidates by, so the two
    *  surfaces cannot disagree about what "still outstanding" means. `[]` while the claimant is
-   *  blank or the read has not resolved: no candidate is ever guessed. */
+   *  blank or the read has not resolved: no candidate is ever guessed.
+   *
+   *  #1066 — WIDENED TO THE DOOR'S OWN SECOND ARM. `clara._assert_claim_basis` (0340) also admits
+   *  an advance held under a DIFFERENT live enrolled account of this client whose person label is
+   *  the claimant's; before this the chooser never offered such a candidate, so only a caller
+   *  going around the form could reach it. `a.enrolment_active` mirrors the wall's own `sa2.active`
+   *  — a retired enrolment on a second account still fails arm (b) at the door and is not offered
+   *  here either.
+   *
+   *  FIX ROUND (ADV-03) — `enrolment_active` GUARDS BOTH ARMS, because the wall does. 0340 tests
+   *  the ADVANCE'S OWN ENROLMENT (`v_adv_enrol is distinct from v_claim_enrol`), never its account
+   *  code, and the claimant's resolved enrolment is always a LIVE one (rule (i), and
+   *  `clara._adv_enrolment_at(..., now())`). So an advance issued under a RETIRED earlier
+   *  generation of the claimant's own account is not the claimant's own enrolment's either: it
+   *  falls to arm (b), whose `sa2.active` it fails, and the door answers
+   *  `advance_allocation_mismatch` / `not_this_claimant`. Offering it — and, since #1052,
+   *  attributing it in words — promised a confirmation the door refuses. The account-code arm
+   *  stays an ACCOUNT-CODE arm so that a form whose enrolment register could not be read still
+   *  offers the claimant's own advances, exactly as before; only the retired generation leaves. */
   const advanceCandidates = useMemo(() => {
     const code = draft.claimantAccountCode.trim();
     if (code === "" || advancesRead.data === null) return [];
-    return advancesRead.data.advances.filter((a) => a.account_code === code && isOutstandingAdvance(a));
-  }, [advancesRead.data, draft.claimantAccountCode]);
+    return advancesRead.data.advances.filter((a) => {
+      if (!isOutstandingAdvance(a) || !a.enrolment_active) return false;
+      if (a.account_code === code) return true;
+      return claimantLabel !== null && a.person_label.trim().toLowerCase() === claimantLabel;
+    });
+  }, [advancesRead.data, draft.claimantAccountCode, claimantLabel]);
+  /** #1066 — advance_id → the REAL account it sits on, off the SAME `staff_advance_summary` read
+   *  `advanceCandidates` narrows — every advance this client has, not only the offered ones, so a
+   *  stale confirmed id (a stored draft naming an advance a later read no longer offers) still
+   *  resolves rather than silently falling back to the typed field. Fed to `toClaimWire` and
+   *  `derivedLines` so the wire and the preview never disagree with what the door will actually
+   *  do with a cross-account confirmed list. `null` while unread: both callers already fall back
+   *  to the claim's own typed `advanceAccountCode`, exactly as they did before this ticket. */
+  const advanceAccountCodes = useMemo(() => {
+    if (advancesRead.data === null) return null;
+    const map = new Map<string, string>();
+    for (const a of advancesRead.data.advances) map.set(a.advance_id, a.account_code);
+    return map;
+  }, [advancesRead.data]);
+  /** #1052 — WHERE AN OFFERED ADVANCE CAME FROM, when it did not come from the claimant's own
+   *  enrolment. The owner's ruling of 2026-09-24 on #931 requires the editor to show it "beside
+   *  each such advance, […] so the preparer's confirmation is a confirmation of that specific
+   *  account", and the comparison is of ENROLMENTS, never of account codes: one account
+   *  re-enrolled after a retirement carries a second generation, and an advance issued under the
+   *  first is not the current claimant enrolment's however the code reads. */
+  const advanceSourceEnrolment = useCallback((c: StaffAdvanceSummaryRow): string | null => (
+    claimantEnrolmentId === null || c.enrolment_id === claimantEnrolmentId
+      ? null
+      : t("advanceSourceEnrolment", { account: c.account_code, person: c.person_label })
+  ), [claimantEnrolmentId, t]);
   /** #931 — the draft's allocation list in the shared editor's own row shape. The claim form keeps
    *  camelCase and the register keeps snake_case; this is the ONE place they meet, rather than one
    *  module bending to the other's spelling. */
@@ -280,11 +352,26 @@ export function StaffExpenseClaimFormView({
     && (enrolledCodes === null || !enrolledCodes.has(draft.claimantAccountCode.trim()));
 
   const issues: ClaimIssue[] = useMemo(
-    () => (showIssues ? validateClaimDraft(draft, knownCodes, enrolledCodes) : []),
-    [showIssues, draft, knownCodes, enrolledCodes],
+    // FIX ROUND (ADV-04) — VALIDATE WHAT IS SENT. `toClaimWire` fills `advance_account_code` from
+    // the head allocation's REAL account, so the chart check must ask about that one; handing the
+    // lookup in is what keeps the form from passing a draft the door refuses `unknown_account`.
+    () => (showIssues ? validateClaimDraft(draft, knownCodes, enrolledCodes, advanceAccountCodes) : []),
+    [showIssues, draft, knownCodes, enrolledCodes, advanceAccountCodes],
   );
-  const lines = useMemo(() => derivedLines(draft), [draft]);
+  const lines = useMemo(() => derivedLines(draft, advanceAccountCodes), [draft, advanceAccountCodes]);
   const total = claimTotalCents(draft);
+  /** #1066 fix round (L03-SPEC-03) — THE ACCOUNT THIS CLAIM WILL ACTUALLY CREDIT, when that is
+   *  not the one the preparer picked. `clara._assert_claim_basis` (0340) refuses a claim whose
+   *  `advance_account_code` disagrees with its confirmed list's first entry, so `toClaimWire` makes
+   *  the column FOLLOW the head allocation's own account. That override is necessary; leaving it
+   *  silent was not — the picker went on reading 1190 while the claim filed 1191. `null` whenever
+   *  the two agree (every single-account claim, which is every claim before #1066), so the field
+   *  is byte for byte what it was. */
+  const creditedAdvanceAccount = useMemo(() => {
+    if (draft.settlement !== "advance_application") return null;
+    const head = claimAdvanceAccountCode(draft, advanceAccountCodes);
+    return head === "" || head === draft.advanceAccountCode.trim() ? null : head;
+  }, [draft, advanceAccountCodes]);
 
   // PERSIST ON EVERY EDIT. Not debounced: the payload is small, the storage is synchronous, and a
   // debounce is exactly how a draft goes missing when a tab is closed a moment after the last
@@ -398,7 +485,7 @@ export function StaffExpenseClaimFormView({
   };
 
   const send = async () => {
-    const claim = toClaimWire(draft, knownCodes, enrolledCodes);
+    const claim = toClaimWire(draft, knownCodes, enrolledCodes, advanceAccountCodes);
     if (claim === null) return; // unreachable: the caller validated first
     // OMITTED ENTIRELY when there is no document — the route reads an absent and an empty list
     // identically (`toDbSourceRefs`), and sending `[]` would be the same request with more bytes.
@@ -666,9 +753,19 @@ export function StaffExpenseClaimFormView({
         <>
           <Field field="advanceAccountCode" errorText={errorFor("advanceAccountCode")}
             label={t("advanceAccountCode")} hint={t("advanceAccountCodeHelp")}>
-            <AccountPicker field="advanceAccountCode" value={draft.advanceAccountCode}
-              accounts={accounts} props={controlProps("advanceAccountCode", true)}
-              onPick={(v) => set("advanceAccountCode", v)} placeholder={t("accountPlaceholder")} />
+            <div className="flex flex-col gap-1">
+              <AccountPicker field="advanceAccountCode" value={draft.advanceAccountCode}
+                accounts={accounts} props={controlProps("advanceAccountCode", true)}
+                onPick={(v) => set("advanceAccountCode", v)} placeholder={t("accountPlaceholder")} />
+              {/* WHAT THE CLAIM WILL ACTUALLY CREDIT (fix round, L03-SPEC-03). Shown only when the
+                  confirmed head sits somewhere else, so a preparer never files a claim against an
+                  account the form did not say out loud. */}
+              {creditedAdvanceAccount === null ? null : (
+                <p className="text-xs text-muted-foreground" data-testid="advance-account-follows-head">
+                  {t("advanceAccountCodeFollowsHead", { account: creditedAdvanceAccount })}
+                </p>
+              )}
+            </div>
           </Field>
           {/* NO SILENT FIFO (WD-R10). The claim says WHICH advances it discharges and by how much;
               the register never guesses, and the database refuses a claim that does not name one.
@@ -703,6 +800,11 @@ export function StaffExpenseClaimFormView({
                 // HER advances apart: when it was paid, and what is still outstanding on it.
                 optionLabel={(a) =>
                   `${a.issue_date} — ${fmtCents(a.outstanding_cents, tcommon("centsUnsafe"))} ${t("advanceIdOutstandingSuffix")}`}
+                // #1052 — AND WHICH ENROLMENT IT CAME FROM, whenever that is not the
+                // claimant's own. The ruling of 2026-09-24 on #931 asks for it beside the
+                // advance in the chooser AND beside the confirmed row; the editor renders both
+                // from this one reader.
+                sourceEnrolment={advanceSourceEnrolment}
                 rowProps={(i, key) => controlProps(
                   allocationFieldId(i, key === "advance" ? "advanceId" : "amountCents"),
                   i === 0 && key === "advance",

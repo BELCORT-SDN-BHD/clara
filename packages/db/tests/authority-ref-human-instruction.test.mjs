@@ -17,7 +17,8 @@ import assert from "node:assert/strict";
 import {
   gate977, NOT_HUMAN, UNRESOLVED, refusedWith,
   REFUSAL_CALL, INLINE_CHAT_LANE_EXISTENCE, normalizedBody, normalizeSrc,
-  REFUSAL_FN_SIG, AUTHORITY_REF_HUMAN_INSTRUCTION_STEM,
+  REFUSAL_FN_SIG, PLAN_WALL_FN_SIG, PLAN_WALL_CALL, AUTHORITY_REF_HUMAN_INSTRUCTION_STEM,
+  accrualPlanAuthorityWallReady,
 } from "./authority-ref-human-instruction-fixtures.mjs";
 import { mintAgentTaskRef } from "./fa-authority-sign-compat.mjs";
 import {
@@ -182,18 +183,34 @@ test("p977.definition.shape clara._authority_ref_refusal(text,uuid,uuid,uuid) ex
   }
 });
 
-test("p977.definition.one both doors READ clara._authority_ref_refusal — as does #941's on-behalf twin of the plan door, which copies that door's authority shape verbatim — and none of them still carries its own inline chat-lane existence test; that inline test now survives in exactly one clara function — the accrual lane's core, which the owner's ruling deliberately leaves alone", async (t) => {
+test("p977.definition.one both doors REACH clara._authority_ref_refusal — the signing door by naming it, the plan door and #941's on-behalf twin of it through #1051's one shared plan-authority wall once that is live — and none of them still carries its own inline chat-lane existence test; that inline test survives in exactly one clara function below #1080 (the accrual lane's core, which 0250 could not reach) and in NO clara function at all from 0331 on", async (t) => {
   if (await gate(t)) return;
 
   const SIGN = "clara.sign_depreciation_authority(uuid,uuid,text,jsonb)";
   const PLAN = "clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)";
 
-  for (const sig of [SIGN, PLAN]) {
+  // #1051 (0330) — MEASURED, NEVER ASSUMED, the same rule this cell already applies to the OBO
+  // twin below. On a pre-0330 chain the plan door NAMES the shared definition; on a post-0330
+  // chain it reaches it through `clara._assert_plan_authority`, the one predicate both plan
+  // bodies now call. Either way there is exactly ONE definition and no door keeps its own copy,
+  // which is #977's whole claim; what moves is how many hops away the plan lane stands.
+  const planWallLive = (await rootQuery(
+    "select to_regprocedure($1) is not null as ok", [PLAN_WALL_FN_SIG])).rows[0].ok;
+  const planReach = planWallLive ? PLAN_WALL_CALL : REFUSAL_CALL;
+
+  for (const [sig, reach] of [[SIGN, REFUSAL_CALL], [PLAN, planReach]]) {
     const src = await normalizedBody(sig);
-    assert.ok(src.includes(REFUSAL_CALL.toLowerCase()),
-      `${sig} reads the shared definition ${REFUSAL_CALL}`);
+    assert.ok(src.includes(reach.toLowerCase()),
+      `${sig} reaches the shared definition through ${reach}`);
     assert.ok(!src.includes(INLINE_CHAT_LANE_EXISTENCE),
       `${sig} no longer carries its own inline chat-lane existence test — the fold is real`);
+  }
+  if (planWallLive) {
+    const wall = await normalizedBody(PLAN_WALL_FN_SIG);
+    assert.ok(wall.includes(REFUSAL_CALL.toLowerCase()),
+      "…and #1051's shared plan wall is itself a READER of the one definition, not a second copy of it");
+    assert.ok(!wall.includes(INLINE_CHAT_LANE_EXISTENCE),
+      "…carrying no inline chat-lane existence test of its own either");
   }
 
   // Normalized in JS by the SAME rule the migration's tail uses in SQL, so this cell and the
@@ -204,9 +221,20 @@ test("p977.definition.one both doors READ clara._authority_ref_refusal — as do
   const carriers = bodies.rows
     .filter((r) => normalizeSrc(r.prosrc).includes(INLINE_CHAT_LANE_EXISTENCE))
     .map((r) => r.proname);
-  assert.deepEqual(carriers, ["_accrual_plan_core"],
-    "the inline existence test survives in exactly the one body the ruling leaves alone "
-    + "(the accrual lane's core) — never in either door, and never in a third place");
+  // #1080 (0331) TAKES THE LAST CARRIER AWAY. 0250 named `clara._accrual_plan_core` as the one
+  // body it could not reach and pinned the probe there; 0331 points that body at #1051's shared
+  // predicate, so from 0331 on the probe lives in NO clara function — the state 0250's own prose
+  // always described and could not yet assert. MEASURED off the applied chain (0331 mints no
+  // name, so `to_regprocedure` cannot feature-detect it and asking the body itself would be
+  // asking the subject under test what it should be). Still an EXACT closed world in either
+  // branch: a carrier outside the expected roster still reds this cell.
+  const accrualWallLive = await accrualPlanAuthorityWallReady();
+  assert.deepEqual(carriers, accrualWallLive ? [] : ["_accrual_plan_core"],
+    accrualWallLive
+      ? "from #1080 (0331) the inline existence test survives in NO clara body at all — not in "
+        + "either door, not in the accrual lane's core, and not in a third place"
+      : "below #1080 the inline existence test survives in exactly the one body 0250 could not "
+        + "reach (the accrual lane's core) — never in either door, and never in a third place");
 
   // THE THIRD READER, AND WHY IT IS ONE (riders wave 4, #941/0308). `clara._obo_plan_core` is the
   // ON-BEHALF twin of the plan door's own plan step: #915 wrote it because
@@ -228,16 +256,94 @@ test("p977.definition.one both doors READ clara._authority_ref_refusal — as do
     + "integer,text,date,date,jsonb)";
   const oboTwinLive = (await rootQuery(
     "select to_regprocedure($1) is not null as ok", [OBO_TWIN_SIG])).rows[0].ok;
+  // THE FOURTH READER, AND WHY IT IS ONE (riders sweep wave, #1137/0353). The owner's ruling of
+  // 2026-09-25 on #1137 lets Clara confirm a TENANCY rent plan on a named bookkeeper's behalf from
+  // the conversation, and that confirmation ends in a plan — so it needs a plan step for the same
+  // reason #915's and #941's did: `clara.create_accounting_plan` resolves its actor through
+  // `clara._human_ctx` -> `clara.jwt_sub()`, which a `clara_runtime` connection cannot satisfy.
+  // `clara._tenancy_plan_core` is `clara._obo_plan_core`'s body with the kind fixed to
+  // `recurring_journal`, and it READS the shared definition rather than carrying an inline copy —
+  // which is #977's rule holding on one more machine lane, not escaping it. 0353's own
+  // `p1137.obo.refusals_match` (tenancy-agent-twins.test.mjs) MEASURES the copy: seven shared
+  // refusals driven through BOTH entrances and compared on sqlstate, sentence and typed detail.
+  //
+  // …and AT INTEGRATION IT STOPPED BEING A READER, which is why it is not on the roster below.
+  // This lane was cut from the cut head, which carries no 0330, so 0353 pasted 0300's authority
+  // block into that step under the comment "THE AUTHORITY SHAPE, verbatim from
+  // clara.create_accounting_plan" — a FOURTH hand-written copy of the wall #1051 exists to fold,
+  // and the only one that would have been left standing. 0353's own note says the step "belongs in
+  // clara._obo_plan_core … and is separate only because lane L1 of the same wave recuts that body",
+  // and names the follow-up that merges them. THE MERGE IS WHERE THAT FOLLOW-UP LANDED: the
+  // integration recut points the step at `clara._assert_plan_authority`, exactly as 0330 pointed
+  // the two plan doors and 0331 the accrual core. It had to, because #1051's own census refuses any
+  // body that both calls the predicate and keeps a copy of the wall's sentence.
+  //
+  // So the step now reaches the definition through the shared predicate rather than by naming it,
+  // and this cell asserts THAT rather than listing it: below, a live tenancy step must NOT be a
+  // reader. Nothing it admits or refuses moved — 0353's own `p1137.obo.refusals_match` drives seven
+  // shared refusals through BOTH entrances and compares sqlstate, sentence and typed detail, and
+  // that parity is now exact by construction, because both entrances reach the same body.
+  //
+  // MEASURED, never assumed, on the same terms as the twin above: the roster stays an EXACT closed
+  // world, and a reader this cell does not name still reds it.
+  const TENANCY_STEP_SIG = "clara._tenancy_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,"
+    + "integer,text,date,date,jsonb)";
+  const tenancyStepLive = (await rootQuery(
+    "select to_regprocedure($1) is not null as ok", [TENANCY_STEP_SIG])).rows[0].ok;
   const readers = bodies.rows
     .filter((r) => r.proname !== "_authority_ref_refusal" && r.prosrc.includes(REFUSAL_CALL))
     .map((r) => r.proname);
+  // #1051 (0330) COLLAPSES THE PLAN LANE'S TWO READERS INTO ONE. Before it, the plan door and
+  // its OBO twin each named the definition; after it, neither does and `_assert_plan_authority`
+  // names it once for both — which is the same claim ("no door keeps its own copy") counted at
+  // the place the copies actually live. Still an EXACT closed world in either branch: a reader
+  // outside the expected roster still reds this cell.
+  // #1050 (0338) GIVES THE TWIN ONE KIND OF ITS OWN, and that makes it a reader again. Recut at
+  // integration (riders sweep wave, L1's 0330 against L2's 0338). The owner's re-brief of #1050
+  // lets a named member of the firm record a FIRM-LEVEL STANDING INSTRUCTION, and the unattended
+  // prepayment lane cites that row as its directing human. 0338 §E answers that one kind inside
+  // `clara._obo_plan_core` and hands every other kind to #1051's shared predicate, deliberately:
+  // folding `standing_instruction` into the predicate would admit a firm's blanket delegation at
+  // the HUMAN plan door too, which the ruling gives it to nobody and which 0338's own tail item 6
+  // refuses. Answering it there means resolving it, and it is resolved through THIS definition —
+  // the same #977 resolver every other kind goes through, at firm scope. So the twin is back on
+  // the roster, and that is #977's rule holding on the machine lane rather than escaping it.
+  //
+  // MEASURED, never assumed, the same way the twin's own presence is: 0338 mints
+  // `clara.firm_standing_instructions`, so the catalog carrying that relation is the fact that
+  // says this chain has the second kind on it. Everything else stays an EXACT closed world — a
+  // reader outside the expected roster still reds this cell.
+  const standingKindLive = (await rootQuery(
+    "select to_regclass('clara.firm_standing_instructions') is not null as ok")).rows[0].ok;
+  const oboReads = oboTwinLive && standingKindLive;
   assert.deepEqual(readers,
     // `order by p.proname` above is the catalog's own C ordering (proname is `name`), so the
-    // underscore-led twin sorts first.
-    [...(oboTwinLive ? ["_obo_plan_core"] : []),
-      "create_accounting_plan", "sign_depreciation_authority"],
+    // underscore-led names sort first.
+    planWallLive
+      ? (oboReads
+        ? ["_assert_plan_authority", "_obo_plan_core", "sign_depreciation_authority"]
+        : ["_assert_plan_authority", "sign_depreciation_authority"])
+      : [...(oboTwinLive ? ["_obo_plan_core"] : []),
+        "create_accounting_plan", "sign_depreciation_authority"],
     "…and exactly the two doors the ruling names — plus #941's on-behalf twin of the plan door, "
-    + "which carries that door's authority shape verbatim — read the one definition");
+    + "counted at #1051's shared wall once that is live, and counted again in its own right once "
+    + "#1050's standing-instruction kind gives it a reference of its own to resolve — read the "
+    + "one definition");
+
+  // AND THE TENANCY STEP IS NOT ONE, which is the integration recut's own claim, asserted here
+  // rather than left to the roster's silence: a body that quietly went back to naming the
+  // definition would otherwise only show up as a roster mismatch with no reason attached.
+  if (tenancyStepLive) {
+    const step = bodies.rows.find((r) => r.proname === "_tenancy_plan_core");
+    assert.ok(step, "the tenancy plan step resolves but is not in the catalog census");
+    assert.ok(!step.prosrc.includes(REFUSAL_CALL),
+      "clara._tenancy_plan_core names clara._authority_ref_refusal again -- 0353's integration "
+      + "recut onto #1051's shared predicate was lost");
+    assert.ok(step.prosrc.includes(PLAN_WALL_CALL),
+      "clara._tenancy_plan_core does not reach #1051's shared plan-authority wall at all");
+    assert.ok(!normalizeSrc(step.prosrc).includes(INLINE_CHAT_LANE_EXISTENCE),
+      "clara._tenancy_plan_core carries an inline chat-lane existence test of its own");
+  }
 });
 
 // ===========================================================================================

@@ -141,6 +141,29 @@ async function workListWindowReady() {
   }
   return _workListReady;
 }
+// RIDERS SWEEP WAVE (S). Lane L3's #1069 (0341_work_claim_allocation_count) recuts
+// `clara.list_accounting_work` ONCE more, at a number above 0267's own widening: it projects
+// `allocation_count`, the number of staff advances a claim discharges. The SIGNATURE does not
+// move this time, so the pin's key is unchanged and only its value is; the behavioural proof
+// lives in work-list.test.mjs, not here, and this cell's claim is still only "0229 recuts
+// nothing". Gated on 0341's own STEM, never on a number, for the renumber hazard wave 3 lane 04
+// paid for -- the same instrument firm-portfolio-pack.test.mjs's p659 ladder uses for this very
+// body.
+const WORK_CLAIM_ALLOCATION_COUNT_STEM = "work_claim_allocation_count$";
+let _allocationCountReady = null;
+async function workClaimAllocationCountReady() {
+  if (_allocationCountReady === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [WORK_CLAIM_ALLOCATION_COUNT_STEM]);
+      _allocationCountReady = r.rows[0].n > 0;
+    } catch {
+      _allocationCountReady = false;
+    }
+  }
+  return _allocationCountReady;
+}
 let _refusalReady = null;
 async function refusalRecordReady() {
   if (_refusalReady === null) {
@@ -515,6 +538,7 @@ test("p636.census.no_recut — the twelve pinned bodies are byte-identical after
   const mytLive = await mytWindowReady();
   const refusalLive = await refusalRecordReady();
   const workListLive = await workListWindowReady();
+  const allocationCountLive = await workClaimAllocationCountReady();
   const pins = [
     ["clara._tf_accounting_work_immutable()", "a1c4e0fc07dfe535433ee3061c54192ffeba640eae1375d8a2f529b3d1ff518e"],
     ["clara._assert_journal_source_refs(uuid,uuid,jsonb,boolean)", "f028c8ea70f7bcfde3cdd8ebaae045964ca763746010011a50d4c489bff232d2"],
@@ -538,14 +562,15 @@ test("p636.census.no_recut — the twelve pinned bodies are byte-identical after
     [workListLive
       ? "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,integer,timestamptz,timestamptz)"
       : "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,integer)",
-      workListLive ? "dffa917db2180f5a13be48795ea823ef5cece813677d8d6ad6c61cf01726a828"
+      allocationCountLive ? "fc679a2d4d96341d664d881b9e43da54ed1d8d2e5fe04f4ca45351ff7dbf8dbc"
+        : workListLive ? "dffa917db2180f5a13be48795ea823ef5cece813677d8d6ad6c61cf01726a828"
                    : "61bd9184fe271e081af426647c4081155c6d086368411478d1f2be88a1f4ca5a"],
   ];
   for (const [sig, expected] of pins) {
     const r = await rootQuery(
       "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha from pg_proc p where p.oid = $1::regprocedure",
       [sig]);
-    assert.equal(r.rows[0].sha, expected, `${sig} MOVED unexpectedly — 0229 recuts nothing, and only #964's named MYT-window change, #965's refusal record and #880/#905's work-list recut are tolerated`);
+    assert.equal(r.rows[0].sha, expected, `${sig} MOVED unexpectedly — 0229 recuts nothing, and only #964's named MYT-window change, #965's refusal record, #880/#905's work-list recut and the riders sweep wave's #1069 (0341) allocation-count projection are tolerated`);
   }
 });
 

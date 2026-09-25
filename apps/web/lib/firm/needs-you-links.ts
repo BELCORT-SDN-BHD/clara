@@ -51,7 +51,7 @@
 // and reds the day that column appears.
 
 import type { ReviewQueueRow } from "@/lib/journals/types";
-import { fixedAssetHref, type RegisterTab } from "@/lib/navigation/tree";
+import { fixedAssetHref, type BankTab, type RegisterTab } from "@/lib/navigation/tree";
 
 /** The client-workspace tab each row kind belongs to, as a path SUFFIX under
  *  `/clients/<clientId>`. `""` is the workspace root — the honest destination for a row that
@@ -69,6 +69,10 @@ import { fixedAssetHref, type RegisterTab } from "@/lib/navigation/tree";
 // predicate here to get wrong.
 /** The registers-workbench view that mounts `DepreciationAuthorityPanel` (#974). */
 const FIXED_ASSETS_TAB: RegisterTab = "fixedAssets";
+/** The bank-workbench view that mounts `PayrollSettlementsSection` and `RentSettlementsSection`
+ *  (#1060). Typed against `BankTab` for the same reason `FIXED_ASSETS_TAB` is: renaming the view
+ *  is a typecheck failure here, not a link that silently falls back to the workbench's default. */
+const BANK_MATCHING_TAB: BankTab = "matching";
 
 const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as Record<string, string>, {
   // A draft journal entry is approved/revised/withdrawn on the journals workbench.
@@ -113,17 +117,13 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   // the row. (`?tab=` is not used here: the documents tab has no view that selects a single
   // document from the URL, so naming one would be a link to a view that does not exist.)
   payroll_posting_blocked: "/documents",
-  // #947 (0298) — the bank tab, bare (not `?tab=matching`). `PayrollSettlementsSection` mounts
+  // #947 (0298) — REPOINTED by #1060 to `?tab=matching`. `PayrollSettlementsSection` mounts
   // inside the Matching view, which is where the act this row names — find the bank line, accept
-  // it — actually lives, but `ACCOUNTING_ITEMS`'s own `bank` entry (lib/navigation/tree.ts)
-  // names no `tab`, so `?tab=matching` is not a view `CLIENT_ROUTES` itself emits today
-  // (this file's own test proves every query-carrying suffix against that set, the same way
-  // `depreciation_authority_pending`'s `?tab=fixedAssets` is proven — adding the matching
-  // symmetric entry for bank is scoped OUT of this ticket, recorded as a follow-up rather than
-  // widening a shared navigation registry four other lanes touch this wave). A bare `/bank`
-  // lands one tab away (the default is `accounts`) rather than zero, which is still the honest
-  // answer today.
-  payroll_net_pay_unsettled: "/bank",
+  // it — actually lives, and `ACCOUNTING_ITEMS`'s own `bank` entry (lib/navigation/tree.ts) now
+  // names that tab, the same way `depreciation_authority_pending`'s `?tab=fixedAssets` already
+  // does for the registers workbench. This file's own test still proves the suffix against
+  // `CLIENT_ROUTES`, so a tab renamed in the registry reds here rather than silently falling back.
+  payroll_net_pay_unsettled: `/bank?tab=${BANK_MATCHING_TAB}`,
   // #948 (0299) — the documents tab, SHARED with `payroll_posting_blocked` and the three kinds
   // above it, and deliberately so. A blocked acquisition is about ONE document that was read and
   // did not post: the page whose two readings disagreed, or the agreement to re-file once the
@@ -132,12 +132,10 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   // `payroll_posting_blocked` does not: the documents tab has no view that selects a single
   // document from the URL, so naming one would be a link to a view that does not exist.)
   agreement_posting_blocked: "/documents",
-  // #949 (0300) -- the bank tab, bare, for exactly the reason #947's own note above gives: the
-  // act this row names (find the bank line that paid the month's rent, accept it) lives in the
-  // Matching view, but `ACCOUNTING_ITEMS`'s own `bank` entry names no `tab`, so `?tab=matching`
-  // is not a view `CLIENT_ROUTES` emits today. A bare `/bank` lands one tab away rather than
-  // zero, which is still the honest answer.
-  rent_payable_unsettled: "/bank",
+  // #949 (0300) -- REPOINTED by #1060, exactly as #947's own settlement kind above is: the act
+  // this row names (find the bank line that paid the month's rent, accept it) lives in the
+  // Matching view, and the registry's `bank` entry now names it.
+  rent_payable_unsettled: `/bank?tab=${BANK_MATCHING_TAB}`,
   // #949 (0300) -- the DOCUMENTS tab, and a different tab from its sibling above on purpose. The
   // escalation row's act is on the contract page: read what the tenancy states, decide the
   // treatment the standard asks about, and confirm the revision. Sending it to the bank would
@@ -149,6 +147,13 @@ const OWNING_TAB: Record<string, string> = Object.assign(Object.create(null) as 
   // `accrualDetailHref` is unreachable from this row today. Its own top-level client segment
   // (apps/web/app/(firm)/clients/[clientId]/accruals/page.tsx), never under `/registers`.
   accrual_bill_conflict: "/accruals",
+  // #1048 (0343) — the documents tab, SHARED with `payroll_posting_blocked` and deliberately so.
+  // The ACT lives on the row itself (this is the one payroll kind with an inline affordance), so
+  // the link is not where the question is answered — it is where a person goes to CHECK the page
+  // before answering it, which is the payslip, on the documents tab. (`?tab=` is not used here for
+  // the same reason #946 gave: the documents tab has no view that selects a single document from
+  // the URL, so naming one would be a link to a view that does not exist.)
+  payroll_completeness_question: "/documents",
 });
 
 /**

@@ -151,6 +151,11 @@ export type WorkClaimOrigin = {
   pending_item_count: number;
   corrects_claim_id: string | null;
   corrected_by_claim_id: string | null;
+  /** #1069 (migration 0341) — how many advances this claim's advance-application arm discharges,
+   *  read off `clara.staff_expense_claim_allocations`' own rows: 1 for a single-advance claim, the
+   *  matching row count for a multi-advance one, and 0 for a claim that discharges no advance at
+   *  all (`reimbursement`, `already_settled`) — the honest count of an arm that is not there. */
+  allocation_count: number;
 };
 
 /**

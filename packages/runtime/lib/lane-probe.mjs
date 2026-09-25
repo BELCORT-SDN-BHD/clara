@@ -297,36 +297,48 @@ let probeOverride = null; // test seam only; production is always null
 let loopStartedAt = 0;
 let lastSettledAt = 0;
 
-async function refreshOnce() {
-  // NEVER a fresh no-op promise while a cycle is running (review-558 r2 NIT): returning the
-  // IN-FLIGHT one keeps `inFlight` pointing at real work, so a waiter cannot await a promise
-  // that resolves immediately and then read a verdict the cycle has not written yet.
+/**
+ * ONE CYCLE, AND ONE PROMISE FOR EVERYONE WAITING ON IT.
+ *
+ * NEVER a fresh no-op promise while a cycle is running (review-558 r2 NIT): returning the IN-FLIGHT
+ * one keeps `inFlight` pointing at real work, so a waiter cannot await a promise that resolves
+ * immediately and then read a verdict the cycle has not written yet.
+ *
+ * THE CYCLE IS PUBLISHED HERE, by whoever starts it (#1128, review round ADV-L06-04). It used to be
+ * published only by `ensureStarted` and by the interval's own callback, so a cycle started from
+ * anywhere ELSE — `_waitForLaneProbeSettleForTest`, `_refreshOnceForTest` — left `inFlight`
+ * pointing at the PREVIOUS, already-resolved cycle, and a concurrent caller arriving mid-cycle was
+ * handed exactly the promise the paragraph above says it must never get: measured, it came back
+ * with cycle 1's verdict while the caller that started cycle 2 came back with cycle 2's
+ * (`tests/l9-pool-contract-lane-probe.test.mjs`, "a CONCURRENT caller gets the cycle actually in
+ * flight"). Publishing at the one place a cycle can begin makes the invariant structural rather
+ * than something each call site has to remember.
+ */
+function refreshOnce() {
   if (busy) return inFlight;
   busy = true;
-  try {
-    const run = () => probeLanes(probeOverride ? { probe: probeOverride } : {});
-    // A cycle that blows its own hard bound reports every lane as unknown rather than freezing
-    // the previous verdict: a stale green is the one answer worse than "not measured".
-    const result = await withHardTimeout(run, cycleMs(), null);
-    cachedLanes = result;
-    if (Array.isArray(result)) lastSettledAt = Date.now();
-  } finally {
-    busy = false;
-  }
-  return undefined;
+  inFlight = (async () => {
+    try {
+      const run = () => probeLanes(probeOverride ? { probe: probeOverride } : {});
+      // A cycle that blows its own hard bound reports every lane as unknown rather than freezing
+      // the previous verdict: a stale green is the one answer worse than "not measured".
+      const result = await withHardTimeout(run, cycleMs(), null);
+      cachedLanes = result;
+      if (Array.isArray(result)) lastSettledAt = Date.now();
+    } finally {
+      busy = false;
+    }
+  })();
+  return inFlight;
 }
 
 function ensureStarted() {
   if (intervalHandle) return;
   loopStartedAt = Date.now();
-  inFlight = refreshOnce();
-  intervalHandle = setInterval(() => {
-    const started = refreshOnce();
-    // Only re-point `inFlight` at a cycle we actually STARTED; a skipped tick returns the
-    // in-flight promise, and clobbering with it would be harmless but reassigning a resolved
-    // no-op would not be. Keep the invariant explicit rather than incidental.
-    if (started !== undefined) inFlight = started;
-  }, intervalMs());
+  refreshOnce();
+  // `refreshOnce` publishes the cycle it starts and hands back the in-flight one otherwise, so a
+  // skipped tick needs no guard here any more: there is nothing left for this callback to assign.
+  intervalHandle = setInterval(refreshOnce, intervalMs());
   intervalHandle.unref?.();
 }
 
@@ -372,7 +384,8 @@ export function _laneProbeTimingForTest() {
 }
 
 /** Test-only: run ONE cycle directly, bypassing the interval, so the `busy` non-overlap guard
- *  can be driven deterministically. Returns whatever refreshOnce returned. */
+ *  can be driven deterministically. Returns the cycle this call started, or the one already in
+ *  flight — the same promise every other waiter is given. */
 export function _refreshOnceForTest() {
   return refreshOnce();
 }
@@ -395,10 +408,33 @@ export function _setLaneProbeForTest(fn) {
   probeOverride = fn;
 }
 
-/** Test-only: await the most recently started (or currently in-flight) cycle — starting the
- *  loop if it has not started — so a cell asserts on a SETTLED verdict instead of racing it. */
+/**
+ * Test-only: await a NEW background cycle — one that starts at this call, or the one already in
+ * flight — so a cell asserts on a FRESH verdict instead of racing it, or reading a stale one.
+ *
+ * #1128 — the OLD implementation (`laneProbeHealth(); await inFlight; return laneProbeHealth();`)
+ * read the module-level `inFlight` variable, which is only REASSIGNED when the interval's own
+ * callback fires. Called BETWEEN ticks — after a cycle has already settled but before the next
+ * scheduled tick — `inFlight` still pointed at that PRIOR cycle's already-resolved promise, so
+ * `await inFlight` returned near-instantly with the SAME cached verdict, not a fresh one. A caller
+ * looping on this (`settleLaneUntil`, in ready.test.mjs) ended up busy-polling `checkReadiness()`
+ * at whatever cadence a DB round trip takes until the real tick eventually landed, rather than
+ * genuinely waiting for it.
+ *
+ * This version calls `refreshOnce()` directly instead of reading `inFlight`. `refreshOnce()`'s own
+ * `busy` guard means this is never redundant: if a cycle is already running, it returns and awaits
+ * THAT one (same as before); if none is, it starts and awaits a brand-new one right now, bounded by
+ * `cycleMs()` — never by `intervalMs()`'s own, possibly much longer, schedule. That also keeps this
+ * safe under `node --test`: `intervalMs()`'s timer is deliberately unref'd (this module's header —
+ * it must never hold a PRODUCTION process open by itself, where an HTTP listener already does that
+ * job), so a bare test process waiting on IT ALONE for up to `intervalMs()` risks Node deciding the
+ * event loop has nothing left ref'd and abandoning the wait first. Driving a cycle here directly —
+ * the same thing `_refreshOnceForTest()` already does safely throughout this file — never has that
+ * problem: `cycleMs()`'s own bound is short, and this call is the very thing keeping the awaiting
+ * test alive while it runs.
+ */
 export async function _waitForLaneProbeSettleForTest() {
-  laneProbeHealth();
-  await inFlight;
+  laneProbeHealth(); // starts the loop lazily, same as before
+  await refreshOnce();
   return laneProbeHealth();
 }

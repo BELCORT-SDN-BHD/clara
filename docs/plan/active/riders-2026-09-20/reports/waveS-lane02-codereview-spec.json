@@ -1,0 +1,115 @@
+{
+  "axis": "spec",
+  "lane": "waveS-lane02",
+  "branch": "riders/wS-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "fixed_point": "7bc5a710f",
+  "head": "873488f4e",
+  "commits": 27,
+  "tickets": [1114, 1077, 1079, 1078, 1050],
+  "spec_sources": [
+    "gh issue 1114 (body Agent Brief; 0 comments)",
+    "gh issue 1077 (body Agent Brief; 0 comments)",
+    "gh issue 1079 (body Agent Brief; 0 comments)",
+    "gh issue 1078 (body + owner-delegated ruling comment 2026-09-24T19:10:51Z)",
+    "gh issue 1050 (body + re-brief ruling comment 2026-09-24T19:10:22Z) and the amended ruling on gh issue 1036 (2026-09-24T05:39:08Z)",
+    "docs/plan/active/riders-2026-09-20/SWEEP-PLAN.md (plan of record, sweep rule (g))"
+  ],
+  "verification": {
+    "db": "127.0.0.1:55745/clara_l05, ledger re-measured at 313 files, max 0338_prepayment_close_standing_instruction",
+    "reruns": [
+      "node --test --test-concurrency=1 $GATES tests/prepayment-close-standing-instruction.test.mjs tests/refusal-errcode-partition.test.mjs tests/revenue-recognition-plan-op-key.test.mjs tests/prepayment-account-reservation.test.mjs -> 25 tests, 25 pass, 0 fail, 0 skipped",
+      "node --test --test-concurrency=1 $GATES tests/prepayment-schedule-obo.test.mjs tests/revenue-recognition.test.mjs tests/prepayment-account-roster.test.mjs tests/prepayment-wake-reroute.test.mjs -> 35 tests, 35 pass, 0 fail, 0 skipped",
+      "apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/registers/prepayment-accounts-panel.test.tsx -> 8 tests, 8 pass, 0 fail",
+      "node scripts/check-frozen-workflows.mjs -> 38 append-only violations vs origin/main; FREEZE_BASE_REF=7bc5a710f -> OK, 322 frozen files verified (base drift confirmed, not this lane's: git diff 7bc5a710f...HEAD touches no packages/runtime file)",
+      "live pg_proc census: CLR44 is raised by exactly the four bodies 0335 names and nothing else; the reason token \"invalid_author\" is raised by exactly the two on-behalf-of twins",
+      "live pg_proc census: :rrplan/:rrend are held only by clara._revenue_recognition_core and clara.replace_revenue_recognition_schedule; :plan/:end still held by the two prepayment siblings, and :plan still shared by clara.create_accrual_adjustment, clara.confirm_tenancy_rent_plan and clara.correct_accrual_adjustment",
+      "live catalog: accounting_plans_authority_kind_check = {explicit_instruction, standing_instruction}; clara.create_accounting_plan still admits one kind; clara.firm_standing_instructions relrowsecurity and relforcerowsecurity both true",
+      "live prosrc read of clara._acct_role_reserved (third union arm present), clara._adj_line_eligibility_breach (domain filter present) and clara._draft_opening_item_core (finding L02-SPEC-01)"
+    ]
+  },
+  "verdict": "accept-with-fixes",
+  "findings": [
+    {
+      "id": "L02-SPEC-01",
+      "ticket": 1078,
+      "severity": "major",
+      "kind": "requirement-implemented-wrongly",
+      "title": "0337 widens the claim census to a third domain but leaves its fourth consumer lying: the opening-balance carry-down reports a prepayment claim as coa_account_advance_reserved with a remedy that cannot release it",
+      "evidence": "The ruling on #1078: \"The prepayment roster DOES reserve its enrolled accounts, the way its fixed-asset and staff-advance siblings already do.\" 0337 SS-A adds the 'prepayment' domain to clara._acct_role_reserved (verified live on clara_l05: a third union arm over clara.prepayment_account_enrolments). SS-C, SS-D and SS-E then make the bank belt, the FA profile door and the staff-advance admission predicate say the right thing per domain. The FOURTH reader, clara._draft_opening_item_core, was not recut. Its live prosrc (read from pg_proc on clara_l05 at 0338) raises through clara._fa_role_claim_conflict with detail reason hardcoded to 'coa_account_advance_reserved' and a sentence whose remedy list reads \"a staff-advance enrolment is released by retire_staff_advance_account (which needs every advance on it settled); a fixed-asset claim is released by retiring the profile that holds it\" -- neither of which releases a prepayment-roster claim. That is exactly the class 0042 names at packages/db/migrations/0042_wave_d_b0_shared_authorities.sql:2110 (\"a refusal must name a followable remedy, or say honestly that there is none\", WDB-R2), and it is the class SS-D and SS-E exist to fix in the three siblings. Disclosed in waveS-lane02-ticket1078.md (\"What was deliberately left\" item 3, follow-up 1) and declined on the ground that no cell in this battery can drive the wave-b opening-balance world.",
+      "required_fix": "Either a fix round recuts clara._draft_opening_item_core the same shape SS-D used (one %% on the domain plus a case on v_res_domain for the sentence AND for detail.reason) with a driven cell in the opening-balance battery, or the orchestrator files the follow-up ticket BEFORE merge and records the shipped WDB-R2 residue on #1078. It must not merge unrecorded."
+    },
+    {
+      "id": "L02-SPEC-02",
+      "ticket": 1050,
+      "severity": "major",
+      "kind": "plan-of-record-violation",
+      "title": "0338 crosses the sweep plan's hard seam: it recuts clara._obo_plan_core and pins clara.create_accounting_plan and clara._prepayment_plan_core, all three reserved to lane L1",
+      "evidence": "SWEEP-PLAN.md:145-147, the plan of record this lane's sweep rule (g) binds the worker to: \"The hard seam: L2 must not pin clara._obo_plan_core, clara.create_accounting_plan, clara._prepayment_plan_core or clara._accrual_plan_core, all of which L1 writes\". packages/db/migrations/0338_prepayment_close_standing_instruction.sql:71 pins AND recuts clara._obo_plan_core (the create-or-replace is at :587), :96 pins clara.create_accounting_plan as a must-not-move keep, :98 pins clara._prepayment_plan_core the same way. Consequence: if L1's migration (#1051) moves any of the three, 0338's prestate refuses by name and the L1-then-L2 merge order the plan sets breaks; and under sweep rule (c) SS-E must be re-derived from #1051's post-image at integration. Disclosed in waveS-lane02-ticket1050.md under \"Integration seam -- read this before merging\", with the argument that the seam was written while #1050 was held and the 2026-09-25 re-brief reversed that.",
+      "required_fix": "Carry 0338 SS-E onto #1051's post-image of clara._obo_plan_core and re-measure the two keep pins live after L1 lands, then re-run p1050.authority.paired, p915.obo.refusals_match and p941.obo.authority. Do not merge L2 ahead of L1, and do not let the stale pins reach a from-scratch chain."
+    },
+    {
+      "id": "L02-SPEC-03",
+      "ticket": 1114,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "AC2 is satisfied by inverting its literal text: no CLR10 reason was given its own code; three never-shown reasons were moved off CLR10 instead",
+      "evidence": "#1114 AC2: \"Any other refusal reason currently sharing CLR10 is audited and given its own code where it is meant to reach a user.\" 0335 moves three tokens (invalid_author on both on-behalf-of twins, prepayment_read_scope_required, revenue_recognition_read_scope_required) onto the new CLR44 and leaves every user-facing reason on CLR10 -- 626 live clara bodies under 468 distinct reason tokens by the implementer's own census. Verified live: CLR44 is raised by exactly clara.create_prepayment_schedule_for, clara.create_revenue_recognition_schedule_for, clara.read_prepayment_source_for and clara.read_revenue_recognition_source_for. The audit WAS performed and written up (packages/db/README.md \"## 0335\", section \"The audit (#1114 AC2), and its population\"), both code-side catalogs gained the entry (tests/rig-helpers.mjs, tests/work-journal-fixtures.mjs), and the ticket's Desired-behavior paragraph is met -- but the AC as written stays unticked, because nothing meant to reach a user was given its own code.",
+      "required_fix": "Accept the reinterpretation explicitly and record it on #1114 when closing, naming AC2's literal text as superseded by the argument in packages/db/README.md '## 0335'. Do not tick AC2 silently."
+    },
+    {
+      "id": "L02-SPEC-04",
+      "ticket": 1079,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "Only the heading was renamed; the rest of the panel's copy still names one purpose, so the panel still misleads on its scope",
+      "evidence": "#1079's stated reason: \"so a bookkeeper looking at the panel is not misled about its scope\". apps/web/messages/en.json PrepaymentAccounts after the change: heading = \"Prepayment and deferred-revenue accounts\", but subheading (\"Only an account enrolled here can be amortised...\"), empty (\"No account is enrolled as a prepayment account for this client yet. Until one is, no prepayment here can be amortised.\"), loading (\"Reading the prepayment roster\"), enrolTitle (\"Enrol an account as a prepayment account\"), retireTitle (\"Retire this prepayment account\") and reasonLabel (\"Why this account holds prepayments\") are unchanged and name only the first purpose. None is purpose-conditional: apps/web/components/registers/prepayment-accounts-panel.tsx reads each as a flat t(\"...\") at :83, :93, :170, :222 and :259. AC1 names only the heading, so it is literally met, and the ticket's out-of-scope line covers layout, rows and flows rather than copy -- but the residue is not disclosed anywhere in waveS-lane02-ticket1079.md.",
+      "required_fix": "File a follow-up for the remaining PrepaymentAccounts strings (at minimum empty, enrolTitle, retireTitle and reasonLabel) and name it in the ticket report, so the panel's body copy is not left contradicting its new title."
+    },
+    {
+      "id": "L02-SPEC-05",
+      "ticket": 1050,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "AC5 is half-evidenced: the from-scratch apply was not run, and the lint clause only passes with FREEZE_BASE_REF",
+      "evidence": "#1050 AC5: \"Migration applies from scratch and on a populated database; CI=true GITHUB_ACTIONS=true pnpm lint exit 0.\" The populated half is proven (five redos, prestate branches 2 FIRST/0 REDO, 1 FIRST/2 REDO, 0 FIRST/3 REDO, and a second migrate reporting 0 new / 313 total, which I re-measured). The from-scratch half was NOT run and is disclosed under \"Unverified\" (migration 0154 pins the cluster-wide role count, so the rig cannot take a second chain). I re-ran the lint clause's first step myself: node scripts/check-frozen-workflows.mjs reports 38 append-only violations against origin/main, and FREEZE_BASE_REF=7bc5a710f makes it OK -- which confirms the report's claim that this is cut-phase base drift (PR #1140) and not the lane's, since git diff 7bc5a710f...HEAD touches no packages/runtime file at all.",
+      "required_fix": "The integrator runs the from-scratch 0001 -> 0338 chain on a disposable cluster and rebases the lane onto current main before re-running the lint chain without FREEZE_BASE_REF. AC5 cannot be ticked on this branch alone."
+    },
+    {
+      "id": "L02-SPEC-06",
+      "ticket": 1050,
+      "severity": "minor",
+      "kind": "scope-beyond-brief",
+      "title": "Two things the re-brief does not ask for: a whole withdrawal door (SS-G), and an admin/owner floor where the ruling says only \"a named member\"",
+      "evidence": "The 2026-09-25 ruling on #1050: \"a NAMED MEMBER of the firm records a firm-level standing instruction ... that member is the wake plan's directing human, and admission runs under that member's authority and membership. Joins the sweep wave's lane L2 LAST, with the authority_kind widening as one value.\" 0338 additionally ships clara.withdraw_firm_standing_instruction (SS-G) with three refusals, its own ACL and three cells, which the report itself introduces as \"Why SS-G exists at all (it is not in the ticket)\" and defends under the standing \"nothing dark\" ruling (an instruction that cannot be taken back is a switch). Separately, both doors carry an admin/owner floor -- p1050.withdraw.refusals drives a real bookkeeper to CLR04 at each -- which is narrower than \"a named member\". Both are disclosed and argued; neither was ruled.",
+      "required_fix": "Put the admin/owner floor and the withdrawal door to the owner in one line when the wave is reported. If the owner meant any member may record it, the floor is a change rather than a fix."
+    },
+    {
+      "id": "L02-SPEC-07",
+      "ticket": 1078,
+      "severity": "note",
+      "kind": "deviation-from-ruling-wording",
+      "title": "The roster's reservation is deliberately NOT \"the way its siblings do\": SS-B filters the new domain out of the posting wall, and the arm one existing cell proved is now unreachable",
+      "evidence": "The ruling's words are \"the way its fixed-asset and staff-advance siblings already do\". Verified live on clara_l05: clara._adj_line_eligibility_breach reads clara._acct_role_reserved with `where r.domain is distinct from 'prepayment'`, so a prepayment reservation is visible to the three claim doors but invisible to the eligibility wall, unlike both siblings. The reasoning is sound and measured rather than asserted (the report's SS-A-in / SS-B-out experiment went to 2 pass / 10 fail, with the schedule door refusing its own enrolled prepaid leg), and p1078.wall.unmoved holds it. The downstream consequence is a coverage change, also disclosed: prepaid_account_ineligible is no longer reachable for an enrolled account through any governed door, so p940.schedule.roster_gate and p915.obo.roster_first were RETARGETED (house precedent, not deleted) onto the enrolment door and the bank belt -- the original claim about the SCHEDULE door's wall arm on an enrolled account is no longer measured anywhere. Both amended cells re-run green here.",
+      "required_fix": "None as code. Record in the wave report that the prepayment reservation is a claim-census entry only, and file follow-up 3 of the ticket report (the now-unreachable prepaid_account_ineligible arm)."
+    },
+    {
+      "id": "L02-SPEC-08",
+      "ticket": 1077,
+      "severity": "note",
+      "kind": "scope-beyond-brief",
+      "title": "0336 also renames the correction door's :end reservation to :rrend, which the brief does not name",
+      "evidence": "The brief's Key interfaces name \"The deferred-revenue schedule creation path in packages/db/migrations/0308_deferred_revenue_recognition.sql (the nested :plan reservation it shares with the prepayment lane)\". 0336 SS-B additionally recuts clara.replace_revenue_recognition_schedule for BOTH :end -> :rrend and :plan -> :rrplan. Verified live: replace_revenue_recognition_schedule now holds :rrend and :rrplan and neither :end nor :plan, while replace_prepayment_schedule still holds both originals. The defence is AC1's own plural (\"the two lanes' nested plan reservations\") plus the measured fact that the correction doors collide at the :end reservation one step BEFORE the plan door; p1077.cross_lane.replace was red at exactly that point and passes now (re-run: 25/25 across the lane's four new batteries). Correctly NOT widened to the three other estate bodies that derive :plan -- clara.create_accrual_adjustment, clara.confirm_tenancy_rent_plan and clara.correct_accrual_adjustment, confirmed still sharing it live -- which belong to L1's families.",
+      "required_fix": "None. Record the widening and the named residue (follow-up 1 of the ticket report: the :plan namespace is still shared by three accrual/tenancy bodies) so it is filed rather than swept."
+    }
+  ],
+  "already_satisfied_claims_checked": [
+    "#1114 'nothing on main had done it': consistent -- at 7bc5a710f packages/db/migrations/0307:971 and 0308:1522 both still raised invalid_author under CLR10, and CLR44 appears nowhere before this branch.",
+    "#1077 'the collision was measured at the doors': p1077.cross_lane.create and p1077.cross_lane.replace both re-run green on the 0336 post-image, and 0317's :plan sharing at 1767 and 2250 is visible in the base file.",
+    "#1079 'the heading still read Prepayment accounts at the branch head': confirmed from the diff of apps/web/messages/en.json.",
+    "#1078 'account_inactive is unreachable': not independently re-censused, and it is the owner's ruling rather than a build claim; the axis arm is confirmed still present in the live wall body, so nothing was removed.",
+    "#1050 'clara.wake_engine_sources holds one global row per source_key, so the ticket as filed could not be built': the owner already recorded that premise as false in the 2026-09-25 re-brief, so the re-briefed contract is what I reviewed against.",
+    "#1050 'no plan is written on the agent's own authority': re-run p1050.wake.configures passes, including the zero-row assertion over clara.accounting_plans authorised_by = clara.agent_user_id()."
+  ],
+  "summary": "Five tickets, all built and all green on re-run (25/25 on the four new db batteries, 35/35 on the four amended ones, 8/8 on the web panel unit). Every acceptance criterion is met or met-with-a-disclosed-reinterpretation; no requirement is silently missing and nothing undisclosed was found in the diff. Two findings need action before merge: #1078 leaves the fourth consumer of the widened claim census (clara._draft_opening_item_core) reporting a prepayment claim under the advance reason token with a remedy that cannot release it, which is the WDB-R2 class 0042 names; and #1050 crosses the sweep plan's hard seam by recutting clara._obo_plan_core and pinning two more of L1's bodies, so its section E must be carried onto #1051's post-image at integration. The rest are disclosure and follow-up items."
+}

@@ -28,7 +28,11 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { assertRaises, endPool, humanQuery, opk, rootQuery } from "./rig-fixtures.mjs";
-import { knowledgeWorld, scopeDefaultDroppedCohortApplied } from "./knowledge-fixtures.mjs";
+import {
+  depreciationPolicyKnowledgeCohortApplied,
+  knowledgeWorld,
+  scopeDefaultDroppedCohortApplied,
+} from "./knowledge-fixtures.mjs";
 
 const EXPECTED_CELLS = 4;
 let live = false;
@@ -78,13 +82,24 @@ cell("sd.01 scope_default and its own CHECK are gone; the ONE OTHER table-level 
 });
 
 cell("sd.02 the catalogue's rows are exactly what they were before the drop -- same count, same kind census, 0240's own row intact", async () => {
+  // THE CENSUS IS RE-DERIVED, NOT WIDENED. #913's claim is that a COLUMN DROP moved no row; it is
+  // not a claim that the catalogue never grows again. #1090's 0345_depreciation_policy_knowledge_key
+  // appends exactly one row, of kind `assertion`, so both the total and the assertion bucket are
+  // derived from the same live-catalogue cohort probe this file's header already binds itself to,
+  // never from a migration number. A pre-0345 chain still measures 14 / {11,2,1} exactly; a
+  // post-0345 chain measures 15 / {12,2,1} exactly; any other row, or the new row landing in the
+  // policy or preference bucket, still reds this cell.
+  const has1090 = await depreciationPolicyKnowledgeCohortApplied();
   const total = await rootQuery("select count(*)::int as n from clara.knowledge_keys");
-  assert.equal(total.rows[0].n, 14, "the 13-key 0192 catalogue plus 0240's financial_year_end_day");
+  assert.equal(total.rows[0].n, has1090 ? 15 : 14,
+    has1090
+      ? "the 13-key 0192 catalogue, 0240's financial_year_end_day and 0345's depreciation_policy"
+      : "the 13-key 0192 catalogue plus 0240's financial_year_end_day");
 
   const kinds = await rootQuery(
     "select kind, count(*)::int as n from clara.knowledge_keys group by kind");
   const byKind = Object.fromEntries(kinds.rows.map((r) => [r.kind, r.n]));
-  assert.deepEqual(byKind, { assertion: 11, policy: 2, preference: 1 },
+  assert.deepEqual(byKind, { assertion: has1090 ? 12 : 11, policy: 2, preference: 1 },
     "a column drop must not move any row's kind");
 
   // The NEWEST row before this ticket (0240's own insert), read with a `select *` the way every
@@ -154,8 +169,10 @@ cell("sd.03 the firm-defaultability wall is unchanged: a client-identity key sta
 });
 
 cell("sd.04 the catalogue's key count and clara._knowledge_floor's answers are unchanged", async () => {
+  // Re-derived for the same reason sd.02 is, off the same live-catalogue cohort probe.
+  const has1090 = await depreciationPolicyKnowledgeCohortApplied();
   const total = await rootQuery("select count(*)::int as n from clara.knowledge_keys");
-  assert.equal(total.rows[0].n, 14);
+  assert.equal(total.rows[0].n, has1090 ? 15 : 14);
 
   const floor = (key, scope) =>
     rootQuery("select clara._knowledge_floor($1, $2) as f", [key, scope]).then((r) => r.rows[0].f);
@@ -169,5 +186,17 @@ cell("sd.04 the catalogue's key count and clara._knowledge_floor's answers are u
     `select count(*)::int as n from clara.knowledge_keys k
       where not exists (select 1 from clara.knowledge_key_firm_eligibility e where e.knowledge_key = k.knowledge_key)
         and k.kind not in ('preference', 'policy')`);
-  assert.equal(refusedCount.rows[0].n, 10, "the firm-scope-refused census (#898's own tail) must be unmoved by this drop");
+  // 0345's `depreciation_policy` is kind `assertion` and 0345 seeds NO firm-eligibility row for it
+  // (its own tail says so: "never firm-eligible"), so it joins this census by construction rather
+  // than by accident. The eleventh member is asserted BY NAME below so the count cannot absorb a
+  // different key silently.
+  assert.equal(refusedCount.rows[0].n, has1090 ? 11 : 10,
+    "the firm-scope-refused census (#898's own tail) must be unmoved by this drop");
+  if (has1090) {
+    const dp = await rootQuery(
+      `select exists (select 1 from clara.knowledge_key_firm_eligibility where knowledge_key = 'depreciation_policy') as eligible,
+              (select kind from clara.knowledge_keys where knowledge_key = 'depreciation_policy') as kind`);
+    assert.equal(dp.rows[0].eligible, false, "0345 seeds no firm-eligibility row for depreciation_policy");
+    assert.equal(dp.rows[0].kind, "assertion", "0345's row is an assertion, which is why it is firm-scope-refused");
+  }
 });

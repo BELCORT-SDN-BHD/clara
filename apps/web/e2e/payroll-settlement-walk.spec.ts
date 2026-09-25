@@ -77,3 +77,21 @@ test("a settlement refusal renders VISIBLY with its code and reason, never silen
   await expect(panel.getByText(P947.refusalAmountMismatch)).toBeVisible();
   await expect(panel.getByText("CLR10 · amount_mismatch")).toBeVisible();
 });
+
+// #1059's fix round (spec finding L04-SPEC-01). THE LEG NO OTHER INSTRUMENT CAN RUN: a person
+// who accepted nothing in THIS browser session still finds the settlement and its reverse route.
+// The first cut kept the accept receipt in React state, so this leg would have found an empty
+// panel — which is exactly what a reload, a tab change or a fresh sign-in gave a real person.
+test("a settlement accepted in an earlier session is still discoverable, with its route to reverse it", async ({ page }) => {
+  await signInTo(page, MATCHING);
+
+  const panel = page.getByTestId("payroll-settlements-panel");
+  const settled = page.getByTestId(`payroll-settled-${P947.settledEntryId}`);
+  await expect(settled).toBeVisible();
+  await expect(settled.getByText("June 2026")).toBeVisible();
+  await expect(settled.getByText("RM 3,000.00")).toBeVisible();
+  await expect(settled.getByRole("button", { name: /Reverse the June 2026 settlement/i })).toBeVisible();
+  await expect(panel).toBeVisible();
+
+  await expectAccessible(page, "bank matching · a settled payroll run with its reverse route");
+});

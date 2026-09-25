@@ -381,7 +381,7 @@ test("prepayments.walk.roster: the Registers page carries the prepayment-account
   // REASON — which is the whole audit trail a later reader has for why this account is treated as
   // a prepayment account.
   const panel = page.getByTestId("prepayment-accounts-panel");
-  await expect(panel.getByText("Prepayment accounts")).toBeVisible();
+  await expect(panel.getByText("Prepayment and deferred-revenue accounts")).toBeVisible();
   await expect(panel.getByText("19000001")).toBeVisible();
   await expect(panel.getByText(/holds the client.s prepaid insurance and prepaid rent/)).toBeVisible();
   await scan(page, "the prepayment-account roster panel");
@@ -414,7 +414,7 @@ test("prepayments.walk.roster: the Registers page carries the prepayment-account
   const enrolDialog = page.getByRole("dialog");
   await enrolDialog.getByLabel("Account", { exact: true }).selectOption("19000001");
   await expect(enrolDialog.getByRole("button", { name: "Enrol an account" })).toBeDisabled();
-  await enrolDialog.getByLabel("Why this account holds prepayments").fill(
+  await enrolDialog.getByLabel("Why this account is enrolled").fill(
     "the client pays rent and insurance a quarter ahead and books both here");
   await enrolDialog.getByRole("button", { name: "Enrol an account" }).click();
   await expect(page.getByRole("dialog")).toBeHidden();

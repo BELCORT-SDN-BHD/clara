@@ -1,0 +1,82 @@
+{
+  "lens": "recheck",
+  "lane": "waveS-lane06",
+  "branch": "riders/wS-lane06",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "fixed_point": "7bc5a710f",
+  "head_rechecked": "5c086b8f2",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/waveS-lane06-fix.md",
+  "prior_reports_rechecked": [
+    "docs/plan/active/riders-2026-09-20/reports/waveS-lane06-review-adversarial.json (12 findings)",
+    "docs/plan/active/riders-2026-09-20/reports/waveS-lane06-codereview-spec.json (10 findings)",
+    "docs/plan/active/riders-2026-09-20/reports/waveS-lane06-codereview-standards.json (2 findings)"
+  ],
+  "status_request_note": "No status-report request arrived during this recheck.",
+  "methodology": [
+    "git diff 7bc5a710f...HEAD --stat: 21 files, +1634/-87, matches the fix report exactly.",
+    "git log 7bc5a710f..HEAD: 23 commits, every one ends with the required Co-Authored-By line.",
+    "For every 'fixed' finding: read the current code/doc at the cited location and confirmed the required_fix's shape is actually present.",
+    "Independently re-ran, from clean: packages/db (ci-frontier-leg-contract.test.mjs + ci-schedule-notify.test.mjs + operation-census.test.mjs + rig-isolation.test.mjs, full gate chain) 57 tests/56 pass/0 fail/1 skip; packages/runtime intake-sidecar-race.test.mjs 22/22, l9-pool-contract-lane-probe.test.mjs 28/28, ready.test.mjs 26/26, rollback-preflight.test.mjs 25 pass/0 fail/22 skip; apps/web e2e/cell-budget-census.test.ts 5/5. All match or are consistent with the fix report's own counts.",
+    "Independently re-ran two vacuity controls from scratch (not trusting the fix report's own account): (1) ADV-L06-02 — stripped the three $GITHUB_STEP_SUMMARY count-row echo lines out of .github/actions/frontier-leg/action.yml and reran ci-frontier-leg-contract.test.mjs: p1126.summary.list/roster/drill all went 'not ok' (RED), then restored the file and confirmed sha256 identical (927844eca6f3b4d03486413ba83f86f0456f2fcf274fab60a37f9b0c494d7445) and all three green again. (2) ADV-L06-01 — reverted removeTaskMeta to the pre-fix bare `rm` (outside withSidecarLock) and reran intake-sidecar-race.test.mjs: p1044.delete failed 1/1 (RED, 'a delete that has been ordered must stay done'), then restored the file (sha256 9a80c8cb2592b33f4406ca5ffef490f9a1333a214f483659c3c81ae81537567a, git status clean) and confirmed green again.",
+    "Independently verified ADV-L06-06's Node 22 TAP claim by running `test('a'); test.skip('b'); test.todo('c')` directly: '# pass 1 / # skipped 1 / # todo 1', matching the code comment's claim exactly.",
+    "Independently verified SPEC-1131-UNRUN/STD-1's core logic without the full multi-minute two-build WDK bootstrap: called the PURE function `frontierRuleViolations('0318_knowledge_fye_pair_applicability', { bodies: ['claraWork_v3'], contracts: [] })` directly and got back exactly the two contract violations (intake_refusal_record_v1@0254, fa_parked_run_v1@0279) cliC's assertions expect, with no body violation — reproducing the decisive computation the new CLI cell (cliC) depends on. Also re-read resolveSupported() and confirmed an omitted --supported-contracts resolves to contracts:[] on the --supported door, matching what cliC relies on. Did not re-run the full tests/two-build-cutover-e2e.mjs end to end (a standalone drill that builds a second runtime image and drives a real WDK World over minutes) — this recheck instead relies on the fix report's own printed evidence for that full run, corroborated by the pure-function reproduction above and by the already-independently-confirmed variable scoping from the standards review.",
+    "Verified GitHub state directly (read-only): `gh api repos/BELCORT-SDN-BHD/clara/actions/permissions/workflow` -> default_workflow_permissions=read (matches the SPEC-1127-CHANNEL claim); `gh issue list --state open --search 'in:title \"CI health: the weekly scheduled sweep\"'` -> empty (confirms no standing issue exists yet, so the create-fallback branch is what would fire today; no number is pinned in code or test).",
+    "pnpm typecheck: exit 0. CI=true GITHUB_ACTIONS=true FREEZE_BASE_REF=7bc5a710f pnpm lint: exit 0. FREEZE_BASE_REF=7bc5a710f node scripts/check-frozen-workflows.mjs: OK, 322 frozen files, no manifest diff. node packages/runtime/scripts/check-parts-parity.mjs: OK. eslint run directly on all 13 touched source/test files: clean.",
+    "git status --porcelain in the worktree: clean, both before and after every control (nothing left dirty by this recheck)."
+  ],
+  "findings_confirmed_fixed": [
+    "ADV-L06-01 (#1044, major) — removeTaskMeta and removeIntakeSpool's metadata rm now run inside withSidecarLock; independently reproduced RED against the reverted subject and GREEN after restore.",
+    "ADV-L06-02 (#1126, major) — summaryBlock's regex is now anchored to the write group's own two lines, not the step name's `${{ }}`; independently reproduced RED by gutting the write and GREEN after restore.",
+    "ADV-L06-03 / SPEC-1127-TARGET (#1127, major/minor) — the channel resolves an OPEN issue by title (gh issue list --search) and creates one when absent; no literal issue number anywhere in ci.yml or ci-schedule-notify.test.mjs (p1127.notify.standing passes; grep confirms no bare `1127` in the gh issue comment/create lines).",
+    "ADV-L06-04 (#1128, minor) — refreshOnce now assigns `inFlight` itself at the one place a cycle can start; _waitForLaneProbeSettleForTest and _refreshOnceForTest inherit the guarantee structurally rather than needing their own copy.",
+    "ADV-L06-05 (#1044, minor) — mergeTaskMeta now reads through a private readTaskMetaAt(path) using the already-resolved lock path, not a second taskMetaPath(id)/CLARA_SPOOL_DIR resolution.",
+    "ADV-L06-06 (#1126, minor) — countCells now matches `/^test(?:\\.skip)?\\(/gm`, matching the leg's own CELLS=PASS+SKIP; assertCountableCorpus refuses the two shapes (non-zero indent, test.todo) it cannot count. Independently confirmed the underlying Node 22 TAP behavior.",
+    "ADV-L06-07 (#1127, minor) — packages/db/tests/README.md now says the workflow 'WIRES' the notification rather than asserting it is already a live one; the first-scheduled-run caveat is present.",
+    "ADV-L06-08 (#1044, minor) — reconciler-documents.mjs's comment and README.md's #1043 residual paragraph now point at withSidecarLock instead of reading as a still-open defect.",
+    "ADV-L06-09 (#1129, minor) — deadContractRuleExceptions(rules, exceptions) added, closing the write-only direction of the exception list.",
+    "ADV-L06-10 / SPEC-1141-BODYASSERT (#1141, minor/note) — the whole {tag, text, tabindex} triple is now read inside one expect.poll, with a message naming the defect in the cell's own words.",
+    "ADV-L06-11 / SPEC-1124-SCOPE (#1124, note/minor) — the durable note now lives in the repo-root README.md's Develop section; the wave RIG.md points at it; the pnpm 11.8.0 --dry-run attribution carries a dated, linked citation.",
+    "ADV-L06-12 / SPEC-1126-SKIPSMAX (#1126, note/minor) — packages/db/tests/README.md now states explicitly that #!skips-max: stays hand-declared and why.",
+    "SPEC-1127-CHANNEL (#1127, major) — the grant question is answered (default_workflow_permissions=read, independently re-confirmed live), the job-level permissions widen is cited, and the step writes to $GITHUB_STEP_SUMMARY (no token scope needed) before any gh call under set -euo pipefail, with p1127.notify.summary pinning that ordering. The live comment itself is still unproven (inherently cannot be proven from a worktree) and the fix report and README both say so explicitly rather than claiming otherwise — this is a legitimate, disclosed residual, not an open defect.",
+    "SPEC-1131-UNRUN / STD-1 (#1131, major/minor) — the new cliC block's decisive computation was independently reproduced via the pure frontierRuleViolations() function and matches the assertions exactly; resolveSupported()'s contracts:[] fallback on an omitted --supported-contracts was independently re-read and confirmed. The fix report's account of an actual end-to-end run of the committed cell (throwaway clone, printed '[tb-e2e] preflight CLI: ... exits 1 naming frontier_requires_contract ...' / 'TWO-BUILD CUTOVER E2E: ALL PASS', restored byte-for-byte) was not itself re-executed by this recheck (a multi-minute dual-build WDK drill), but nothing found here contradicts it and the core logic it depends on is independently confirmed correct.",
+    "SPEC-1129-SINCE (#1129, note) — confirmed as a deliberate, disclosed deviation (id-match rather than since-match); no action required, and none was taken.",
+    "STD-2 (#1126, note) — the three shell blocks remain duplicated by design choice, following the file's own pre-existing per-step convention; unchanged since the review, judgement call stands."
+  ],
+  "findings": [
+    {
+      "id": "SPEC-1141-AC1",
+      "ticket": 1141,
+      "severity": "major",
+      "status": "still open",
+      "title": "#1141 AC1 (a bounded loop reproduces the red before the fix and passes after) remains unmet",
+      "evidence": "The fix report's own account (waveS-lane06-fix.md, 'SPEC-1141-AC1'): the ticket's own instrument (PRE-FIX B4 cell, ten runs beside a parallel whole unit-suite run) was run and did NOT reproduce (10 green / 0 red of 10, both pre-fix and post-fix). No orchestrator/owner waiver is recorded in this worktree in its place, which is what the original finding's required_fix asked for absent a reproduction. What was substituted — an in-page activeElement sampler showing the trace [\"BUTTON\",\"BODY\",\"H2\"] across four independent runs — is real, useful diagnostic evidence of the mechanism, and is honestly distinguished in both the fix report and apps/web/e2e/README.md from a reproduced red. It does not satisfy AC1's literal text. This recheck did not attempt its own reproduction runs (the ticket's own instrument already consumed a bounded budget without success, and repeating it here would not change the outcome without a materially different load shape).",
+      "disposition": "Carry forward for the orchestrator: either accept the mechanism evidence (sampler trace + the pre-existing vacuity control that reds the polled cell when restoreFocusAfterRow's landmark.focus() is dropped) as sufficient in AC1's place with an explicit ruling, or leave #1141 open against this one acceptance criterion. AC2 (whole browser suite green twice, no B4 red) IS met — three full 589-passed runs are recorded, including one with the pre-fix cell in place — so this is a partial, not a wholesale, gap."
+    },
+    {
+      "id": "SPEC-1044-AC3",
+      "ticket": 1044,
+      "severity": "major",
+      "status": "still open",
+      "title": "#1044 AC3 (the db-live-gates driver green five consecutive times on a fresh database) remains unmet as a whole-driver run",
+      "evidence": "The fix report's own gate table: leg 1 (intake-e2e) 5/5 green; leg 2 (intake-admission-e2e) 0/5 — its terminal waitForQueueDrain cannot complete on any database carrying real client data, diagnosed concretely (held wake tasks minted from the cloned estate's own compliance/lint notifications while both clara.wake_engine_sources rows are disabled — a rig/estate property, not a #1044 code path); leg 3 (intake-batch-e2e) 4/5 green, one round-2 red at intake-batch-e2e.mjs:650 under load, also diagnosed concretely (a child settling between the cancel decision and the belt sweep, an allowance the cell already makes for the seed-to-decision window but not for the decision-to-belt window). No round in this lane ever ran the DRIVER (all three legs as db-live-gates actually runs them) green once, let alone five consecutive times — the AC's own wording. Lint (exit 0, independently reconfirmed by this recheck) and the WSL runtime-file run (independently reconfirmed: intake-sidecar-race 22/22, l9-pool-contract-lane-probe 28/28, though this recheck ran them on the Windows host rather than under WSL as user runner — the fix report's own WSL run is not re-verified here) are the two other AC3 clauses, both satisfied.",
+      "disposition": "Both gaps are diagnosed as properties of the rig (a used clara_l08-derived clone vs CI's from-scratch clara_intake_ci) and of a pre-existing cell (intake-batch-e2e.mjs:650, filed as a follow-up, not caused by this lane's change), not as defects in #1044's own fix — ADV-L06-01's lock and its non-vacuity were independently reproduced by this recheck (see findings_confirmed_fixed) and are sound. Per the original finding's own required_fix, closing AC3 needs the integrator to run the real driver on a genuinely fresh database (matching CI's clara_intake_ci shape) — something this lane's worktree, bound to a rig-cloned lane cluster, cannot produce. Carry forward to the integrator/release evidence rather than back to this lane."
+    }
+  ],
+  "newly_broken": [],
+  "gates_rerun_by_this_recheck": {
+    "pnpm typecheck": "exit 0",
+    "CI=true GITHUB_ACTIONS=true FREEZE_BASE_REF=7bc5a710f pnpm lint": "exit 0",
+    "FREEZE_BASE_REF=7bc5a710f node scripts/check-frozen-workflows.mjs": "OK — 322 frozen files, no manifest diff",
+    "node packages/runtime/scripts/check-parts-parity.mjs": "OK",
+    "packages/db (full gate chain): ci-frontier-leg-contract.test.mjs + ci-schedule-notify.test.mjs + operation-census.test.mjs + rig-isolation.test.mjs": "57 tests, 56 pass / 0 fail / 1 skip",
+    "packages/runtime: intake-sidecar-race.test.mjs": "22 pass / 0 fail",
+    "packages/runtime: l9-pool-contract-lane-probe.test.mjs": "28 pass / 0 fail",
+    "packages/runtime (PG env): ready.test.mjs": "26 pass / 0 fail",
+    "packages/runtime (PG env): rollback-preflight.test.mjs": "47 tests, 25 pass / 0 fail / 22 skip",
+    "apps/web: e2e/cell-budget-census.test.ts": "5 pass / 0 fail",
+    "eslint on all 13 touched source/test files": "clean",
+    "git status (worktree)": "clean throughout, including after every vacuity control this recheck ran"
+  },
+  "verdict": "accept-with-fixes",
+  "summary": "22 of the 24 findings across the three review reports are confirmed fixed on the current head (5c086b8f2), and this recheck independently re-verified the highest-risk ones rather than trusting the fix report's own account: two vacuity controls (ADV-L06-01's sidecar-delete lock, ADV-L06-02's $GITHUB_STEP_SUMMARY regex) were re-run from a deliberately reverted subject through RED and back to GREEN with byte-identical restores; the #1131/STD-1 CLI cell's decisive logic was reproduced through the underlying pure function without needing the full multi-minute two-build drill; the #1127 grant claim and the absence of a pinned issue number were independently confirmed live via read-only GitHub API calls; every touched test file, typecheck, lint, the frozen-workflow census and parts-parity all pass clean, and eslint is clean on every touched file. Nothing is newly broken. Two major findings remain genuinely open, both honestly disclosed as such in the fix report itself rather than papered over: SPEC-1141-AC1 (the ticket's own reproduction instrument did not reproduce the red, and no waiver is recorded) and SPEC-1044-AC3 (the db-live-gates driver has never gone green five consecutive times as a whole on this lane's rig, though both remaining gaps are concretely diagnosed as rig/estate properties or a pre-existing cell's own gap, not as #1044 code defects). Both are carried forward to the orchestrator/integrator rather than answerable from this worktree. Accept-with-fixes: nothing above minor remains in the code itself, but these two evidence gaps should be closed (a fresh-database driver run for #1044; a ruling or continued instrumentation for #1141 AC1) before the tickets are marked fully done in release evidence."
+}

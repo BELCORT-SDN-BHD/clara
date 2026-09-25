@@ -215,7 +215,44 @@ test("§6 agent lane: clara_agent_ro has ZERO access to every new table (42501, 
   const wave2AgentReads = new Set([
     "document_fact_validations", "knowledge_records", "knowledge_keys", "knowledge_plan_item_map",
   ]);
-  for (const tbl of [...deltaAgentCatalogReads, ...wave2AgentReads]) {
+  // [#1092, migration 0346_fa_retired_policy_agent_read — riders sweep wave, lane L5] ONE MORE
+  // SANCTIONED AGENT READ, and it is a RULING rather than a discovery. SWEEP-PLAN.md flagged this
+  // widening as the wave's security item ("that widens a runtime credential onto client tax data.
+  // Security. Opus."); it went through the security review, the adversarial review and a recheck,
+  // and was ruled in. The read that consumes it is the fixed-asset particulars proposal's
+  // retired-policy ground, which the runtime reaches out of its READ pool, whose group role is
+  // clara_agent_ro — there is no door to route it through, the same shape knowledge_records takes
+  // above.
+  //
+  // WHAT THE RULING ADMITS, AND THE CELL CARVES OUT EXACTLY THAT AND NO MORE. 0346 grants SELECT
+  // and only SELECT, to clara_agent_ro and only clara_agent_ro, behind a row-level policy
+  // (p_fadp_agent) scoped to clara.wake_firm() — never a blanket table read. So this entry is not
+  // a bare name on a skip-list: the three assertions below re-measure the ruling's own shape off
+  // the catalog, and a later file that widened the grant to INSERT, to a second role, or to an
+  // unscoped policy would red this cell even though the table stays excepted from the sweep.
+  const sweepAgentReads = new Set(["fa_account_depreciation_policies"]);
+  for (const tbl of sweepAgentReads) {
+    for (const priv of ["INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"]) {
+      assert.equal(
+        (await rootQuery("select has_table_privilege($1,$2,$3) ok", [ROLES.agentRo, `clara.${tbl}`, priv])).rows[0].ok,
+        false,
+        `clara.${tbl} is a sanctioned agent READ: #1092's ruling grants SELECT and nothing else, but the agent lane holds ${priv}`,
+      );
+    }
+    const agentPolicies = await rootQuery(
+      `select p.polname, pg_get_expr(p.polqual, p.polrelid) as qual, p.polcmd
+         from pg_policy p
+        where p.polrelid = ('clara.' || $1)::regclass
+          and $2 = any (select rolname from pg_roles where oid = any (p.polroles))`,
+      [tbl, ROLES.agentRo]);
+    assert.equal(agentPolicies.rowCount, 1,
+      `clara.${tbl} must carry exactly ONE clara_agent_ro policy, not ${agentPolicies.rowCount}`);
+    assert.equal(agentPolicies.rows[0].polcmd, "r",
+      `clara.${tbl}'s agent policy must be FOR SELECT, not a write arm`);
+    assert.match(agentPolicies.rows[0].qual, /wake_firm\(\)/,
+      `clara.${tbl}'s agent policy must be scoped to clara.wake_firm() — an unscoped read is not what #1092 ruled`);
+  }
+  for (const tbl of [...deltaAgentCatalogReads, ...wave2AgentReads, ...sweepAgentReads]) {
     assert.equal(
       (await rootQuery("select has_table_privilege($1,$2,'SELECT') ok", [ROLES.agentRo, `clara.${tbl}`])).rows[0].ok,
       true,
@@ -224,7 +261,7 @@ test("§6 agent lane: clara_agent_ro has ZERO access to every new table (42501, 
   }
   for (const tbl of tables) {
     if (slice5AgentReads.has(tbl) || s6AgentReads.has(tbl) || deltaAgentCatalogReads.has(tbl)
-        || wave2AgentReads.has(tbl)) continue;
+        || wave2AgentReads.has(tbl) || sweepAgentReads.has(tbl)) continue;
     await assertRaises(
       PG.insufficientPrivilege,
       () => roleQuery(ROLES.agentRo, `select count(*) from clara.${tbl}`),

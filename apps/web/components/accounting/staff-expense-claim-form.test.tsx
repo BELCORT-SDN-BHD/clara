@@ -27,6 +27,7 @@ import { NextIntlClientProvider } from "next-intl";
 
 import { renderComponent, setCheckboxChecked, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
+import { focusableElements } from "../../test/keyboardWalk";
 import { StaffExpenseClaimFormView } from "./staff-expense-claim-form";
 import { claimDraftKey } from "../../lib/work/staff-expense-claim-draft";
 import type { DraftStorage } from "../../lib/work/journal-draft";
@@ -49,6 +50,8 @@ const FARAH_ADVANCE = "55555555-5555-4555-8555-555555555555";
 const OTHER_CLAIMANT_ADVANCE = "66666666-6666-4666-8666-666666666666";
 const VOIDED_ADVANCE = "77777777-7777-4777-8777-777777777777";
 const SETTLED_ADVANCE = "88888888-8888-4888-8888-888888888888";
+const SECOND_ACCOUNT_ADVANCE = "99999999-9999-4999-8999-999999999999";
+const RETIRED_SECOND_ACCOUNT_ADVANCE = "aaaaaaaa-1111-4111-8111-111111111111";
 
 const BOOKKEEPER: NavigationScope & { firm_id?: string; user_id?: string } = {
   role_rank: 1,
@@ -68,8 +71,9 @@ const ACCOUNTS: CoaAccountRow[] = [
 ];
 
 /** One LIVE enrolment: `1190` is Farah's, `1191` is not enrolled at all. */
+const FARAH_ENROLMENT = "44444444-4444-4444-8444-444444444444";
 const ENROLMENTS: StaffAdvanceEnrolmentRow[] = [
-  { id: "44444444-4444-4444-8444-444444444444", account_code: "1190", person_label: "Farah binti Idris" },
+  { id: FARAH_ENROLMENT, account_code: "1190", person_label: "Farah binti Idris" },
 ];
 
 /** The default, EMPTY staff-advance summary — most tests never touch the advance arm at all, so
@@ -89,7 +93,7 @@ function staffAdvanceSummary(advances: StaffAdvanceSummary["advances"]): StaffAd
 /** One row of `staff_advance_summary`, every field named so a test reads as data, not noise. */
 function advanceRow(patch: Partial<StaffAdvanceSummary["advances"][number]>): StaffAdvanceSummary["advances"][number] {
   return {
-    enrolment_id: "e0", account_code: "1190", person_label: "Farah binti Idris", advance_id: FARAH_ADVANCE,
+    enrolment_id: FARAH_ENROLMENT, account_code: "1190", person_label: "Farah binti Idris", advance_id: FARAH_ADVANCE,
     issue_date: "2026-02-01", amount_cents: 100000, outstanding_cents: 40000, days_outstanding: 30,
     purpose: null, reference: null, voided: false, particulars_complete: false, enrolment_active: true,
     ...patch,
@@ -768,6 +772,458 @@ test("ticket 931 deleting a line of a CONFIRMED split never restates the survivi
     assert.equal(sent[0]!.claim.advanceId, JAN_ADVANCE);
     assert.equal(sent[0]!.claim.advanceAllocations, undefined,
       "one advance carrying the whole claim crosses exactly as it did before ticket 931");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// #1068 — EMPTYING THE LIST DOWN TO NOTHING (the row's own "×", the one act ticket 931's own
+// editor allows and never floors at one) used to leave `validateClaimDraft`'s synthesised
+// "advance required" issue addressed to field id "advanceId" with nothing in the DOM carrying it:
+// the empty state rendered only an "Add allocation" button, unaddressed. A refusal that focuses
+// nothing is a refusal a preparer has to hunt for (this file's own header, seven things).
+// ---------------------------------------------------------------------------------------------
+
+test("ticket 1068 emptying the whole allocation list and submitting focuses a REAL, visible control", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");   // one item, RM 480.00, claimant 1190 — one open row
+
+  let calls = 0;
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => staffAdvanceSummary([advanceRow({})]),
+    submit: async () => { calls += 1; return { kind: "denied" }; },
+  }));
+  try {
+    await h.settle();
+    const removeLabel = messages.StaffAdvances.allocationsEditor.removeAllocation;
+    const removes = findAll(h.container, (n) => attrOf(n, "aria-label") === removeLabel);
+    assert.equal(removes.length, 1, "the one row has its own remove button, like every row");
+    await h.fireEvent(removes[0]!, "click");
+    await h.settle();
+
+    // THE LIST IS NOW EMPTY: no <select> named "advanceId" is on the page any more.
+    assert.equal(h.find((n) => attrOf(n, "id") === F("advanceId") && n.tagName === "SELECT"), null,
+      "the row-0 chooser is gone — this is the state the ticket names");
+
+    await submitForm(h);
+    assert.equal(calls, 0, "nothing is sent while no advance is named");
+    assert.match(h.text(), new RegExp(messages.StaffExpenseClaim.issues.advanceRequired),
+      "the error text is still shown — this form never went silent about WHY it refused");
+
+    const focused = focusedId();
+    assert.equal(focused, F("advanceId"),
+      "the field id validateClaimDraft addresses still takes focus, even with the row gone");
+    const node = h.find((n) => attrOf(n, "id") === focused);
+    assert.ok(node, "…and that id now names a REAL, rendered node, not a stale one");
+    assert.equal(node.tagName, "BUTTON", "…specifically the list's own add-a-row affordance");
+    assert.equal(attrOf(node, "disabled"), null, "…which is enabled, so the focus actually lands");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1068 the SAME empty-list focus holds when the claim never had an open advance to begin with", async () => {
+  // A claimant who removes their one open advance's row is one path to empty; a claimant who
+  // starts the arm with NO open advances at all (the sibling test above this ticket's block,
+  // "a claimant with NO open advance…") is answered by the placeholder-only chooser staying in the
+  // DOM — that case already passes. This cell is the OTHER way an empty list is reached: no
+  // candidates AND the row removed, so both empty-state affordances (the "no outstanding" line and
+  // the add button) are what the page actually offers.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => staffAdvanceSummary([]),
+    submit: async () => ({ kind: "denied" }),
+  }));
+  try {
+    await h.settle();
+    const removeLabel = messages.StaffAdvances.allocationsEditor.removeAllocation;
+    const remove = h.find((n) => attrOf(n, "aria-label") === removeLabel);
+    assert.ok(remove, "even a chooser with nothing to pick still has its own row and remove button");
+    await h.fireEvent(remove, "click");
+    await h.settle();
+
+    await submitForm(h);
+    const focused = focusedId();
+    assert.equal(focused, F("advanceId"));
+    const node = h.find((n) => attrOf(n, "id") === focused);
+    assert.ok(node, "focus still lands on a real node with nothing outstanding to offer either");
+    // FIX ROUND (ADV-01 / L03-SPEC-02). The harness's `.focus()` stub only ever sets
+    // `document.activeElement`, so "focusedId() names it" passes over a DISABLED node that a real
+    // browser refuses focus on and keeps out of the tab order. The sibling cell above already
+    // makes this assertion; the state THIS cell drives — no outstanding advance at all — is the
+    // one the first cut left disabled, so it makes it too, plus the repo's own focusability rule.
+    assert.equal(attrOf(node, "disabled"), null,
+      "…a node a real browser will actually focus, not a disabled one");
+    assert.equal(
+      focusableElements(h.container as Stub).some((n) => attrOf(n as Stub, "id") === focused),
+      true,
+      "…and the repo's own focusability rule agrees it is keyboard-operable");
+    // ADV-02. `<button>` is labelable, so without a name of its own the `<Label htmlFor>` this
+    // Field renders would announce the ADD affordance as "Which advance".
+    assert.equal(attrOf(node, "aria-label"),
+      messages.StaffAdvances.allocationsEditor.addAllocation,
+      "…and it is announced as what it does, not as the chooser it stands in for");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// #1052 — WHICH ENROLMENT AN OFFERED ADVANCE CAME FROM. The owner's ruling of 2026-09-24 on #931
+// admits an advance that is the claimant's by LABEL rather than by their own enrolment, on the
+// condition that "the allocation editor shows, beside each such advance, the enrolment it came
+// from, so the preparer's confirmation is a confirmation of that specific account".
+//
+// The editor's half of that is proved at the editor's own seam
+// (`components/registers/staff-advance-allocations-editor.test.tsx`). What only a mounted FORM can
+// prove is which candidates it calls "not this claimant's own", and the answer is a comparison of
+// ENROLMENTS, never of account codes: one advance account re-enrolled after a retirement carries a
+// second generation, and an advance issued under the first one is not the current claimant's own
+// however the code reads. That case is reachable through today's chooser, which is why it is the
+// cell.
+//
+// The chooser's own candidate FILTER — whether an advance on a SECOND account reaches this list at
+// all — is #1066's, not this ticket's, and is deliberately untouched here.
+// ---------------------------------------------------------------------------------------------
+
+test("ticket 1052 an offered advance issued under ANOTHER live enrolment names that enrolment, and the claimant's own carries no extra line", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => [
+      ...ENROLMENTS,
+      { id: "e-second-account", account_code: "1191", person_label: "Farah binti Idris" },
+    ],
+    loadAdvances: async () => staffAdvanceSummary([
+      // The claimant's own, under the LIVE enrolment on 1190.
+      advanceRow({}),
+      // The SAME person, enrolled again on a SECOND account — the shape arm (b) of the wall
+      // admits, and (since #1066) the shape the chooser offers. FIX ROUND (ADV-03): this cell
+      // used to build an advance under a RETIRED earlier generation of 1190, which the door
+      // refuses `not_this_claimant`; attributing an enrolment to an advance the wall will not
+      // take is exactly the divergence the fix round closes, so the positive case moved onto a
+      // candidate the door admits and the retired one has a refusal cell of its own below.
+      advanceRow({
+        account_code: "1191", enrolment_id: "e-second-account", person_label: "Farah binti Idris",
+        advance_id: OTHER_CLAIMANT_ADVANCE, outstanding_cents: 30000, enrolment_active: true,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    const select = byId(h, F("advanceId"));
+    assert.deepEqual(optionsOf(select).map((o) => attrOf(o, "value")),
+      ["", FARAH_ADVANCE, OTHER_CLAIMANT_ADVANCE],
+      "both of this claimant's advances are offered, her own and the second account's");
+
+    const texts = optionsOf(select).map((o) => o.textContent);
+    assert.ok(String(texts[2]).includes("Farah binti Idris") && String(texts[2]).includes("1191"),
+      `the advance from the other enrolment names it: ${String(texts[2])}`);
+    assert.ok(!String(texts[1]).includes("enrolment"),
+      `the claimant's own advance carries no extra text: ${String(texts[1])}`);
+
+    // AND BESIDE THE CONFIRMED ROW, once it is chosen.
+    assert.equal(
+      findAll(h.container, (n) => attrOf(n, "data-testid") === "allocation-source-enrolment").length,
+      0,
+      "nothing is claimed about a row that has chosen no advance yet",
+    );
+    await h.fireEvent(select, "change", (n) => setFieldValue(n, OTHER_CLAIMANT_ADVANCE));
+    await h.settle();
+    const lines = findAll(h.container, (n) => attrOf(n, "data-testid") === "allocation-source-enrolment");
+    assert.equal(lines.length, 1, "the confirmed row says which enrolment it discharges");
+    assert.ok(String(lines[0]!.textContent).includes("1191"),
+      `…naming the account that enrolment carries: ${String(lines[0]!.textContent)}`);
+
+    // AND CHOOSING THE CLAIMANT'S OWN TAKES IT AWAY AGAIN.
+    await h.fireEvent(select, "change", (n) => setFieldValue(n, FARAH_ADVANCE));
+    await h.settle();
+    assert.equal(
+      findAll(h.container, (n) => attrOf(n, "data-testid") === "allocation-source-enrolment").length,
+      0,
+      "a directly enrolled advance carries no extra line",
+    );
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1052 with the enrolment register unread, no advance is described as coming from somewhere else", async () => {
+  // The conservative direction, and the same one `claimantIsNew` already takes: a read this form
+  // uses to decide WHAT TO SAY must never invent a provenance it could not check.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => null,
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}),
+      advanceRow({
+        enrolment_id: "e-first-generation", person_label: "Farah Idris",
+        advance_id: OTHER_CLAIMANT_ADVANCE, outstanding_cents: 30000, enrolment_active: false,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    const texts = optionsOf(byId(h, F("advanceId"))).map((o) => String(o.textContent));
+    assert.ok(texts.every((x) => !x.includes("enrolment")),
+      `no option claims a source enrolment while the register is unread: ${texts.join(" | ")}`);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1052 fix round an advance under a RETIRED earlier generation of the claimant's OWN account is not offered", async () => {
+  // ADV-03 — THE CHOOSER'S ADMISSION SET IS THE DOOR'S. `clara._assert_claim_basis` (0340) tests
+  // the ADVANCE'S OWN ENROLMENT, never its account code: an advance whose enrolment is not the
+  // claimant's resolved one must pass arm (b), which requires that enrolment to be ACTIVE. An
+  // advance issued under a retired generation of the very same account therefore fails the wall
+  // (driven on the lane database by the adversarial review: CLR10
+  // advance_allocation_mismatch / not_this_claimant), so offering it — and, since #1052,
+  // positively attributing it — promised a confirmation the door refuses.
+  //
+  // It is reachable: `clara.retire_staff_advance_account` guards on outstanding at 'infinity'
+  // while `clara.staff_advance_summary` reports outstanding at today's as-of, so a claim settled
+  // with a FORWARD-DATED posting date leaves the row retirable and still outstanding today.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}),
+      // 1190 was retired and re-enrolled after a name correction; this advance was issued under
+      // the FIRST generation.
+      advanceRow({
+        enrolment_id: "e-first-generation", person_label: "Farah Idris",
+        advance_id: OTHER_CLAIMANT_ADVANCE, outstanding_cents: 30000, enrolment_active: false,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    assert.deepEqual(optionsOf(byId(h, F("advanceId"))).map((o) => attrOf(o, "value")),
+      ["", FARAH_ADVANCE],
+      "the retired generation's advance is not offered: the wall would refuse it not_this_claimant");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// #1066 — THE CHOOSER'S OWN CANDIDATE FILTER, WIDENED TO A SECOND ACCOUNT. The door
+// (`clara._assert_claim_basis`, 0340) admits an advance held under a DIFFERENT live enrolled
+// account of this client whose person label is the claimant's — the same case/whitespace-tolerant
+// match #1052 proved at the wall. Before this the chooser filtered to `draft.claimantAccountCode`
+// alone, so a preparer using the FORM had no way to select such a candidate at all; only a caller
+// going around the form (the door directly, or the future chat tool) could reach it.
+// ---------------------------------------------------------------------------------------------
+
+test("ticket 1066 the chooser also offers an outstanding advance on a DIFFERENT live enrolled account with the same claimant label", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => [
+      ...ENROLMENTS,
+      { id: "e-second-account", account_code: "1191", person_label: "Farah binti Idris" },
+    ],
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}), // Farah's own, on 1190 — offered as before.
+      advanceRow({
+        account_code: "1191", enrolment_id: "e-second-account", person_label: "Farah binti Idris",
+        advance_id: SECOND_ACCOUNT_ADVANCE, outstanding_cents: 15000, enrolment_active: true,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    const select = byId(h, F("advanceId"));
+    const values = optionsOf(select).map((o) => attrOf(o, "value"));
+    assert.deepEqual(values, ["", FARAH_ADVANCE, SECOND_ACCOUNT_ADVANCE],
+      "the second, differently-numbered account's outstanding advance is now offered too");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1066 the second-account match is case- and whitespace-tolerant, exactly as the wall's own lower(btrim(...))", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => [
+      ...ENROLMENTS,
+      // A DIFFERENT case and DIFFERENT surrounding whitespace than the claimant's own stored
+      // "Farah binti Idris" — 0340's own measurement ("farah BINTI idris" vs "Farah binti Idris").
+      { id: "e-second-account", account_code: "1191", person_label: "  farah BINTI idris  " },
+    ],
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}),
+      advanceRow({
+        account_code: "1191", enrolment_id: "e-second-account", person_label: "  farah BINTI idris  ",
+        advance_id: SECOND_ACCOUNT_ADVANCE, outstanding_cents: 15000, enrolment_active: true,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    const values = optionsOf(byId(h, F("advanceId"))).map((o) => attrOf(o, "value"));
+    assert.deepEqual(values, ["", FARAH_ADVANCE, SECOND_ACCOUNT_ADVANCE],
+      "a case/whitespace difference in the second enrolment's label does not hide its advance");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1066 a second account's advance under a RETIRED enrolment is not offered, even with the claimant's own label", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => ENROLMENTS, // 1191 carries no LIVE enrolment any more.
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}),
+      advanceRow({
+        account_code: "1191", enrolment_id: "e-second-account-retired", person_label: "Farah binti Idris",
+        advance_id: RETIRED_SECOND_ACCOUNT_ADVANCE, outstanding_cents: 15000, enrolment_active: false,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    const values = optionsOf(byId(h, F("advanceId"))).map((o) => attrOf(o, "value"));
+    assert.deepEqual(values, ["", FARAH_ADVANCE],
+      "a RETIRED second-account enrolment fails the wall's own sa2.active and is not offered here either");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1066 with the enrolment register unread, no second-account candidate is offered", async () => {
+  // The same conservative direction #1052's own "register unread" cell takes: a read the chooser
+  // uses to decide WHAT TO OFFER must never guess a claimant's own label.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => null,
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}),
+      advanceRow({
+        account_code: "1191", enrolment_id: "e-second-account", person_label: "Farah binti Idris",
+        advance_id: SECOND_ACCOUNT_ADVANCE, outstanding_cents: 15000, enrolment_active: true,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    const values = optionsOf(byId(h, F("advanceId"))).map((o) => attrOf(o, "value"));
+    assert.deepEqual(values, ["", FARAH_ADVANCE],
+      "with the register unread the form knows no claimant label to match a second account against");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1066 fix round the claim says WHICH account it will credit when the head sits on a second one", async () => {
+  // L03-SPEC-03. `toClaimWire` makes `advance_account_code` FOLLOW the head allocation's real
+  // account, because 0340 refuses a claim whose column disagrees with its list's first entry. The
+  // first cut left that silent: the picker still read 1190 while the claim filed 1191, and nothing
+  // on screen reconciled the two. The override is necessary; its silence was not.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => [
+      ...ENROLMENTS,
+      { id: "e-second-account", account_code: "1191", person_label: "Farah binti Idris" },
+    ],
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}),
+      advanceRow({
+        account_code: "1191", enrolment_id: "e-second-account", person_label: "Farah binti Idris",
+        advance_id: SECOND_ACCOUNT_ADVANCE, outstanding_cents: 60000, enrolment_active: true,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    // NOTHING IS SAID while the head sits on the typed account.
+    const line = () => h.find((n) => attrOf(n, "data-testid") === "advance-account-follows-head");
+    await h.fireEvent(byId(h, F("advanceId")), "change", (n) => setFieldValue(n, FARAH_ADVANCE));
+    await h.settle();
+    assert.equal(line(), null, "a head on the typed account needs no reconciling line");
+
+    // CONFIRM THE SECOND ACCOUNT'S ADVANCE AS THE HEAD, and the claim says what it will credit.
+    await h.fireEvent(byId(h, F("advanceId")), "change", (n) => setFieldValue(n, SECOND_ACCOUNT_ADVANCE));
+    await h.settle();
+    const shown = line();
+    assert.ok(shown, "the claim names the account it will actually credit");
+    assert.ok(String(shown.textContent).includes("1191"),
+      `…and it is the head advance's own account: ${String(shown.textContent)}`);
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1066 the SUGGESTED split across two accounts is confirmed and sent with each row's own account", async () => {
+  // END TO END: the chooser offers both accounts (this commit's first cell), and what is
+  // CONFIRMED and SENT names each row's own account so the door's arm (b) and its head-consistency
+  // check (0340) both see the truth, rather than the earlier cells' pure-function proof alone.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, ""); // one item, RM 480.00, claimant 1190
+
+  let sent: Submitted | null = null;
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => [
+      ...ENROLMENTS,
+      { id: "e-second-account", account_code: "1191", person_label: "Farah binti Idris" },
+    ],
+    loadAdvances: async () => staffAdvanceSummary([
+      // OLDEST first: Farah's own, 1190, 300.00 outstanding.
+      advanceRow({ outstanding_cents: 30000, issue_date: "2026-01-10" }),
+      // A SECOND enrolled account, 1191, 200.00 outstanding, dated later.
+      advanceRow({
+        account_code: "1191", enrolment_id: "e-second-account", person_label: "Farah binti Idris",
+        advance_id: SECOND_ACCOUNT_ADVANCE, outstanding_cents: 20000, issue_date: "2026-02-01",
+        enrolment_active: true,
+      }),
+    ]),
+    submit: async (_a, input) => { sent = input; return { kind: "accepted", workId: "w", taskId: null, logicalOpId: null, status: "queued", replayed: false, claimId: "c" }; },
+  }));
+  try {
+    await h.settle();
+    // THE ONE-CLICK SUGGESTION, oldest first: 300.00 off the claimant's own, 180.00 off the second
+    // account — 480.00 exactly, the item's own total.
+    const suggest = h.find((n) => attrOf(n, "data-testid") === "advance-suggest");
+    assert.ok(suggest, "the suggest-by-date button is on screen");
+    await h.fireEvent(suggest, "click");
+    await h.settle();
+    await submitForm(h);
+    assert.ok(sent, "a split confirmed across two accounts is a complete claim");
+    const claim = (sent as unknown as Submitted).claim;
+    assert.equal(claim.advanceAccountCode, "1190",
+      "the head (the OLDEST, on the claimant's own account) sets the claim's own column");
+    assert.deepEqual(claim.advanceAllocations, [
+      { advanceId: FARAH_ADVANCE, amountCents: 30000 },
+      { advanceId: SECOND_ACCOUNT_ADVANCE, amountCents: 18000, accountCode: "1191" },
+    ], "the head states no account of its own; the second-account row states exactly its own");
   } finally {
     await h.unmount();
   }

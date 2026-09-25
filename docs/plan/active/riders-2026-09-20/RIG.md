@@ -32,6 +32,22 @@ Database env for every db command or test (Bash form):
 - Runtime World legs: set `WORKFLOW_POSTGRES_URL=postgres://postgres@127.0.0.1:<port>/<db>` beside the
   PG env. Bootstrapping a World on your database makes `rig-isolation.test.mjs` T10b red afterwards
   (#866); clone a sibling database first if you need both.
+- **The `workflow` schema is PROVISIONED, not migrated, and one command does it:**
+  `pnpm --filter @clara/runtime exec bootstrap`, once, with `WORKFLOW_POSTGRES_URL` set. It creates
+  `workflow.workflow_runs` and five sibling tables. No migration in this repository creates them, and
+  setting the variable alone does not either; it is not an npm script but a dependency bin
+  (`packages/runtime/node_modules/.bin/bootstrap` resolving to
+  `@workflow/world-postgres/bin/setup.js`).
+  **Without it the runtime suite's DevKit-backed cells SKIP rather than fail**, which is the shape
+  that hides them: they announce themselves as skipped on a probe for
+  `to_regclass('workflow.workflow_runs')` and a green run looks green. That is how the sweep wave's
+  integration merge left **22 lane-L6 cells unverified**, after recording three dead ends and
+  concluding no script provisions the schema (`reports/waveS-merge.md` §16.1, §18 item 1); gate C
+  then ran the same 22 green on a bootstrapped database (`reports/waveS-gates-C.md` §1c, §2a, §2b,
+  F5). **Use a DISPOSABLE database for it**, per the bullet above: bootstrapping a World reds
+  `rig-isolation.test.mjs` T10b afterwards (#866), so bootstrap a clone and drop it rather than your
+  lane database. **The durable home for this is the repository's own `README.md` under "Develop"**,
+  per the paragraph below; this is the wave's copy.
 - db tests: from `packages/db`, `node --test --test-concurrency=1 $GATES tests/<file>.test.mjs` where
   `$GATES` is the exact list of `--import ./tests/*-preintegration-gate.mjs` flags in
   `packages/db/package.json`'s `"test"` script.
@@ -43,6 +59,35 @@ Database env for every db command or test (Bash form):
   `npx playwright test` (it serves a stale build, #865). `next build` may panic `0xc0000142` under
   host contention: retry once (#869).
 - `pnpm typecheck` (~4 min) and `pnpm lint` from the worktree root.
+
+**The durable home for the next paragraph is the repository's own `README.md`, under "Develop"**
+— this plan folder is archived when the wave closes, and a rig note that dies with its wave is how
+this guidance went stale in the first place (#1124, review round). The root README carries the
+symptom and the fix for every wave after this one; what follows is this wave's copy, with the
+evidence that produced it. **Whoever cuts the next wave's RIG.md: point at the README rather than
+re-deriving this.**
+
+A worktree's `node_modules` can go stale relative to `pnpm-lock.yaml` and look exactly like a code
+defect. `node_modules` is installed once when a worktree is set up; if `pnpm-lock.yaml` later gains a
+package (on `main` before your lane's base, or from an earlier ticket on your own branch), your
+worktree does not pick it up by itself. Five wave-4 lanes independently hit and separately diagnosed
+this same gap for `@shadcn/react`, each spending a cycle before finding the same one-line fix
+(`reports/wave4-lane01-ticket945.md`, `wave4-lane02-ticket930.md`, `wave4-lane05-ticket933.md`,
+`wave4-lane06-ticket1031.md`, `wave4-lane07-ticket1041.md`; #1124). The symptom: `pnpm typecheck`
+fails with `Cannot find module '@shadcn/react/message-scroller'`, web unit test files fail with
+`Cannot find package '@shadcn/react'`, and `next build` (so every browser walk) fails with `Module
+not found: Can't resolve '@shadcn/react/...'` — all on code your ticket never touched. **Before you
+treat the first `pnpm typecheck` / `pnpm lint` / build / test failure of a session as a real defect,
+rule this out** by running once from the worktree root:
+`CI=true pnpm install --frozen-lockfile --prefer-offline`. It is side-effect-free when nothing was
+missing (0 packages added, `pnpm-lock.yaml` and `git status` unchanged — the wave-4 evidence, every
+time); when something was missing it installs only that, still touching neither the lockfile nor any
+tracked file. This repo pins `pnpm@10.33.0` (`packageManager` in the root `package.json`), which has
+no `install --dry-run`, so there is no side-effect-free way to check first short of running the
+install itself. (Verified rather than recalled: `pnpm install --help` on the pinned 10.33.0 prints no
+`--dry-run`, and the option landed in
+[pnpm v11.8.0](https://github.com/pnpm/pnpm/releases/tag/v11.8.0), 2026-06-18 — "Added a `--dry-run`
+option to `pnpm install`… writes nothing to disk", pnpm/pnpm#12449.)
 
 Known Windows-only reds you must not "fix" unless your ticket IS that defect: #707 (x56-rest-c shells
 out to grep), the Defender/EICAR skip, no `pg_dump` on PATH (four runtime files), the

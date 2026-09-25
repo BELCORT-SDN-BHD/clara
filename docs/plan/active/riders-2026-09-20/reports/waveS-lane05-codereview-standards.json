@@ -1,0 +1,83 @@
+{
+  "axis": "standards",
+  "wave": "S",
+  "lane": "05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "branch": "riders/wS-lane05",
+  "fixed_point": "7bc5a710f",
+  "diff_command": "git diff 7bc5a710f...HEAD",
+  "commits_reviewed": [
+    "7516cc0e2 feat(db): #1056 the fact door gains a payroll lane arbiter",
+    "c11e80576 feat(db): #1056 the payroll chain's observation and what a declaration makes of its state",
+    "234ac15da feat(db): #1056 the fact door admits a payroll question, into the payroll chain",
+    "53afe35ed test(db): #1056 AC2 both ways - the unposted run and the already-posted run",
+    "a65bf43ce feat(db): #1056 the lineage read publishes the payroll chain's facts version",
+    "5add78c22 feat(web): #1056 the document facts table offers a payroll fact its Revise control",
+    "41a37f97f fix(web): #1056 the version note takes a narrowed number, and a ticket reference is spelled out",
+    "20e794ce9 feat(db): #1090 catalogue a depreciation-policy knowledge key",
+    "f0f825bc3 feat(runtime): #1090 map a depreciation-policy knowledge row onto the proposal's client_knowledge ground",
+    "7275f99f8 test(db): #1090 the door, the trust wall, and the read-map-derive pipeline, driven on a live database",
+    "357203355 feat(db): #1092 the runtime read credential reaches a client's depreciation policies",
+    "708ff8f20 feat(runtime): #1092 the retired-policy ground's read and its row mapping",
+    "0da1b021f test(db): #1092 the ground read and its supersession guard, driven on a live database",
+    "2197cf0ff feat(web): #1093 the asset proposal read filters source_ref server-side",
+    "b020cfb34 feat(web): #1093 the read side of a settled particulars question's review",
+    "7c7e1f668 feat(web): #1093 the settled surface shows what Clara proposed beside a departed field",
+    "8b4b5b9ab fix(web): #1093 reword two ticket-639 references so the colour-token lint stops tripping on them"
+  ],
+  "verification_performed": [
+    "Re-measured live on clara_l03 (127.0.0.1:55743): prosrc sha256 for clara._revisable_invoice_field, clara._monetary_invoice_field, clara._payroll_entry_plan, clara._payroll_posting_verdict, clara._knowledge_assert_value, clara._knowledge_floor, clara.wake_firm, clara._tf_fa_acquisition_birth -- all match the prestate/tail pins in 0344/0345/0346 exactly.",
+    "Re-measured live: clara.knowledge_keys holds 15 rows with depreciation_policy at (kind=assertion, value_shape=object, validated_against=shape_only, authority_bearing=true, min_role=bookkeeper) -- matches 0345's own tail claim.",
+    "Re-measured live: clara.fa_account_depreciation_policies is RLS enabled+forced with exactly 3 policies (p_fadp_owner, p_fadp_human unmoved, p_fadp_agent new) and grants exactly {clara_agent_ro: SELECT, clara_authenticated: SELECT, clara_fn_owner: ALL} -- matches 0346's own tail claim, no other role/PUBLIC holds anything.",
+    "Re-measured live: the five new 0344 helper functions (_revisable_payroll_run_field, _revisable_fact_lane, _payroll_source_observation, _payroll_state_with_human_fact, _document_live_posted_entry) all carry proacl '{clara_fn_owner=X/clara_fn_owner}' only -- ungranted to every application role, as claimed.",
+    "Ran packages/db/tests/payroll-fact-revision.test.mjs (full gate chain, --test-concurrency=1): 11/11 pass.",
+    "Ran packages/db/tests/depreciation-policy-knowledge.test.mjs (full gate chain): 7/7 pass.",
+    "Ran packages/db/tests/fa-retired-policy-agent-read.test.mjs (full gate chain): 3/3 pass.",
+    "Ran rig-meta.mjs's own grantMatrixFailures() live against clara_l03: 0 failures overall, 0 relevant to any of this lane's new relations/functions -- confirms the rig-meta cohort gap below (finding STD-1) is not a live security hole.",
+    "Ran node scripts/check-frozen-workflows.mjs and packages/runtime/scripts/check-parts-parity.mjs: parts-parity clean; check-frozen-workflows reports 28 violations, all REMOVED-VS-BASE / REGISTRY-DOWNGRADE against chatTurn_v22/claraWork_v6/statementFacts.v4 entries that exist on origin/main (61a6992b, 59 commits ahead of this lane's fixed point) but not at 7bc5a710f. Confirmed via `git diff 7bc5a710f...HEAD --name-only | grep workflows/` (zero hits) that this lane's 17 commits touch no frozen-workflow file. This is rig/base staleness (the sweep-wave lane was deliberately cut before the cut-phase's origin/main merge), not a defect this lane introduced -- not reported as a finding.",
+    "Confirmed no applied migration file is edited (only 0344/0345/0346 are new under packages/db/migrations/) and no docs/PRD.md, docs/ARCHITECTURE.md or frozen-workflows.json diff exists in 7bc5a710f...HEAD."
+  ],
+  "findings": [
+    {
+      "id": "STD-1",
+      "ticket": 1056,
+      "category": "documented-standard",
+      "kind": "hard-violation",
+      "severity": "minor",
+      "title": "rig-meta cohort for migration 0344 lists 2 of the 5 new ungranted functions it mints",
+      "file": "packages/db/tests/rig-meta.mjs",
+      "lines": "3376-3392, 4372-4377",
+      "rule": "WORK-ORDER.md shared-files table: 'packages/db/tests/rig-meta.mjs | One cohort entry per migration that mints a new name.' Established precedent in the same file (DOCUMENT_SOURCE_REVISION_0217_UNGRANTED_FNS, lines 2647-2652) lists ALL four of 0217's new ungranted helpers.",
+      "evidence": "Migration 0344_payroll_fact_revision.sql mints five new, deliberately ungranted functions: clara._revisable_payroll_run_field, clara._revisable_fact_lane, clara._payroll_source_observation, clara._payroll_state_with_human_fact, clara._document_live_posted_entry (all carry `revoke all on function ... from public` -- confirmed live, all five show proacl '{clara_fn_owner=X/clara_fn_owner}' and nothing else). rig-meta.mjs's PAYROLL_FACT_REVISION_0344_UNGRANTED_FNS (line ~3389) enumerates only two: [\"_revisable_payroll_run_field\", \"_revisable_fact_lane\"]. The migration's own header comment on that array claims 'THE WHOLE COHORT IS UNGRANTED, and that is the boundary claim ... Listed so an accidental grant FAILS instead of passing quietly' -- a claim the array itself does not fully back, since 3 of the 5 ungranted names are absent from it. Contrast with 0217's own precedent in the same file, which lists all four of ITS new ungranted helpers (_document_source_observation, _document_sole_live_client, _revisable_invoice_field, _monetary_invoice_field).",
+      "impact": "The rig-meta cohort's cross-frontier 'wholly present or wholly absent' check (cohortFailures) will not notice a database where exactly one of the three omitted functions exists in isolation from the other four -- a state that should be structurally impossible (0344 applies as one transaction) but is exactly the kind of drift this house convention exists to catch on a from-scratch chain across frontiers. VERIFIED NOT A LIVE SECURITY GAP: re-ran rig-meta.mjs's own grantMatrixFailures() against clara_l03 live -- 0 failures. The general per-function EXECUTE sweep in that function (which checks every clara.* function not in the ALLOWED matrix or RLS-helper set against every role) already independently protects the three omitted names, and 0344's own tail assertion (\u00a7Z point 2, lines 976-989 of the migration) already enumerates and checks all five. This is a completeness gap in the audit-trail convention, not an exploitable grant.",
+      "required_fix": "Add the three omitted names to PAYROLL_FACT_REVISION_0344_UNGRANTED_FNS (or a sibling array) in packages/db/tests/rig-meta.mjs, matching the 0217 precedent, so the cohort's own claim of completeness is true of the code and not just the prose."
+    },
+    {
+      "id": "STD-2",
+      "ticket": 1093,
+      "category": "claims-need-evidence",
+      "kind": "judgement-call",
+      "severity": "note",
+      "title": "Code comment overstates what the cited live-database test actually measured",
+      "file": "apps/web/lib/registers/fa-particulars-proposal.ts",
+      "lines": "142-151",
+      "rule": "AGENTS.md \u00a76: 'Any statement about the state of the world ... must be backed by a checkable source ... No evidence, no claim.'",
+      "evidence": "The new comment on loadAssetParticularsProposal says the server-side filter -- `source_ref->>asset_id` AND `source_ref->>kind` TOGETHER -- is 'measured against a live database by p933.read.by_asset's own \"AND THE NARROWER SERVER-SIDE FORM IS LAWFUL TOO\" cell ... which runs the identical predicate as a raw SQL where under the human role.' Re-read that cell (packages/db/tests/fa-particulars-proposal.test.mjs:174-179, pre-existing from #933, untouched by this lane's diff): it drives only `source_ref->>'asset_id' = $1` -- it never drives `source_ref->>'kind'`, and never drives the two predicates combined, which is what 0346-era #1093 actually ships (apps/web/lib/registers/fa-particulars-proposal.ts:170-176). No new DB-level test was added in this diff to drive the combined predicate under the human role either.",
+      "impact": "Very likely harmless in practice -- PostgreSQL column-level SELECT privilege does not vary by jsonb path expression, so if `source_ref->>'asset_id'` is admitted, `source_ref->>'kind'` on the same column almost certainly is too -- but the comment states as 'measured' something that was not driven, which is the exact overclaim AGENTS.md \u00a76 asks the estate to avoid making about its own code.",
+      "required_fix": "Either narrow the comment to say what was actually measured (asset_id alone) and mark the kind-filter admission as inferred rather than measured, or add one cell to packages/db/tests/fa-particulars-proposal.test.mjs driving the combined filter as PostgREST would build it, under the human role."
+    },
+    {
+      "id": "STD-3",
+      "ticket": 1056,
+      "category": "smell-baseline",
+      "kind": "judgement-call",
+      "severity": "note",
+      "title": "Duplicated Code: the payroll closed set and lane arbiter are hand-mirrored in TypeScript",
+      "file": "apps/web/components/documents/document-revision-dialog.tsx",
+      "lines": "62-90",
+      "evidence": "REVISABLE_PAYROLL_RUN_PATHS (the eleven run-level paths) and revisableFactLane() restate, in TypeScript, exactly what clara._revisable_payroll_run_field(text) and clara._revisable_fact_lane(text) (migration 0344) already decide in SQL. This is Duplicated Code by the letter of the smell.",
+      "note": "Not reported as an actionable finding: this is the SAME shape the file already used for the invoice lane before this ticket (REVISABLE_FIELD_PATHS / isRevisableFieldPath, mirroring clara._revisable_invoice_field), the migration's own header names the mirror explicitly and states 'both copies move together', and the lane's own scan notes (this task's prompt) record the same pairing. A documented, pre-existing repo convention for exactly this situation overrides the baseline smell here (code-review skill \u00a73: 'The repo overrides'). Recorded only because the axis brief asks every baseline smell to be named as a judgement call."
+    }
+  ],
+  "summary": "3 findings, 0 blockers. STD-1 (minor) is the only hard standards-rule gap: the rig-meta cohort for migration 0344 (#1056) lists 2 of the 5 new ungranted functions it mints, against this file's own established one-cohort-per-migration convention -- verified live to be redundant with two other guards (grantMatrixFailures' general sweep and the migration's own tail), so not an exploitable gap, but the migration's own header prose overstates what the cohort array actually covers. STD-2 (note) is a similar evidentiary overclaim in a #1093 code comment about what a pre-existing DB test measured. STD-3 (note) records an accepted, precedented duplication rather than a new problem. All three migrations (0344/0345/0346) were re-measured live against clara_l03 and every prestate/tail pin checked out byte-for-byte; owner, SECURITY DEFINER, search_path and ACL are preserved on every recut body; the one relation touched (clara.fa_account_depreciation_policies) keeps RLS enabled+forced with grants exactly as each migration's own tail claims; no applied migration was edited; no PRD/ARCHITECTURE/frozen-manifest diff exists in this lane's 17 commits. TDD discipline: all three tickets commit per small group of green slices (never a battery of red tests landed before any implementation); test values are independent literals or worked examples, never re-derived from the code under test; every DB-level test drives the public door/read, never a side-channel query in place of the door. Re-ran packages/db/tests/payroll-fact-revision.test.mjs (11/11), depreciation-policy-knowledge.test.mjs (7/7) and fa-retired-policy-agent-read.test.mjs (3/3) live -- all pass."
+}

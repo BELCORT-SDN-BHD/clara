@@ -40,6 +40,7 @@ components/accounting/trade-invoice-form-a11y.test.tsx
 components/accounting/trade-invoice-form-keyboard.test.tsx
 components/accounting/trade-invoice-form.test.tsx
 components/accruals/accrual-correction-form.test.tsx
+components/accruals/accrual-detail.test.tsx
 components/accruals/accrual-form.test.tsx
 components/accruals/accruals-list.test.tsx
 components/admin/invite-dialog-a11y.test.tsx
@@ -169,6 +170,7 @@ components/firm-admin/firm-settings-a11y.test.tsx
 components/firm-admin/firm-settings-panel.test.tsx
 components/firm-admin/legal-standing-card.test.tsx
 components/firm-admin/processing-capacity-card.test.tsx
+components/firm-admin/standing-instructions-card.test.tsx
 components/firm-admin/vendor-binding-ceremony.test.tsx
 components/firm-setup/firm-setup-a11y.test.tsx
 components/firm-setup/firm-setup-checklist.test.tsx
@@ -299,6 +301,7 @@ components/registers/opening-target-document-panel.test.tsx
 components/registers/opening-tie-gates.test.tsx
 components/registers/prepayment-accounts-panel.test.tsx
 components/registers/register-refresh-siblings.test.tsx
+components/registers/staff-advance-allocations-editor.test.tsx
 components/registers/staff-advance-statement-panel.test.tsx
 components/registers/staff-advances-a11y.test.tsx
 components/registers/staff-advances-keyboard.test.tsx
@@ -426,6 +429,7 @@ lib/firm/navigation-label.test.ts
 lib/firm/needs-you-agreement-posting.test.ts
 lib/firm/needs-you-gaps.test.ts
 lib/firm/needs-you-links.test.ts
+lib/firm/needs-you-payroll-completeness.test.ts
 lib/firm/needs-you-payroll-posting.test.ts
 lib/firm/needs-you-payroll-settlement.test.ts
 lib/firm/needs-you-tenancy-rent.test.ts

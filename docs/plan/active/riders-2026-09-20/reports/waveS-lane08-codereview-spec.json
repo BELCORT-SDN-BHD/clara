@@ -1,0 +1,157 @@
+{
+  "review": "riders sweep wave - lane 08 (riders/wS-lane08), AXIS: SPEC",
+  "fixed_point": "061a6992b",
+  "head": "e890a56c6c1ec63e3e7558acf7432097ce2f7efd",
+  "commits": 14,
+  "tickets": [1136, 1137],
+  "spec_sources": "GitHub issues #1136 (body only; `gh api repos/BELCORT-SDN-BHD/clara/issues/1136/comments` returns EMPTY, so the Agent Brief in the body is the newest and only spec) and #1137 (body plus the owner-delegated ruling comment of 2026-09-25, which answers its own AC1: 'yes, Clara may confirm a tenancy rent plan on a bookkeeper's behalf ... as an OBO twin in #915's shape'); plus the lane's ruled scope in the work order prompt, SWEEP-PLAN.md lane L8 (lines 91, 104, 203-220, 231-239) and CUT-PLAN.md section 1.4 entries C1-C3 and C4-C7 with their amendment.",
+  "verdict": "accept-with-fixes",
+  "cells_rerun_by_this_reviewer": [
+    "packages/db tests/agent-read-twins-payroll-agreement.test.mjs, full 130-gate chain - 10 tests / 10 pass / 0 fail (matches the #1136 report)",
+    "packages/db tests/tenancy-agent-twins.test.mjs, full gate chain - 20 tests / 20 pass / 0 fail (every cell named in the #1137 report's AC tables exists and passed)",
+    "packages/db neighbour batteries in one gate-chain run: payroll-settlement, payroll-summary-posting, agreement-contract-acquisition, tenancy-rent-plan, accounting-plans, accrual-correction, plan-overlap-template-arm-retired, firm-portfolio-pack, authority-ref-human-instruction, wave-b/wb-g-tail - 201 tests / 201 pass / 0 fail",
+    "packages/db tests/operation-census.test.mjs + tests/rig-isolation.test.mjs (no reset flags) - 33 tests / 32 pass / 1 skip (T19 poison-role), exactly the reported figure",
+    "apps/web node scripts/run-tests.mjs - 5173 tests / 5171 pass / 0 fail / 2 skip, exactly the reported figure",
+    "FREEZE_BASE_REF=061a6992b node scripts/check-frozen-workflows.mjs - OK 347 / 60 / 3; `git diff 061a6992b...HEAD -- frozen-workflows.json` empty; `git diff 061a6992b...HEAD --name-only -- packages/runtime` empty",
+    "catalog (clara_l01): EXECUTE ACLs measured directly - wake_list_review_queue, wake_get_payroll_settlement_candidates and the six wake_get_* tenancy reads = {clara_fn_owner, clara_agent_ro}; confirm_tenancy_rent_plan_for and confirm_tenancy_rent_plan_revision_for = {clara_fn_owner, clara_runtime}; all eleven human doors plus settle_payroll_net_pay, settle_rent_payable and record_contract_terms = {clara_fn_owner, clara_authenticated}; clara._agreement_posting_verdict = {clara_fn_owner}, granted to nobody, exactly as the ticket demands",
+    "catalog: all eight read cores contain ZERO `insert into` / `update ` / `delete from` (the 'no act' claim, measured rather than read)",
+    "catalog: every core's tenant wall is argument-driven - clara._list_review_queue_core has 23 `p_firm` and 0 live `c.firm`; the tenancy cores' only `_human_ctx` / `jwt_` occurrences are COMMENT text (measured line by line)",
+    "catalog: plan-body ordering behind the narrowed (T.4) probe - only clara._revise_accounting_plan_core carries `for update` (client rung 203005004 at offset 4210, `for update` at 4498); create_accounting_plan, _accrual_plan_core and _tenancy_plan_core contain no `from clara.accounting_plans where id` at all",
+    "catalog: clara._tenancy_plan_core carries the #929 client rung (offset 3144) and calls clara._plan_overlap_warning(p_client, p_basis, v_plan) with its own plan id",
+    "grep: neither 0352 nor 0353 contains a dynamic-SQL `execute` (only `grant execute` and prose), so no web-corpus barrier entry is owed"
+  ],
+  "findings": [
+    {
+      "id": "SPEC-L08-1136-A",
+      "ticket": 1136,
+      "severity": "major",
+      "kind": "requirement-deferred-by-ruling",
+      "title": "#1136 AC2 is not delivered and the ticket cannot be closed by this lane: the three chat tools are a successor contract, not a cut",
+      "spec_line": "\"- [ ] The three tools cut into the next `chatTurn` version with their walks.\" (Agent Brief, acceptance criteria), against the Summary's own purpose: \"so the chat lane can carry the #946, #947 and #948 tools\".",
+      "evidence": "Measured: `git diff 061a6992b...HEAD --name-only -- packages/runtime` is EMPTY and FREEZE_BASE_REF=061a6992b check-frozen-workflows is OK 347/60/3, so nothing was cut. This is correct lane behaviour - the lane's ruled scope is 'the DATABASE HALF ONLY ... write each tool as a successor contract' - and the report delivers all three contracts (name, zod input, door call with argument order, refusal mapping, part kind, prompt stanza) in reports/waveS-lane08-ticket1136.md. The contracts are internally sound: clara.get_document_extract(p_document,p_client,p_max_chars) and clara.get_document_state(p_document,p_client) are both already granted to clara_agent_ro (measured), so the non-blocked branches of read_agreement_terms and read_payroll_posting_state are reachable without a new grant.",
+      "required_fix": "Do NOT close #1136 when this lane merges. The orchestrator re-parents the three contracts to the mainline's next chatTurn cut and carries AC2 there; the capability the ticket exists for does not exist until then."
+    },
+    {
+      "id": "SPEC-L08-1137-A",
+      "ticket": 1137,
+      "severity": "major",
+      "kind": "requirement-deferred-by-ruling",
+      "title": "#1137 AC2's second half is not delivered: the four tenancy tools are a successor contract, not a cut, and one contract question is handed on undecided",
+      "spec_line": "\"- [ ] The read twins, tenant-walled, with cells proving agreement with the human doors; the tools cut into the next `chatTurn` version with their walks.\"",
+      "evidence": "Same measurement as SPEC-L08-1136-A (no packages/runtime diff, freeze-lint OK 347/60/3). The four contracts are in reports/waveS-lane08-ticket1137.md and each carries the six required elements. The report explicitly declines to settle one of them: the two confirmations' part kind, 'work_result as #949 wrote it, or a typed tool result in runStartPrepaymentScheduleWork's shape' - measured as safe either way (check-parts-parity green, emittable set unchanged), but it is a decision the cut must take.",
+      "required_fix": "Keep #1137 open; the cut ticket settles the confirmations' part kind against check-parts-parity.mjs and carries the four contracts verbatim."
+    },
+    {
+      "id": "SPEC-L08-BOTH-B",
+      "ticket": 1136,
+      "severity": "minor",
+      "kind": "acceptance-criterion-unverified-in-lane",
+      "title": "The 'from-scratch chain green' acceptance criterion of BOTH tickets is unmeasured on this branch",
+      "spec_line": "#1136 AC3 and #1137 AC3: \"From-scratch chain green; `CI=true GITHUB_ACTIONS=true pnpm lint` exit 0.\"",
+      "evidence": "Both reports state 'From-scratch chain: NOT run here' and assign it to the integrator (0154 pins a cluster-wide role count, so a second chain on a lane cluster is forbidden). The lint half IS evidenced (CI=true GITHUB_ACTIONS=true FREEZE_BASE_REF=061a6992b pnpm lint, exit 0) and the FIRST-APPLY branch of each bimodal prestate was driven inside a rolled-back transaction against the final file text. Neither migration mints a role or a table, which is why the risk is low - but no measurement on this branch meets the AC as written.",
+      "required_fix": "The integrator runs 0001 -> 0353 on a disposable cluster and records the result against both ACs before either ticket is closed."
+    },
+    {
+      "id": "SPEC-L08-1137-C",
+      "ticket": 1137,
+      "severity": "minor",
+      "kind": "scope-wider-than-the-plan-of-record",
+      "title": "#1137 builds SIX agent read twins and a ninth split of a non-tenancy door, where the plan of record scoped the lane to TWO reads",
+      "spec_line": "SWEEP-PLAN.md lines 217-219: \"The ten tenancy doors of 0300 are all `clara_authenticated` only. #1137 needs twins for two reads, `get_contract_terms` (0300:600) and `get_rent_settlement_candidates` (0300:1974).\" and line 104: \"two reads for #1137, plus two more only if the owner rules OBO twins\".",
+      "evidence": "0353 mints wake twins for SIX reads (get_contract_terms, get_tenancy_rent_plan_draft, propose_contract_terms, get_tenancy_escalation_revision, get_rent_settlement_candidates, get_tenancy_deposit_coding) and additionally SPLITS clara.revise_accounting_plan (0193, plan family - not one of the ten 0300 doors #1137 names as key interfaces). The widening is grounded in the ticket's other key interface, #949's successor contract, whose two read TOOLS call three and two doors, and whose revision confirmation ends in clara.revise_accounting_plan (0300:2499, measured) - so the two tools genuinely cannot work on two doors. It is still four more agent-reachable doors and one more recut body than the plan budgeted. Measured harmlessness: all six cores contain zero write statements, the six wake doors are clara_agent_ro only, and the allowlist gains exactly six `interactive` rows with nothing for an act.",
+      "required_fix": "The orchestrator ratifies the widening explicitly (a line on #1137 or in SWEEP-PLAN), so the model lane's reach into the tenancy family is a recorded decision rather than a lane's own reading."
+    },
+    {
+      "id": "SPEC-L08-1137-D",
+      "ticket": 1137,
+      "severity": "minor",
+      "kind": "unasked-behaviour",
+      "title": "#1137 adds a THIRD copy of the OBO plan-creation body, against the one-definition law its own header cites",
+      "spec_line": "#1137's key interfaces name \"the OBO twin pattern of 0307 (#915)\"; the migration header quotes the law it bends: \"DUPLICATION IS REFUSED\" (0082:14-17) and \"One fact gets ONE definition\" (0154:2058).",
+      "evidence": "0353 section F mints clara._tenancy_plan_core - clara._obo_plan_core's body with the kind fixed to recurring_journal - because lane L1 of this same wave recuts _obo_plan_core (#1051, 2049c1c4 -> 149b4a3d, then #1080) and the sweep's grouping rule forbids two lanes writing one body. It is self-declared in the migration header, in `comment on function`, in packages/db/README.md section 0353 and as follow-up 1 of the report. The estate now carries three OBO plan-creation steps (_accrual_plan_core, _obo_plan_core, _tenancy_plan_core).",
+      "required_fix": "File the collapse ticket now, sequenced AFTER #1051 and #1080: _obo_plan_core absorbs `recurring_journal` (two lines) and _tenancy_plan_core becomes a delegate. Unfiled, the duplication outlives the wave."
+    },
+    {
+      "id": "SPEC-L08-1137-E",
+      "ticket": 1137,
+      "severity": "minor",
+      "kind": "guard-coverage-gap",
+      "title": "The new plan-writing body clara._tenancy_plan_core is not added to the (T.4) roster that watches exactly its two invariants",
+      "spec_line": "plan-overlap-template-arm-retired.test.mjs (T.4): \"THE THREE RECUT CALLERS: each at the body 0283's own text produces, each taking the client rung (FIX 2) ABOVE any clara.accounting_plans row lock, each passing its own plan id to the advisory (FIX 1).\"",
+      "evidence": "The lane amended that roster to swap clara.revise_accounting_plan for its core and added (T.5) for the thin delegate, but left clara._tenancy_plan_core - a body that CREATES accounting plans and takes the #929 client rung - outside it. Measured on clara_l01: it carries pg_advisory_xact_lock(203005004, ...) at offset 3144, calls clara._plan_overlap_warning(p_client, p_basis, v_plan) with its own plan id and holds no row lock, so there is no live defect today; the estate's fourth plan writer simply has no watcher for the invariants the roster exists to watch.",
+      "required_fix": "Add clara._tenancy_plan_core to the (T.4) roster gated on 0353's stem - or, if it is about to be collapsed under SPEC-L08-1137-D, record that in the file so the omission is a choice rather than an oversight."
+    },
+    {
+      "id": "SPEC-L08-1137-F",
+      "ticket": 1137,
+      "severity": "note",
+      "kind": "guard-narrowed-claim-verified",
+      "title": "The (T.4) row-lock probe was narrowed in the same commit that needs it - and the lane's justification checks out",
+      "spec_line": "The report's claim: \"Measured on the live catalog: of the roster's bodies only the revision core carries `for update` at all, so no body that was checked before is skipped now.\"",
+      "evidence": "CONFIRMED by re-measurement. The probe moved from `src.indexOf(\"from clara.accounting_plans where id\")` to `src.search(/from clara.accounting_plans where id [^;]*for update/)`. clara._revise_accounting_plan_core has a plain firm-walled re-resolution read at offset 1100 (which would have failed the old probe, the rung being at 4210) and its `for update` at 4498, so the rung-above-LOCK claim still holds. create_accounting_plan, _accrual_plan_core and _tenancy_plan_core contain the old substring ZERO times, so the old probe was already inert for them. No coverage was lost, and the new (T.5) pin on the thin delegate is additive.",
+      "required_fix": "None. Recorded because a guard relaxed in the commit that needs it is the shape a reviewer must not wave through."
+    },
+    {
+      "id": "SPEC-L08-1137-G",
+      "ticket": 1137,
+      "severity": "note",
+      "kind": "contract-departs-from-source",
+      "title": "The confirm contracts depart from #949's 'a FRESH p_op_key per act' in favour of a stable op key",
+      "spec_line": "#949's successor contract, quoted by the lane: \"a FRESH `p_op_key` per act\"; the report's contract uses `stableOpKey(ctx.taskId, CONFIRM_TENANCY_RENT_PLAN_TOOL, input)` instead.",
+      "evidence": "Self-declared and argued (a retried tool call in chat is ONE intent, not two), and driven: p1137.obo.one_op_key_namespace (rerun: pass) shows a replayed chat confirmation returning a byte-identical receipt and a HUMAN replay under the same key converging on ONE receipt and ONE plan - the core reserves over the caller's own arguments and NOT the author, which is what makes that convergence safe.",
+      "required_fix": "The cut ratifies the departure in one line, so a later reader does not 'restore' #949's wording and break idempotency."
+    },
+    {
+      "id": "SPEC-L08-1136-H",
+      "ticket": 1136,
+      "severity": "note",
+      "kind": "requirement-met-differently",
+      "title": "#1136 asks for three twins and the lane built two doors - correctly, and the ticket's own text is why",
+      "spec_line": "\"- [ ] One migration per twin (or one for the three), each tenant-walled and refused to every other role; cells prove the twin and the human door agree row for row.\"",
+      "evidence": "read_payroll_posting_state and read_agreement_terms read the SAME door (clara.list_review_queue), so two wake doors serve three tools. The agreement half is proven row for row by p1136.queue.agreement_blocked_row_travels (whole-envelope deepEqual plus row.question_text === clara._agreement_posting_verdict(doc).sentence; rerun: pass), and the banked-terms half needs no new grant because clara.get_document_extract already holds clara_agent_ro (measured). clara._agreement_posting_verdict stays granted to nobody (measured: {clara_fn_owner}), which is what CUT-PLAN C3 demanded ('must NOT be called from a tool'). AC1 is met in substance.",
+      "required_fix": "None. Recorded so the cut does not read 'two doors' as a missing twin."
+    },
+    {
+      "id": "SPEC-L08-1136-I",
+      "ticket": 1136,
+      "severity": "note",
+      "kind": "contract-departs-from-source",
+      "title": "read_agreement_terms gained a client_id input that #948's contract did not have",
+      "spec_line": "#1136's key interfaces name \"the successor contracts in `reports/wave4-lane01-ticket948.md`\", whose input is document_id alone.",
+      "evidence": "The report declares it ('client_id is ADDED to #948's original input') and argues it: both doors the tool calls take a client, and a document-only tool would have to discover the client first, which is the existence oracle the tenant wall prevents. Follow-up 2 of the report names the real consequence - a firm-level (unpinned) chat session has no ctx.clientId to supply.",
+      "required_fix": "The cut confirms the chat surface can always supply a client for this tool, or takes the report's named alternative. A cut-time decision, not a lane defect."
+    },
+    {
+      "id": "SPEC-L08-1137-J",
+      "ticket": 1137,
+      "severity": "note",
+      "kind": "process-tdd-shape",
+      "title": "Eight of the nine seams were not driven red-first (self-declared)",
+      "spec_line": "Work order rule 4: \"One slice at a time: one test -> see it red for the right reason -> the minimal code that turns it green\".",
+      "evidence": "The report says it plainly: only the first seam (wake_get_contract_terms) was driven red -> green; the other eight cells were written against a migration that already existed, because section 0 and TAIL are table-driven over all nine bodies. The work order's own substitute was applied instead - six vacuity controls, each breaking a LIVE subject, seeing the exact cells go red with the right message, and restoring the subject byte for byte (sha-compared). The Standards axis owns this; it is recorded here only because the deviation is from a rule the lane prompt calls binding.",
+      "required_fix": "None from this axis."
+    },
+    {
+      "id": "SPEC-L08-BOTH-K",
+      "ticket": 1137,
+      "severity": "note",
+      "kind": "worktree-hygiene",
+      "title": "An untracked adversarial probe file is sitting in the lane worktree's test directory",
+      "spec_line": "n/a - integration hygiene.",
+      "evidence": "`git status --short` in the lane worktree shows `?? packages/db/tests/zz-adv-1137-probe.test.mjs`, whose own first line reads 'ADVERSARIAL REVIEW PROBE - waveS lane 08. NOT a deliverable; deleted after the run.' (mtime 2026-09-25 17:09 - the parallel adversarial reviewer's, not the implementer's). It is in no commit of 061a6992b..HEAD, but it matches tests/**/*.test.mjs and would join any whole-suite run.",
+      "required_fix": "The orchestrator confirms it is deleted before integration; nothing for the implementer."
+    }
+  ],
+  "no_findings_on": [
+    "#1136 AC1 tenant wall, ACL and row-for-row agreement: p1136.settlement.same_rows, p1136.queue.payroll_blocked_row_travels, p1136.queue.agreement_blocked_row_travels, p1136.wake.tenant_wall, p1136.acl.two_doors_one_role and p1136.wake.read_only all rerun green, and the catalog agrees with every ACL claim.",
+    "#1137 AC1 (the ruling recorded before the confirmations were built): verified live - the owner-delegated ruling comment of 2026-09-25 is on the issue and the label is ready-for-agent.",
+    "#1137 AC3 (the ruling's half): the two OBO twins are 0307's shape line for line (op key first, null author refused before the client is read, membership re-checked LIVE, the bookkeeper floor applied to the NAMED human), clara_runtime only, no wake_fn_allowlist row for either, and all twelve confirmation cells rerun green.",
+    "The wave4-lane01-fix.md section 8 amendment: carried into BOTH lanes' contract text (refusal mapping AND prompt stanza) with the 'never read success from the absence of an error' sentence; candidate_window_days (35) is asserted on the wire by p1137.settlement.same_answer; no settlement act was opened - settle_payroll_net_pay and settle_rent_payable are still clara_authenticated only (measured).",
+    "Sweep rule (a), no frozen body edited: no packages/runtime diff, no frozen-workflows.json diff, freeze-lint OK 347/60/3 against 061a6992b.",
+    "Sweep rule (b), migration numbers: exactly 0352 for #1136 and 0353 for #1137, one file each, no other migration file touched.",
+    "Sweep rule (c), the web pins corpus: neither migration contains dynamic SQL (measured), so no reviewed-barrier entry is owed; the corpus file is byte-identical to base and the whole web suite is green at the reported figure.",
+    "Shared-file discipline: packages/db/package.json gains exactly two gate tokens in migration order; rig-meta.mjs gains its own cohort blocks; the two census files lane L1 also touches (plan-overlap-template-arm-retired, authority-ref-human-instruction) carry additive, stem-gated hunks and the report names the collision for the integrator.",
+    "The human doors' behaviour: the only observable change to a human entrance is one additive `via` key on the two confirmations' audit detail (0300:1740 and 0300:2511 pre-image compared against 0353's anchored replacement), and it is an anchored, reversible, pinned substitution rather than a hand edit."
+  ],
+  "status_request_note": "No mid-task status request reached this reviewer."
+}

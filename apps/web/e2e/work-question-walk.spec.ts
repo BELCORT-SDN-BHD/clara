@@ -283,7 +283,7 @@ test("LEAVE PENDING is not offered on the Work's own page — that page IS the q
 const NEEDS_YOU_URL = "/work?view=needs-you";
 
 test("B4: the SAME question is answered from Needs-you, and the row leaves without dumping focus", async ({ page }) => {
-  test.setTimeout(cellBudgetMs({ polls: 3 }));
+  test.setTimeout(cellBudgetMs({ polls: 4 }));
   await parkOnQuestion(page);
   await page.goto(NEEDS_YOU_URL);
 
@@ -311,18 +311,42 @@ test("B4: the SAME question is answered from Needs-you, and the row leaves witho
   // …AND FOCUS DOES NOT LAND ON `<body>` (§4, and the reviewed finding this cell exists for: the
   // old code focused the trigger BEFORE asking for the reload that unmounts it). It lands on the
   // stable landmark this list lives under — the section's own heading.
-  const focused = await page.evaluate(() => {
-    const el = document.activeElement;
-    return {
-      tag: el?.tagName ?? null,
-      text: (el?.textContent ?? "").trim().slice(0, 40),
-      tabindex: el?.getAttribute("tabindex") ?? null,
-    };
-  });
-  expect(focused.tag, "focus was dumped onto the document body when the row disappeared").not.toBe("BODY");
-  expect(focused.tag, "focus landed on the section heading this list is rendered under").toBe("H2");
-  expect(focused.text, "…this list's OWN heading, not some other section's").toContain("Needs you");
-  expect(focused.tabindex, "made programmatically focusable, and NOT a tab stop").toBe("-1");
+  //
+  // #1141: polled, not read once. `restoreFocusAfterRow` runs one `nextPaint()` (one rAF plus one
+  // macrotask) AFTER the reload that unmounts the row, so there is a real, if usually short, tick
+  // between "the row left" (this cell's own `toHaveCount(0)` above) and "focus landed on the
+  // heading" during which `document.activeElement` is transiently `<body>` — an instant read here
+  // could land inside that tick under host contention (measured: red once in each of three whole-
+  // suite runs across two gates, green on every other run and on every isolated re-run). README.md's
+  // own rule for exactly this shape — "wait for the state — `expect.poll` on the element that must
+  // become `document.activeElement`... not for a number of milliseconds" — is what this polls for.
+  //
+  // ONE SETTLED OBSERVATION CARRIES ALL THREE FACTS (review round, ADV-L06-10). The first cut of
+  // this fix polled the TAG and then re-read `document.activeElement` in a SECOND, unwaited
+  // `evaluate` for its text and tabindex — so any focus movement between the two round trips (a
+  // later rAF, the `scan()` injection, a re-render) was read by the one carrying no wait, and the
+  // poll itself was satisfied by ANY `<h2>` on the page while the identity check lived in the
+  // unwaited read. The whole triple now comes back from inside the poll, so what is waited for and
+  // what is asserted are the same observation.
+  await expect
+    .poll(
+      async () => page.evaluate(() => {
+        const el = document.activeElement;
+        return {
+          tag: el?.tagName ?? "NONE",
+          text: (el?.textContent ?? "").trim().slice(0, 40),
+          tabindex: el?.getAttribute("tabindex") ?? null,
+        };
+      }),
+      {
+        timeout: 15_000,
+        message:
+          "focus was dumped onto the document body when the row disappeared, or landed somewhere other than "
+          + "this list's own section heading — made programmatically focusable (tabindex -1) and NOT a tab stop",
+      },
+    )
+    .toEqual({ tag: "H2", text: expect.stringContaining("Needs you"), tabindex: "-1" });
+
   await scan(page, "needs-you after the question was answered inline");
 });
 

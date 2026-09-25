@@ -24,7 +24,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { PG, asRoot, endPool, rootQuery } from "./rig-fixtures.mjs";
-import { keyGrammarCohortApplied } from "./knowledge-fixtures.mjs";
+import { depreciationPolicyKnowledgeCohortApplied, keyGrammarCohortApplied } from "./knowledge-fixtures.mjs";
 
 const EXPECTED_CELLS = 5;
 let live = false;
@@ -141,8 +141,20 @@ cell("kg.03 clara.client_fact_keys refuses a key record_work_knowledge_read woul
 });
 
 cell("kg.04 every key currently registered in both catalogs continues to validate unchanged", async () => {
+  // THE CENSUS IS RE-DERIVED, NOT WIDENED. This cell's number is a closed world over a catalogue
+  // that later migrations lawfully append to, and #1090's 0345_depreciation_policy_knowledge_key
+  // appends exactly one row to it (`depreciation_policy`, the key the fixed-asset proposal's
+  // `client_knowledge` ground needs before any person can record a depreciation note). The
+  // expected count is therefore derived from the SAME live-catalogue cohort probe this file's
+  // header already binds itself to -- never from a migration number -- so a pre-0345 chain still
+  // measures exactly fourteen and a post-0345 chain exactly fifteen. A SIXTEENTH key still reds
+  // this cell, which is the closed world AC2 asks for.
+  const has1090 = await depreciationPolicyKnowledgeCohortApplied();
   const kk = await rootQuery("select knowledge_key from clara.knowledge_keys order by knowledge_key");
-  assert.equal(kk.rowCount, 14, "the 13-key 0192 catalog plus #898's financial_year_end_day");
+  assert.equal(kk.rowCount, has1090 ? 15 : 14,
+    has1090
+      ? "the 13-key 0192 catalog, #898's financial_year_end_day and #1090's depreciation_policy (0345)"
+      : "the 13-key 0192 catalog plus #898's financial_year_end_day");
   for (const row of kk.rows) {
     assert.match(row.knowledge_key, /^[a-z][a-z0-9_]{0,62}$/,
       `${row.knowledge_key} must still validate against the tightened grammar`);

@@ -53,6 +53,47 @@ import {
   applicationsForEntry, advanceOutstanding, seedAdvance, linesWithIds,
   withClientRungHeld, awaitRungWaiters,
 } from "./staff-expense-claim-fixtures.mjs";
+import { markSkip } from "./wave-a-helpers.mjs";
+
+// ===========================================================================================
+// #1069 [0341] — `clara.get_work_claim_origin` PROJECTS `allocation_count`.
+//
+// This section's OWN frontier, layered on top of `gateSec` above — 0221's own stem is true from
+// that migration onward, long before 0341 exists, so these cells need their OWN stem check
+// (`staff-expense-claim-allocations.test.mjs`'s #1067/#1052 two-frontier idiom).
+// ===========================================================================================
+
+export const WORK_CLAIM_ALLOC_COUNT_STEM = "work_claim_allocation_count$";
+
+let _allocCount = null;
+async function allocCountLaneReady() {
+  if (_allocCount === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [WORK_CLAIM_ALLOC_COUNT_STEM]);
+      _allocCount = r.rows[0].n > 0;
+    } catch {
+      _allocCount = false;
+    }
+  }
+  return _allocCount;
+}
+
+async function gateAllocCount(t) {
+  if (await allocCountLaneReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_WORK_CLAIM_ALLOCATION_COUNT === "1") {
+    markSkip();
+    t.skip(`#1069 allocation_count projection absent (no ${WORK_CLAIM_ALLOC_COUNT_STEM} migration applied)`);
+    return true;
+  }
+  assert.fail(
+    "#1069: the allocation_count projection is absent. Apply "
+    + "0341_work_claim_allocation_count.sql (or its numbered suite copy), or set "
+    + "CLARA_ALLOW_MISSING_WORK_CLAIM_ALLOCATION_COUNT=1 for the package-wide pre-integration sweep.",
+  );
+  return true;
+}
 
 let world = null;
 before(async () => {
@@ -975,6 +1016,62 @@ test("p638.origin get_work_claim_origin answers for a claim Work and NULL for a 
   // FIRM-SCOPED: a member of another firm gets nothing rather than an existence oracle.
   assert.equal(await getWorkClaimOrigin(world.users.dave, a.work_id), null,
     "origin: another firm's member sees nothing");
+});
+
+// ===========================================================================================
+// 12a · p1069.origin — `allocation_count`, the Work card's own count of how many advances a
+// claim discharges. #1069's Agent Brief: 1 for a single-advance claim (matching row count for a
+// multi-advance one), and — implied by "the advance-application arm" — 0 for a claim that
+// discharges no advance at all.
+// ===========================================================================================
+
+test("p1069.origin allocation_count is 0 for a reimbursement and 1 for a single-advance claim", async (t) => {
+  if (await gateSec(t) || await gateAllocCount(t)) return;
+  const client = await secClient("allocCountSingle");
+
+  // A reimbursement discharges no advance at all: the honest count of an arm that is not there.
+  const reimbursed = await armed({ client, claim: claim({ settlement: SETTLEMENT.reimbursement }) });
+  const originReimbursed = await getWorkClaimOrigin(CAROL(), reimbursed.work_id);
+  assert.equal(originReimbursed.settlement, SETTLEMENT.reimbursement);
+  assert.equal(originReimbursed.allocation_count, 0,
+    "allocCount: a reimbursement claim carries no advance-application arm at all");
+
+  // A single-advance application — the legacy shape, `advance_id` and no `advance_allocations`
+  // key — still stores exactly ONE confirmed allocation row (0301's own single-advance branch),
+  // so the count is 1, never a fabricated default.
+  const adv = (await seedAdvance(ALICE(), BOB(), { client, cents: 80000, issueDate: "2026-01-10" })).advance;
+  const single = await armed({ client, claim: claim({
+    settlement: SETTLEMENT.advance, advanceAccountCode: SECHART.advance,
+    advanceId: adv.id, payableAccountCode: null,
+  }) });
+  const originSingle = await getWorkClaimOrigin(CAROL(), single.work_id);
+  assert.equal(originSingle.settlement, SETTLEMENT.advance);
+  assert.equal(originSingle.allocation_count, 1,
+    "allocCount: a single-advance claim's arm carries exactly one allocation");
+});
+
+test("p1069.origin allocation_count matches the register's own row count for a multi-advance claim", async (t) => {
+  if (await gateSec(t) || await gateAllocCount(t)) return;
+  const client = await secClient("allocCountMulti");
+  const advA = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const advB = (await seedAdvance(ALICE(), BOB(), { client, cents: 30000, issueDate: "2026-02-01" })).advance;
+
+  const c = claim({ settlement: SETTLEMENT.advance, advanceAccountCode: SECHART.advance, payableAccountCode: null });
+  c.advance_allocations = [
+    { advance_id: advA.id, amount_cents: 40000, account_code: SECHART.advance },
+    { advance_id: advB.id, amount_cents: 20500, account_code: SECHART.advance },
+  ];
+  const a = await armed({ client, claim: c });
+
+  const origin = await getWorkClaimOrigin(CAROL(), a.work_id);
+  assert.equal(origin.allocation_count, 2,
+    "allocCount: a two-advance claim's arm carries exactly the two allocations it confirmed");
+
+  // AND IT MATCHES THE REGISTER'S OWN ROW COUNT, read independently — the count is never a
+  // re-derivation of the claim's stored basis, only the register's own rows.
+  const stored = await getStaffExpenseClaim(ALICE(), a.claim_id);
+  assert.equal(origin.allocation_count, stored.advance_allocations.length,
+    "allocCount: the projected count matches clara.staff_expense_claim_allocations' own row count");
 });
 
 // ===========================================================================================

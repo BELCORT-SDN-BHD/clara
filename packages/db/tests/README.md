@@ -196,6 +196,90 @@ declarations, the drill floor against the drill's own cell count, and the action
 them; `partition-total` refuses a missing declaration on the PR itself, days before anyone
 dispatches the legs.
 
+**A declared `#!cells-floor:` is itself checked against the corpus on disk (#1126).** The bounds
+above prove a RUN met its declared numbers; they never proved the declared numbers were still
+correct, so a corpus retarget or a census widening could move the true cell count without moving
+the declared one — the `-ge` floor check stays satisfied either way, and that happened twice,
+unnoticed for a stretch. Every file in this corpus is a flat battery of top-level `test(...)`
+calls (no file nests a subtest inside another), so the true cell count is re-derivable from disk
+the same way the gate chain already is: `p1126.floor.corpus` and `p1126.floor.roster` in
+`ci-frontier-leg-contract.test.mjs` sum top-level cell registrations across each slice list's own
+files (and the roster's) and assert the sum equals the list's declared `#!cells-floor:` — on every
+PR, with no database and no dispatch run needed. Raise or lower the declared number in the SAME PR
+that changes the corpus; this cell is what now refuses the PR that forgets to.
+
+> **What counts as one cell here, and the two shapes this corpus does not admit.** The leg's own
+> number is `CELLS=$((PASS + SKIP))` over the TAP summary, so the derivation counts `^test(` **and
+> `^test.skip(`** — quarantining a cell with `test.skip` is exactly the case where the leg's count
+> does not move, and a derivation that missed it would force the declared floor DOWN by one for a
+> cell that is still there. Two shapes are refused outright by `assertCountableCorpus`, because a
+> declared floor over them would stop meaning what it says: a registration at **non-zero indent**
+> (inside a loop, a helper or a `describe` — the leg runs and counts it, a top-level scan does not),
+> and **`test.todo(`** (measured on node 22: `# tests 3 / # pass 1 / # skipped 1 / # todo 1`, so a
+> todo cell lands in neither `# pass` nor `# skipped` and is bounded by neither `#!cells-floor:` nor
+> `#!skips-max:`). `p1126.floor.derivation` pins the counting rule against a known-good literal.
+>
+> **`#!skips-max:` stays hand-declared, deliberately.** Only the cell FLOOR is re-derived. A skip
+> count is not a property of the corpus on disk: it is how many of those cells stand down at ONE
+> frontier, which depends on which preintegration gates the frontier grants, so nothing static can
+> compute it. It remains a number someone measured and typed, bounded at run time by the leg and by
+> nothing else. Deriving it would need a run at each frontier; that half is a recorded residual of
+> #1126, not an oversight.
+
+**Every measured run in the leg also writes its own counts to the dispatch run's summary
+(#1126).** The bounds above prove a run met its declared numbers; before #1126 they printed the
+actual pass/fail/skip/cells nowhere but the step's raw log, so noticing a leg whose measured
+count drifted from its declared floor took a human reading that log. `db-slice-frontiers` is a
+matrix of separate jobs, and GitHub groups every job's `$GITHUB_STEP_SUMMARY` writes onto the
+SAME workflow run's summary page (in job-completion order), so each of the leg's three measured
+steps — the slice list, the cross-slice contract roster, the isolated deploy drill — now appends
+a small Markdown table there: pass, fail, skip, cells and the declared floor/skip-max it was
+held to. A dispatch run's summary page therefore carries every leg's real numbers next to what
+they were checked against, with no raw log to open.
+
+**`ci.yml` now WIRES the weekly schedule's own failure to a visible notification (#1127).** The
+bounds and the step summary above both prove something about a RUN that already happened; neither
+one tells anyone the schedule went red at all unless they open the Actions tab.
+This wave's own evidence is that nobody reliably did: a test-corpus retarget and a census
+widening each moved a number `db-slice-frontiers` depends on, and neither was caught for a
+stretch of time. `.github/workflows/ci.yml`'s `notify-schedule-failure` job depends on `ci` — the
+terminal meta-gate above, never an individual leg directly, so it can never disagree with what the
+gate already decided — and fires only when `github.event_name == 'schedule'` and `needs.ci.result
+!= 'success'`; a `workflow_dispatch` run is excluded because a human who just triggered it is
+already watching, and a `pull_request`/`push` failure is already visible to its author on the PR.
+No Slack, email or webhook channel exists anywhere in this repo's `.github/` today, so the job
+posts a `gh issue comment` onto a standing CI-health issue instead, carrying the run's own result
+and a link back to it (`github.run_id`) rather than a bare "it failed." The job declares its own
+job-level `permissions: issues: write`; the workflow itself still carries no top-level
+`permissions:` block, so every other job keeps its present (lesser) default token scope.
+`ci-schedule-notify.test.mjs` holds the job's existence, its `needs`/`if` wiring, its
+least-privilege grant, and that the terminal `ci` job's own `needs` list stays exactly the ten
+legs it already had — this ticket adds a job that reacts to `ci`, not a new leg `ci` waits on.
+
+> **The channel is RESOLVED, never a number pinned in the workflow.** The first cut hardcoded
+> `gh issue comment 1127`; #1127 is the ticket that asked for the notification, and the wave that
+> delivers it closes the ticket — so the standing channel for every future weekly red would have
+> been a closed issue nobody has reason to reopen, which is the ticket's own failure mode
+> re-created by its own fix. The job looks up the OPEN issue whose title is exactly
+> `CI health: the weekly scheduled sweep` and opens one when none exists, so the channel can
+> neither be closed out from under it nor need a human to create it first.
+>
+> **What is HELD, and what the first scheduled run is still what proves.** Held by cells: the job's
+> wiring, its grant, that it pins no issue number, that it resolves by title and creates when it
+> finds nothing, and that the failure reaches `$GITHUB_STEP_SUMMARY` — which needs no token scope at
+> all — BEFORE any API call, so a refused grant cannot take the notice down with it. Driven, not
+> only read: the resolution command itself was run against this repository (`gh issue list --state
+> open --search 'in:title "…"'` returns nothing for the standing title and returns #1131 for an
+> existing issue's exact title), and the step's own shell was executed end to end against a stubbed
+> `gh` in both branches. **NOT driven: the live API write.** The repository's default workflow
+> permission is `read` (`gh api repos/:owner/:repo/actions/permissions/workflow` →
+> `"default_workflow_permissions":"read"`), which a job-level `permissions:` block is documented to
+> widen ("Anyone with write access to a repository can modify the permissions granted to the
+> `GITHUB_TOKEN`, adding or removing access as required, by editing the `permissions` key in the
+> workflow file" — docs.github.com, *Managing GitHub Actions settings for a repository*). The first
+> scheduled run after this merges is what proves a comment actually posts, and belongs in the
+> release evidence.
+
 **A fixture that runs at two frontiers is not a gate.** A gate lets a cell stand down; a
 FRONTIER-COMPAT fixture keeps the cell running on both sides of the migration that changed a
 door's grammar. `fa-authority-sign-compat.mjs` holds both of the x41 rig's:
@@ -1901,12 +1985,26 @@ Six `p977.*` cells:
   `clara._authority_ref_refusal(text,uuid,uuid,uuid)` exists, `stable`, SECURITY DEFINER, owned by
   `clara_fn_owner`, `search_path` pinned, EXECUTE held by nobody (not PUBLIC, not
   `clara_authenticated`/`clara_runtime`/`clara_agent_ro`).
-* `p977.definition.one` — the catalog census: both doors READ the shared definition, neither still
-  carries its own inline chat-lane existence test, that inline test now survives in EXACTLY ONE
-  `clara` function (`_accrual_plan_core`, the accrual lane's copy, which the owner's ruling
-  deliberately leaves alone), and EXACTLY the two doors the ruling names read the one definition.
+* `p977.definition.one` — the catalog census: both doors REACH the shared definition, neither
+  still carries its own inline chat-lane existence test, that inline test survives in EXACTLY the
+  expected set of `clara` functions, and EXACTLY the expected roster reads the one definition.
+  **The carrier set is BIMODAL on #1080 (`0331_accrual_plan_authority_wall.sql`)**, measured off
+  the applied chain on 0331's stable stem rather than off the body under test (0331 mints no name,
+  so `to_regprocedure` cannot feature-detect it): below 0331 it is exactly
+  `{_accrual_plan_core}` — the accrual lane's copy, which 0250's own header (line 63) says it
+  could not reach and whose survival 0250's tail pinned at line 604 — and from 0331 on it is
+  EMPTY, because that body now calls #1051's shared predicate. That empty set is the state 0250's
+  prose always described and could not yet assert.
   Normalized in JS by the same rule 0250's tail normalizes `prosrc` in SQL, so the cell and the
-  migration cannot disagree about what "the fragment" is.
+  migration cannot disagree about what "the fragment" is. **BIMODAL since #1051
+  (`0330_plan_authority_wall_predicate.sql`)**, measured off the catalog rather than assumed: on
+  a pre-0330 chain the plan door and #941's OBO twin each NAME `clara._authority_ref_refusal`; on
+  a post-0330 chain the plan lane's whole authority wall lives in one shared predicate,
+  `clara._assert_plan_authority`, which both plan bodies call and which is itself the reader, so
+  the roster reads `_assert_plan_authority, sign_depreciation_authority`. #977's claim is
+  unchanged — one definition, no door keeping its own copy — and the cell stays an EXACT closed
+  world in either branch. The shared wall has its own battery,
+  `plan-authority-wall.test.mjs`, below.
 * `p977.both.unauthored_chat_turn_refused` — the cell that forces the rule to be a CONJUNCTION:
   `clara.agent_tasks.created_by` is nullable for every kind, so a `chat_turn` nobody signed is
   refused too.
@@ -1934,6 +2032,44 @@ signature.
 `packages/db/package.json`'s `"test"` chain at its MIGRATION-order position (last, after
 `fa-particulars-completion-fold-preintegration-gate.mjs`, 0249). A FOCUSED run does not preload it
 and FAILS LOUDLY below 0250; final acceptance is exactly that focused shape counting ZERO skips.
+
+## The shared plan authority wall (#1051, `0330_plan_authority_wall_predicate.sql`)
+
+`plan-authority-wall.test.mjs`, frontier-gated on its own stable stem
+(`plan_authority_wall_predicate$`) with `plan-authority-wall-preintegration-gate.mjs` as the
+package-sweep escape (`CLARA_ALLOW_MISSING_PLAN_AUTHORITY_WALL`). A FOCUSED run does not preload
+the gate, so a chain missing 0330 fails loudly there rather than skipping.
+
+**What the ticket asked for is not what it is.** #1051 was filed saying `clara._obo_plan_core`
+admits two `authority_ref` kinds against the human door's three, and recommended keeping the
+machine lane narrower. That premise is stale: the riders wave-4 integrator carried #949's
+`contract_confirmation` into BOTH bodies, so the two walls already admit the same three kinds, and
+taking the ticket's recommendation would REMOVE one. What is live is the ticket's second half —
+two independently hand-written copies of one wall, and 0308:870's "verbatim from
+clara.create_accounting_plan" claim that is no longer true of anything. 0330 is therefore a
+refactor that PRESERVES the three kinds.
+
+Cells:
+
+* `p1051.wall.one_definition` — the catalog census, the structural standard for a recut body:
+  `clara._assert_plan_authority(text,jsonb,uuid,uuid)` exists as an ungranted, `stable`, SECURITY
+  DEFINER, `clara_fn_owner`-owned, `search_path`-pinned internal; both plan doors CALL it and
+  neither carries a line of the wall any more; and the wall's own sentence lives in exactly one
+  body besides `clara._accrual_plan_core`, the THIRD copy #1051 deliberately leaves standing and
+  #1080 owns. Stated as a RULE (a body either calls the predicate or keeps its own copy, never
+  both) rather than as a closed roster, so #1080 composes with it instead of having to edit it —
+  and it did: **#1080 (0331) landed and this cell needed no edit**, because the accrual core moved
+  from the carrier side of the rule to the caller side, which the rule already admitted. The
+  closed roster for the post-#1080 state lives in `accrual-plan-authority-wall.test.mjs` below.
+* `p1051.wall.same_kinds` — the behaviour half, driven END TO END through BOTH seams on ONE
+  client: the human door `clara.create_accounting_plan` as a bookkeeper and the on-behalf
+  entrance `clara.create_prepayment_schedule_for` on a real `clara_runtime` connection. All
+  three admitted kinds — an `accounting_work`, a `chat_task` carrying an author and a
+  `contract_confirmation` — are ADMITTED by both, and a fourth kind is refused by both with the
+  same sentence and the same `authority_ref_invalid` / `kind` detail. The
+  `contract_confirmation` arm is the one the wave-4 integrator asserted and nothing drove: the
+  human door's side was covered by `tenancy-rent-plan.test.mjs`'s `S5`, the OBO twin's side was
+  not covered anywhere before this cell.
 
 ## The depreciation authority retired-read fallback (#979)
 
@@ -2038,3 +2174,226 @@ package-wide run below 0289 SKIPS loudly, a focused run FAILS.
   reads the VALUE written at `recorded_via` rather than only the column name — a body that named
   the column and bound it to a variable used to pass. Its own parser is proved non-vacuous against
   a crafted body in the same cell.
+
+## The accrual lane's own authority wall (#1080, `0331_accrual_plan_authority_wall.sql`)
+
+`accrual-plan-authority-wall.test.mjs` is frontier-gated on the `accrual_plan_authority_wall$`
+stem with the same loud-fail discriminator its two siblings use, and its own package-sweep escape
+(`CLARA_ALLOW_MISSING_ACCRUAL_PLAN_AUTHORITY_WALL`). A FOCUSED run does not preload the gate, so a
+chain missing 0331 fails loudly there rather than skipping. It rides
+`accrual-adjustments-fixtures.mjs` (#652's own world, chart and door wrappers) plus
+`fa-authority-sign-compat.mjs`'s `mintAgentTaskRef`, and adds no third world.
+
+**What it is about.** `clara._accrual_plan_core` resolved a `{kind:'chat_task', id}` authority by a
+bare existence probe against `clara.agent_tasks`, so a `wake` task or an `autodraft` run — work
+the estate enqueued for itself — satisfied the same check as an instruction a person typed. 0250
+replaced exactly that probe in the signing door and the human plan door and said in its own header
+that it was leaving this third copy alone; 0330 folded the plan family's wall into one predicate
+and named this body as the copy #1080 owns. **Only the ON-BEHALF accrual entrance was exposed**:
+`clara.create_accrual_adjustment` nests `clara.create_accounting_plan` and has been behind the
+shared wall since 0250, while `clara.create_accrual_adjustment_for` (`clara_runtime` only) nests
+the core.
+
+Four `p1080.*` cells:
+
+* `p1080.accrual.obo_machine_task_refused` — the ticket's own acceptance criterion, at the seam
+  its threat model names: `clara.create_accrual_adjustment_for`, on a REAL least-privileged
+  `clara_runtime` connection with no human JWT, refuses a `wake` task (no author by construction)
+  and an `autodraft` run (which DOES carry one) with CLR10 and
+  `authority_ref_not_human_instruction`, naming the kind and the row, and writes no plan, revision,
+  occurrence, accrual or Work. The lane's own `accounting_work` instruction still configures on the
+  same client, so the refusals are the wall answering rather than the scene being unusable. **This
+  cell was RED before 0331 for the right reason — "the call SUCCEEDED (no error)".**
+* `p1080.accrual.entrances_agree` — both accrual entrances driven on the same five references (a
+  wake task, an autodraft run, a `chat_task` naming no row, an `accounting_work` naming no row and
+  a kind nobody admits), with the WHOLE refusal required to match: SQLSTATE, sentence and detail
+  payload, each side's payload naming its own row. Before 0331 the two disagreed on all three axes
+  for a machine chat task, and gave two different sentences for `authority_ref_unresolved`.
+* `p1080.accrual.three_kinds_admitted` — the admissions, so a wall that refused everything cannot
+  pass: an `accounting_work`, a human-authored chat turn and a real
+  `clara.contract_plan_confirmations` row are each admitted by BOTH entrances, and each plan row is
+  read back for the authority it cites and the human it is authorised by. The confirmation arm is
+  the parity half — the human entrance has admitted the kind since 0300 and the on-behalf one
+  refused it `authority_ref_invalid`/`kind` until 0331. The confirmation row is planted directly
+  and the fixture says so; #949's own confirm door is `tenancy-rent-plan.test.mjs`'s subject.
+* `p1080.accrual.confirmation_cannot_be_self_minted` — the fix round of 2026-09-25 (SPEC-01). 0331
+  lets the ON-BEHALF entrance admit `contract_confirmation`, a kind it refused before, and the case
+  for calling that PARITY rather than a widening is that no machine lane can manufacture the row
+  such a plan would cite. That case was an argument in 0331's header; this cell measures it, as a
+  closed world: exactly two clara bodies insert into `clara.contract_plan_confirmations` and both
+  are the tenancy lane's human doors; `clara_runtime`, `clara_agent_ro` and the four wake roles can
+  execute neither and none of them (nor `clara_authenticated`) can INSERT into the table directly;
+  and `confirmed_by` is NOT NULL, which is what CONTEXT.md means by "the row cannot exist without
+  naming who confirmed it". A later lane that grants one of those paths turns this cell red instead
+  of quietly making the header false. Non-vacuity: with `clara_authenticated` added to the machine
+  roster the cell goes red on the first door.
+* `p1080.wall.one_spelling` — the catalog census, the structural standard for a recut body, and
+  the other end of 0250:604's sentence. Across the whole `clara` schema: the wall's sentence lives
+  in exactly ONE body (`_assert_plan_authority`), the predicate is called by exactly
+  `{_accrual_plan_core, _obo_plan_core, create_accounting_plan}`, #977's inline chat-lane probe
+  survives in NONE, and 0222's own "the instruction this accrual cites" sentence survives in NONE.
+  It also re-reads the recut body's volatility, definer flag, owner, pinned `search_path` and
+  owner-only ACL, because a `create or replace` preserves an ACL and a recut that granted the core
+  to an application role would otherwise pass. Each roster is compared against a literal built with
+  `order by p.proname`, the catalog's own C ordering, so it is collation-proof by construction.
+
+**Non-vacuity.** All four cells were re-run with `clara._accrual_plan_core` recut on the rig back
+to its 0283 pre-image and all four went RED, each for its own reason: the runtime door ADMITTED the
+wake task; the two entrances disagreed; the on-behalf one refused a `contract_confirmation` with
+the two-kind sentence; and the census found the body still carrying its own wall. The subject was
+then restored byte for byte to 0331's output and all four were green again.
+
+## A reversal reverses what its occurrence POSTED (#1074, `0332_plan_reversal_posted_basis.sql`)
+
+`plan-reversal-posted-basis.test.mjs`, frontier-gated on the `plan_reversal_posted_basis$` stem.
+Six cells. The subject is `clara._plan_admit_occurrence`, reached through the doors a bookkeeper
+actually uses — `clara.create_accrual_adjustment`, `clara.correct_accrual_adjustment` and
+`clara.request_plan_catch_up` — with every figure read back off `clara.journal_lines` after the
+estate's own posting lane committed it.
+
+**The defect the battery was written against, measured before the fix existed.** An accrual posts a
+period at 300,000c; a correction restates it to 275,000c (which advances the plan to a new live
+revision carrying a new basis); the reversal for the already-posted period is then admitted, and it
+posts 275,000c. 25,000c is left on the accrued-liability account that nothing ever posted and
+nothing will ever reverse.
+
+* `p1074.expense.reverses_what_posted` — that exact sequence on the expense side, end to end, and
+  the ticket's second acceptance criterion beside it: the balance-sheet leg AND the profit-and-loss
+  leg are each summed over every approved, un-reversed entry of the client and each must be zero.
+  This is the cell that was RED first, with `Dr 2020 275,000` where `Dr 2020 300,000` was owed.
+* `p1074.revenue.reverses_what_posted` — the ticket's third acceptance criterion. The same sequence
+  on a #942 revenue accrual (Dr accrued income / Cr revenue), reversed the same way, with the
+  accrued-income asset netting to zero. It is not a copy for its own sake: the fix is side-agnostic
+  only because the sides are exchanged by `clara._plan_occurrence_basis`, and a cell is the only
+  thing that makes "identically on both sides" a measurement.
+* `p1074.per_period.reverses_what_posted` — the same defect by its SECOND route. A
+  `stated_period_amount` accrual's figure never touches the plan revision: it lives in
+  `clara.accrual_period_amounts`, and `clara._plan_accrual_period_line` reads the HIGHEST revision
+  of the accrual detail, which a correction supersedes too. The cell states two periods, posts the
+  second at 200,000c, restates BOTH, and requires the reversal to undo 200,000c rather than the
+  160,000c the restated set names.
+* `p1074.not_posted.reads_live_revision` — the ticket's OUT-OF-SCOPE line, driven rather than
+  promised. A three-month window, the latest period posted, a correction, and then an EARLIER
+  period caught up: it has no entry behind it, takes no override, and posts the CORRECTED figure.
+  This is the one cell that stays GREEN against the pre-image, and deliberately so — it guards
+  against the fix being applied too widely, so it must pass both before and after.
+* `p1074.basis.only_the_lines_move` — the reversal's ADMITTED basis, read off
+  `clara.accounting_work`, not just the posted entry. Only the `lines` come from the entry: the memo
+  is still the plan's own with the reversed entry appended (0193's rule), the posting date is still
+  the reversal's own due date, the currency is still the revision's, and the basis carries exactly
+  `{currency, lines, memo, posting_date}` — so neither the resolver's `source` nor its `entry_id`
+  leaked into a journal basis. A fix that had replaced the basis wholesale would pass every cell
+  above and silently drop the memo.
+* `p1074.catalog.one_resolver` — the catalog census, the structural standard for an ungranted
+  internal (`clara._plan_posted_entry_lines` has no public interface of its own: it reads every
+  client's `clara.journal_lines` under a SECURITY DEFINER and reaches no application role by
+  design). It re-reads the resolver's volatility (STABLE — it reads a table, which is why the basis
+  body cannot), definer flag, owner, pinned `search_path` and owner-only ACL; requires the resolver
+  to be called by exactly `{_plan_admit_occurrence}`, because a second caller would be a second
+  place deciding what a reversal reverses; requires the resolver's own text to name no revision, no
+  accrual detail, no schedule and no clock; and re-reads that `clara._plan_occurrence_basis` is
+  still IMMUTABLE, which is the whole reason the override can arrive as an argument. The roster is
+  compared against a literal built with `order by p.proname`, the catalog's own C ordering, so it is
+  collation-proof by construction.
+
+**Non-vacuity.** The whole file was re-run with `clara._plan_admit_occurrence` recut on the rig back
+to its 0308 pre-image (the sha re-measured as `02ea6afe…` to prove the break was exact). FIVE of the
+six cells went RED, each for its own reason — the expense reversal posted 275,000c, the revenue one
+275,000c, the per-period one 160,000c, the admitted basis carried the corrected lines, and the
+census found ZERO callers of the resolver. The sixth, `p1074.not_posted`, stayed green, which is the
+correct answer for a guard against over-application. The subject was then restored byte for byte by
+re-running 0332's own statement (`5cc0fa56…` before the break and after the restore) and all six
+were green again.
+
+## A third accrual/bill-conflict remedy: one period's own correcting entry (#1073, `0333_plan_occurrence_reversal_door.sql`)
+
+`plan-occurrence-reversal-door.test.mjs`, frontier-gated on the `plan_occurrence_reversal_door$`
+stem. It drives `clara.reverse_plan_occurrence(uuid,date,text)` — the remedy that books the
+correcting entry for exactly ONE named period — beside the two remedies 0302 (#938) already offers,
+and reads every answer back off `clara.journal_lines`, `clara.accounting_plan_occurrences` and
+`clara.op_receipts` rather than off the envelopes the doors returned.
+
+* `p1073.one_period.nets_like_reverse_now` — the ticket's second acceptance criterion, as a
+  COMPARISON. Two identically configured clients each carry a 300,000c accrual and a 290,000c
+  document-sourced bill inside the same period; one is settled through the existing
+  `clara.request_plan_catch_up` remedy and one through the new door. The two reversal entries are
+  line-for-line identical, the profit-and-loss leg is left carrying **the bill's own 290,000c** —
+  an independent figure, never a re-computation of what the door did — and the conflict row is gone
+  from the next `clara.list_review_queue` read with nothing dismissed.
+* `p1073.scope.one_occurrence_only` — "scoped to exactly the conflicting period", measured. Its
+  FIRST assertion drives `clara._assert_plan_schedule`'s `reversal_collides_with_next_occurrence`
+  refusal (a monthly reversing accrual due on the 1st), because that wall is the REASON the two
+  remedies agree on this lane: a reversing schedule's `[due, reversal_date]` window can never carry
+  a second primary. Then: the door adds exactly one occurrence, the flagged period's own primary row
+  is unchanged (same Work, same attempt, same revision), the catch-up leaves the same set, and the
+  "never a window" guarantee is read off the catalog — the door's `prosrc` mentions neither
+  `clara._plan_due_events(` nor either existing remedy. An earlier draft of this cell claimed the
+  window admits MORE; the refusal above is what disproved it, and 0333's header and
+  `packages/db/README.md`'s §0333 both record the withdrawal.
+* `p1073.receipt.idempotent` — the third acceptance criterion. A replayed op_key returns the stored
+  answer byte for byte and adds no second occurrence; `clara.op_receipts` carries exactly one
+  finished row for `(firm, reverse_plan_occurrence, key)`; and a FRESH key naming a period already
+  reversed is refused `CLR13 reversal_already_admitted` — the name this door gives the admission
+  core's CONVERGED answer, which carries no `reason` key of its own.
+* `p1073.receipt.floor` — a viewer is refused `CLR04 insufficient_role`, nothing is written, and the
+  conflict row is still there rather than silently cleared.
+* `p1073.refusals.own` — the door's own four typed raises: an empty op_key, no period named, a date
+  this schedule never reached (`accrual_occurrence_not_found`, deliberately the same token
+  `clara.skip_plan_occurrence` uses for its own `p_after_due`), and `plan_does_not_reverse` on a
+  real `recurring_journal` plan built through `clara.create_accounting_plan`. That last wall is not
+  decorative: `clara._plan_primary_for_reversal` resolves a reversal date back to a real primary due
+  date from the date arithmetic alone, so without it the admission core would admit a swapped-sides
+  entry for a plan whose revision says `auto_reverse = false`.
+* `p1073.refusals.core` — the admission core's own answers, reaching a surface unchanged:
+  `not_yet_due` for a period whose scheduled reversal has not arrived, `reversal_before_primary` for
+  a period whose accrual never posted, and `plan_ended` / `plan_paused` — the same two tokens both
+  existing remedies raise, so the surfaces keep one sentence each. The cell then proves WHY this
+  door raises instead of reporting: the op_key a `plan_paused` refusal rolled back does the real act
+  once the plan is resumed. The fix round of 2026-09-25 added the fourth arm of the door's own code
+  map, `client_inactive` on an archived client (ADV-L01-06), which no cell drove before.
+* `p1073.refusals.payload_identity` — the refusal CONTRACT, added by the fix round of 2026-09-25
+  (ADV-L01-01). The admission core records most refusals ON an occurrence row and returns its id;
+  this door raises, so that write rolls back. The cell drives both halves: the orphan wall's
+  refusal carries `occurrence_recorded: false` and NO `occurrence_id`, and the plan really keeps
+  nothing; the converged `reversal_already_admitted` refusal carries `occurrence_recorded: true`
+  and an `occurrence_id` the cell OPENS on `clara.accounting_plan_occurrences` rather than trusting
+  the key. It was red against the pre-fix body for exactly the right reason (the payload still
+  named a row the rollback had destroyed).
+* `p1073.history.refusal_record_diverges` — the divergence between the two remedies, measured
+  rather than discovered (ADV-L01-02). Two identically built plans, one refusal: through
+  `clara.request_plan_catch_up`, which commits its receipt either way, the plan is LEFT holding a
+  `refused` / `reversal_before_primary` reversal occurrence with no Work; through this door the
+  same refusal leaves the plan exactly as it found it. The reversal date the cell compares on is
+  computed from the calendar (`date_trunc('month', due) + 1 month`), not from
+  `clara._plan_reversal_date`, so the expectation does not come from the body under test.
+  Non-vacuity: pointed at the WINDOW plan, the "no refused reversal survives" half goes red.
+* `p1073.revenue.one_live_amount` — the same claim on the other half of the books (#942). A revenue
+  accrual (Dr accrued income / Cr revenue) with a document-sourced invoice crediting the same income
+  account inside the period: the reversal exchanges the sides of what that period posted, the income
+  account is left carrying the invoice's own amount alone, and the accrued-income asset nets to
+  zero.
+
+**Non-vacuity, run once over the whole file.** The subject was recut ON THE RIG ONLY into the null
+hypothesis a reviewer would raise — "the third remedy is 'reverse now' under another name": the same
+signature, the same floor, the same receipt, with the single admission replaced by
+`clara.request_plan_catch_up(p_plan, p_due, clara._plan_reversal_date(p_due), …)`, the window the
+web layer builds today. FOUR of the seven cells went RED, each for its own reason:
+
+```
+ok   1 … (p1073.one_period — the ledger really is the same on this lane; see below)
+not ok 2 … the one-period remedy must not reach clara.request_plan_catch_up(
+not ok 3 … reversing the same period twice under a fresh key: expected SQLSTATE CLR13 but the call SUCCEEDED
+not ok 5 … a plan whose schedule has no reversal leg: expected SQLSTATE CLR10 but the call SUCCEEDED
+not ok 6 … expected detail.reason="not_yet_due" beside CLR10, got {"reason":"catch_up_in_future"}
+ok   7 … (p1073.revenue — the ledger again)
+```
+
+Cells 1, 4 and 7 stayed GREEN **and that is the point**: the two ledger cells cannot tell the two
+acts apart, because on this lane they genuinely leave the same ledger — which is exactly what the
+ticket predicts when it asks for "the same net state". It is why the scope cell reads the CATALOG as
+well as the occurrence set, and why the refusal cells exist at all: they are the only cells that can
+see the difference between a scoped act and a window.
+
+The subject was then restored byte for byte by re-running 0333's own function statement
+(`3f6f656d…` before the break, `c9ab7ff4…` while broken, `3f6f656d…` after the restore) and all
+seven were green again.

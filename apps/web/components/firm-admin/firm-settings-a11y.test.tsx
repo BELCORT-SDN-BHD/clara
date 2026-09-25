@@ -97,6 +97,10 @@ function loadersFor(admin: boolean, masked: boolean): FirmSettingsLoaders {
     legalStanding: async () => standing(masked),
     commercialState: async () => { if (!admin) throw clr04(); return COMMERCIAL; },
     aiUsage: async () => { if (!admin) throw clr04(); return { rows: USAGE, dropped: 0 }; },
+    // #1050 - the standing-instruction read. `null` is the legitimate
+    // state "this firm has instructed nothing", which is what every
+    // cell below is about except the ones that say otherwise.
+    standingInstruction: async () => null,
   };
 }
 

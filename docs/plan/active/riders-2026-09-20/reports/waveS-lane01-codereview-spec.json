@@ -1,0 +1,132 @@
+{
+  "axis": "spec",
+  "lane": "riders/wS-lane01",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "fixed_point": "7bc5a710f",
+  "diff": "git diff 7bc5a710f...HEAD",
+  "commits": 19,
+  "tickets": ["1051", "1080", "1074", "1073", "1075", "1070", "1071"],
+  "spec_source": "GitHub issue bodies (Agent Brief) for #1051/#1080/#1074/#1073/#1075/#1070/#1071 - ZERO comments on all seven, confirmed via `gh api repos/BELCORT-SDN-BHD/clara/issues/<n>/comments` (empty array each); plus docs/plan/active/riders-2026-09-20/SWEEP-PLAN.md, which re-briefs #1051 and narrows #1070, and the lane notes in the work order.",
+  "verdict": "accept-with-fixes",
+  "reruns": [
+    {
+      "what": "plan-authority-wall.test.mjs + accrual-plan-authority-wall.test.mjs (full 260-flag gate chain, clara_l04)",
+      "result": "6 tests, 6 pass, 0 fail"
+    },
+    {
+      "what": "plan-reversal-posted-basis + plan-occurrence-reversal-door + accrual-list-side-filter (full gate chain)",
+      "result": "16 tests, 16 pass, 0 fail"
+    },
+    {
+      "what": "accrual-adjustments + accrual-correction + accrual-bill-conflict + accrual-period-amounts + accrual-revenue-side + authority-ref-human-instruction + plan-overlap-template-arm-retired (full gate chain)",
+      "result": "80 tests, 80 pass, 0 fail"
+    },
+    {
+      "what": "apps/web: accrual-detail.test.tsx + accruals-list.test.tsx + accrual-bill-conflict-affordance.test.tsx + lib/accruals/api.test.ts",
+      "result": "24 tests, 24 pass, 0 fail (1070.detail.periods/.no-periods/.side, 1071.list.amount-kind, the THREE-remedies cell, the registry cell, reverseAccrualPeriod)"
+    },
+    {
+      "what": "apps/web tests/firm-scope-db-pins.test.ts (sweep rule (d): migration files changed)",
+      "result": "22 tests, 22 pass, 0 fail - no barrier entry owed for 0330-0334 (all static DDL)"
+    },
+    {
+      "what": "catalog on clara_l04: callers of clara._assert_plan_authority; writers of clara.contract_plan_confirmations; ledger",
+      "result": "callers = {_accrual_plan_core, _obo_plan_core, create_accounting_plan}; writers = confirm_tenancy_rent_plan + confirm_tenancy_rent_plan_revision, both clara_authenticated=X/clara_fn_owner only; ledger 314 files, max 0334_accrual_list_side_filter"
+    },
+    {
+      "what": "CI=true GITHUB_ACTIONS=true node scripts/check-frozen-workflows.mjs (no FREEZE_BASE_REF)",
+      "result": "38 violations - reproduces the base drift the workers reported; clean with FREEZE_BASE_REF=7bc5a710f"
+    }
+  ],
+  "findings": [
+    {
+      "id": "SPEC-01",
+      "ticket": 1080,
+      "kind": "unrequested-behaviour",
+      "severity": "minor",
+      "title": "0331 newly ADMITS contract_confirmation on the accrual machine lane, which no ticket asked for and #1051 lists out of scope",
+      "evidence": "#1080's Out of scope: \"Widening or narrowing the authority-reference vocabulary itself.\" #1051's Out of scope: \"admitting `contract_confirmation` on the OBO lane.\" Before 0331, clara._accrual_plan_core carried 0222/0283's own two-kind list ('accounting_work','chat_task') at 0283:621-712; 0331 replaces it with `perform clara._assert_plan_authority(...)` (0331_accrual_plan_authority_wall.sql:212), and that predicate admits THREE kinds (0330_plan_authority_wall_predicate.sql:178). Measured on clara_l04: clara._assert_plan_authority is now called by exactly {_accrual_plan_core, _obo_plan_core, create_accounting_plan}. The ticket report names this itself (\"What moves, beyond the refusal the ticket is about\", row 2) and argues parity. The mitigation checks out: I re-measured the only two writers of clara.contract_plan_confirmations (confirm_tenancy_rent_plan, confirm_tenancy_rent_plan_revision) and both are granted to clara_authenticated alone, so clara_runtime cannot manufacture the row; and the HUMAN accrual door has admitted the kind since 0222 (it nests create_accounting_plan). But it is still an authority wall on a machine-only door (clara.create_accrual_adjustment_for, clara_runtime only) admitting a kind it refused before, against the standing owner ruling that access control is never loosened.",
+      "required_fix": "Integrator or owner records explicit acceptance of the accrual OBO lane admitting contract_confirmation before release; otherwise take the parameterised admitted set #1051's own brief anticipates (\"the shared predicate takes a parameter, not a second copy\") and keep the accrual machine lane at two kinds."
+    },
+    {
+      "id": "SPEC-02",
+      "ticket": 1051,
+      "kind": "requirement-partial",
+      "severity": "minor",
+      "title": "#1051 AC3 is not satisfied on the branch as it stands: the from-scratch chain was never run, and plain `CI=true GITHUB_ACTIONS=true pnpm lint` is red",
+      "evidence": "#1051 AC3 verbatim: \"From-scratch chain green; `CI=true GITHUB_ACTIONS=true pnpm lint` exit 0.\" The report marks it DONE/partial: the from-scratch chain is deliberately not runnable in-lane (RIG.md forbids a second from-scratch chain on a lane cluster) and is deferred to the integrator. I re-ran the lint's first step on the branch: `CI=true GITHUB_ACTIONS=true node scripts/check-frozen-workflows.mjs` reports 38 violations (REMOVED-VS-BASE chatTurn.v22.*, claraWork.v6.*, statementFacts.v4.*, UNLOCKED-VS-BASE payrollFacts.v1.*, three REGISTRY-DOWNGRADE lines). Cause is base drift, not the lane: origin/main has moved to 3bf6aa94d (the cut phase, PR #1142) while this lane's base is 7bc5a710f, and the lane's diff touches no packages/runtime file. With FREEZE_BASE_REF=7bc5a710f the chain is exit 0, as #1073/#1075/#1070's reports record. So #1051's own \"exit 0, run twice\" was true when measured and is no longer reproducible as the AC words it.",
+      "required_fix": "Wave-level decision at integration: either rebase the sweep lanes onto the merged cut head, or run the freeze lint with FREEZE_BASE_REF set to the wave base and say so in the integration record. Run the true from-scratch chain on a disposable cluster before #1051 is closed."
+    },
+    {
+      "id": "SPEC-03",
+      "ticket": 1075,
+      "kind": "requirement-partial",
+      "severity": "minor",
+      "title": "#1075 AC2 is deferred and nothing carries the obligation forward: the new p_side parameter has zero callers",
+      "evidence": "#1075 AC2 verbatim: \"The register's side filter control uses the server-side parameter once pagination exists, rather than filtering a fully-read page client-side.\" The deferral is defensible - the AC is conditional on pagination and the ticket's Out of scope says \"Building pagination itself; this ticket only prepares the read for it. If pagination is not planned soon, this can wait until it is.\" Verified on the branch: apps/web/lib/accruals/api.ts `loadAccruals` still sends exactly {p_client, p_from, p_to} (api.ts:252-256) and apps/web/components/accruals/accruals-list.tsx still narrows the fully-read array client-side. So 0334 ships a parameter with no production caller, and the AC2 obligation lives only in the ticket report's prose.",
+      "required_fix": "Before #1075 is closed, either file the pagination follow-up that explicitly owns AC2 and link it on the ticket, or leave #1075 open with AC2 unticked. Do not close the ticket on AC1 alone."
+    },
+    {
+      "id": "SPEC-04",
+      "ticket": null,
+      "kind": "scope-shared-file",
+      "severity": "note",
+      "title": "L1 edited CONTEXT.md four times although the plan of record assigns that file to L3 only",
+      "evidence": "SWEEP-PLAN.md's Shared files table: \"CONTEXT.md | L3, only if #1049 stays in the wave\". This lane edited it under #1051 (commit 2ada717aa, \"Authorising instruction\"), #1080 (f762c1a87, same paragraph), #1074 (ab42ceb55, \"Plan occurrence\" / \"Accrual reversal\" / \"Accrual correction\") and #1073 (fc9d61b2b, \"Settlement candidate row\"). Reviewed the diff: every hunk corrects a sentence the lane's own change made untrue (the entry still enumerated TWO authorising-instruction kinds; the conflict row still said \"only two remedies\" and \"they both refuse\"), no new term is minted, no new heading is added, and the four regions are disjoint. Each worker flagged the deviation in its own report.",
+      "required_fix": "Merger reconciles the four L1 regions against any L3 hunk; no code change proposed. If the plan's ownership rule is to hold, record the exception rather than leaving CONTEXT.md stating things the lane has made false."
+    },
+    {
+      "id": "SPEC-05",
+      "ticket": 1073,
+      "kind": "claim-stronger-than-driven",
+      "severity": "note",
+      "title": "The on-screen hint states an unconditional ledger equivalence that holds only because a configuration wall elsewhere makes the counter-example unreachable",
+      "evidence": "apps/web/messages/en.json, new key accrualBillConflictReversePeriodHint: \"It leaves the same amount on the books for this period as Reverse now does.\" The equality is driven (p1073.one_period.nets_like_reverse_now, re-run green), but the worker's own report withdrew a wider claim after measuring it: \"reverse now\" is a catch-up over [dueDate, _plan_reversal_date(dueDate)] and could admit a second event, and the only thing that stops it today is clara._assert_plan_schedule's reversal_collides_with_next_occurrence refusal (0193:1611) forbidding monthly/day_of_month=1 reversing plans. The sentence a bookkeeper reads carries no such condition, and the report itself files this as follow-up 2.",
+      "required_fix": "Owner judgement: keep the sentence (true of every schedule the estate admits today) or soften it to name the period rather than promise equivalence. Flagged so the claim is a decision rather than an accident."
+    },
+    {
+      "id": "SPEC-06",
+      "ticket": 1074,
+      "kind": "unrequested-behaviour",
+      "severity": "note",
+      "title": "0332 introduces a reversal that can refuse at posting time when a correction moved the accrual off an account that has since been deactivated",
+      "evidence": "The ticket asks only that \"a reversal for an already-posted occurrence should reverse the amount that occurrence actually posted\". 0332 achieves that by taking the POSTED entry's own lines (clara._plan_posted_entry_lines), which also fixes the account pair to the original one. The report's own \"What moves\" table, row 2: before 0332 the reversal posted to the NEW accounts (succeeded, stranded the balance); after 0332 \"if one has since been deactivated it REFUSES at posting time through clara._validate_entry_lines's existing ... floor\". No new refusal is minted, and the estate has no chart-account deactivation door today (SWEEP-PLAN's #1078 ruling calls account_inactive \"a known harmless dead axis for chart accounts\"), so the path is latent. It is correct accounting; it is also a hard stop with no named operator remedy.",
+      "required_fix": "None now. Record it so that whichever ticket ever opens chart-account deactivation owns the remedy for a posted period whose original account is gone."
+    },
+    {
+      "id": "SPEC-07",
+      "ticket": 1080,
+      "kind": "stale-fixture",
+      "severity": "note",
+      "title": "A web cell still mocks a refusal sentence that 0331's own tail asserts exists nowhere in the estate",
+      "evidence": "apps/web/components/accruals/accrual-form.test.tsx:336-345 (652.form: a form-level refusal is a persistent banner carrying the code and reason) throws refusal(\"CLR10\", \"authority_ref_unresolved\", \"the instruction this accrual cites does not exist for this client\"). Grepped the migrations: the sentence survives only in the applied 0222:1022 and 0283:662 pre-images and inside 0331's own pin constants and tail message (0331:298, 0331:396), and 0331's T.4d asserts ZERO live clara bodies carry it. The cell passes because the value is mocked, and the door the form actually calls (clara.create_accrual_adjustment via api.ts) has answered the *plan* sentence since 0222. Pre-existing staleness that 0331 turns from \"wrong door\" into \"nonexistent string\"; the worker named it as follow-up 1 and deliberately left apps/web untouched.",
+      "required_fix": "One-line string fix in whichever lane next touches accrual-form.test.tsx, or a follow-up ticket. Not a blocker for this wave."
+    },
+    {
+      "id": "SPEC-08",
+      "ticket": 1070,
+      "kind": "requirement-interpretation",
+      "severity": "note",
+      "title": "The per-period schedule is rendered as the page's own read-only table, not \"in the same shape the form's own block uses\"",
+      "evidence": "#1070 Desired behavior: \"the per-period stated amounts as a schedule (due date and amount, in the same shape the form's own block uses)\". accrual-detail.tsx renders a DataTableCard/Table with colDue/colAmount rather than mounting AccrualPeriodAmountsBlock. The worker's reason is sound and recorded: that block is a select/input/remove-button editor with no read-only mode, and a detail view should not offer a control whose only outcome is editing an admitted row. The message key periodAmountsHeading IS the form's own and formatCents is the same formatter, so the labelling half of the requirement is met. Re-ran 1070.detail.periods / .no-periods / .side: 3 pass.",
+      "required_fix": "None. Recorded so the interpretation is visible if the owner meant literal reuse."
+    }
+  ],
+  "clean": [
+    "#1051 AC1 - clara._assert_plan_authority exists as an ungranted, STABLE, definer-owned, search_path-pinned internal; both plan doors call it; p1051.wall.same_kinds drives all three kinds through BOTH seams and a fourth kind's identical refusal. Re-run green.",
+    "#1051 AC2 - the untrue 'verbatim' claim at 0308:870 is corrected in packages/db/README.md's own '## 0330' section under 'THE CORRECTION 0308 CANNOT CARRY'; no applied migration was edited.",
+    "#1051 re-brief - the SWEEP-PLAN re-brief was followed, not the stale ticket recommendation: three kinds are PRESERVED on both doors rather than the OBO lane narrowed to two.",
+    "#1080 AC1/AC2 - clara._accrual_plan_core calls the predicate (not a third pasted copy, which is exactly what the lane note forbade); the wake/autodraft refusal is driven on a real clara_runtime connection and both entrances are required to give byte-identical SQLSTATE, sentence and detail.",
+    "#1080 AC3 - the two cells that depended on the gap (p977.definition.one's carrier roster, p929.tail's prosrc pin) were found by running them and repaired bimodally. Re-ran both files: green.",
+    "#1074 AC1/AC2/AC3 - p1074.expense/.revenue/.per_period each post X, correct to Y, reverse X, and sum the balance-sheet leg off clara.journal_lines to zero; p1074.not_posted guards the out-of-scope line and is green on both sides of the change. Re-run green.",
+    "#1073 AC1/AC2/AC3 - one component serves both surfaces (registry cell asserts NEEDS_YOU_AFFORDANCES.accrual_bill_conflict === AccrualBillConflictAffordance; the e2e drives the Accruals page); the door takes row.period byte for byte and sends no window; the net-ledger comparison against request_plan_catch_up and the receipt/idempotency/floor cells all re-run green. Both existing remedies are sha-pinned at both ends of 0333.",
+    "#1075 AC1 - p_side is optional, judged against clara._accrual_sides(), composes with the date window, and refuses an unsupported value CLR10 accrual_side_filter_unsupported. The drop-and-create preserves owner, SECURITY DEFINER, STABLE and the literal ACL, and loadAccruals' three-key call still resolves (accrual-adjustments battery re-run green).",
+    "#1070 - built to the SWEEP-PLAN narrowing (per-period half + the missing test file); the side fact at accrual-detail.tsx:94 was already live and is now under test; out-of-scope files carry zero diff.",
+    "#1071 AC1/AC2/AC3 - the Amount cell labels 'Per period' vs 'Window total' off method.rule, with negative assertions proving neither label leaks onto the other row; list_accrual_adjustments' return shape is untouched by this ticket.",
+    "Sweep rule (d) - the pins corpus was re-checked for every migration change; no barrier entry is owed because 0330-0334 are static DDL. Re-ran the corpus test: 22 pass.",
+    "Sweep rule (b) - five migrations at exactly the assigned numbers 0330-0334, one per ticket, no overflow number taken.",
+    "Sweep rule (c) - each ticket pinned what was LIVE after the ticket before it (0331 pins 0330's output, 0332 pins 0331's post-state, 0333 pins 0332's 5cc0fa56 image), never a sha copied from an older header.",
+    "Sweep rule (f) - every report states no mid-task status request arrived."
+  ],
+  "summary": "Seven tickets, all seven delivered, and every acceptance criterion I could re-run is green on the branch (102 db cells plus 24 web cells plus the 22-cell pins corpus re-run by this review, zero failures). No requirement is missing outright and nothing is implemented wrongly. Eight findings, none a blocker: three minor (an unrequested contract_confirmation widening on the accrual machine lane, #1051's AC3 which the branch cannot satisfy as worded because of the freeze-lint base drift and the unrun from-scratch chain, and #1075's AC2 deferred with no follow-up carrying it) and five notes."
+}

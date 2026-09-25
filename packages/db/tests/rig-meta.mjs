@@ -374,10 +374,55 @@ const PAYROLL_SETTLEMENT_0298_COHORT = [...PAYROLL_SETTLEMENT_0298_HUMAN_FNS];
 // PAYROLL_0296's two internals above.
 const AGREEMENT_0299_RUNTIME_FNS = ["persist_agreement_facts", "fail_agreement_facts"];
 const AGREEMENT_0299_COHORT = [...AGREEMENT_0299_RUNTIME_FNS];
+// #1048 [0343] the payroll COMPLETENESS WITNESS lane, riders sweep wave lane 04. Its OWN cohort
+// per the "wholly present or wholly absent" rule, exactly as PAYROLL_0296 is: folding it into that
+// array would red every database whose chain stops before 0343.
+//   answer_payroll_completeness — ONE clara_authenticated door (bookkeeper floor, body-enforced),
+//     and the FIRST human write this payroll family has ever had. #945 and #946 both added none
+//     deliberately, because everything else in the lane is machine-decided; this one is a
+//     professional judgement about whether a summary that prints no total covers every employee,
+//     and the standing owner ruling is that Clara asks for those rather than guessing them. A `yes`
+//     posts the run in the same call through clara._post_payroll_run.
+// The file's other new bodies stay ungranted to every application role — the sweep's
+// expected=false IS that assertion, same posture as PAYROLL_0296's two internals above:
+// evaluate_payroll_run_state_v2 (the successor evaluator, registered in clara.evaluator_versions
+// at version 2) and _payroll_completeness_answer (the reading-bound answer read). The four bodies
+// 0343 RECUTS (_payroll_answers_ok, _payroll_entry_plan, _payroll_posting_verdict,
+// _post_payroll_run) keep the grants they already had, which the migration's own tail re-derives.
+const PAYROLL_COMPLETENESS_0343_HUMAN_FNS = ["answer_payroll_completeness"];
+const PAYROLL_COMPLETENESS_0343_COHORT = [...PAYROLL_COMPLETENESS_0343_HUMAN_FNS];
+// #1061 [0342, the payroll registry's business_operation catches up to #946] — COMMENT-ONLY,
+// deliberately, and for the SAME reason #782's 0245 entry and #988's 0246 entry above carry none.
+//
+//   0342_payroll_registry_business_operation_supported.sql INSTALLS NO FUNCTION, NO TABLE, NO
+//   TRIGGER AND NO CHECK, AND RECUTS NONE. Its whole content is a republication of
+//   `clara.document_capabilities`: an UPDATE that moves the SAME six `payroll_summary` pdf/image
+//   rows PAYROLL_0296 opened reading on from `business_operation = 'stored_only'` to `'supported'`
+//   (0297_payroll_summary_posting.sql, riders wave 4's own #946, shipped the drafting-and-posting
+//   half 0296's header deferred to "a later file" — the registry's claim had outlived the build),
+//   then the registry-wide raise every prior republication has used (0299's most recent, 6 -> 7).
+//   So there is no granted name to roster and no ungranted closure to pin: a cohort array would be
+//   empty and `cohortFailures` would compare it against nothing. `limits.payroll_employee_detail`
+//   does not move — the persist door still strips every per-employee figure and the posting lane
+//   drafts from run-level totals alone, so the boundary PAYROLL_0296 named is exactly as true
+//   after 0342 as before it.
+//
+//   THE FRONTIER IS READ FROM THE LIVE ROW, never from a migration number, the same law every
+//   battery in this file follows: `document-capability-registry.test.mjs`'s payroll cell reads
+//   `business_operation` off `clara._document_capability('pdf','payroll_summary')` directly.
+//
+//   THE FOURTH OF THE FIVE WALL BODIES THIS FILE'S RAISE RIDES (`_tf_document_capability_high_
+//   water_monotone`) IS PINNED AT 0272's POST-IMAGE, NOT 0244's OR 0245's ORIGINAL — 0272 (a
+//   different, already-merged fix round) recut it in place before this branch was ever cut, and
+//   the migration's own prestate says so rather than silently pinning a stale sha.
+// #1061 END
 // #949 [0300] the tenancy contract-terms + recurring rent-plan lane, riders wave 4 lane 01. TEN
-// clara_authenticated doors and NOT ONE machine-lane grant: this lane is a person's lane end to
-// end — a person records the terms Clara read, a person confirms the plan, a person accepts the
-// settlement, a person confirms the revision. Three READS at the viewer floor
+// clara_authenticated doors and NOT ONE machine-lane grant on any of these ten names — that is
+// still literally true after #1137 [0353], which opens the model lane through EIGHT NEW NAMES
+// beside them (TENANCY_AGENT_TWINS_0353_* below) rather than by widening one of these. A person
+// still records the terms Clara read, a person still accepts the settlement, and a person still
+// confirms the plan and its revision: the two OBO twins name that person in an argument and
+// re-check their standing live. Three READS at the viewer floor
 // (get_contract_terms, propose_contract_terms, get_tenancy_rent_plan_draft,
 // get_tenancy_escalation_revision) and the rest at bookkeeper+, each floor enforced in the body.
 // The twelve internals this file mints (_contract_terms_row_json, _contract_term_rank,
@@ -2330,6 +2375,54 @@ export const AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT = [
 const FYE_PAIR_WALL_0310_UNGRANTED_FNS = ["_knowledge_assert_fye_pair"];
 export const FYE_PAIR_WALL_0310_COHORT = [...FYE_PAIR_WALL_0310_UNGRANTED_FNS];
 
+// #1051 [0330, ONE authority-wall predicate for clara.create_accounting_plan and
+// clara._obo_plan_core] — its own cohort, for the same "wholly present or wholly absent" reason
+// 0250's carries: the `db-slice-frontiers` matrix runs this package against databases pinned at
+// earlier frontiers where 0308 has applied and 0330 has not. `_assert_plan_authority` is
+// UNGRANTED like `_authority_ref_refusal`, whose definition it wraps: the main sweep fails the
+// moment a grant appears on it, this cohort fails if it ever DISAPPEARS from the two plan doors
+// that must both call it (see plan-authority-wall.test.mjs's own census cell). ONE name, because
+// 0330 mints exactly one.
+const PLAN_AUTHORITY_WALL_0330_UNGRANTED_FNS = ["_assert_plan_authority"];
+export const PLAN_AUTHORITY_WALL_0330_COHORT = [...PLAN_AUTHORITY_WALL_0330_UNGRANTED_FNS];
+
+// #1074 [0332, a reversal reverses what its own occurrence POSTED] — its own cohort, for the same
+// "wholly present or wholly absent" reason 0330's carries: the `db-slice-frontiers` matrix runs
+// this package against earlier frontiers where 0308 has applied and 0332 has not.
+// `_plan_posted_entry_lines` is UNGRANTED, the same posture its two siblings
+// `_plan_amortisation_period_line` (0223) and `_plan_accrual_period_line` (0303) carry — it reads
+// every client's `clara.journal_lines` under a SECURITY DEFINER, so the main sweep fails the moment
+// a grant appears on it, and 0332's own tail fails if it ever stops being reached from
+// `_plan_admit_occurrence`. ONE name, because 0332 mints exactly one: the admission core it recuts
+// has existed since 0193.
+const PLAN_REVERSAL_POSTED_BASIS_0332_UNGRANTED_FNS = ["_plan_posted_entry_lines"];
+export const PLAN_REVERSAL_POSTED_BASIS_0332_COHORT = [...PLAN_REVERSAL_POSTED_BASIS_0332_UNGRANTED_FNS];
+
+// #1073 [0333, the THIRD accrual/bill-conflict remedy: one period's own correcting entry] — its
+// own cohort, for the same "wholly present or wholly absent" reason 0332's carries: the
+// `db-slice-frontiers` matrix runs this package against earlier frontiers where 0302/0332 have
+// applied and 0333 has not.
+//
+//   the ONE new human door — clara_authenticated ONLY, bookkeeper-floored in its own body. It
+//   admits exactly ONE reversal occurrence through clara._plan_admit_occurrence for a period a
+//   person named, and walks no catch-up window; clara_runtime, both agent read roles and all four
+//   wake lanes gain ZERO — no OBO twin, no agent read, no wake wrapper, the same posture
+//   clara.skip_plan_occurrence (0302) carries for the sibling remedy. It mints no ungranted
+//   internal at all: everything it stands on (the admission core, the reversal-date rule, the
+//   plan door context, the two schedule helpers) already existed.
+const PLAN_OCCURRENCE_REVERSAL_DOOR_0333_HUMAN_FNS = ["reverse_plan_occurrence"];
+export const PLAN_OCCURRENCE_REVERSAL_DOOR_0333_COHORT = [...PLAN_OCCURRENCE_REVERSAL_DOOR_0333_HUMAN_FNS];
+
+// #1075 [0334, the accrual register's side filter moves server-side] — NO COHORT CHANGE, NO NEW
+// NAME, for the same "still the SAME name and ACL" shape #905's (0267) own note beside 0189's
+// cohort records. `clara.list_accrual_adjustments` is a DROP-and-CREATE (a new parameter cannot
+// be added by `create or replace`, the same reason 0202/#770 and 0267/#905 give for
+// `list_activity`/`p_work` and `list_accounting_work`/`p_receipt_since`), but a drop-and-create of
+// the SAME name is not a new name: 0334's own tail re-reads owner clara_fn_owner, SECURITY
+// DEFINER, STABLE and the literal ACL {clara_fn_owner, clara_authenticated} unchanged after the
+// recut, so `ACCRUAL_ADJUSTMENTS_0222_HUMAN_FNS` above (which already lists
+// "list_accrual_adjustments") covers the widened door as-is.
+
 // #979 [0251, the depreciation authority read tells "never had one" apart from "had one, and it
 // was retired"] — NO COHORT, NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed, for
 // the same reason #797's (0212) and #720's (0198) blocks state theirs. 0251 creates no function:
@@ -3013,6 +3106,83 @@ export const CLIENT_FINANCIAL_PACK_WAKE_0320_COHORT = [
   ...CLIENT_FINANCIAL_PACK_WAKE_0320_AGENT_FNS, ...CLIENT_FINANCIAL_PACK_WAKE_0320_UNGRANTED_FNS,
 ];
 // #1000 END
+// #1136 [0352, the model lane's entrance to the payroll and agreement reads] — its OWN cohort,
+// bimodal on the same terms 0320's is, and the SECOND and THIRD wake wrappers clara_agent_ro has
+// ever held.
+//
+//   WHY THERE ARE TWO DOORS FOR THREE TOOLS. Three wave-4 successor contracts were blocked on
+//   `clara_authenticated`-only reads (CUT-PLAN.md §1.4, class C): `read_payroll_posting_state`
+//   (#946) and `read_agreement_terms` (#948) both read clara.list_review_queue — the first for its
+//   `payroll_posting_blocked` row, the second for its `agreement_posting_blocked` row — and
+//   `read_payroll_settlement_state` (#947) reads clara.get_payroll_settlement_candidates. One wake
+//   door per HUMAN DOOR is therefore the whole delta; a third door would have been a second
+//   projection of a verdict whose sentence is the point (0299:2600).
+//
+//   WHAT clara_agent_ro DID NOT GAIN. The HUMAN doors: 0011:4210-4213 asserts that this role must
+//   NOT hold clara.list_review_queue, and 0352's own tail re-reads that after it applies.
+//   clara._agreement_posting_verdict: granted to nobody by 0299 and still granted to nobody.
+//   clara.settle_payroll_net_pay: an ACT, and this ticket bought reads — a person accepts a
+//   candidate on the bank surface or in Needs you, never in a conversation.
+const AGENT_READ_TWINS_0352_AGENT_FNS = [
+  "wake_get_payroll_settlement_candidates", "wake_list_review_queue",
+];
+//   …and the two UNGRANTED cores both pairs of entrances run. Each is its read's OWN body with the
+//   caller's firm lifted into an argument (0352's tail proves that by reversing the surgery and
+//   hashing), granted to NOBODY and reached only from a definer door — the one-ungranted-core law,
+//   0004:6-12. Listed here so `cohortFailures` reports a HALF-applied 0352 rather than a silently
+//   narrower boundary.
+const AGENT_READ_TWINS_0352_UNGRANTED_FNS = [
+  "_payroll_settlement_candidates_core", "_list_review_queue_core",
+];
+export const AGENT_READ_TWINS_0352_COHORT = [
+  ...AGENT_READ_TWINS_0352_AGENT_FNS, ...AGENT_READ_TWINS_0352_UNGRANTED_FNS,
+];
+// #1136 END
+// #1137 [0353, the model lane's entrance to the tenancy lane] — its own cohort, bimodal on the
+// same terms 0320's and 0352's are, and the FIRST lane in the estate that opens BOTH a read lane
+// and an on-behalf-of ACT lane onto one family of human doors in one file.
+//
+//   WHY IT EXISTS. #949's successor contract names four chat tools whose ten doors are
+//   clara_authenticated only (cohort TENANCY_RENT_0300_HUMAN_FNS below, ten names and still zero
+//   machine-lane grants). CUT-PLAN.md §1.4 entries C4-C7 deferred all four and asked the owner
+//   whether Clara may CONFIRM a rent plan on a bookkeeper's behalf; the ruling of 2026-09-25 on
+//   #1137 says yes, in #915's OBO shape — the person still confirms and the act is recorded as
+//   theirs.
+//
+//   THE SIX READS — clara_agent_ro only, the FOURTH through NINTH wake wrappers that role has ever
+//   held, on exactly 0320's and 0352's terms: each is a READ, each runs inside the read pool's
+//   read-only transaction, and each carries one `interactive` allowlist row on top of the EXECUTE.
+const TENANCY_AGENT_TWINS_0353_AGENT_FNS = [
+  "wake_get_contract_terms", "wake_get_tenancy_rent_plan_draft", "wake_propose_contract_terms",
+  "wake_get_tenancy_escalation_revision", "wake_get_rent_settlement_candidates",
+  "wake_get_tenancy_deposit_coding",
+];
+//   THE TWO ACTS — clara_runtime only, NEW NAMES rather than widened grants, the same lane
+//   clara.create_prepayment_schedule_for (0307) and clara.create_accrual_adjustment_for (0222) sit
+//   in: the initiating human is named in an ARGUMENT and re-checked LIVE against this firm's
+//   memberships. The agent read role and all four wake roles gain ZERO on them — a read role that
+//   could confirm a rent plan would be the agent deciding what it is allowed to do — and no
+//   wake_fn_allowlist row exists for either, because they are runtime doors, not wake doors.
+const TENANCY_AGENT_TWINS_0353_RUNTIME_FNS = [
+  "confirm_tenancy_rent_plan_for", "confirm_tenancy_rent_plan_revision_for",
+];
+//   …and the TEN UNGRANTED bodies behind them: eight cores that are their human door's own body
+//   with the caller's firm (and, for the two confirmations, the caller's identity and lane) lifted
+//   into arguments, 0193's revision body under the same treatment, and the OBO lane's own plan
+//   step. Each is granted to NOBODY and reached only from a definer door — the one-ungranted-core
+//   law, 0004:6-12. Listed here so `cohortFailures` reports a HALF-applied 0353 rather than a
+//   silently narrower boundary.
+const TENANCY_AGENT_TWINS_0353_UNGRANTED_FNS = [
+  "_get_contract_terms_core", "_get_tenancy_rent_plan_draft_core", "_propose_contract_terms_core",
+  "_get_tenancy_escalation_revision_core", "_get_rent_settlement_candidates_core",
+  "_get_tenancy_deposit_coding_core", "_confirm_tenancy_rent_plan_core",
+  "_confirm_tenancy_rent_plan_revision_core", "_revise_accounting_plan_core", "_tenancy_plan_core",
+];
+export const TENANCY_AGENT_TWINS_0353_COHORT = [
+  ...TENANCY_AGENT_TWINS_0353_AGENT_FNS, ...TENANCY_AGENT_TWINS_0353_RUNTIME_FNS,
+  ...TENANCY_AGENT_TWINS_0353_UNGRANTED_FNS,
+];
+// #1137 END
 // #635 [0233, the firm's real legal, commercial and model-usage state] — its own cohort, and
 // the FIRST on this roster that deliberately is NOT "wholly absent" before its migration.
 //
@@ -3449,6 +3619,71 @@ export const SCHEDULE_TERM_CORRECTION_0317_COHORT = [
   ...SCHEDULE_TERM_CORRECTION_0317_HUMAN_FNS, ...SCHEDULE_TERM_CORRECTION_0317_UNGRANTED_FNS,
 ];
 // #941 END
+// #1050 [0338, the clocked prepayment lane gets a directing human: a named member of the firm
+// records a firm-level standing instruction] — its own cohort, the same "wholly present or wholly
+// absent" reason 0317's carries: the `db-slice-frontiers` matrix runs this package against
+// databases pinned at earlier frontiers where 0315 has applied and 0338 has not.
+//
+//   the TWO human doors — clara_authenticated ONLY, ADMIN-floored in their own bodies. The act the
+//   instruction authorises is bookkeeper work; STANDING it for every client of the firm until
+//   somebody withdraws it is firm-level governance, which sits at admin here (0055's own floor).
+//   clara_runtime, both agent read roles and all four wake lanes gain ZERO and there is NO wake
+//   wrapper and NO obo twin: an instruction a machine recorded would name nobody, which is the
+//   whole point of the ticket. 0338's own tail asserts the absence by has_function_privilege.
+const FIRM_STANDING_INSTRUCTION_0338_HUMAN_FNS = [
+  "record_firm_standing_instruction",
+  "withdraw_firm_standing_instruction",
+];
+//   …and the UNGRANTED closure: the relation's withdraw-only trigger. Granted to NOBODY — reached
+//   only from the write path, exactly as `_tf_pae_retire_only` (0306) is.
+const FIRM_STANDING_INSTRUCTION_0338_UNGRANTED_FNS = [
+  "_tf_fsi_withdraw_only",
+];
+export const FIRM_STANDING_INSTRUCTION_0338_COHORT = [
+  ...FIRM_STANDING_INSTRUCTION_0338_HUMAN_FNS, ...FIRM_STANDING_INSTRUCTION_0338_UNGRANTED_FNS,
+];
+// #1050 END
+
+// #1056 [0344, the payroll lane of the human fact door] — its own cohort, the same "wholly present
+// or wholly absent" reason 0217's and 0317's carry: the `db-slice-frontiers` matrix runs this
+// package against databases pinned at earlier frontiers where 0296/0297 have applied and 0344 has
+// not.
+//
+//   THE WHOLE COHORT IS UNGRANTED, and that is the boundary claim. 0344 adds no door and widens no
+//   grant: it gives `clara.revise_document_fact` — already on
+//   DOCUMENT_SOURCE_REVISION_0217_HUMAN_FNS, and deliberately NOT listed a second time here — a
+//   payroll lane, and every helper that lane needs is reached from inside that one definer body.
+//   A grant on any of them would be a second, unwalled way into the payroll facts chain from
+//   outside the door that carries the agent wall and the bookkeeper floor.
+//
+//   ALL FIVE ARE LISTED, not the two the first cut named (fix round, STD-1 / ADV-L05-07,
+//   2026-09-25). What this array actually does is the PARTIAL-FRONTIER detector: `cohortFailures`
+//   asks that the five be wholly present or wholly absent, so a database carrying some of 0344's
+//   names and not the others is named as such. The grant guard is a different body —
+//   `grantMatrixFailures` walks the LIVE clara catalogue and holds every function not in ALLOWED
+//   to no grant at all, listed here or not — and the first cut's own comment claimed the list did
+//   that job. It does not; it is the frontier detector, and it is now complete, matching 0217's
+//   precedent above, which lists all four of ITS new ungranted helpers.
+const PAYROLL_FACT_REVISION_0344_UNGRANTED_FNS = [
+  "_revisable_payroll_run_field", "_revisable_fact_lane", "_payroll_source_observation",
+  "_payroll_state_with_human_fact", "_document_live_posted_entry",
+];
+export const PAYROLL_FACT_REVISION_0344_COHORT = [...PAYROLL_FACT_REVISION_0344_UNGRANTED_FNS];
+// #1056 END
+
+// #1046 [0348] — the two pre-session rate-wall evidence tables' retention sweep. Both verbs are
+// clara_runtime ONLY: each is SECURITY DEFINER, owned by clara_fn_owner, and disables/re-enables
+// its own table's append-only trigger for the one call — no human lane, no agent lane, no wake
+// lane ever needs to prune an evidence table directly, and a grant beyond clara_runtime here
+// would be a maintenance job with more reach than the thing it maintains. Declared here so any
+// wider grant FAILS the matrix.
+const RATE_WALL_ATTEMPTS_RETENTION_0348_RUNTIME_FNS = [
+  "prune_invite_preview_attempts", "prune_confirmation_attempts",
+];
+export const RATE_WALL_ATTEMPTS_RETENTION_0348_COHORT = [
+  ...RATE_WALL_ATTEMPTS_RETENTION_0348_RUNTIME_FNS,
+];
+// #1046 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -3741,6 +3976,10 @@ export const ALLOWED = {
     // ONLY, bookkeeper floor body-enforced; clara_runtime, both agent read roles and all four
     // wake lanes gain ZERO, and the three internals it reaches through hold no role at all.
     ...PAYROLL_SETTLEMENT_0298_HUMAN_FNS,
+    // #1048 [0343] the payroll completeness-witness lane — see the block above. clara_authenticated
+    // ONLY, bookkeeper floor body-enforced; clara_runtime, both agent read roles and all four wake
+    // lanes gain ZERO, and the two internals it reaches through hold no role at all.
+    ...PAYROLL_COMPLETENESS_0343_HUMAN_FNS,
     // #949 [0300] the tenancy contract-terms + rent-plan lane — see the block above.
     // clara_authenticated ONLY, floors body-enforced (viewer for the four reads, bookkeeper for
     // the six acts); clara_runtime, both agent read roles and all four wake lanes gain ZERO, and
@@ -3751,6 +3990,11 @@ export const ALLOWED = {
     // row `clara._plan_admissible_event`'s own picker already treats as handled — it does not
     // recut or nest the admission core.
     ...ACCRUAL_BILL_CONFLICT_0302_HUMAN_FNS,
+    // #1073 [0333] the one-period reversal door — the THIRD remedy for the same conflict row, see
+    // the block above. clara_authenticated ONLY, bookkeeper floor body-enforced; clara_runtime,
+    // both agent read roles and all four wake lanes gain ZERO. It admits one occurrence through
+    // the admission core rather than recutting it, and it touches neither existing remedy.
+    ...PLAN_OCCURRENCE_REVERSAL_DOOR_0333_HUMAN_FNS,
     // #939 [0305] the stated-prepayment-term door — see the block above. clara_authenticated
     // ONLY, bookkeeper-floored in its own body; clara_runtime, both agent read roles and all four
     // wake lanes gain ZERO, and no wake wrapper for it exists anywhere in the catalog.
@@ -3770,6 +4014,11 @@ export const ALLOWED = {
     // read roles and all four wake lanes gain ZERO, and neither an OBO twin nor a wake wrapper
     // exists for either of them anywhere in the catalog.
     ...SCHEDULE_TERM_CORRECTION_0317_HUMAN_FNS,
+    // #1050 [0338] the firm-level standing-instruction doors -- see the block above.
+    // clara_authenticated ONLY, admin-floored in their own bodies; clara_runtime, both agent read
+    // roles and all four wake lanes gain ZERO, and neither an OBO twin nor a wake wrapper exists
+    // for either of them anywhere in the catalog.
+    ...FIRM_STANDING_INSTRUCTION_0338_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -3788,7 +4037,19 @@ export const ALLOWED = {
     // says a read-only role is the narrower home for it. The KIND gate sits on top of the EXECUTE
     // exactly as it does for the bank and close families: one `interactive` allowlist row, so a
     // credential of any other kind is refused by assert_wake_allowed even holding this grant.
-    ...CLIENT_FINANCIAL_PACK_WAKE_0320_AGENT_FNS]),
+    ...CLIENT_FINANCIAL_PACK_WAKE_0320_AGENT_FNS,
+    // #1136 [0352] the SECOND and THIRD wake wrappers this role holds, on the same terms as
+    // 0320's: each is a READ, each runs inside the read pool's read-only transaction, and each
+    // carries one `interactive` allowlist row on top of the EXECUTE. The HUMAN doors they front
+    // (clara.list_review_queue, clara.get_payroll_settlement_candidates) stay absent from this
+    // roster, which is what 0011:4210-4213 asks for.
+    ...AGENT_READ_TWINS_0352_AGENT_FNS,
+    // #1137 [0353] the FOURTH through NINTH wake wrappers this role holds, on the same terms as
+    // 0320's and 0352's: six READS onto the tenancy lane, each inside the read pool's read-only
+    // transaction, each with one `interactive` allowlist row on top of the EXECUTE. The ten HUMAN
+    // doors they front (TENANCY_RENT_0300_HUMAN_FNS) stay absent from this roster, and the two
+    // ACT twins 0353 also mints are clara_runtime's, never this role's.
+    ...TENANCY_AGENT_TWINS_0353_AGENT_FNS]),
   [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...BINDING_PROPOSAL_PR1_WAKE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS, ...F_A5B_PR1_WAKE_FNS, ...CARD1_SEAM_WAKE_FNS,
     // [Wave-F Track A, F-A5b card 1] wake_compose_metric_preview_v2 -- 'interactive' ONLY,
     // permanently (CD-16), beside its untouched v1 twin in AUTHORING_0077_WAKE_FNS.
@@ -3986,6 +4247,11 @@ export const ALLOWED = {
     // human whose membership the door re-checks LIVE. Declared here so any wider grant FAILS the
     // matrix.
     ...DEFERRED_REVENUE_0308_RUNTIME_FNS,
+    // [#1137, 0353] the TWO tenancy confirmation OBO twins -- clara_runtime ONLY, the same lane
+    // and the same shape as 0307's and 0308's pairs above, acting OBO a named human whose
+    // membership the door re-checks LIVE. Declared here so any wider grant FAILS the matrix: the
+    // agent read role and all four wake roles must hold ZERO on an act.
+    ...TENANCY_AGENT_TWINS_0353_RUNTIME_FNS,
     // [#636, 0229] the intake-batch write doors and the cancellation sweep — clara_runtime ONLY,
     // the same lane clara.create_document_intake sits in. The sweep is the pool's ONLY way to see
     // a cancelling parent: it holds no SELECT on clara.intake_batches and none on
@@ -4064,6 +4330,10 @@ export const ALLOWED = {
     // clara.record_opening_targets_parsed sits in (WAVE_B_RUNTIME_FNS above). See the block
     // where the cohort is declared.
     ...OPENING_SOURCE_REREAD_0286_RUNTIME_FNS,
+    // [#1046, 0348] the rate-wall evidence tables' retention sweep — clara_runtime ONLY, called
+    // from packages/runtime/lib/reconciler.mjs pruneTraces() on the existing trace-prune belt.
+    // See the block where the cohort is declared.
+    ...RATE_WALL_ATTEMPTS_RETENTION_0348_RUNTIME_FNS,
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -4276,6 +4546,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#945 0296 payroll-summary reading lane", PAYROLL_0296_COHORT, liveNames));
   failures.push(...cohortFailures("#947 0298 payroll net-pay settlement", PAYROLL_SETTLEMENT_0298_COHORT, liveNames));
   failures.push(...cohortFailures("#948 0299 agreement-contract reading + acquisition lane", AGREEMENT_0299_COHORT, liveNames));
+  failures.push(...cohortFailures("#1048 0343 payroll completeness witness", PAYROLL_COMPLETENESS_0343_COHORT, liveNames));
   failures.push(...cohortFailures("#949 0300 tenancy contract terms + recurring rent plan", TENANCY_RENT_0300_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3 PR-1a bank/COA core extractions", EXTRACTION_F_A3_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("#623 0178 accounting-work lane", WORK_JOURNAL_0178_COHORT, liveNames));
@@ -4321,6 +4592,21 @@ export async function grantMatrixFailures() {
   const fyePairWallLive = FYE_PAIR_WALL_0310_COHORT.filter((n) => liveNames.has(n));
   if (fyePairWallLive.length !== 0) {
     failures.push(...cohortFailures("#1031 0310 knowledge fye pair wall", FYE_PAIR_WALL_0310_COHORT, liveNames));
+  }
+  // #1051 [0330] — bimodal like 0310's: wholly present once 0330 applies, wholly absent before it.
+  const planAuthorityWallLive = PLAN_AUTHORITY_WALL_0330_COHORT.filter((n) => liveNames.has(n));
+  if (planAuthorityWallLive.length !== 0) {
+    failures.push(...cohortFailures("#1051 0330 shared plan authority wall", PLAN_AUTHORITY_WALL_0330_COHORT, liveNames));
+  }
+  // #1074 [0332] — bimodal like 0330's: wholly present once 0332 applies, wholly absent before it.
+  const postedReversalBasisLive = PLAN_REVERSAL_POSTED_BASIS_0332_COHORT.filter((n) => liveNames.has(n));
+  if (postedReversalBasisLive.length !== 0) {
+    failures.push(...cohortFailures("#1074 0332 posted-entry reversal basis", PLAN_REVERSAL_POSTED_BASIS_0332_COHORT, liveNames));
+  }
+  // #1073 [0333] — bimodal like 0332's: wholly present once 0333 applies, wholly absent before it.
+  const oneperiodReversalLive = PLAN_OCCURRENCE_REVERSAL_DOOR_0333_COHORT.filter((n) => liveNames.has(n));
+  if (oneperiodReversalLive.length !== 0) {
+    failures.push(...cohortFailures("#1073 0333 one-period reversal door", PLAN_OCCURRENCE_REVERSAL_DOOR_0333_COHORT, liveNames));
   }
   // #652 [0222] — bimodal like F-A6's: wholly present once 0222 applies, wholly absent before it,
   // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.
@@ -4442,6 +4728,27 @@ export async function grantMatrixFailures() {
     failures.push(...cohortFailures("#939 AC4 / #941 AC3 0317 schedule term correction",
       SCHEDULE_TERM_CORRECTION_0317_COHORT, liveNames));
   }
+  // #1050 [0338] -- bimodal, same reasoning as 0317's above: wholly present once 0338 applies,
+  // wholly absent before it.
+  const standingLive = FIRM_STANDING_INSTRUCTION_0338_COHORT.filter((n) => liveNames.has(n));
+  if (standingLive.length !== 0) {
+    failures.push(...cohortFailures("#1050 0338 firm standing instruction",
+      FIRM_STANDING_INSTRUCTION_0338_COHORT, liveNames));
+  }
+  // #1056 [0344] -- bimodal, same reasoning as 0317's above: wholly present once 0344 applies,
+  // wholly absent before it.
+  const payrollRevisionLive = PAYROLL_FACT_REVISION_0344_COHORT.filter((n) => liveNames.has(n));
+  if (payrollRevisionLive.length !== 0) {
+    failures.push(...cohortFailures("#1056 0344 payroll fact revision",
+      PAYROLL_FACT_REVISION_0344_COHORT, liveNames));
+  }
+  // #1046 [0348] -- bimodal, same reasoning as 0317's above: wholly present once 0348 applies,
+  // wholly absent before it.
+  const rateWallRetentionLive = RATE_WALL_ATTEMPTS_RETENTION_0348_COHORT.filter((n) => liveNames.has(n));
+  if (rateWallRetentionLive.length !== 0) {
+    failures.push(...cohortFailures("#1046 0348 rate-wall attempts retention",
+      RATE_WALL_ATTEMPTS_RETENTION_0348_COHORT, liveNames));
+  }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));
   // #812
@@ -4468,6 +4775,24 @@ export async function grantMatrixFailures() {
   if (packWakeLive.length !== 0) {
     failures.push(...cohortFailures("#1000 0320 client financial-pack model-lane entrance",
       CLIENT_FINANCIAL_PACK_WAKE_0320_COHORT, liveNames));
+  }
+  // #1136 [0352] — bimodal on the same terms as 0320's above: wholly present once 0352 applies,
+  // wholly absent before it. A PARTIAL cohort here means a wake door exists without the core it
+  // delegates to, or the reverse — a half-applied lane, which cohortFailures() fails by design,
+  // and which 0352's own §0 refuses to apply over.
+  const agentTwinsLive = AGENT_READ_TWINS_0352_COHORT.filter((n) => liveNames.has(n));
+  if (agentTwinsLive.length !== 0) {
+    failures.push(...cohortFailures("#1136 0352 payroll and agreement model-lane entrances",
+      AGENT_READ_TWINS_0352_COHORT, liveNames));
+  }
+  // #1137 [0353] — bimodal on the same terms as 0352's above: wholly present once 0353 applies,
+  // wholly absent before it. A PARTIAL cohort here means a wake read or an OBO act exists without
+  // the core it delegates to, or the reverse — a half-applied lane, which cohortFailures() fails
+  // by design, and which 0353's own §0 refuses to apply over.
+  const tenancyTwinsLive = TENANCY_AGENT_TWINS_0353_COHORT.filter((n) => liveNames.has(n));
+  if (tenancyTwinsLive.length !== 0) {
+    failures.push(...cohortFailures("#1137 0353 tenancy model-lane reads and on-behalf-of confirmations",
+      TENANCY_AGENT_TWINS_0353_COHORT, liveNames));
   }
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
   // race, not a narrower boundary (see the block where the roster is declared).

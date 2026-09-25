@@ -568,6 +568,24 @@ await t.test("both evaluator closures are exact, independent, and registered —
     expected.set("evaluate_payroll_run_state@v1",
       ["clara.evaluate_payroll_run_state_v1(jsonb,jsonb)"]);
   }
+  // RIDERS SWEEP WAVE (S), LANE L4: #1048's evaluate_payroll_run_state **v2** (migration 0343) —
+  // a NEW closure beside the frozen v1, never a recut of it (0296:710 refuses an in-place edit at
+  // APPLY and 0343's own freeze block says its only lawful repair is a _v3). ONE member for v1's
+  // reason: it reads no table and calls no other clara function, so the closure the freeze binds
+  // is genuinely the one entrypoint. It is COVERED by the ceremony exactly as v1 is — it is not
+  // in delta-contract.test.mjs's EXCLUDED_PAIRS_SQL, it does not ship dark, and the live catalog
+  // census of bodies reading clara.evaluator_versions still names only the metric, report,
+  // prepayment and revenue-recognition families, so nothing in the estate reads its `deployed`
+  // flag and no battery of its own must witness a pre-flip refusal. Named here rather than
+  // absorbed into a bumped total, because this census is CLOSED-WORLD by design; added
+  // CONDITIONALLY, because the row does not exist on a pre-0343 chain.
+  const payrollV2Registered = (await rootQuery(
+    "select exists(select 1 from clara.evaluator_versions where evaluator_name='evaluate_payroll_run_state' and version=2 and firm_id is null) as ok"))
+    .rows[0].ok;
+  if (payrollV2Registered) {
+    expected.set("evaluate_payroll_run_state@v2",
+      ["clara.evaluate_payroll_run_state_v2(jsonb,jsonb)"]);
+  }
   const agreementRegistered = (await rootQuery(
     "select exists(select 1 from clara.evaluator_versions where evaluator_name='evaluate_agreement_contract_state' and version=1 and firm_id is null) as ok"))
     .rows[0].ok;
@@ -726,7 +744,15 @@ await t.test("freeze verifier positively reads registered live bodies, deploymen
   const agreementRegistered = (await rootQuery(
     "select exists(select 1 from clara.evaluator_versions where evaluator_name='evaluate_agreement_contract_state' and version=1 and firm_id is null) as ok"))
     .rows[0].ok;
-  const coveredNew = (payrollRegistered ? 1 : 0) + (agreementRegistered ? 1 : 0);
+  // RIDERS SWEEP WAVE (S), LANE L4: #1048's evaluate_payroll_run_state v2 (0343) is a COVERED
+  // closure on exactly v1's terms — not an exclusion — so the ceremony deploys it too and it
+  // belongs in BOTH censuses below. Measured rather than assumed, so the cell stays exact on a
+  // pre-0343 chain.
+  const payrollV2Registered = (await rootQuery(
+    "select exists(select 1 from clara.evaluator_versions where evaluator_name='evaluate_payroll_run_state' and version=2 and firm_id is null) as ok"))
+    .rows[0].ok;
+  const coveredNew = (payrollRegistered ? 1 : 0) + (agreementRegistered ? 1 : 0)
+    + (payrollV2Registered ? 1 : 0);
   assert.equal(result.verified_deployed,
     fresh ? 0 : 5 + coveredNew + (fsPackDeployed ? 1 : 0) + (card1V2Deployed ? 1 : 0)
       + (prepayDeployed ? 1 : 0) + (prepayV2Deployed ? 1 : 0),

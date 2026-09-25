@@ -96,6 +96,20 @@ export async function fyePairWallCohortApplied() {
   return present === flags.length;
 }
 
+/** True iff #1090's depreciation-policy knowledge key (0345_depreciation_policy_knowledge_key.sql)
+ *  is applied: the `depreciation_policy` catalog row exists. Same "wholly present or wholly
+ *  absent" law as `fyeDayCohortApplied` above — this cohort adds no relation, no function and no
+ *  plan-item-map row (the key is recorded directly, never promoted from an onboarding answer), so
+ *  the one catalog row is the whole of it. */
+export async function depreciationPolicyKnowledgeCohortApplied() {
+  const r = await rootQuery(
+    `select exists (
+       select 1 from clara.knowledge_keys where knowledge_key = 'depreciation_policy'
+     ) as key_row`,
+  );
+  return r.rows[0].key_row;
+}
+
 /** True iff #913's column drop (0241_knowledge_scope_default_drop.sql) is applied:
  *  `clara.knowledge_keys` no longer carries `scope_default`. Unlike the two cohorts above there
  *  is exactly one thing to lose, not several to land together, so there is no PARTIAL state a

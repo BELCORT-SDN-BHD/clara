@@ -436,8 +436,17 @@ test("S1 · a run whose totals the page does not print has nothing to post, and 
 
   await seedPayrollChart(world.users.alice, world.clients.A1);
   // The summary page that prints per-employee rows but NO totals row: 0296's evaluator marks
-  // every run-level question `not_printed` and offers a row sum instead. This lane does not post
-  // from that sum — the evaluator's own verdict is what it drafts from.
+  // every run-level question `not_printed` and offers a row sum instead.
+  //
+  // WHAT #1048 (migration 0343) CHANGED HERE, and why this cell's expectation moved. Until 0343
+  // this lane refused such a page `run_totals_not_printed` outright, and 0297 §C's own header said
+  // the row sum was deliberately left unused because "whether the owner wants a row sum admitted
+  // as a posting basis is a product question this ticket does not answer for them." #1048 is that
+  // answer (the ruling on #946, 2026-09-24): the sum IS a posting basis when the page witnesses
+  // its own completeness, and when it does not the lane PARKS A QUESTION instead of refusing. This
+  // page prints no witness, so the refusal it now earns is `completeness_unwitnessed` — the parked
+  // question — and `run_totals_not_printed` is reserved for a page that has no sum to offer at all
+  // (the cell below). Nothing is posted either way, which is what this cell has always been about.
   const silent = Object.fromEntries(RUN_FIELDS.map((f) => [f, notPrinted()]));
   const [tx, vx] = bothChannels({ answers: silent });
   const state = await evaluate(tx, vx);
@@ -450,9 +459,41 @@ test("S1 · a run whose totals the page does not print has nothing to post, and 
   const p = await plan(world.clients.A1, state);
   assert.equal(p.ready, false);
   assert.deepEqual(
+    p.refusals.map((r) => r.reason).sort(),
+    ["completeness_unwitnessed", "period_not_established"],
+    "the page prints no month and no completeness witness, and BOTH are named",
+  );
+  assert.deepEqual(p.legs, [], "and nothing at all is drafted");
+});
+
+test("S1b · #1048: a page with no rows to sum is still `run_totals_not_printed` — the parked question needs a sum to be about", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  // No totals row AND no employee rows: there is no figure anywhere on this page, so there is
+  // nothing to ask a person about. The refusal 0297 shipped is still the right one, and this cell
+  // is what keeps #1048's widening from swallowing it.
+  const silent = Object.fromEntries(RUN_FIELDS.map((f) => [f, notPrinted()]));
+  silent["payroll.run.period"] = value("2026-08");
+  const [tx, vx] = bothChannels({ answers: silent, rows: [] });
+  const state = await evaluate(tx, vx);
+  assert.equal(
+    state.facts["payroll.run.gross_pay"].computed_cents,
+    null,
+    "mandatory setup: with no quoted rows the evaluator computes nothing",
+  );
+
+  const p = await plan(world.clients.A1, state);
+  assert.equal(p.ready, false);
+  assert.deepEqual(
     p.refusals.filter((r) => r.reason === "run_totals_not_printed").map((r) => r.detail.field).sort(),
     ["payroll.run.gross_pay", "payroll.run.net_pay"],
     "both totals without which there is no entry are named",
+  );
+  assert.equal(
+    p.refusals.some((r) => r.reason.startsWith("completeness_")),
+    false,
+    "…and no completeness question is parked about a page that offers no sum",
   );
   assert.deepEqual(p.legs, [], "and nothing at all is drafted");
 });

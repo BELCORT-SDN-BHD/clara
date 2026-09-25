@@ -1,0 +1,155 @@
+{
+  "review": "adversarial",
+  "lane": "waveS-lane06",
+  "branch": "riders/wS-lane06",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "fixed_point": "7bc5a710f",
+  "diff": "git diff 7bc5a710f...HEAD (19 files, +1051/-41)",
+  "commits": [
+    "0e2ee52ba fix(runtime): #1044 one sidecar, one mutation at a time",
+    "7ab0d4ebb test(runtime): #1044 the real sweep's merge keeps the transport",
+    "1e33ce123 test(runtime): #1044 200 rounds at the natural body size",
+    "5b31ea95b refactor(runtime): #1044 one taskMetaPath per merge",
+    "30335b147 fix(runtime): #1128 lane-probe settle helper waits for a NEW cycle",
+    "eb8a6f3a6 fix(runtime): #1128 drive the settle helper's fresh cycle directly",
+    "bfa163db6 fix(runtime): #1128 HEARTBEAT_STALE_MS reads CLARA_HEARTBEAT_STALE_MS per call",
+    "c196cdbf7 feat(runtime): #1129 guard against an unruled runtime-contract roster entry",
+    "6b73af662 test(runtime): #1131 the two-build drill proves the CLI's exit code for a missing CONTRACT",
+    "11b22490a test(db): #1126 a declared frontier-leg cells-floor is checked against the corpus",
+    "b6030d20e feat(ci): #1126 each frontier leg records its counts to $GITHUB_STEP_SUMMARY",
+    "8a944c40b docs(rig): #1124 name the stale-node_modules symptom and its one-line fix",
+    "8994ae2f3 feat(ci): #1127 the weekly schedule's failure lands as a GitHub issue comment",
+    "a6343dd79 test(web): #1141 the B4 focus-landing cell polls document.activeElement"
+  ],
+  "cells_rerun": [
+    "packages/db: node --test --test-concurrency=1 $GATES tests/ci-frontier-leg-contract.test.mjs tests/ci-schedule-notify.test.mjs -> 21 pass / 0 fail",
+    "packages/runtime: node --test tests/intake-sidecar-race.test.mjs -> 20 pass / 0 fail",
+    "packages/runtime (PG env): node --test tests/rollback-preflight.test.mjs -> 46 tests, 24 pass / 0 fail / 22 skip (#1129 cells 39 and 40 ran and passed)",
+    "packages/runtime: node --test tests/l9-pool-contract-lane-probe.test.mjs -> 27 pass / 0 fail",
+    "packages/runtime (PG env): node --test tests/ready.test.mjs -> 26 pass / 0 fail (the #1128 heartbeat cell ran, not skipped)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test e2e/cell-budget-census.test.ts -> 5 pass / 0 fail (the polls:3 -> polls:4 bump balances)",
+    "js-yaml parse of .github/workflows/ci.yml and .github/actions/frontier-leg/action.yml -> both valid; ci.yml has 12 jobs"
+  ],
+  "confirmed_good": [
+    "#1044 the defect was real and the lock is what closes it: an independent probe that re-expresses the PRE-FIX merge shape (readTaskMeta then writeTaskMeta, read outside any lock) over the module's own public reads/writes loses a transport field in 50/50 rounds on this rig, while the shipped mergeTaskMeta loses 0/50 in the same process, same bodies, same rounds (scratchpad/probe-1044-prefix.mjs).",
+    "#1044 the lock map is collected: 0 entries after 50 distinct sidecars drained (_sidecarLockCountForTest).",
+    "#1131 AC2 is genuinely already satisfied: .github/actions/db-live-gates/action.yml runs `node scripts/ci/world-gate.mjs tests/two-build-cutover-e2e.mjs`, and the db-live-gates job (ci.yml:281-284) runs whenever needs.changes.outputs.code != 'false' -- so the new cliC contract-refusal leg lands in a regular gate. (Narrower than 'every pull request': a classified docs-only PR skips it.)",
+    "#1131 the CLI door matches the drill's claim: scripts/rollback-preflight.mjs resolveSupported() line 207 makes an absent --supported-contracts read as an empty contract list, i.e. 'declares none', which is what cliC relies on.",
+    "#1126 AC2's derivation is sound on today's corpus: no file listed by any split list registers a test at non-zero indent, inside a loop, or as test.skip/test.todo, so sum(^test() == #!cells-floor: for all five lists (153/82/169/74/12), and p1126.floor.corpus/roster pass.",
+    "#1126 the summary write is correctly placed BEFORE the `test \"$FAIL\" = \"0\"` and floor checks in all three steps, so a failing leg still records its counts.",
+    "#1127 no injection: the mutable values reach the step through `env:` (REPO/RUN_URL/CI_RESULT), never spliced into the run script as ${{ }}; the backticks in --body are backslash-escaped so bash does not substitute.",
+    "#1141 the budget arithmetic balances: cellBudgetMs({polls:4}) pays for the new 15_000ms poll and e2e/cell-budget-census.test.ts stays green."
+  ],
+  "findings": [
+    {
+      "id": "ADV-L06-01",
+      "ticket": 1044,
+      "severity": "major",
+      "kind": "race / unclosed mutation path under a header that says it is closed",
+      "title": "removeTaskMeta bypasses withSidecarLock, so a merge resurrects the sidecar a terminal cleanup just deleted -- and a task sidecar is never TTL-reaped",
+      "evidence": "packages/runtime/lib/spool.mjs:404 `removeTaskMeta` is a bare `rm(taskMetaPath(id))` and never enters `withSidecarLock` (139), while spool.mjs:270 now states 'no other mutation of THIS sidecar can land between them' and packages/runtime/README.md:2147 repeats it. A delete IS a mutation. PROBE (scratchpad/probe-1044-delete.mjs, run against the lane worktree's own lib/spool.mjs): 50 rounds of write -> start mergeTaskMeta -> removeTaskMeta after the merge's read -> await the merge, resurrected 50/50 sidecars. This is reachable in production ordering: reconciler-documents.mjs:210-238 snapshots rows whose status is still queued/held_egress/running and then merges each one in a sequential fs loop, while documentIngest.behavior_v2.mjs:184/208/252 calls services.removeTaskMeta once the task is terminal -- so the delete routinely lands inside a later task's merge window. The orphan is permanent: SPOOL_REAPABLE (spool.mjs:550) is /^intake-.+\\.(?:bin|json)$/i, so the TTL sweep never touches task-<id>.json -- PROVED: a task sidecar backdated 48h survives `sweepSpoolTtl()` with spoolRemoved:0 (scratchpad/probe-1044-reap.mjs). Consequence beyond the leak: the degraded arm at reconciler-documents.mjs:293 (`listTaskMetas()` when the document SELECT is unavailable -- a path the module's own comment says has happened on live) would read the resurrected orphan as a live queued task and re-dispatch documentIngest for a document that is already done. Pre-existing, not introduced by this commit -- but the ticket's Desired behavior is 'the merge re-reads under the same per-sidecar exclusion the intake path uses', and this is the one mutator left outside it, one line away in the same module.",
+      "required_fix": "Put removeTaskMeta (and removeIntakeSpool's metadata rm) through withSidecarLock on the same path key, so a delete serialises with the merge that would otherwise resurrect it. If that is deliberately out of scope, then spool.mjs:270 and README.md:2147 must say 'no other WRITE', name the delete as the residual beside the one-process residual already stated, and the residual must say a resurrected task-<id>.json is never reaped."
+    },
+    {
+      "id": "ADV-L06-02",
+      "ticket": 1126,
+      "severity": "major",
+      "kind": "false-green test / report claim contradicted by the code",
+      "title": "summaryBlock()'s regex starts at the `{` inside the step name's own `${{ inputs.slice }}` and swallows most of the step, so the three p1126.summary cells pass a $GITHUB_STEP_SUMMARY write that records no counts at all",
+      "evidence": "packages/db/tests/ci-frontier-leg-contract.test.mjs:336 `summaryBlock` = /\\{([\\s\\S]*?)\\}\\s*>>\\s*\"\\$GITHUB_STEP_SUMMARY\"/ . Its own doc-comment (330-334) says it exists 'so a cell can check exactly what that write contains rather than whether the six-letter names it needs happen to appear anywhere else in the step (every one of PASS/FAIL/SKIP/CELLS already does, for the floor check above it -- a loose match would pass before any write existed at all)', and reports/waveS-lane06-ticket1126.md:161-163 repeats the claim. MEASURED against the real action (scratchpad/summaryblock.mjs): for the slice-list step the capture is 6350 chars of a 7966-char step and begins '{ inputs.slice }} test list\\n      if: steps.gate.outputs.ready ...' -- it includes the `node --test` invocation and every pre-existing $PASS/$FAIL/$SKIP/$CELLS/$FLOOR/$SKIPMAX reference. DECISIVE VACUITY CONTROL (scratchpad/vac3.mjs): gut the three writes so they emit only their `### ...` heading and no table rows, and all three cells -- p1126.summary.list, .roster, .drill -- STILL PASS (captured 6152/7768, 3659/5854, 3304/3891 chars); a correctly anchored group-only regex fails all three with 'missing $PASS'. The ticket's own vacuity control (deleting the whole block) is the one case the loose regex does catch, which is why the gap was not noticed.",
+      "required_fix": "Anchor the cut to the group, e.g. /\\n\\s*\\{\\n([\\s\\S]*?)\\n\\s*\\} >> \"\\$GITHUB_STEP_SUMMARY\"/ (verified to fail correctly on the gutted action), and re-run the three cells against a write with the count rows removed as the vacuity control, not only against a write that is absent. Correct reports/waveS-lane06-ticket1126.md:161-163, which asserts the property the code does not have."
+    },
+    {
+      "id": "ADV-L06-03",
+      "ticket": 1127,
+      "severity": "major",
+      "kind": "design defect / the notification channel is an issue this wave closes",
+      "title": "The weekly-failure comment is hardcoded onto issue #1127 -- the lane's own ticket, which this wave closes -- and the test cements the literal",
+      "evidence": ".github/workflows/ci.yml:659 `gh issue comment 1127 --repo \"$REPO\"`, and packages/db/tests/ci-schedule-notify.test.mjs:93 pins /gh issue comment 1127\\b/. #1127 is one of the 55 backlog tickets in SWEEP-PLAN.md's census (lines 13-16, 27, 266) and the plan's stated goal is that the wave 'ends with no ticket outside the mainline open' (SWEEP-PLAN.md:4-5) -- so the very first weekly run after this merges comments onto a CLOSED issue. There is no tracking-issue convention to fall back on: `gh label list` shows no tracking/standing label, and `grep -rniE 'slack|webhook|notify|github-script|issue comment' .github/ -l` returns only ci.yml (this change) and db-live-gates/action.yml (Stripe webhook COLUMN names) -- confirming the ticket's premise but leaving the target an invention. The failure mode is the ticket's own: a closed ticket is not a place anyone routinely looks, and if it is ever locked, `gh issue comment` fails and the notify job goes red in exactly the Actions tab nobody was reading. The lane's own report already lists this as a follow-up (reports/waveS-lane06-ticket1127.md, 'Follow-ups worth filing', bullet 1) -- it is raised here because it is not a preference, it is the channel being closed by the same wave that opens it.",
+      "required_fix": "Point the comment at a target that stays open -- a standing 'CI health' issue opened for the purpose (and labelled so it survives triage), or reuse the mainline tracking issue -- and pin THAT number in ci-schedule-notify.test.mjs instead of 1127; or, if #1127 is to be kept open as the standing thread, say so on the issue and exclude it from the wave's close list. Either way the choice needs the owner's one-line ruling before the wave closes its tickets."
+    },
+    {
+      "id": "ADV-L06-04",
+      "ticket": 1128,
+      "severity": "minor",
+      "kind": "race in the test seam the ticket exists to make deterministic",
+      "title": "_waitForLaneProbeSettleForTest starts a cycle without re-pointing `inFlight`, so a CONCURRENT caller still gets the stale, already-resolved previous cycle",
+      "evidence": "packages/runtime/lib/lane-probe.mjs:425 now calls `await refreshOnce()` directly. `refreshOnce` (300-316) returns `inFlight` when `busy`, and `inFlight` is only ever reassigned by `ensureStarted` (322) and the interval callback (324-328) -- never by this helper. refreshOnce's own comment (301-303) states the invariant this breaks: 'returning the IN-FLIGHT one keeps `inFlight` pointing at real work, so a waiter cannot await a promise that resolves immediately and then read a verdict the cycle has not written yet.' PROBE (scratchpad/probe-1128-concurrent.mjs): cycle 1 reports read.ok=true; caller A starts cycle 2 (slow prober, read.ok=false); a concurrent caller B entering while cycle 2 is mid-flight (calls=16, i.e. all 8 probes of round 2 dispatched) returns read.ok=TRUE -- cycle 1's cached verdict -- while A goes on to return read.ok=false. That is the exact 'stale in-flight promise' AC1 asks to remove. No live impact today (node --test runs a file's top-level cells sequentially, and ready.test.mjs's settleLaneUntil is the only caller), so this is latent, but it re-opens the hole in the helper whose whole job is not to race the verdict.",
+      "required_fix": "One line: have `_waitForLaneProbeSettleForTest` (and `_refreshOnceForTest`) publish the cycle they start, e.g. `const started = refreshOnce(); if (started !== undefined) inFlight = started; await started;` -- the same guard the interval callback already uses at lane-probe.mjs:324-328 -- or make refreshOnce assign `inFlight` itself when it starts a cycle."
+    },
+    {
+      "id": "ADV-L06-05",
+      "ticket": 1044,
+      "severity": "minor",
+      "kind": "comment contradicted by the code it annotates / lost update via a third env read",
+      "title": "mergeTaskMeta locks and writes `path` but reads through readTaskMeta(id), which re-reads CLARA_SPOOL_DIR -- the merge can read one directory and write another",
+      "evidence": "packages/runtime/lib/spool.mjs:275-277 says 'ONE `taskMetaPath(id)` for both: the lock's key and the write's target are the same string by construction, never two reads of CLARA_SPOOL_DIR that a test could change in between', then line 279 calls `readTaskMeta(id)`, which computes `taskMetaPath(id)` again (line 237) and therefore reads `spoolConfig().dir` a THIRD time. PROBE (scratchpad/probe-1044-reap.mjs, part b): with a sidecar carrying storageKey='in-dir-A', starting the merge and repointing CLARA_SPOOL_DIR before the merge's read resolves gives `merge returned storageKey=undefined` and leaves dir A holding `storageKey=undefined` -- the merge merged onto an empty base from the wrong directory and wrote the transport-less result to the locked path. Production never repoints CLARA_SPOOL_DIR mid-flight, so the impact is confined to test shapes, but it is precisely the lost update #1044 exists to prevent and the comment asserts cannot happen.",
+      "required_fix": "Read from the captured `path` inside the locked turn (a small readJsonAt(path)-shaped helper, or `readTaskMetaAt(path)`) instead of `readTaskMeta(id)`, so the read, the lock key and the write target are literally one string; or drop the second half of the comment's claim."
+    },
+    {
+      "id": "ADV-L06-06",
+      "ticket": 1126,
+      "severity": "minor",
+      "kind": "derivation not equivalent to the number it is derived against",
+      "title": "staticCellCount's /^test\\(/gm misses test.skip(/test.todo( while the leg's CELLS = PASS + SKIP counts them, so quarantining a cell silently lowers the declared floor",
+      "evidence": "packages/db/tests/ci-frontier-leg-contract.test.mjs:280 counts only lines that literally begin `test(`. The CI side computes CELLS=$((PASS + SKIP)) from the TAP summary (.github/actions/frontier-leg/action.yml:195). DEMONSTRATED (scratchpad/floorgap.test.mjs): a file with one `test(` and one top-level `test.skip(` gives staticCellCount = 1 while `node --test` reports `# tests 2 / # pass 1 / # skipped 1`, i.e. CELLS = 2. So converting an existing `test(` to `test.skip(` -- the ordinary way to quarantine a cell -- turns p1126.floor.corpus red until someone LOWERS #!cells-floor: by one, after which the leg's -ge check has lost a unit of protection although the measured cell count never moved. Harmless today (no listed file uses a skip/todo variant or a non-zero-indent registration -- verified across all five lists), but the derivation is what the ticket buys and it is not equivalent to what CI measures.",
+      "required_fix": "Count the same thing CI counts: `/^test(\\.(skip|todo))?\\(/gm` (and say in packages/db/tests/README.md that a registration at non-zero indent or inside a loop is not permitted in this corpus, which is the assumption the derivation already rests on)."
+    },
+    {
+      "id": "ADV-L06-07",
+      "ticket": 1127,
+      "severity": "minor",
+      "kind": "a door's behaviour asserted in a permanent doc without the door being driven",
+      "title": "packages/db/tests/README.md states the weekly failure IS a visible notification, but nothing has driven gh issue comment with the job's own token grant",
+      "evidence": "packages/db/tests/README.md gains '**The weekly schedule's own failure is now a visible notification, not only a raw run log (#1127).**' All six cells in packages/db/tests/ci-schedule-notify.test.mjs assert the raw YAML text only -- job existence, needs, if, permissions, and that the run line matches /gh issue comment 1127\\b/ -- none spawns gh, and none can. The lane's own report is honest about this ('Anything unverified': 'No live dispatch run exercised this ... Whether gh issue comment succeeds against the live default GITHUB_TOKEN with only the job's own issues: write grant ... is unverified'), so the README is the one place that states it as fact. The work order's wave-3 addendum is explicit: 'A door's behaviour is asserted only after it was driven. Do not write ... the door admits it ... in a report, a comment or a sentence on screen unless a cell drove that door and saw it.'",
+      "required_fix": "Reword the README paragraph to what is actually held ('ci.yml now WIRES the weekly schedule's failure to a GitHub issue comment; the wiring is held by ci-schedule-notify.test.mjs, and the first scheduled run after this merges is what proves the comment posts'), and record the first real dispatch in the release evidence."
+    },
+    {
+      "id": "ADV-L06-08",
+      "ticket": 1044,
+      "severity": "minor",
+      "kind": "stale docs that now contradict the fix, in the two places a reader lands",
+      "title": "reconciler-documents.mjs and the #1043 README section still say the lost update is open and that 'a hard guarantee needs real locking ... out of scope here'",
+      "evidence": "packages/runtime/lib/reconciler-documents.mjs:249-257 (untouched by this lane -- the diff lists no change to that file) still reads 'It does NOT eliminate the race (a write landing in that exact gap still loses); a hard guarantee needs real locking or a version/mtime CAS, out of scope here.' That comment sits directly above the `mergeTaskMeta(row.taskId, row)` call at :278 -- the exact call site #1044 fixed -- in the module whose merge is the defect. packages/runtime/README.md:2104-2109 likewise still says 'Two writers of one sidecar still race on the rename itself, and the last rename wins ... which is now tracked as its own defect, #1044', immediately above the new '## #1044 -- one sidecar, one mutation at a time' heading at :2122 that says the opposite. SWEEP-PLAN.md:188-190 cites exactly that README paragraph as the repository's own admission of #1044, so it is the paragraph a future reader is steered to. Work order rule 9: 'Docs in the same commits: the module README your change affects'.",
+      "required_fix": "Rewrite reconciler-documents.mjs:254-257 to point at withSidecarLock and state the remaining residual (one process, one spool directory; and the delete of ADV-L06-01), and add the forward pointer to the #1043 README residual paragraph at :2104 so it no longer reads as a live defect."
+    },
+    {
+      "id": "ADV-L06-09",
+      "ticket": 1129,
+      "severity": "minor",
+      "kind": "the guard re-creates its own failure mode one level up",
+      "title": "CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE is write-only: an exception that is no longer needed is never flagged, so the list can silently accumulate the same way an unruled roster entry could",
+      "evidence": "packages/runtime/lib/rollback-preflight.mjs:266-272 returns only `contracts.filter(c => !ruled.has(c.id) && !excepted.has(c.id))`. An id that is BOTH excepted and ruled -- the normal end state, once the migration that requires it lands -- comes back from nothing, so the exception entry survives forever with nobody told it is dead. That is the same 'sits forever with no rule ever added, silently' failure the ticket's Current behavior names, moved from the roster to the exception list. The list is empty today (line 238), so the guard is not vacuous in the direction it checks (the #1129 synthetic cell at tests/rollback-preflight.test.mjs:1085-1095 proves it names an unruled entry), but nothing holds the exception list honest.",
+      "required_fix": "Have the guard (or a second assertion in the same cell) also name every exception id that now HAS a FRONTIER_RULES row -- a dead exception -- so adding the rule forces the exception to be removed in the same PR. Two lines, and it closes the loop the ticket actually asked to close."
+    },
+    {
+      "id": "ADV-L06-10",
+      "ticket": 1141,
+      "severity": "minor",
+      "kind": "the residual instant read the ticket exists to remove",
+      "title": "B4 polls only activeElement.tagName, then re-reads document.activeElement in a separate unwaited evaluate for its text and tabindex",
+      "evidence": "apps/web/e2e/work-question-walk.spec.ts:323-325 polls `document.activeElement?.tagName` to 'H2', then lines 327-333 open a SECOND round trip that reads `document.activeElement` again for `text` and `tabindex`. Any focus movement between the two evaluates (a later rAF, the scan() injection, a re-render) is read by the second one, which carries no wait -- the exact shape the ticket refuses ('the cell asserts the landing with the suite's own settle idiom rather than an instant read'). It fails loudly rather than silently (on <body>, tabindex would be null), so this is narrower than the original flake, not a new one -- but the race class is reduced, not removed. The poll also only pins the TAG: any H2 on the page satisfies it, and the identity check ('Needs you') lives in the unwaited read.",
+      "required_fix": "Return the whole triple from inside the poll -- `expect.poll(() => page.evaluate(() => { const el = document.activeElement; return { tag: el?.tagName ?? 'NONE', text: (el?.textContent ?? '').trim().slice(0, 40), tabindex: el?.getAttribute('tabindex') }; })).toEqual({ tag: 'H2', text: expect.stringContaining('Needs you'), tabindex: '-1' })` -- so one settled observation carries all three facts and the identity is part of what is waited for."
+    },
+    {
+      "id": "ADV-L06-11",
+      "ticket": 1124,
+      "severity": "note",
+      "kind": "durability of the one place / unverified aside",
+      "title": "The 'documented once, in a single place' fix lives in a wave-scoped plan folder that is archived with the wave, and the pnpm-11.8 aside is unverified",
+      "evidence": "The note landed in docs/plan/active/riders-2026-09-20/RIG.md:47-64. That file is the SWEEP wave's own rig table (its own header: 'RIG.md beside this file replaces that wave's rig table', WORK-ORDER.md:5-6) and plan folders under docs/plan/active/ move to the archive when the wave closes -- so #1124's AC2 ('documented once, in a single place other lanes' agents would naturally find it') holds only until this wave ends, after which the next wave's rig doc starts clean and the fifth-rediscovery risk returns. Separately, the note asserts pnpm 10.33.0 'has no `install --dry-run` (that landed in pnpm 11.8)'; `npm view pnpm dist-tags` confirms an 11.x line exists (latest-11 = 11.27.1), but the 11.8 attribution itself was not checked against pnpm's changelog in this review -- unverified, not disputed.",
+      "required_fix": "Either carry the paragraph into a durable home (packages/db/README.md's rig section, or the repo-root AGENTS.md rig note) and leave a pointer in the wave's RIG.md, or record explicitly that the next wave's rig doc must inherit it. Cite a pnpm changelog entry for the 11.8 claim or drop the version attribution."
+    },
+    {
+      "id": "ADV-L06-12",
+      "ticket": 1126,
+      "severity": "note",
+      "kind": "coverage gap against the lane note",
+      "title": "#!skips-max: is still a hand-declared number checked against nothing measured",
+      "evidence": "The lane note for this ticket names both '#!cells-floor: and #!skips-max: lines' as the floors. The new cells (p1126.floor.corpus, p1126.floor.roster) derive only #!cells-floor:. #!skips-max: (and #!drill-skips-max:) remain numbers someone typed, bounded at run time by the leg but never compared to anything on disk. Defensible -- a skip count is frontier-dependent and not derivable from the corpus the way a cell count is, and the ticket's own AC2 says 'declared floor' -- but it is the half of the lane note that did not land, and no report line says so.",
+      "required_fix": "Record in the ticket report (and in packages/db/tests/README.md's new paragraph) that #!skips-max: is deliberately left hand-declared and why, so the next reader does not assume both numbers are now derived."
+    }
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "Twelve findings across eight tickets: three major, seven minor, two notes. The lane's core engineering is sound and I confirmed it independently -- #1044's lost update was real (50/50 rounds lost a transport field against a re-expressed pre-fix merge shape) and withSidecarLock closes it (0/50), the lock map is collected, #1131's contract-refusal leg really does land in a regularly-run gate, and #1126's floor derivation is exact on today's corpus. What breaks is around the edges: removeTaskMeta is the one sidecar mutator left outside the new lock and resurrects a deleted sidecar 50/50 into a file the TTL sweep never reaps (ADV-L06-01); the three p1126.summary cells pass a $GITHUB_STEP_SUMMARY write that records no counts at all, because summaryBlock's regex starts at the `{` inside the step name and swallows the pre-existing floor-check variables (ADV-L06-02, proved by gutting the write); and #1127's notification is hardcoded onto issue #1127, the wave's own ticket, which this wave closes (ADV-L06-03). The remainder are a latent concurrent-caller race re-opened in #1128's settle helper, two comments/docs that now contradict the code they annotate, a write-only exception list in #1129, a residual unwaited read in #1141, and two notes."
+}

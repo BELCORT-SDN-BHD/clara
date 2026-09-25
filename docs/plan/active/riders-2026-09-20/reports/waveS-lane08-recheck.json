@@ -1,0 +1,33 @@
+{
+  "lens": "recheck",
+  "lane": "waveS-lane08",
+  "tickets": [1136, 1137],
+  "base": "061a6992b",
+  "head_verified": "0bbf3addb8988521fac2d5b2faf5d67a78e654c3",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/waveS-lane08-fix.md",
+  "method": "Re-ran, on the live lane database (127.0.0.1:55741/clara_l01), every cell and gate the fix report cites as evidence, rather than accepting its printed counts.",
+  "verified_at_head": {
+    "migrate": "0 new migration(s) applied · 314 total (no drift)",
+    "targeted_lane_battery": "tenancy-agent-twins + agent-read-twins-payroll-agreement + plan-overlap-template-arm-retired = 38/38 pass, 0 fail (includes p1137.obo.refusals_match case 8, p1137.obo.plan_step_parity, p1137.revision.client_status_parity, p1137.obo.one_op_key_namespace)",
+    "operation_census_and_rig_isolation": "33 tests, 32 pass, 1 skip (T19 poison-role, needs CLARA_RIG_ALLOW_RESET) — matches report",
+    "full_gate_battery_all_18_files": "243 tests · 242 pass · 0 fail · 1 skipped — matches report's table exactly",
+    "check_frozen_workflows": "OK — 347 / 60 / 3, unchanged — matches report",
+    "runtime_and_web_diff_vs_base": "git diff 061a6992b...HEAD --name-only -- packages/runtime apps/web frozen-workflows.json is empty — matches report",
+    "lint": "CI=true GITHUB_ACTIONS=true FREEZE_BASE_REF=061a6992b pnpm --filter @clara/db lint -> exit 0",
+    "typecheck": "pnpm --filter @clara/web typecheck and --filter @clara/runtime typecheck both exit 0",
+    "wiki_dynamic_sql": "OK — 1588 fn defs, 248 patches scanned, 0353 needs no new waiver",
+    "check_parts_parity": "OK — work_result's six construction sites are all claraWork.v1..v6.impl.ts, none in chatTurn.* — matches §7.2's measurement",
+    "firm_scope_db_pins_corpus": "byte-identical vs base (0-line diff); firm-scope-db-pins.test.ts 22/22 pass — matches report",
+    "git_status": "clean at head 0bbf3addb — no zz-gates.txt, no zz-adv-1137-probe.test.mjs (SPEC-L08-BOTH-K confirmed gone)",
+    "waveS_lane08_codereview_standards_json": "confirmed ABSENT from docs/plan/active/riders-2026-09-20/reports/ — F1's premise holds"
+  },
+  "code_spot_checks": [
+    "ADV-L08-01 fix: clara._tenancy_plan_core (0353 sql, ~L1408-1444) carries the client_inactive wall at the top of the body, verbatim errcode/message/detail from clara.create_accounting_plan; confirm_tenancy_rent_plan_for/_revision_for are NOT touched by it (deliberate, argued and driven — not the review's originally-required placement, refuted with p1137.revision.client_status_parity).",
+    "ADV-L08-04: 0353 sql ~L1905-1910 narrows the §I wall-3 sentence to the non-member arm only, states the deactivated-member asymmetry and its reason (0307's ruling) — matches report, no behavioural change.",
+    "ADV-L08-05: live catalog measured — both clara._confirm_tenancy_rent_plan_core and _confirm_tenancy_rent_plan_revision_core have proacl {clara_fn_owner=X/clara_fn_owner} (ungranted to any other role) — confirms the 'unreachable today' premise the decline rests on.",
+    "SPEC-L08-1137-E: plan-overlap-template-arm-retired.test.mjs TENANCY_PLAN_STEP entry sha-pins clara._tenancy_plan_core at 3065a41f862a419fe25cfa1c9d665e2b57578a54a6c4bfc489f5c13f4887d37b, gated on the 0353 stem — matches the migration file's own header comment citing the same sha."
+  ],
+  "findings": [],
+  "verdict": "accept",
+  "notes": "Nothing above minor remains open. Every measurable claim in waveS-lane08-fix.md was independently re-driven on the live rig at the reported head (0bbf3addb) and reproduced exactly, including the full 243/242/0/1 gate battery, the 347/60/3 freeze-lint count, the 22/22 web pins test, and the code-level placement/measurement claims (ADV-L08-01, -04, -05, SPEC-L08-1137-E). F1's premise (missing waveS-lane08-codereview-standards.json) still holds and is correctly carried to the orchestrator as an open question rather than hidden; that is a note-severity process item, not a defect surviving in code. No mid-task status request reached this worker."
+}

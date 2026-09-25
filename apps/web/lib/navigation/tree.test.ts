@@ -20,7 +20,10 @@
 // "AppShell.firmNav.work" in the sidebar and nothing goes red.
 
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import messages from "../../messages/en.json";
 import {
@@ -140,12 +143,49 @@ test("the vendor-bindings row is the ONLY one marked legacy, and the tax row the
   assert.deepEqual(ACCOUNTING_ITEMS.filter((i) => i.beta).map((i) => i.id), ["tax"]);
 });
 
+// ── one destination, one decider (fix round, ADV-09) ──────────────────────
+
+// #1060 gave the registry's bank row a `tab`, which MOVED the bank destination for every registry
+// caller: the sidebar, the accounting hub and ⌘K all land on Matching now. The adversarial lens
+// found the one surface that did not, because it never went through the registry at all --
+// `components/firm/client-home/client-bank-summary.tsx` spelled `/clients/:id/bank` by hand. Three
+// surfaces, two answers, and the drift was invisible because a hand-spelled href is still a valid
+// URL. This cell is the wall: the bank destination is decided in `accountingHref` and nowhere else.
+//
+// It scans SOURCE rather than behaviour deliberately -- the failure it catches is a second decider
+// appearing, which no amount of rendering the first one can reveal (the `*-census.test.ts` files
+// in apps/web/tests are the house precedent for a source scan with a stated claim).
+test("no component spells the bank destination by hand -- accountingHref decides it (ticket 1060, ADV-09)", () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const offenders: string[] = [];
+  const walk = (dir: string): void => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === "node_modules" || e.name === ".next") continue;
+      const full = join(dir, e.name);
+      if (e.isDirectory()) { walk(full); continue; }
+      if (!/\.tsx?$/.test(e.name) || /\.test\.tsx?$/.test(e.name)) continue;
+      const src = readFileSync(full, "utf8");
+      // A template href whose path ends at the bank segment: `/clients/${x}/bank` with nothing
+      // after it. The registry's own builder appends `?tab=`, so a caller that goes through it
+      // never produces this shape.
+      if (/href=\{`\/clients\/\$\{[^}]+\}\/bank`\}/.test(src)) offenders.push(full);
+    }
+  };
+  walk(join(root, "components"));
+  walk(join(root, "app"));
+  assert.deepEqual(offenders, [], "these spell the bank destination by hand instead of calling accountingHref");
+});
+
 // ── hrefs ────────────────────────────────────────────────────────────────────
 
 test("the four register rows are ?tab= views of ONE workbench, and the object URLs are unchanged", () => {
   const href = (id: string) => accountingHref(A, ACCOUNTING_ITEMS.find((i) => i.id === id)!);
   assert.equal(href("journals"), `/clients/${A}/journals`);
-  assert.equal(href("bank"), `/clients/${A}/bank`);
+  // #1060 — the bank row now NAMES its tab too, outside the registers family: `/bank` is its own
+  // workbench with its own six-way sub-nav (`components/bank/bank-workbench.tsx`), and Matching is
+  // where a Needs-you row's act (accept a payroll or rent settlement candidate) actually lives, so
+  // the registry points there instead of the workbench's own default ("accounts").
+  assert.equal(href("bank"), `/clients/${A}/bank?tab=matching`);
   assert.equal(href("receivables"), `/clients/${A}/registers?tab=aging`);
   assert.equal(href("assets"), `/clients/${A}/registers?tab=fixedAssets`);
   // #640 — plans is its own route now, not a view of the registers workbench.

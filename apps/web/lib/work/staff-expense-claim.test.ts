@@ -24,6 +24,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 
 import {
+  claimAdvanceAccountCode,
   claimAllocations,
   claimTotalCents,
   derivedLines,
@@ -478,6 +479,91 @@ test("wire.allocations: one advance crosses as the 2021 single shape, several as
   assert.equal(toClaimWire(good(), CHART, ENROLLED)?.advanceAllocations, undefined);
 });
 
+// ===========================================================================================
+// #1066 — a confirmed list spanning TWO enrolled accounts, on the wire and in the preview.
+//
+// The independent source of truth for both the wire shape and the derived preview is
+// `packages/db/tests/staff-expense-claim-allocations.test.mjs`'s own worked example
+// (`p931.accounts`, already proved end to end through the real door): Farah holds 1190 and 1191;
+// a claim taking 40,000 sen off an advance on 1190 and 20,500 off one on 1191 must credit BOTH
+// accounts, and the claim row's own `advance_account_code` column carries the HEAD's account.
+// That test's own helper states the rule plainly: the WIRE's per-allocation `account_code` is
+// omitted for the row that already matches the claim's head account, and stated only for a row
+// that does not — `clara._claim_allocations` (0301) defaults a bare row to the claim's own
+// `advance_account_code`, so a row on a DIFFERENT account must say so itself or the door would
+// silently misattribute it as the head's.
+// ===========================================================================================
+
+test("wire.allocations.accounts: a NON-HEAD row on a different enrolled account states its OWN accountCode", () => {
+  const draft = advanceDraft([
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_B, amountCents: 20500 },
+  ]);
+  const wire = toClaimWire(draft, CHART, ENROLLED, new Map([
+    [ADV_A, "1190"], // the head — same account the draft already names.
+    [ADV_B, "1191"], // a SECOND enrolled account, per #1066's widened chooser.
+  ]));
+  assert.deepEqual(wire?.advanceAllocations, [
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_B, amountCents: 20500, accountCode: "1191" },
+  ], "the head row states no account of its own; the second-account row states exactly its own");
+  assert.equal(wire?.advanceAccountCode, "1190", "the claim row's own column stays the HEAD's account");
+});
+
+test("wire.allocations.accounts: a HEAD advance on a SECOND account becomes the claim's own advanceAccountCode", () => {
+  // The preparer typed "1190" at the top (the draft's own default, `advanceDraft`'s "1190"), but
+  // the ONE advance they chose and confirmed is ADV_A, which THIS lookup says lives on "1191" — a
+  // second dedicated account of the same claimant. `clara._claim_allocations`'s single-advance
+  // shape has no per-row account of its own, so the claim's own `advance_account_code` must BE
+  // that advance's real account or the door refuses it as not this client's (0340's tail check).
+  const draft = advanceDraft([{ advanceId: ADV_A, amountCents: 0 }]);
+  const wire = toClaimWire(draft, CHART, ENROLLED, new Map([[ADV_A, "1191"]]));
+  assert.equal(wire?.advanceAccountCode, "1191",
+    "the wire's advanceAccountCode follows the HEAD advance's real account, not the typed default");
+  assert.equal(wire?.advanceAllocations, undefined, "a single advance still crosses as the single shape");
+  assert.equal(wire?.advanceId, ADV_A);
+});
+
+test("wire.allocations.accounts: with no lookup given, behaviour is byte-identical to before this ticket", () => {
+  // The conservative default: an OMITTED 4th argument (every pre-#1066 caller) resolves every row
+  // to the claim's own typed `advanceAccountCode`, exactly as `wire.allocations` above already
+  // pins — this cell exists so that pin and this ticket's widening are proved side by side.
+  const draft = advanceDraft([
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_B, amountCents: 20500 },
+  ]);
+  assert.deepEqual(toClaimWire(draft, CHART, ENROLLED)?.advanceAllocations, [
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_B, amountCents: 20500 },
+  ]);
+});
+
+test("derive.lines.accounts: a confirmed list on TWO accounts previews TWO credit legs, account-code order", () => {
+  // The SAME worked example as the wire cells above, and the SAME independent source of truth:
+  // `p931.accounts` in packages/db/tests/staff-expense-claim-allocations.test.mjs, already proved
+  // end to end through the real door (40,000 sen credits 1190, 20,500 sen credits 1191). A
+  // preparer who confirms this split must see the SAME two legs the door will actually post,
+  // before they submit — a single leg on one account would misstate which books move.
+  const draft = advanceDraft([
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_B, amountCents: 20500 },
+  ]);
+  const lookup = new Map([[ADV_A, "1190"], [ADV_B, "1191"]]);
+  assert.deepEqual(derivedLines(draft, lookup).map((l) => [l.account_code, l.debit_cents, l.credit_cents]), [
+    ["6200", 48000, 0],
+    ["6210", 12500, 0],
+    ["1190", 0, 40000],
+    ["1191", 0, 20500],
+  ]);
+
+  // WITH NO LOOKUP (every pre-#1066 caller, and the same conservative default `toClaimWire` takes):
+  // every row resolves to the claim's own typed `advanceAccountCode`, so the two rows collapse
+  // into the SAME single leg the form has always shown — byte-identical to before this ticket.
+  assert.deepEqual(derivedLines(draft).at(-1)!, {
+    account_code: "1190", debit_cents: 0, credit_cents: 60500, description: "advance_application",
+  });
+});
+
 test("suggest.byDate: the one-click suggestion is OLDEST FIRST and stops at the claim", () => {
   // THE WORKED EXAMPLE, stated rather than recomputed. Three outstanding advances:
   //   Jan 40,000 · Feb 30,000 · Mar 5,000 — against a 60,500 claim.
@@ -514,5 +600,73 @@ test("suggest.byDate: the one-click suggestion is OLDEST FIRST and stops at the 
   assert.deepEqual(suggestAllocationsByDate(tied, 15000), [
     { advanceId: ADV_A, amountCents: 10000 },
     { advanceId: ADV_B, amountCents: 5000 },
+  ]);
+});
+
+// ===========================================================================================
+// FIX ROUND — ADV-04 / L03-SPEC-03 / ADV-05: one reader for "which advance account does this
+// claim actually credit", and a preview that never renders an entry that cannot exist.
+// ===========================================================================================
+
+test("head.account: ONE reader answers which account the claim credits, and validation asks the chart about THAT one", () => {
+  // THE DEFECT (ADV-04). `toClaimWire` sends the head allocation's REAL account, while
+  // `validateClaimDraft` asked the chart about the value the preparer TYPED. A restored draft
+  // naming an advance on an account that has since left the active chart therefore passed
+  // validation with a valid-looking 1190 on screen and was refused `unknown_account` at the door.
+  const draft = advanceDraft([
+    { advanceId: ADV_B, amountCents: 40000 },
+    { advanceId: ADV_A, amountCents: 20500 },
+  ]);
+  // The HEAD (ADV_B) sits on 1191; the typed field still says 1190.
+  const lookup = new Map([[ADV_A, "1190"], [ADV_B, "1191"]]);
+  assert.equal(claimAdvanceAccountCode(draft, lookup), "1191",
+    "the claim credits the head allocation's OWN account, whatever the field says");
+  assert.equal(claimAdvanceAccountCode(draft), "1190",
+    "with no lookup (every pre-#1066 caller) it is the typed field, byte for byte as before");
+  assert.equal(toClaimWire(draft, CHART, ENROLLED, lookup)!.advanceAccountCode, "1191",
+    "…and that is exactly what the wire carries");
+  assert.equal(toClaimWire(draft, new Set(["6200", "6210", "2010", "2000", "1150", "1190"]), ENROLLED, lookup),
+    null, "…and a head on an account that has left the chart assembles NO body at all");
+
+  // …AND THE CHART CHECK NOW ASKS ABOUT THE ACCOUNT THAT WILL BE SENT. 1191 has left the chart:
+  const shrunk = new Set(["6200", "6210", "2010", "2000", "1150", "1190"]);
+  assert.deepEqual(validateClaimDraft(draft, shrunk, ENROLLED, lookup).map((i) => [i.field, i.code]),
+    [["advanceAccountCode", "accountUnknown"]],
+    "the retired account the wire would carry is refused HERE, not by the door");
+  assert.deepEqual(validateClaimDraft(draft, shrunk, ENROLLED).map((i) => [i.field, i.code]), [],
+    "…and with no lookup nothing new is claimed: the typed 1190 is still in the chart");
+  assert.deepEqual(validateClaimDraft(draft, CHART, ENROLLED, lookup), [],
+    "a head on a second account that IS in the chart raises nothing");
+});
+
+test("preview.balance: a list that does not add up previews the ONE balanced leg, never a split that cannot exist", () => {
+  // ADV-05. #1066's per-account grouping previews what the door would post — but only a list that
+  // ADDS UP is a list the door would post at all. A short split (40,000 + 20,000 against a 60,500
+  // claim) is already refused by `allocationsNotExact`; rendering 60,500 of debits against 60,000
+  // of credits beside that message shows a journal that cannot exist.
+  const short = advanceDraft([
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_B, amountCents: 20000 },
+  ]);
+  const lookup = new Map([[ADV_A, "1190"], [ADV_B, "1191"]]);
+  assert.deepEqual(validateClaimDraft(short, CHART, ENROLLED, lookup).map((i) => i.code),
+    ["allocationsNotExact"], "the short split is flagged, exactly as before");
+  const lines = derivedLines(short, lookup);
+  assert.deepEqual(lines.map((l) => [l.account_code, l.debit_cents, l.credit_cents]), [
+    ["6200", 48000, 0],
+    ["6210", 12500, 0],
+    ["1190", 0, 60500],
+  ], "one balanced leg on the head's own account until the split adds up");
+  assert.equal(
+    lines.reduce((n, l) => n + l.debit_cents - l.credit_cents, 0), 0,
+    "the preview balances, whatever the confirmed list happens to hold");
+
+  // AND WHEN IT DOES ADD UP, the per-account split is previewed exactly as #1066 built it.
+  const exact = advanceDraft([
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_B, amountCents: 20500 },
+  ]);
+  assert.deepEqual(derivedLines(exact, lookup).map((l) => [l.account_code, l.credit_cents]), [
+    ["6200", 0], ["6210", 0], ["1190", 40000], ["1191", 20500],
   ]);
 });

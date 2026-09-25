@@ -27,7 +27,8 @@ import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, textOf, setFieldValue, clickButton } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
-import { DocumentRevisionDialog, isRevisableFieldPath } from "./document-revision-dialog";
+import { DocumentRevisionDialog, isRevisableFieldPath, revisableFactLane, REVISABLE_PAYROLL_RUN_PATHS } from "./document-revision-dialog";
+import { KNOWN_FACT_PATHS } from "../../lib/documents/extract-shape";
 import type { SourceRevisionResult } from "../../lib/documents/types";
 import messages from "../../messages/en.json";
 
@@ -153,6 +154,44 @@ test("the closed revisable set is exactly the DB's, and a layout or statement pa
     + "extraction cannot carry it, and the door refuses CLR10 field_path_not_revisable");
   assert.equal(isRevisableFieldPath("pages.1.lines.0"), false, "a layout fragment is not a typed fact");
   assert.equal(isRevisableFieldPath(null), false);
+});
+
+// #1056 — THE LANE ARBITER, the second half of the same wall.
+//
+// `clara._revisable_fact_lane` (migration 0344) is what the door asks now: which fact CHAIN a
+// revision of this path would land in. The surface mirrors it because the chain decides which
+// source version the control has to quote, and a control quoting the other chain's number refuses
+// CLR19 every time it is pressed.
+
+test("1056 · the lane arbiter names the payroll lane, the invoice lane, and nothing else", () => {
+  for (const f of REVISABLE_PAYROLL_RUN_PATHS) {
+    assert.equal(revisableFactLane(f), "payroll", `${f} is a payroll-lane fact`);
+  }
+  assert.equal(revisableFactLane("invoice.total"), "invoice");
+  assert.equal(revisableFactLane("invoice.myinvois_longid"), "invoice");
+  assert.equal(revisableFactLane("payroll.row.gross_pay"), null,
+    "nothing below the run level: the per-employee quotes are summed and discarded at read time, "
+    + "so there is no region to revise and no prior value to replace");
+  assert.equal(revisableFactLane("payroll.run.bonus"), null, "a path outside the closed set");
+  assert.equal(revisableFactLane("statement.closing_balance"), null);
+  assert.equal(revisableFactLane("pages.1.lines.0"), null);
+  assert.equal(revisableFactLane(null), null);
+
+  // THE INVOICE SET IS NOT WIDENED. The arbiter asks the invoice predicate; it does not absorb it,
+  // which is the same shape migration 0344 takes in the database.
+  assert.equal(isRevisableFieldPath("payroll.run.gross_pay"), false);
+});
+
+test("1056 · DRIFT CELL: the revisable payroll set is exactly the payroll paths this app labels", () => {
+  // Two copies of #945's eleven run-level questions live in this app: `KNOWN_FACT_PATHS` (which
+  // decides whether a row gets a human label) and the list above (which decides whether it gets a
+  // control). A path in one and not the other is a row that is either labelled and uncorrectable
+  // or correctable and unlabelled, and both are wrong.
+  const labelled = KNOWN_FACT_PATHS.filter((p) => p.startsWith("payroll."));
+  assert.deepEqual([...REVISABLE_PAYROLL_RUN_PATHS].sort(), [...labelled].sort());
+  // "ticket 945", spelled out: the lint rule that bans a raw colour cannot tell `#945` from a hex
+  // literal and says so in its own message, and the fix it recommends is to reword the string.
+  assert.equal(REVISABLE_PAYROLL_RUN_PATHS.length, 11, "ticket 945's eleven run-level questions");
 });
 
 test("the dialog states the field path, the current value and the source version before the confirm", async () => {

@@ -333,11 +333,18 @@ test("652.form: a SERVER field path becomes a focused control, and the refusal r
   }
 });
 
+// THE SENTENCE THIS FIXTURE THROWS IS THE DOOR'S OWN. The form calls
+// `clara.create_accrual_adjustment`, which nests `clara.create_accounting_plan`, so the
+// authority_ref_unresolved sentence a person actually sees says "this PLAN cites". The older
+// "this accrual cites" spelling belonged to `clara._accrual_plan_core` alone, on the machine lane;
+// #1080 (0331) folded that body onto the shared predicate and its tail asserts the old sentence
+// now lives in no clara body at all. Restated here so the fixture quotes something the estate can
+// really raise (adversarial/spec round 2026-09-25, ADV-L01-07 / SPEC-07).
 test("652.form: a form-level refusal is a persistent banner carrying the code and reason", async () => {
   const h = await renderComponent(App({
     submit: async () => {
       throw refusal("CLR10", "authority_ref_unresolved",
-        "the instruction this accrual cites does not exist for this client");
+        "the instruction this plan cites does not exist for this client");
     },
   }));
   try {
@@ -347,7 +354,7 @@ test("652.form: a form-level refusal is a persistent banner carrying the code an
     assert.match(text, /That was refused/);
     assert.match(text, /CLR10/);
     assert.match(text, /authority_ref_unresolved/);
-    assert.match(text, /the instruction this accrual cites does not exist for this client/);
+    assert.match(text, /the instruction this plan cites does not exist for this client/);
   } finally {
     await h.unmount();
   }

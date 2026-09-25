@@ -37,6 +37,7 @@ import {
   replaceRecognitionSchedule, recognitionScheduleSupersession, liveRecognitionScheduleCountFor,
   DR_CORRECTION_REASON, DR_CORRECTION_AXIS, DR_REPLACE_SIG,
 } from "./revenue-recognition-fixtures.mjs";
+import { callerContractCode } from "./internal-refusal-errcode-fixtures.mjs";
 // THE STANDARD-CHART CELL's own doors, from the chart batteries that own them: a client born
 // through clara.create_client and the onboarding commit, and clara.apply_coa_template against
 // the estate's CURRENT published template. No surgery, and no chart row minted here.
@@ -359,6 +360,21 @@ cell("p941.create.refusals — a draft receipt, a receipt with no liability leg,
   assert.equal(notEnrolled.detail.panel, "client_registers_prepayment_accounts");
   assert.equal(await recognitionScheduleCountFor(scene.receipt), 0, "…and it configured nothing");
 
+  // #1114 — THE SAME PARTITION ON THIS LANE. `deferred_revenue_source_unfit` is a refusal a
+  // bookkeeper acts on (it names the enrolment door and the Registers panel) and it keeps CLR10;
+  // the OBO twin's null author is an internal wiring error nobody is ever shown, and it answers
+  // CLR44. Driven through the twin because that is the door the brief names.
+  const wiring = await assertPair(await callerContractCode(), "invalid_author",
+    () => createRecognitionScheduleFor({
+      client: scene.client, author: null, sourceEntry: scene.receipt,
+      revenueAccount: scene.revenue, authorityRef: scene.authorityRef,
+      opKey: opk("p941-refuse-null") }),
+    "the deferred-revenue twin, handed no author at all");
+  assert.equal(notEnrolled.err.code, CLR.badRequest,
+    "the account-not-enrolled refusal is the one a surface renders, and it stays on CLR10");
+  assert.notEqual(wiring.err.code, notEnrolled.err.code,
+    "#1114 AC1 on the deferred-revenue lane: the two refusals must differ by errcode alone");
+
   // …AND IT IS A GATE, NOT A BAN: enrolling the very same account makes the very same call
   // succeed. A refusal a person cannot clear would be a wall, and this one is a door.
   await enrolDeferredAccount(scene.bob, { client: scene.client, account: scene.deferred });
@@ -652,7 +668,12 @@ cell("p941.obo.authority — the twin refuses a null author by name, answers a N
 
   // 1 — A NULL AUTHOR is its own mistake, answered before the client is read, so it can leak
   //     nothing about which clients exist.
-  const nullAuthor = await assertPair(CLR.badRequest, "invalid_author",
+  //
+  //     #1114 — AND IT IS NOT A `bad-request`. This door is `clara_runtime` ONLY and its caller
+  //     always holds the actor, so a null is the calling PROGRAM's fault: nothing to show anyone,
+  //     no remedy to offer. CLR44, the caller-contract class, and the distinctness from this
+  //     lane's own renderable roster refusal is asserted at the end of the cell.
+  const nullAuthor = await assertPair(await callerContractCode(), "invalid_author",
     () => call({ author: null }), "an OBO configuration naming no human at all");
   assert.equal(nullAuthor.detail.field, "author");
 
@@ -764,7 +785,10 @@ cell("p941.read.recorded_term — the machine-lane read answers the RECORDED ter
   await assertPair(CLR.notFound, DR_REASON.sourceNotFound,
     () => readRecognitionSourceFor({ ...scope, firm: nowhere() }),
     "reading a recognition source under another firm's scope");
-  await assertPair(CLR.badRequest, DR_REASON.readScopeRequired,
+  // #1114 — THE SCOPE REFUSAL IS A CALLER-CONTRACT FAULT (CLR44), not a bad request a surface
+  // renders. Same class as the null author on this lane's own twin; a different class from
+  // `deferred_revenue_source_unfit`, which keeps CLR10 because a bookkeeper acts on it.
+  await assertPair(await callerContractCode(), DR_REASON.readScopeRequired,
     () => readRecognitionSourceFor({ ...scope, client: null }),
     "reading with no client in scope");
 

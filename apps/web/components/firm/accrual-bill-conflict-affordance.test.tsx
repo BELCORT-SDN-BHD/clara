@@ -22,6 +22,7 @@ import { renderComponent, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import messages from "../../messages/en.json";
 import { AccrualBillConflictAffordance } from "./accrual-bill-conflict-affordance";
+import { NEEDS_YOU_AFFORDANCES } from "./needs-you-affordances";
 import type { ReviewQueueRow } from "@/lib/firm/needs-you";
 
 type Stub = { tagName?: string } & Record<string, unknown>;
@@ -101,12 +102,18 @@ test("AccrualBillConflictAffordance: a revenue accrual's item says revenue — t
   }
 });
 
-test("AccrualBillConflictAffordance: the two remedies say what each one settles, so a skip that leaves this period flagged is not read as a failure (ADV-02)", async () => {
+test("AccrualBillConflictAffordance: the THREE remedies say what each one settles, so a skip that leaves this period flagged is not read as a failure (ADV-02, ticket 1073)", async () => {
   const h = await renderComponent(App());
   try {
-    assert.deepEqual(buttons(h), ["Reverse now", "Skip this period's next occurrence"]);
+    assert.deepEqual(buttons(h),
+      ["Reverse now", "Reverse this period only", "Skip this period's next occurrence"]);
     assert.match(h.text(), /Reverse now settles this period/);
     assert.match(h.text(), /Skipping affects the NEXT period only/);
+    // #1073 — the third remedy is a SCOPED act, and the sentence says what makes it different
+    // without claiming a different ledger outcome: on this lane it leaves the same amount on the
+    // books (packages/db/tests/plan-occurrence-reversal-door.test.mjs, p1073.one_period).
+    assert.match(h.text(), /books the reversing entry for this period alone/);
+    assert.match(h.text(), /same amount on the books/);
   } finally {
     await h.unmount();
   }
@@ -115,8 +122,8 @@ test("AccrualBillConflictAffordance: the two remedies say what each one settles,
 test("AccrualBillConflictAffordance: once the plan is ended the item stays but offers no control whose only outcome is a refusal — it gives the reason instead (ADV-03)", async () => {
   const h = await renderComponent(App({ accrual_plan_status: "ended" }));
   try {
-    assert.deepEqual(buttons(h), [], "neither plan-lane door can succeed, so neither is offered");
-    assert.match(h.text(), /This plan has ended, so neither remedy is available/);
+    assert.deepEqual(buttons(h), [], "no plan-lane door can succeed, so none of them is offered");
+    assert.match(h.text(), /This plan has ended, so none of the remedies is available/);
     assert.match(h.text(), /journal entry of its own/, "…and says what a bookkeeper can still do");
     // The item itself is NOT hidden: the double count it names is still on the books.
     assert.match(h.text(), /Accrued period: 2026-07-31/);
@@ -129,8 +136,16 @@ test("AccrualBillConflictAffordance: a paused plan reads as paused, not as ended
   const h = await renderComponent(App({ accrual_plan_status: "paused" }));
   try {
     assert.deepEqual(buttons(h), []);
-    assert.match(h.text(), /This plan is paused, so neither remedy is available/);
+    assert.match(h.text(), /This plan is paused, so none of the remedies is available/);
   } finally {
     await h.unmount();
   }
+});
+
+test("AccrualBillConflictAffordance: the Needs-you inbox mounts THIS component for the conflict row, so a remedy added here reaches that surface (ticket 1073, AC1)", () => {
+  // AC1 asks for the third remedy on BOTH surfaces. They are one component by construction: the
+  // firm-wide inbox reaches it through this closed registry, and the Accruals page's own conflict
+  // section mounts it directly (components/accruals/accrual-bill-conflicts.tsx — driven for real
+  // by the browser walk `accrual.walk.billConflict`, which clicks the new control there).
+  assert.equal(NEEDS_YOU_AFFORDANCES.accrual_bill_conflict, AccrualBillConflictAffordance);
 });

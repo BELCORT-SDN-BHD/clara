@@ -73,6 +73,14 @@ export type WorkListRow = {
    *  of operations is not a ledger" stands). */
   claim_id: string | null;
   claimant_label: string | null;
+  /** #1069 — how many advances a staff expense claim discharges, projected by migration 0341 on
+   *  BOTH doors from `clara.staff_expense_claim_allocations`' own confirmed rows (#931/0301).
+   *  NULL for any Work that is not a claim, the same honest absence `claim_id` carries; 0 for a
+   *  claim that discharges no advance at all (a reimbursement, an already-settled claim); 1 for a
+   *  single-advance claim, whether backfilled by 0301 or freshly admitted. It is here, on the
+   *  LIST's own projection, because the reviewer it is for is the one scanning the list — the
+   *  point of the ticket is that they learn it WITHOUT opening the claim. */
+  allocation_count: number | null;
   memo: string | null;
   posting_date: string | null;
   currency: string | null;

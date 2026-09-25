@@ -228,6 +228,74 @@ export function frontierRuleViolations(frontierVersion, carried = {}, rules = FR
 }
 
 /**
+ * CONTRACT IDS THIS IMAGE DECLARES BEFORE THE MIGRATION THAT WILL REQUIRE THEM HAS A RULE — the
+ * deliberate, temporary state `lib/runtime-contracts.mjs`'s own rule 3 already allows: a contract
+ * can ship in `RUNTIME_CONTRACTS` before the migration that makes reading it mandatory lands a row
+ * in `FRONTIER_RULES`. Listing an id here is the record that the gap is INTENDED right now — an id
+ * that is neither ruled nor listed here is one `contractsMissingFrontierRule` (#1129) refuses to
+ * pass over in silence.
+ */
+export const CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE = Object.freeze([]);
+
+/**
+ * THE OTHER DIRECTION OF THE SAME TABLE (#1129, a follow-up from #1035's own report). Once the
+ * `FRONTIER_RULES` row lands, `frontierRuleViolations` catches it naming a contract this image
+ * never declares. Nothing before this caught the reverse: `RUNTIME_CONTRACTS` growing an entry
+ * whose migration NEVER gets a rule — legal on its own (an unruled contract refuses nobody, so it
+ * is not itself a defect), but silent, and a roster entry that was meant to get a rule eventually
+ * could sit forever with nothing reminding anyone it still owed one.
+ *
+ * A contract id comes back from this function when its roster entry has NEITHER a `FRONTIER_RULES`
+ * row naming it in `requiresContracts` NOR an entry in `exceptions`. The check does not require the
+ * SAME migration number on both sides — only that some rule, at some frontier, will eventually
+ * refuse an image that does not carry the marker; which migration a contract's rule lands at is the
+ * cutover's own choice, not a constraint this guard enforces.
+ *
+ * THIS MODULE DOES NOT IMPORT `RUNTIME_CONTRACTS` ITSELF, for the same boundary reason the rule
+ * table above keeps its ids bare rather than prefixed: `lib/rollback-preflight.mjs` ships inside the
+ * runtime bundle (`plugins/startWorld.ts` imports its boot census), and a roster this module pulled
+ * in on its own would ship there too, unused, rather than staying the caller's own choice of which
+ * roster to compare. The caller (a test, a lint step) passes `RUNTIME_CONTRACTS` in.
+ *
+ * @param {ReadonlyArray<{id:string}>} contracts the runtime-contract roster to check (typically
+ *        `RUNTIME_CONTRACTS` from `lib/runtime-contracts.mjs`)
+ * @param {ReadonlyArray<{requiresContracts?:ReadonlyArray<string>}>} [rules]
+ * @param {ReadonlyArray<string>} [exceptions]
+ * @returns {string[]} ids with neither a rule nor a listed exception, in roster order
+ */
+export function contractsMissingFrontierRule(contracts, rules = FRONTIER_RULES, exceptions = CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE) {
+  if (!Array.isArray(contracts)) throw new TypeError("contractsMissingFrontierRule needs a `contracts` array");
+  const ruled = ruledContractIds(rules);
+  const excepted = new Set(exceptions);
+  return contracts.filter((c) => !ruled.has(c.id) && !excepted.has(c.id)).map((c) => c.id);
+}
+
+function ruledContractIds(rules) {
+  return new Set(rules.flatMap((r) => r.requiresContracts ?? []));
+}
+
+/**
+ * THE OTHER END OF THE SAME EXCEPTION LIST (#1129, review round ADV-L06-09) — every id in
+ * `exceptions` that now HAS a `FRONTIER_RULES` row naming it, i.e. every exception that has
+ * outlived its reason.
+ *
+ * `contractsMissingFrontierRule` alone was write-only. An entry is listed there precisely because
+ * its rule has not landed YET, so the NORMAL end of its life is the migration that lands the rule —
+ * and nothing told anyone the entry was dead afterwards. That is the same "sits forever, silently"
+ * failure the roster half exists to catch, moved onto the list that excuses it: the list could
+ * quietly accumulate ids nobody could tell apart from live ones. With both directions checked, the
+ * PR that adds a contract's rule is the PR that has to drop its exception.
+ *
+ * @param {ReadonlyArray<{requiresContracts?:ReadonlyArray<string>}>} [rules]
+ * @param {ReadonlyArray<string>} [exceptions]
+ * @returns {string[]} excepted ids that are ruled after all, in the exception list's own order
+ */
+export function deadContractRuleExceptions(rules = FRONTIER_RULES, exceptions = CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE) {
+  const ruled = ruledContractIds(rules);
+  return [...exceptions].filter((id) => ruled.has(id));
+}
+
+/**
  * ONE DESCRIPTION OF ONE VIOLATION — the reason it is refused under, the thing the applied schema
  * requires, the verb by which an image has it, and what the target does not do with it.
  *

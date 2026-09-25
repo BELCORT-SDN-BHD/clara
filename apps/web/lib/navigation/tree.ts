@@ -135,6 +135,9 @@ export type RegisterTab =
  *  is the aging view, and the sidebar must mark the aging row current for it. */
 export const REGISTERS_DEFAULT_TAB: RegisterTab = "aging";
 
+/** The `?tab=` values `components/bank/bank-workbench.tsx` accepts (#657's six-way sub-nav). */
+export type BankTab = "accounts" | "statements" | "matching" | "exceptions" | "reconciliation" | "agency";
+
 type Floored = {
   readonly minimumRole: MemberRole;
   readonly operatorOnly?: true;
@@ -183,8 +186,15 @@ export type ClientLeaf = Floored & {
 export type AccountingItem = Floored & {
   readonly id: AccountingItemId;
   readonly segment: string;
-  /** Present only for the four rows that are `?tab=` views of the registers workbench. */
-  readonly tab?: RegisterTab;
+  /**
+   * Present for the four rows that are `?tab=` views of the registers workbench (`RegisterTab`),
+   * plus, since #1060, the `bank` row: its own workbench (`components/bank/bank-workbench.tsx`)
+   * carries a six-way sub-nav of its own (`BankTab`), and the registry names the Matching view
+   * so a Needs-you row (or any other caller) can deep-link there instead of the bank surface's
+   * own default ("accounts"). No new route is added either way — `?tab=` is still a query, never
+   * a segment.
+   */
+  readonly tab?: RegisterTab | BankTab;
   readonly labelKey: `accounting.${AccountingItemId}`;
   readonly icon: NavIconName;
   /** Renders a "Beta" badge beside the row. The page states its own boundary. */
@@ -377,7 +387,11 @@ export const ACCOUNTING_ITEMS: readonly AccountingItem[] = [
   // The advance half stays where it is, at `registers?tab=staffAdvances`, and the claim register
   // links across to it rather than re-drawing a statement panel that already ships.
   { id: "staffExpenseClaims", segment: "accounting/claims", labelKey: "accounting.staffExpenseClaims", icon: "receipt", minimumRole: "viewer" },
-  { id: "bank", segment: "bank", labelKey: "accounting.bank", icon: "bank", minimumRole: "viewer" },
+  // #1060 — carries `tab: "matching"` (the bank workbench's own default is "accounts", not this)
+  // so a Needs-you row lands a professional directly on the view where the act it names actually
+  // lives, exactly as `assets` below already points at `fixedAssets` rather than the registers
+  // workbench's own default ("aging").
+  { id: "bank", segment: "bank", tab: "matching", labelKey: "accounting.bank", icon: "bank", minimumRole: "viewer" },
   { id: "receivables", segment: "registers", tab: "aging", labelKey: "accounting.receivables", icon: "scale", minimumRole: "viewer" },
   { id: "assets", segment: "registers", tab: "fixedAssets", labelKey: "accounting.assets", icon: "boxes", minimumRole: "viewer" },
   // #640 — REPOINTED from `registers?tab=adjustments` to its own route. Plans are no longer a

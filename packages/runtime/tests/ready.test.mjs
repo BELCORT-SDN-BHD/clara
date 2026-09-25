@@ -11,7 +11,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as rig from "./rig.mjs";
-import { checkReadiness } from "../lib/health.mjs";
+import { checkReadiness, _heartbeatStaleMsForTest } from "../lib/health.mjs";
 import { _resetStorageProbeCacheForTest, _waitForStorageProbeSettleForTest } from "../lib/storage-probe.mjs";
 import { makePool } from "../lib/relay.mjs";
 import { _resetPoolErrorContractForTest, poolErrorHealth } from "../lib/pool-error-contract.mjs";
@@ -647,6 +647,39 @@ test("#617 fault: settleLaneUntil keeps the world/control heartbeats fresh acros
     else process.env.CLARA_LANE_PROBE_INTERVAL_MS = prevInterval;
     if (prev === undefined) delete process.env.CLARA_START_WORLD;
     else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+// #1128 — the OTHER half of the trap the comment above names. `HEARTBEAT_STALE_MS` used to be a
+// plain top-level `const`, read from `CLARA_HEARTBEAT_STALE_MS` exactly once at module load,
+// before any test body runs — so setting the env var from inside a test changed nothing, and this
+// codebase hit that directly while building #1033's own fix
+// (reports/wave4-lane07-ticket1033.md, "Attempt 1"). `health.mjs` now reads it per call, the way
+// `lane-probe.mjs`'s `intervalMs()`/`cycleMs()` already do. A beat aged 5 seconds is STALE under a
+// genuinely-shrunk 3-second window and FRESH under the real, unshrunk 30-second default — the two
+// can only disagree if the override set HERE, inside the test body, actually reached the check.
+test("#1128 fault: CLARA_HEARTBEAT_STALE_MS set INSIDE the test body now takes effect", { skip }, async () => {
+  const prevWorld = process.env.CLARA_START_WORLD;
+  const prevWindow = process.env.CLARA_HEARTBEAT_STALE_MS;
+  process.env.CLARA_START_WORLD = "1";
+  process.env.CLARA_HEARTBEAT_STALE_MS = "3000";
+  try {
+    assert.equal(_heartbeatStaleMsForTest(), 3000, "mandatory setup: the module resolves the shrunk value at all");
+    await setBeat("world", "now() - interval '5 seconds'");
+    await setBeat("control", "now()");
+    const r = await checkReadiness();
+    assert.equal(
+      r.checks.world.ok,
+      false,
+      `a 5s-old beat must fail a genuinely-shrunk 3s window — got ${JSON.stringify(r.checks.world)}; ` +
+        "true here would mean the override never reached checkReadiness (the #1128 trap)",
+    );
+    assert.equal(r.ready, false, "world dead is a readiness failure");
+  } finally {
+    if (prevWindow === undefined) delete process.env.CLARA_HEARTBEAT_STALE_MS;
+    else process.env.CLARA_HEARTBEAT_STALE_MS = prevWindow;
+    if (prevWorld === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prevWorld;
   }
 });
 

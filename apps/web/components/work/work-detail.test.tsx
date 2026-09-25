@@ -27,6 +27,7 @@ import type { WorkDetailData } from "../../lib/work/reads";
 import type { AccountingWorkRow } from "../../lib/work/types";
 import type { AgentInterruptionRow } from "../../lib/journals/types";
 import type { EntryLinkRow } from "../../lib/work/evidence";
+import type { WorkClaimOrigin } from "../../lib/work/staff-expense-claim-reads";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
@@ -148,6 +149,11 @@ function App(props: {
   /** #634 — the entry's links read. DEFAULTED so no cell reaches a real socket:
    *  an empty answer is "the read succeeded and this entry has no links row". */
   loadLinks?: (clientId: string, entryIds: readonly string[]) => Promise<EntryLinkRow[]>;
+  /** #638/#1069 — `clara.get_work_claim_origin`, injected so a cell can render the identity
+   *  block's claim line (and its `allocation_count`) without a socket. Undefined leaves the
+   *  component's own read in place, exactly as `loadTradeInvoice` does — which is what keeps the
+   *  door-census cells above MEASURING it rather than being shielded from it. */
+  loadClaimOrigin?: (workId: string, opts?: unknown) => Promise<unknown>;
   /** #655 — `clara.get_trade_invoice`, injected so a cell can render the AC5 link block without a
    *  socket. Undefined leaves the component's own read in place, which is what the door-census
    *  cells above measure. */
@@ -179,6 +185,7 @@ function App(props: {
       scope: { roleRank: BOOKKEEPER_RANK, ...props.scope },
       storage: props.storage ?? null,
       loadLinks: (props.loadLinks ?? (async () => [])) as never,
+      ...(props.loadClaimOrigin === undefined ? {} : { loadClaimOrigin: props.loadClaimOrigin as never }),
       ...(props.loadTradeInvoice === undefined ? {} : { loadTradeInvoice: props.loadTradeInvoice as never }),
       ...(props.loadDuplicateAck === undefined ? {} : { loadDuplicateAck: props.loadDuplicateAck as never }),
       loadBatchOrigin: (props.loadBatchOrigin ?? (async () => null)) as never,
@@ -1632,6 +1639,84 @@ function stateDoorCalls(calls: DoorCall[]): DoorCall[] {
 function claimOriginCalls(calls: DoorCall[]): DoorCall[] {
   return calls.filter((c) => c.url.includes("/rest/v1/rpc/get_work_claim_origin"));
 }
+
+/** The full NOT-NULL entry shape `PostedEntrySection` needs to mount at all (`renderPosted` is
+ *  `null` when `entry === null`) — the same template the 655 AC5/AC12 cell below uses. The claim
+ *  origin itself comes from `loadClaimOrigin`, injected separately by each cell below. */
+async function postedEntryData(): Promise<WorkDetailData> {
+  return data({
+    work: workRow({
+      status: "completed",
+      result: { entry_id: ENTRY, receipt_id: "receipt-1", posted_at: "2026-09-01T02:00:00Z" },
+    }),
+    entry: {
+      id: ENTRY, client_id: CLIENT, status: "approved", posting_date: "2026-03-31",
+      memo: "1069 probe", origin: "agent", document_id: null, coding_kind: null,
+      revision_token: "rev", maker_actor: null, checker_actor: null,
+      approved_at: "2026-03-31T02:00:00Z", reversal_of: null, reversed_by: null,
+      reversal_reason: null, withdrawn_at: null, withdrawal_reason: null,
+      created_at: "2026-03-31T02:00:00Z",
+    },
+  });
+}
+
+/** One `clara.get_work_claim_origin` envelope, in the door's own shape — every field the 655
+ *  cell's `invoice` fixture is patterned on, `allocation_count` (#1069) included. */
+function claimOrigin(over: { allocation_count: number }): WorkClaimOrigin {
+  return {
+    claim_id: "44444444-4444-4444-8444-444444444444",
+    settlement: "advance_application",
+    claimant_enrolment_id: "55555555-5555-4555-8555-555555555555",
+    claimant_label: "Farah binti Idris",
+    amount_cents: 60500,
+    currency: "MYR",
+    incurred_date: "2026-03-04",
+    posting_date: "2026-03-31",
+    item_count: 2,
+    pending_item_count: 0,
+    corrects_claim_id: null,
+    corrected_by_claim_id: null,
+    ...over,
+  };
+}
+
+function testIdNode(h: { find: (p: (n: Stub) => boolean) => Stub | null }, testId: string): Stub | null {
+  return h.find((n) => {
+    const get = (n as { getAttribute?: (k: string) => string | null }).getAttribute;
+    return typeof get === "function" && get.call(n, "data-testid") === testId;
+  });
+}
+
+test("1069: a single-advance claim's card is unchanged from today — no allocation-count line", async () => {
+  const h = await renderComponent(App({
+    load: postedEntryData,
+    loadClaimOrigin: async () => claimOrigin({ allocation_count: 1 }),
+  }));
+  try {
+    await settleUntil(h, () => testIdNode(h, "work-claim-origin") !== null,
+      "the claim origin line to render");
+    assert.match(h.text(), /Farah binti Idris/, "1069: the base origin line still renders");
+    assert.equal(testIdNode(h, "work-claim-allocation-count"), null,
+      "1069: a single-advance claim (allocation_count 1) renders NO allocation-count line -- byte-identical to today's card");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("1069: a multi-advance claim's card names how many advances it settles", async () => {
+  const h = await renderComponent(App({
+    load: postedEntryData,
+    loadClaimOrigin: async () => claimOrigin({ allocation_count: 3 }),
+  }));
+  try {
+    await settleUntil(h, () => testIdNode(h, "work-claim-allocation-count") !== null,
+      "the allocation-count line to render");
+    assert.match(h.text(), /Farah binti Idris/, "1069: the base origin line still renders beside it");
+    assert.match(h.text(), /settles 3 advances/, "1069: the count names how many advances the claim settles");
+  } finally {
+    await h.unmount();
+  }
+});
 
 /** #655 — `clara.get_trade_invoice` is the SAME SHAPE of read as `get_work_claim_origin` above and
  *  is here for the same reason: a trade invoice is admitted with purpose `journal_entry`, so the

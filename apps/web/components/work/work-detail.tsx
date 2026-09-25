@@ -853,6 +853,19 @@ function PostedEntrySection({
                     claimant: claimOrigin.claimant_label,
                     settlement: tsec(`settlement.options.${claimOrigin.settlement}`),
                   })}
+                  {/* #1069 — HOW MANY ADVANCES this claim discharges, named only when there is
+                      more than one to name: a single-advance claim's card is unchanged from
+                      today, exactly as the ticket asks. `allocation_count` is 0 for a claim that
+                      discharges no advance at all, so this never renders for a reimbursement or
+                      an already-settled claim either. */}
+                  {claimOrigin.allocation_count > 1 ? (
+                    <span
+                      className="block text-sm text-muted-foreground"
+                      data-testid="work-claim-allocation-count"
+                    >
+                      {tsec("origin.allocationCount", { count: claimOrigin.allocation_count })}
+                    </span>
+                  ) : null}
                 </dd>
               </>
             )}

@@ -1,0 +1,105 @@
+{
+  "lens": "adversarial",
+  "lane": "waveS-lane05",
+  "branch": "riders/wS-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "fixed_point": "7bc5a710f",
+  "diff": "git diff 7bc5a710f...HEAD  (31 files, +4312 / -53)",
+  "commits": 17,
+  "tickets": [1056, 1090, 1092, 1093],
+  "database_driven": "clara_l03 @ 127.0.0.1:55743, chain 312 files, head 0346_fa_retired_policy_agent_read",
+  "verdict": "accept-with-fixes",
+  "reruns": [
+    "packages/db/tests/fa-retired-policy-agent-read.test.mjs + depreciation-policy-knowledge.test.mjs — 10/10 pass, 0 skipped (focused, no own gate preloaded)",
+    "packages/db/tests/payroll-fact-revision.test.mjs — 11/11 pass, 0 skipped",
+    "packages/runtime/tests/fa-particulars-proposal-unit.test.mjs — 35/35 pass",
+    "apps/web/tests/firm-scope-db-pins.test.ts — 22/22 pass (rule (d): three new migration files need no corpus entry)"
+  ],
+  "findings": [
+    {
+      "id": "ADV-L05-01",
+      "ticket": 1056,
+      "severity": "major",
+      "kind": "dead-end-outcome / false claim in the migration header",
+      "title": "A corrected payroll run goes from BLOCKED to READY and can never be posted; the Needs-you row does not clear, it tells the person to re-file the payslip, which discards the correction",
+      "evidence": "Driven end to end on clara_l03 (fresh world, month 2027-01, the S5 fixture shape). BEFORE: verdict blocked/channels_agree, Needs-you row payroll_posting_blocked \"Payroll run January 2027 was not posted: the two readings of this payslip disagree (payroll.run.gross_pay). Check the page and re-file it.\". After ONE clara.revise_document_fact on payroll.run.gross_pay: verdict 'ready', rung null, entries on the document = [], payroll_facts tasks = [{status:done, version_n:1}], and the Needs-you row is STILL THERE with the sentence \"Payroll run January 2027 is ready to post but no entry exists yet -- re-file the payslip to post it.\" (amount_cents 576145). Three measured facts make that remedy unreachable-or-lossy: (a) clara._post_payroll_run has exactly ONE caller, clara.persist_payroll_facts, and only clara_fn_owner may execute it (measured: pg_proc scan over prosrc + has_function_privilege); (b) clara._enqueue_invoice_facts_core short-circuits 'already_completed' on a done payroll_text_facts row, so this document is never read a second time — every payroll_facts task on this database is version_n 1 (12/12 sampled); (c) re-filing means a NEW document, whose extraction chain does not carry the correction just made. 0344's own header states the opposite and cites 0297:1129 for it: \"the Needs-you row `payroll_posting_blocked` included, which is why that row 'clears itself when the block does'\". Measured: the row's WHERE clause in clara.list_review_queue is 'a done payroll_text_facts row exists AND no live draft/approved entry on the filing' — it does not test the verdict at all, so it cannot clear when the block clears; it only changes its sentence. The battery's own S5 cell asserts verdict==='ready' and entries===[] and stops there; no cell reads the Needs-you sentence after a correction.",
+      "required_fix": "Either (1) make the corrected reading postable — a named door that re-runs clara._post_payroll_run for a document whose verdict is 'ready' and whose filing carries no live entry (the ticket's own words allow it: \"whether a correction re-runs the posting verdict\"), or (2) keep the refusal to post but correct BOTH sentences so the person is not sent to an act that throws their correction away: the verdict's 'ready' arm and 0344's header claim about the Needs-you row clearing itself. A cell must drive the post-correction Needs-you sentence, not only the verdict."
+    },
+    {
+      "id": "ADV-L05-02",
+      "ticket": 1090,
+      "severity": "major",
+      "kind": "stale authority / bypass of the estate's own knowledge read",
+      "title": "The successor-contract knowledge read ignores a record's effective window, so a depreciation note that expired in 2024 grounds a 2026 proposal under a present-tense sentence",
+      "evidence": "Proven inside ONE transaction that was rolled back, on clara_l03. An admin captured depreciation_policy for a client through the real door with p_effective_from=2024-01-01, p_effective_to=2024-12-31, value {method: straight_line, useful_life_months: 24}. The EXACT read the successor contract states (packages/runtime/lib/fa-particulars-proposal.ts:494-495, and tests/depreciation-policy-knowledge.test.mjs's READ constant, lines 101-103) — `... where client_id=$1 and knowledge_key='depreciation_policy' and state='live'` — returned it (rowCount 1, effective_to 2024-12-31, state live); mapDepreciationKnowledgeRows mapped it; deriveFaParticularsProposal for an acquisition dated 2026-09-01 returned basis ['client_knowledge','acquisition_date','firm_default_residual'], useful_life_months 24, with the reason line \"This client's record states \u201cexpired basis\u201d for this asset account, so I propose straight line over 24 months.\" — present tense, about a window that closed 21 months earlier. MYT today measured as 2026-09-25. The estate already owns the correct read: clara.retrieve_knowledge(uuid,text,date,text[],integer,uuid) computes `v_as_of := coalesce(p_as_of, (now() at time zone 'Asia/Kuala_Lumpur')::date)`, marks every windowed row in_effect against it, requires a stated purpose, and is granted to clara_runtime (measured: only clara_runtime and clara_fn_owner hold EXECUTE). The contract read bypasses all of it, including the work-knowledge-read receipt (clara.record_work_knowledge_read) that clara.work_knowledge_drift depends on, so a proposal grounded this way leaves no reliance trail. The battery's own CAPTURE wrapper takes p_effective_from/p_effective_to and NO cell (dk.01-dk.07) ever passes them.",
+      "required_fix": "Add the effective-window terms to FA knowledge read in the successor contract and in tests/depreciation-policy-knowledge.test.mjs's READ — `and (effective_from is null or effective_from <= $2) and (effective_to is null or effective_to >= $2)` with $2 the MYT calendar day — or state in the contract why the successor step reads the table directly instead of clara.retrieve_knowledge, and say what replaces the drift receipt. Add one cell driving an expired note and asserting it grounds nothing."
+    },
+    {
+      "id": "ADV-L05-03",
+      "ticket": 1093,
+      "severity": "major",
+      "kind": "unproven at the wire / silent failure mode",
+      "title": "AC1's server-side jsonb-path PostgREST filter is the first of its kind in the app and is never driven against a real PostgREST; if the wire round trip is wrong the proposal pre-fill silently turns off everywhere",
+      "evidence": "apps/web/lib/registers/fa-particulars-proposal.ts:165-170 now sends filters {\"source_ref->>asset_id\": \"eq.<uuid>\", \"source_ref->>kind\": \"eq.fixed_asset\"} through getRows -> buildPathAndQuery (apps/web/lib/read.ts:102-111), which builds them with URLSearchParams, so the key leaves as `source_ref-%3E%3Easset_id`. Measured: this is the ONLY jsonb-path filter key in the whole app (`grep -rn '\"[a-z_]*->>[a-z_]*\"' apps/web/lib apps/web/components` returns exactly these two lines plus the test that asserts them) — the ticket itself said \"its query-string encoding through the app's URL-building helper had no existing precedent\". What is actually proven: the db battery runs the EQUIVALENT predicate as raw SQL under the human role, and the web cell asserts the encoded query STRING. What is not proven anywhere: that a real PostgREST decodes that key and applies the filter. No e2e mock serves /rest/v1/agent_interruptions for this read (agent_interruptions branches exist only in agentic-finish-mock, chat-parity-mock, journal-work-mock, journals-table-mock, work-knowledge-mock — none for the fixed-asset proposal), and the e2e stack is hand-written mocks, not PostgREST. The failure mode is silent by construction: loadAssetParticularsProposal catches everything and returns null, and the same commit DELETED the client-side `if (ref.asset_id !== assetId) continue` belt, so a wrong or ignored filter yields either no proposal at all or another asset's block, with nothing red anywhere.",
+      "required_fix": "Drive the read against a real PostgREST once (a hosted or local PGRST check recorded in the ticket report is enough), or add an e2e mock that parses the query string and returns rows only when both filters match, so a wire regression is red rather than silent. Alternatively keep the one-line kind/asset_id check in the loop as a belt; its removal is what turns a wire mismatch into a silent wrong-row read rather than a no-op."
+    },
+    {
+      "id": "ADV-L05-04",
+      "ticket": 1092,
+      "severity": "minor",
+      "kind": "false measured claim in a load-bearing rationale",
+      "title": "0346's header states \"52 of the 52 policies clara_agent_ro holds today are plain tenancy predicates\"; measured on this lane database that is not true, and it is the sentence that justifies the table-level grant",
+      "evidence": "Measured live on clara_l03 after 0346: 53 policies name clara_agent_ro, i.e. 52 before this file. Their predicates group as: 36 `(firm_id = clara.wake_firm())`, 7 `((firm_id IS NULL) OR (firm_id = clara.wake_firm()))`, 6 `true` (event_types, knowledge_keys, knowledge_plan_item_map and three siblings), 1 `(id = clara.wake_firm())`, 1 `clara.shares_my_firm_wake(id)`, 1 an EXISTS join through clara.onboarding_plans. So at most 37 of 52 are plain tenancy and six are unconditional. The count 52 is right; the characterisation is not. The conclusion this file draws (plain tenancy + a table-level SELECT grant) is still the right shape and the tail proves it landed exactly — but per AGENTS.md rule 6 a measured-sounding statistic that is wrong is a finding, and this one is the whole argument for not writing a narrower wall.",
+      "required_fix": "Restate the sentence against what is measurable (\"37 of the 52 are the same plain tenancy predicate this file uses; the rest are catalogue reads and firm-nullable defaults\"), in a follow-up migration's own README section or in the ticket report — never by editing the applied file."
+    },
+    {
+      "id": "ADV-L05-05",
+      "ticket": 1056,
+      "severity": "minor",
+      "kind": "latent race / overbroad comment",
+      "title": "The recut door claims it is \"SERIALISED AGAINST EVERY OTHER WRITER OF THIS DOCUMENT'S READING\" on the clara.documents row, but the payroll writer takes no such lock; unreachable today only by accident of the router",
+      "evidence": "Measured: clara.persist_invoice_facts contains `for update` (it takes the documents row, 0296's router does too at line 869); clara.persist_payroll_facts contains NO `for update` at all — it reads `select * into d from clara.documents where id = t.document_id and firm_id = t.firm_id` unlocked, then inserts the pair and calls clara._post_payroll_run in the same transaction. clara.revise_document_fact does take `from clara.documents where id = p_document for update`. So the two payroll writers do not serialise, and clara.document_extractions.extracted_at defaults to now() (transaction start) for the human row while persist writes clock_timestamp() — the exact tie-break the file's own #1056 (5) note says it avoided by counting version_n across the kind. I drove the race and it does NOT fire today, for a reason outside this ticket: clara._enqueue_invoice_facts_core's 'already_completed' short-circuit means a payroll document is read exactly once (a second enqueue after the first read returned no queued task; every payroll_facts task on this database is version_n 1), and nothing posts outside that one transaction, so there is no second writer to race. Recording it because the moment anyone adds a payroll re-read or a 'post it now' door, the door's own comment will be false and a posted entry can cite a reading a person had already corrected.",
+      "required_fix": "Either narrow the comment to what is true (\"serialised against every writer that takes this row; clara.persist_payroll_facts does not, and is safe only because a payroll document is read once\"), or have the payroll writer take the same documents row. State the reachability argument in the ticket report so the next lane does not have to re-derive it."
+    },
+    {
+      "id": "ADV-L05-06",
+      "ticket": 1090,
+      "severity": "note",
+      "kind": "brittle census on a shared catalogue",
+      "title": "0345 pins exact counts on clara.knowledge_keys (14 others in the prestate, 15 total in the tail); a later wave lane taking a lower migration number breaks the from-scratch chain",
+      "evidence": "0345 §0 raises when `count(*) where knowledge_key <> 'depreciation_policy'` <> 14 and §Z raises when `count(*)` <> 15. Checked for this wave: no other lane report under docs/plan/active/riders-2026-09-20/reports/waveS-*.md mentions clara.knowledge_keys, and the numbers claimed across the wave are 0330-0349 with 0344-0346 this lane's, so the hazard is not live now. It is still an equality on an append-only catalogue that any migration numbered below 0345 would break, and the weaker assertion (the key is absent / present exactly once) buys the same protection.",
+      "required_fix": "None this wave. If a fix round touches 0345 for another reason, prefer `>= 14` plus the exactly-one-depreciation_policy assertion the tail already carries."
+    },
+    {
+      "id": "ADV-L05-07",
+      "ticket": 1056,
+      "severity": "note",
+      "kind": "inaccurate comment, no functional gap",
+      "title": "PAYROLL_FACT_REVISION_0344_COHORT lists 2 of the 5 new functions while its comment says the list is what makes an accidental grant fail",
+      "evidence": "packages/db/tests/rig-meta.mjs lists only _revisable_payroll_run_field and _revisable_fact_lane; _payroll_source_observation, _payroll_state_with_human_fact and _document_live_posted_entry appear nowhere in the file (grep count 0 each). No security gap: grantMatrixFailures iterates the LIVE clara catalogue and asserts every role's privilege against ALLOWED, so all five are already required to hold no grant; the cohort list is the partial-frontier detector, not the grant guard. The comment (\"Listed so an accidental grant FAILS instead of passing quietly\") describes a job the list does not do.",
+      "required_fix": "Reword the comment, or list all five so the cohort matches what the comment claims."
+    },
+    {
+      "id": "ADV-L05-08",
+      "ticket": 1092,
+      "severity": "note",
+      "kind": "scope of a widened credential, recorded",
+      "title": "The grant is table-level, so clara_agent_ro can read the free-text human commentary columns on every client's depreciation policies in the firm, while the read the ticket needs uses five columns",
+      "evidence": "clara.fa_account_depreciation_policies carries reason, created_by, retired_by, retired_reason beside the five drivers; FA_RETIRED_ACCOUNT_POLICY_SQL selects only asset_account_code, version, method, useful_life_months, rate_bps, and the file's own header says so deliberately. p_fadp_agent is firm-scoped, not client-scoped (the estate's own shape — p_fixed_assets_agent and p_knowledge_records_agent are the same), so the wall against reading another client's commentary is the caller's `client_id = $1`, not the policy. The header argues the precedent honestly (no column-level SELECT grant exists anywhere in this estate). Recording it so the next prompt-builder that reaches for this relation knows the columns are reachable.",
+      "required_fix": "None. Keep FA_RETIRED_ACCOUNT_POLICY_SQL as the statement's one home so no reader starts selecting the commentary columns by accident."
+    }
+  ],
+  "walls_that_held": [
+    "#1092 tenancy: another firm's wake credential reads zero rows for this client (fp.wall (d), re-run); clara_agent_ro holds SELECT and nothing else; clara_runtime, both wake roles, clara_wake_bank, clara_freeform_ro and PUBLIC hold nothing; both write doors stay clara_authenticated-only; clara_agent_ro is not BYPASSRLS and its only members are postgres and clara_agent_read_login (measured).",
+    "#1092 supersession guard: the read's `not exists (... q.active)` is load-bearing and its vacuity control (the same string with the clause deleted) really does return the superseded version 1 — re-run.",
+    "#1056 value guards: clara._normalize_invoice_cents refuses >2 decimals ('5,000.004' -> null -> monetary_value_malformed), '1e5' and '+5000.00' -> null, '(5,000.00)' -> -500000 which the new payroll_value_negative arm then refuses, and 16 integer digits exceed the payroll_value_out_of_range bound. clara._payroll_period_month returns null for 'banana', '2026-13', '2026-08-99', '' and '  ' rather than raising, so a declared period the plan cannot read degrades to period_not_established.",
+    "#1056 retirement bypass: clara.retire_document_filing refuses while the filing carries a live draft or approved entry, so the posted-entry pin cannot be stepped around by retiring the filing.",
+    "#1056 basis vocabulary: clara._payroll_posting_verdict reads facts[].state and rows.* and never basis, so the new human_declared basis breaks no rung.",
+    "#1090 congruent() drops a knowledge note with a non-integer, zero or negative useful life and a rate outside 1..10000, so a malformed recorded note grounds nothing rather than pre-filling a bad driver set.",
+    "#1090 two-tier knowledge scoping: a client-wide note (applies_when {}) DOES ground a row that carries an asset account — driven in a rolled-back transaction after I suspected speaksFor would drop it; the deriver's wide/scoped tiering (fa-particulars-proposal.ts:372-384) handles it correctly.",
+    "rule (d): apps/web/tests/firm-scope-db-pins.test.ts is 22/22 green with the three new migration files present — none of them needs a REVIEWED_DYNAMIC_SQL_BARRIERS entry."
+  ],
+  "housekeeping": [
+    "An untracked scratch directory left by the implementer sits in the lane worktree: C:\\Users\\zhant\\Desktop\\clara-wt\\642\\packages\\db\\.verify-scratch\\verify.mjs (timestamped 13:30, before this review). It is the only thing `git status` shows in the worktree. Not mine to remove; the integrator should clear it before the cut."
+  ]
+}

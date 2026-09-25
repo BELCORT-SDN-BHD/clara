@@ -31,6 +31,25 @@
 // rate refusal, a body this build will not act on. A reader that could not read is not a verdict,
 // and `clara.accept_invite` remains the authority on whether this invitation can be accepted.
 //
+// #1095 — ONE INDEFINITE REASON THE PAGE RENDERS. `rate_limited` degrades exactly like
+// `transport` and `unreadable` (the page still renders the sign-in step; the invitation is still
+// untouched), but it is kept as its OWN reason because it is the one refusal a visitor can act
+// on: come back in a while and the block appears. The page renders a distinct, wait-free notice
+// for it.
+//
+// #1095 FIX ROUND (ADV-L07-01) — AND IT CARRIES NO NUMBER, DELIBERATELY. The first cut carried
+// the door's `retryAfterSeconds` through to that notice. `clara.preview_invite_by_token` walls on
+// TWO limbs — five loads per token and five per origin in fifteen minutes — computes each limb's
+// wait independently and advertises the MAXIMUM
+// (`0309_invite_preview_public_door.sql`:461-499). So on an anonymous page the number can belong
+// entirely to somebody ELSE's reloads of the same link: measured on the lane rig, a first-ever
+// request from a cold address against a token another party had loaded five times four minutes
+// earlier came back `rate_limited, 660` with zero rows of the caller's own — and 900 − 660 dates
+// that party's fifth-oldest load to the second. 0309 already withholds its `scope` field for this
+// exact reason ("naming them would tell a prober which of two budgets it exhausted"); the wait is
+// the same disclosure by arithmetic, so it stops at the runtime's own `Retry-After` header and
+// never reaches this type.
+//
 // WHAT THE PAGE DOES WITH EACH, stated here because it is a product decision rather than a
 // transport one: it renders the preview block when the answer is `ok`, and renders NOTHING extra
 // otherwise — the person carries on to the existing sign-in flow either way. The signed-out
@@ -77,7 +96,9 @@ export type PublicInvitePreviewOutcome =
       kind: "indefinite";
       /** `transport` — we never heard back, or the hop is not configured. `unreadable` — an answer
        *  that is not what the route returns. `rate_limited` — the wall refused; the invitation is
-       *  untouched and the page simply carries on without the block. */
+       *  untouched and the page renders a wait-free notice (see the fix-round note above: the
+       *  door's number is an activity oracle on an anonymous page, so it stops at the runtime).
+       *  NONE of the three carries a payload. */
       reason: "transport" | "unreadable" | "rate_limited";
     };
 

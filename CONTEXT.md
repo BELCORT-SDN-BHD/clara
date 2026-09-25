@@ -14,14 +14,24 @@ _Avoid_: A mandatory file attachment; a claim that every user statement is indep
 
 <!-- #977 -->
 **Authorising instruction**:
-The recorded instruction a governed act cites as its authority — an Accounting work, or one turn of
-a Clara conversation. It is admitted only when it is PROVED to come from a person rather than from a
+The recorded instruction a governed act cites as its authority — an Accounting work, one turn of
+a Clara conversation, or (#949) a named person's confirmation of a rent plan on the tenancy lane.
+It is admitted only when it is PROVED to come from a person rather than from a
 process: a Work is proof as it stands, because a Work can never exist without naming who initiated
 it; a conversation turn is proof only when it is a turn taken through the chat ingress AND that
-ingress named a firm member as its author. A run the workspace started for itself — a wake, an
-autodraft, a close preparation, an agent run over a Work — is not an instruction, even when it
-names the person it was started for. "There is no such record here" and "that record is not a
-person's instruction" are two different refusals, and each says which it is.
+ingress named a firm member as its author; a rent-plan confirmation is proof as it stands, for the
+Work's own reason — the row cannot exist without naming who confirmed it. A run the workspace
+started for itself — a wake, an autodraft, a close preparation, an agent run over a Work — is not
+an instruction, even when it names the person it was started for. "There is no such record here"
+and "that record is not a person's instruction" are two different refusals, and each says which it
+is.
+
+Since #1051 the plan lane states the admitted set ONCE, in one predicate the plan bodies call,
+rather than in a copy per door: the doors had drifted apart before, and a claim that one was a
+verbatim copy of the other outlived the copy it described. #1051 folded the human plan door and
+its on-behalf twin; #1080 folded the third body, the accrual lane's plan step, which until then
+still resolved a conversation turn by bare existence and so admitted a run the workspace had
+started for itself — the one lane where the rule above was written down and not enforced.
 
 What is proved is the AUTHOR the ingress recorded, not the keystroke: the rule reads the task's
 kind and its author, and the chat ingress admits an author only as an active member of the firm.
@@ -79,7 +89,8 @@ created — and every attempt it ever admitted, so a cancelled one stays reachab
 refused one records the refusal and creates nothing, and re-attempting it is an explicit catch-up
 rather than the next scan's business. A REVERSING occurrence also names the journal entry it undoes:
 it is admissible only once its own period's accrual has POSTED a still-live entry, never merely
-because that accrual was admitted.
+because that accrual was admitted, and it posts that entry's OWN lines with the sides exchanged —
+so a correction that lands between a posting and its reversal cannot leave a balance behind.
 An AMORTISATION occurrence posts the amount ITS OWN period was allocated — not the plan's stored
 basis amount, which is only the first period's — and a due date the allocation does not cover is a
 typed refusal rather than a fall-back to that constant.
@@ -621,6 +632,10 @@ _Avoid_: Rollback points as a substitute for it; "nothing looked busy" as a drai
 An image's own declaration that it understands what one door RETURNS after a migration changed it — carried as a literal in the built artifact, so a rollback decision is a measurement of the target image rather than a list of image tags somebody keeps by hand. A marker names behaviour that exists in the image, not a build date: the marker and the code that handles the new answer stand or fall together. The rule that a given marker is REQUIRED lives with the migration frontier, not with the image, because an image built before the rule existed carries neither and that is precisely the state the rule has to detect.
 _Avoid_: A version number, a build sha or an image tag as a substitute; a marker for a change an older image reads correctly; a marker kept after the behaviour it names was removed.
 
+**Declared ahead of its rule**:
+The legal, temporary state of a runtime contract marker that a build carries before the migration frontier requires it — the roster entry exists, but no rollback yet refuses an image for lacking it. A marker left in that state is not itself a defect, but a roster entry nobody ever adds the rule for is a silent gap, so the state must be named explicitly (an id listed as an exception) rather than left to be inferred from the rule table's silence.
+_Avoid_: Treating an un-ruled marker as forgotten without checking the exception list; treating the exception list as proof the rule was considered and rejected rather than merely not yet written.
+
 **Operation receipt**:
 The record that one logical operation identity committed its business effect: which run and bundle produced it, which human authority it acted for, and which objects it created. At most one committed receipt exists per logical operation identity; a replay returns it and a changed payload under that identity is refused.
 _Avoid_: A chat message claiming completion; a task status; a second effect.
@@ -890,17 +905,20 @@ The second leg of one accrual's schedule: the same entry with both sides exchang
 day of the period after the one it accrued for, and NAMING the journal entry it undoes. It is
 admissible only once its own period's accrual has POSTED an entry that is still live — never merely
 because that accrual was admitted — and a reversal the lane reached before then is recorded as
-refused, with which of the three ways the accrual failed to stand behind it.
+refused, with which of the three ways the accrual failed to stand behind it. "The same entry" is
+literal: a reversal is built from the lines the entry it names actually carries, so what it undoes
+is what was POSTED, never what the schedule states by the time the reversal comes due.
 _Avoid_: A correction; a cancellation; a separately authorised entry; treating an admitted accrual
-as a posted one.
+as a posted one; reversing what the accrual says today rather than what its own period posted.
 
 **Accrual correction**:
 A restatement of an accrual's own particulars — amount, either account leg, the service period, the
 method or the instruction — that advances its schedule to a NEW plan revision and writes a
 SUCCESSOR accrual-adjustment row for it, naming the row it supersedes. The superseded row is kept,
 stamped with which row corrected it, and is otherwise unchanged; occurrences the schedule has
-already admitted keep naming the revision they ran under, so a correction reaches only what has not
-yet come due. It moves neither the schedule nor the authority window — those are the LIVE revision's
+already admitted keep naming the revision they ran under, and a period that has already POSTED is
+still reversed at the figure it posted, so a correction reaches only what has not yet come due. It
+moves neither the schedule nor the authority window — those are the LIVE revision's
 own, carried through unchanged — because a correction restates what was STATED, not when or how
 often the plan runs.
 _Avoid_: The generic plan revision alone (it advances the schedule but leaves the accrual's own
@@ -959,6 +977,22 @@ would duplicate. The verdict is derived, never stored, so it clears itself the m
 clears.
 _Avoid_: Posting a partial entry; filling an unprinted line with zero; smoothing an imbalance into
 the rounding account; a stored refusal a person has to dismiss; a model deciding any of it.
+
+**Completeness witness**:
+What makes the employee lines Clara read on a payroll summary stand for the WHOLE run, so their
+column sums may be posted when the page prints no run totals at all. Three things count, and nothing
+else: a printed employee headcount that equals the number of lines read, a printed page count of one
+(the document is not truncated), or a named person's written YES to the question Clara parks
+("this summary prints no total; is this every employee for the month?"). A printed headcount the
+lines CONTRADICT is not a weak witness but a refusal — the reading is then known to be incomplete. A
+person's answer belongs to the READING it was given about, not to the document, so a re-read asks
+again rather than inheriting an older yes, and the line count they affirmed is kept with their
+answer. Where the page prints its own totals the witness is not consulted at all: a printed total
+always wins over a sum.
+_Avoid_: Treating a row sum as a printed total; carrying a yes from one reading to another; posting
+on a headcount that disagrees with the lines; asking a person a question the page already answered;
+reading "is this everyone?" as a yes-or-no flag rather than as a named person's judgement with its
+own evidence.
 
 **Financing agreement**:
 An agreement that creates an asset and a liability on the day it is signed — a hire purchase or a
@@ -1055,8 +1089,10 @@ line she derived them from. It travels inside the dependent particulars question
 answering entrance, and it is never applied on its own — a person confirms it or edits it, and what
 is recorded is what they confirmed, under their name. A driver is proposed only where a ground
 exists: the enrolment's own rule (an enrolment with no accumulated-depreciation account admits "not
-depreciated" and nothing else), a recorded note about this client, the account's own retired policy,
-or the account's other completed assets WHERE THEY AGREE. A ground speaks for a row only when its
+depreciated" and nothing else), a recorded note about this client, the account's own retired policy
+WHILE THAT IS STILL ITS LAST WORD, or the account's other completed assets WHERE THEY AGREE. A
+retired policy that a newer LIVE policy supersedes grounds nothing: the live one is what the person
+now says about the account, and a row born under it is born complete with no question at all. A ground speaks for a row only when its
 own account IS that row's account, on every one of those grounds alike; and grounds of one kind that
 disagree ground nothing, whether they are two assets or two recorded notes. Where nothing grounds a
 method the proposal says so and leaves it empty; only the two facts that are not estimates — the
@@ -1064,7 +1100,8 @@ acquisition's posting date and a nil residual — are always proposed, and the r
 default rather than a value read off whatever ground supplied the method.
 _Avoid_: A useful life inferred from an asset's name or class; a method picked between two of the
 account's own assets — or two of the client's own recorded notes — that disagree; a ground borrowed
-from an account that is not this row's; a residual taken from the ground the method came from; a
+from an account that is not this row's; a retired policy proposed while a newer live one supersedes
+it; a residual taken from the ground the method came from; a
 proposal applied without a person; a value a surface repaired into a plausible one; treating the
 reason line as the question's own reason (that says why Clara is asking; this says where the values
 came from).
@@ -1198,9 +1235,17 @@ minting a sibling concept. #938's "a bill posted inside an accrued
 period" row (`clara.list_review_queue`, row_kind `accrual_bill_conflict`) is a NEIGHBOUR on the
 same Needs-you roster that reuses the mechanics — derived, stores nothing, self-clearing — without
 being a member of the settlement-candidate FAMILY itself: it offers no candidate to choose, only
-two remedies (skip the next occurrence, or reverse now) that act on the accrual plan directly.
+remedies that act on the accrual plan directly — skip the next occurrence, reverse now (a catch-up
+over the window from the flagged period to its scheduled reversal date), or reverse THIS PERIOD
+ONLY (one named occurrence, no window; #1073). The last two leave the same amount on the books for
+that period, and differ as ACTS rather than as outcomes: one is a window, one is a scoped entry
+with its own receipt and a refusal that names the occurrence. They also differ in what the plan's
+own history KEEPS when the remedy is refused: the window commits its receipt either way, so a
+refusal it reaches is left recorded on the occurrence for a colleague to read and becomes
+admissible once the accrual posts; the scoped entry refuses by rolling back, which frees its key
+for a real retry and leaves no record of the attempt.
 A derived row outlives its own REMEDIES: when the plan those remedies act on is ended or paused
-they both refuse, while the fact that produced the row is still on the books — so the row stays and
+they all refuse, while the fact that produced the row is still on the books — so the row stays and
 the surface renders the remedies unavailable with the reason, rather than the row disappearing or
 offering a control whose only possible outcome is a refusal.
 _Avoid_: A stored Work, question or task; a new `accounting_work.purpose`; a notification; a row

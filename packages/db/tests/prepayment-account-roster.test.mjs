@@ -325,7 +325,7 @@ cell("p940.enrol.race — two bookkeepers of one firm enrolling the SAME account
   assert.equal((await enrolmentsFor(scene.client, code)).filter((x) => x.active).length, 0);
 });
 
-cell("p940.schedule.roster_gate — an eligible but UNENROLLED prepaid leg is refused by name with the enrolment door and the panel as the remedy and writes nothing; the SAME call succeeds once the account is enrolled; the roster is asked BEFORE the shared wall, so an account that fails both answers the roster; and the wall is still live afterwards for an account enrolled while it was eligible", async () => {
+cell("p940.schedule.roster_gate — an eligible but UNENROLLED prepaid leg is refused by name with the enrolment door and the panel as the remedy and writes nothing; the SAME call succeeds once the account is enrolled; the roster is asked BEFORE the shared wall, so an account that fails both answers the roster; and the wall is still live afterwards, driven at the door #1078's reservation leaves open", async () => {
   const scene = await statedTermScene("gate", { cents: 90000, termMonthsBack: 4, termMonths: 3 });
   const deposit = await plainAssetRecognition(scene, { code: "19000006", cents: 66000, tag: "dep" });
 
@@ -373,25 +373,42 @@ cell("p940.schedule.roster_gate — an eligible but UNENROLLED prepaid leg is re
     "the roster is asked BEFORE the wall, so an account failing both answers the roster");
   assert.equal(await scheduleCountFor(invoice.entry), 0);
 
-  // …AND THE WALL IS STILL LIVE AFTERWARDS. An account may be eligible on the day it is enrolled
-  // and ineligible later: binding it as a registered bank account is the estate's own way of
-  // making that happen. The roster admits it; the wall refuses it, with the SHARED helper's own
-  // breach carried through, exactly as it did before this ticket.
+  // …AND THE WALL IS STILL LIVE AFTERWARDS — reached the way that is still open.
+  //
+  // [#1078, migration 0337_prepayment_account_reservation] THIS HALF USED TO EXPLOIT THE HOLE
+  // #1078 CLOSED. Until 0337 a live prepayment enrolment reserved nothing, so an enrolled account
+  // could still be bound as a registered bank account, and this cell used that to make an
+  // ALREADY-ENROLLED account ineligible and watch the schedule door refuse it with
+  // `prepaid_account_ineligible`. The roster now reserves its live enrolments in
+  // `clara._acct_role_reserved`, so the bank belt refuses that binding outright — which is
+  // measured at the belt in `p1078.claim.bank`, not paraphrased here.
+  //
+  // WHAT THAT COSTS THIS CELL, STATED RATHER THAN QUIETLY DROPPED: the schedule door's
+  // `prepaid_account_ineligible` arm is no longer reachable for an ENROLLED account through any
+  // governed door. Each of the wall's five axes is now closed ahead of it — `account_unknown` and
+  // `account_inactive` have no door at all (the #1078 ruling of 2026-09-24 keeps the latter a
+  // known dead axis), `control_account` needs a re-type that `clara._upsert_account_core` refuses
+  // on any account carrying lines, and `bank_account` and `account_reserved` are what 0337 itself
+  // now refuses. The arm stays in the body as defence in depth, and `p1078.wall.unmoved` measures
+  // that it is still asked.
+  //
+  // SO THE SAME WALL IS DRIVEN ON THE SAME ACCOUNT, at the door that can still reach it: retire
+  // the enrolment, bind the bank account, and try to enrol it again.
   const later = await plainAssetRecognition(scene, {
     code: "17000010", name: "Maybank current (gate)", cents: 45000, tag: "later" });
   await enrolPrepaymentAccount(scene.bob, { client: scene.client, account: later.code });
+  await assertRaises(CLR.badRequest,
+    () => bindBankAccount(scene.alice, {
+      client: scene.client, coaAccountCode: later.code, accountNumber: "5140940941" }),
+    "binding an account the prepayment roster holds as a registered bank account");
+  await retirePrepaymentAccount(scene.bob, { client: scene.client, account: later.code });
   await bindBankAccount(scene.alice, {
     client: scene.client, coaAccountCode: later.code, accountNumber: "5140940941" });
-  const walled = await assertPair(CLR.badRequest, PREPAY_REASON.sourceUnfit,
-    () => createPrepaymentSchedule(scene.bob, {
-      client: scene.client, sourceEntry: later.entry, expenseAccount: scene.target,
-      authorityRef: scene.authorityRef,
-    }),
-    "a schedule on an enrolled account that has since been bound as a bank account");
-  assert.equal(walled.detail.axis, "prepaid_account_ineligible",
-    "the shared negative wall still guards the prepaid leg AFTER the roster admits it");
-  assert.equal(walled.detail.breach?.axis, "bank_account",
-    `the breach is the SHARED helper's own answer: ${JSON.stringify(walled.detail)}`);
+  const walled = await assertPair(CLR37, ROSTER_REASON.invalid,
+    () => enrolPrepaymentAccount(scene.bob, { client: scene.client, account: later.code }),
+    "enrolling an account that has since been bound as a registered bank account");
+  assert.equal(walled.detail.axis, ROSTER_AXIS.bankAccount,
+    "the shared negative wall still guards the roster, with its OWN axis carried through");
   assert.equal(await scheduleCountFor(later.entry), 0);
 });
 

@@ -40,7 +40,7 @@ import {
 } from "./rig-fixtures.mjs";
 import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts, claimTask } from "./a21-helpers.mjs";
 import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
-import { addBankAccount, enterStatement } from "./x38-match-fixtures.mjs";
+import { addBankAccount, enterStatement, unmatchBankMatch } from "./x38-match-fixtures.mjs";
 import { listReviewQueue } from "./wave-a-reads.mjs";
 
 async function queueRows(sub, client) {
@@ -871,4 +871,103 @@ test("S7 · a HIGH-STAKES settlement is left a draft for a distinct checker, not
   } finally {
     await rootQuery("update clara.firms set high_stakes_amount_cents=$2 where id=$1", [firm, restore]);
   }
+});
+
+// ---------------------------------------------------------------------------
+// S8 — #1059: reopening a WRONGLY ACCEPTED settlement, through the two doors the ticket names.
+//
+//      Both `clara.unmatch_bank_match` and `clara.reverse_entry` are GENERAL-PURPOSE and
+//      pre-existing — neither is written or touched by #1059, and this file adds no migration.
+//      What is missing before this section is the INTEGRATION proof that composing them on a
+//      #947 settlement's own pair (the settlement entry `_settle_payroll_net_pay_core` drafts,
+//      and the match its own reuse of `clara._match_bank_line_core` binds) correctly reopens the
+//      run — the exact ledger claim 0298's own ADV-01 note rests its case on ("reversing a
+//      SETTLEMENT entry mirrors Cr 2040, never a debit … that reversal correctly RE-OPENS the
+//      run") without ever driving it end to end.
+// ---------------------------------------------------------------------------
+
+async function unsettledOf(client, entryId) {
+  const r = await rootQuery(
+    "select unsettled_cents from clara._payroll_net_pay_unsettled($1) where entry_id=$2",
+    [client, entryId]);
+  return r.rows[0] ? Number(r.rows[0].unsettled_cents) : null;
+}
+
+test("S8 · reversing the settlement entry BEFORE unmatching its bank line is refused — order matters", async (t) => {
+  if (unready(t)) return;
+  const client = await freshClient(world.users.alice);
+  await seedPayrollChart(world.users.alice, client);
+  const run = await postPayrollRun(world.users.alice, client);
+  const bank = await freshBank(world.users.alice, client);
+  const stmt = await enterStatement(world.users.alice, {
+    client: client, bankAccount: bank, keepPeriod: true,
+    periodStart: "2026-08-25", periodEnd: "2026-09-05", opening: 900000,
+    specs: [{ entryDate: "2026-09-01", description: "PAYROLL", amountCents: -NET_PAY_CENTS }],
+  });
+  const out = await settle(world.users.alice, { client: client, entry: run.entryId, line: stmt.lines[0].id });
+  assert.equal(out.status, "settled");
+  assert.ok(out.match_id, "an ordinary-stakes settlement binds a live match");
+
+  const refused = await caught(() => humanQuery(
+    world.users.alice,
+    namedCall("reverse_entry", [{ name: "p_entry" }, { name: "p_reason" }, { name: "p_op_key" }]),
+    [out.entry_id, "accepted the wrong candidate", opk947("rev-too-soon")],
+  ));
+  assert.ok(refused, "reverse_entry refuses an entry that still rides a live bank match");
+  assert.equal(refused.code, "CLR10");
+  assert.equal(JSON.parse(refused.detail ?? "{}").reason, "live_bank_match_present");
+
+  // Nothing moved: the refused attempt changed no state.
+  assert.equal(await unsettledOf(client, run.entryId), 0, "still fully settled — the refused reverse attempt changed nothing");
+});
+
+test("S8 · unmatch THEN reverse reopens the run — the ledger, the candidate list and the bank line all agree", async (t) => {
+  if (unready(t)) return;
+  const client = await freshClient(world.users.alice);
+  await seedPayrollChart(world.users.alice, client);
+  const run = await postPayrollRun(world.users.alice, client);
+  const bank = await freshBank(world.users.alice, client);
+  const stmt = await enterStatement(world.users.alice, {
+    client: client, bankAccount: bank, keepPeriod: true,
+    periodStart: "2026-08-25", periodEnd: "2026-09-05", opening: 900000,
+    specs: [{ entryDate: "2026-09-01", description: "PAYROLL", amountCents: -NET_PAY_CENTS }],
+  });
+  const lineId = stmt.lines[0].id;
+
+  const out = await settle(world.users.alice, { client: client, entry: run.entryId, line: lineId });
+  assert.equal(await unsettledOf(client, run.entryId), 0, "settled: the run's own FIFO share is fully covered");
+  assert.equal(
+    (await candidatesOf(world.users.alice, client)).some((c) => c.entry_id === run.entryId), false,
+    "a settled run is no longer offered",
+  );
+
+  // THE ACT (#1059's own composition — both doors general-purpose and pre-existing): unmatch
+  // FIRST (S8's own belt test above proves this order is required), then reverse.
+  const unmatched = await unmatchBankMatch(world.users.alice, {
+    client: client, match: out.match_id, reason: "accepted the wrong candidate",
+  });
+  assert.equal(unmatched.status, "unmatched");
+
+  const rev = (await humanQuery(
+    world.users.alice,
+    namedCall("reverse_entry", [{ name: "p_entry" }, { name: "p_reason" }, { name: "p_op_key" }]),
+    [out.entry_id, "accepted the wrong candidate", opk947("rev-ok")],
+  )).rows[0].result;
+  assert.equal(rev.status, "approved", "an ordinary-stakes reversal mirror self-approves");
+
+  // THE LEDGER: the run's FIFO share is back to its full net pay — the settlement's own debit no
+  // longer counts (its entry now carries reversed_by), and the mirror's own 2040 leg is a
+  // CREDIT, never counted as a debit (0298's own ADV-01 note).
+  assert.equal(await unsettledOf(client, run.entryId), NET_PAY_CENTS, "the run is unsettled again, for its full net pay");
+
+  // THE CANDIDATE READ (AC1/AC2): the run is offered again, and the SAME bank line is among its
+  // candidates — freed by the unmatch, never a second line minted.
+  const offered = await candidatesOf(world.users.alice, client);
+  const mine = offered.find((c) => c.entry_id === run.entryId);
+  assert.ok(mine, "the reopened run is offered for settlement again");
+  assert.ok(mine.candidates.some((c) => c.line_id === lineId), "the SAME bank line is a candidate again");
+
+  // THE BANK MATCH: genuinely unmatched, not merely forgotten about.
+  const bm = (await rootQuery("select status from clara.bank_matches where id=$1", [out.match_id])).rows[0];
+  assert.equal(bm.status, "unmatched");
 });

@@ -304,12 +304,16 @@ test("p942.correct — a revenue accrual is corrected on its own side and every 
 
   // A CORRECTED REVENUE ACCRUAL STILL POSTS THE RIGHT WAY ROUND, on both legs. The occurrence
   // admitted at configuration carries its own frozen basis, so it posts the figure it was
-  // admitted with; the reversal admitted after the correction is built from the LIVE revision's
-  // basis. This cell asserts the SIDE of every leg — what #942 owns — and the configured figure
-  // on the accrual itself. It deliberately does NOT assert that the reversal's AMOUNT equals the
-  // accrual's: that they can differ when a correction lands between the two is 0193/#936's own
-  // behaviour, identical on the expense side, and #942's report carries it as a follow-up rather
-  // than blessing it here.
+  // admitted with. This cell asserts the SIDE of every leg — what #942 owns — and the configured
+  // figure on the accrual itself, and deliberately does NOT assert the reversal's AMOUNT: that
+  // claim belongs to #1074, which is the follow-up #942's own report filed.
+  //
+  // #1074 (0332) has since answered it, and the sentence that stood here — "the reversal admitted
+  // after the correction is built from the LIVE revision's basis" — is no longer true of this
+  // estate. A reversal is now built from the lines the entry it undoes actually carries, so a
+  // correction landing between a posting and its reversal no longer strands the difference.
+  // `plan-reversal-posted-basis.test.mjs` owns that claim on both sides; this cell is left
+  // asserting only what #942 owns, which is why it needed no edit beyond this comment.
   const due = r.occurrence?.due_date;
   const entry = await postPlanWork({
     work: r.occurrence.work_id, client: r.client, author: BOB(), firm: FIRM_A(),

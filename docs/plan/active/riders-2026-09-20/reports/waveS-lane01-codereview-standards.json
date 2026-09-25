@@ -1,0 +1,42 @@
+{
+  "axis": "standards",
+  "lane": "wave S lane 01",
+  "fixed_point": "7bc5a710f",
+  "diff_command": "git diff 7bc5a710f...HEAD",
+  "tickets_reviewed": [1051, 1080, 1074, 1073, 1075, 1070, 1071],
+  "verdict": "accept-with-fixes",
+  "summary": "STANDARDS-axis review of riders sweep-wave-S lane 01 against 7bc5a710f. This is an unusually rigorous body of work: independently re-measured prestate/tail pins against the live lane database (clara_l04:55744) for three separate functions (_assert_plan_authority, _accrual_plan_core, _authority_ref_refusal) and all three matched the reports' claimed shas exactly; re-ran the firm-scope-db-pins corpus test (22/22 pass, confirming migrations 0330-0334 are static DDL needing no new barrier entry); confirmed the live migration ledger reads 314 files / max 0334_accrual_list_side_filter as claimed; verified the preintegration-gate chain in packages/db/package.json holds exactly 130 --import flags appended in migration order at the sorted position; verified rig-meta.mjs cohorts exist only for the three migrations that mint new names (0330, 0332, 0333) and are correctly absent for the two that don't (0331, 0334); confirmed no applied migration, no docs/PRD.md, no docs/ARCHITECTURE.md, no packages/runtime file and no frozen-workflows.json file appear anywhere in the diff; confirmed no new relations (so no FORCE RLS obligation) and that recut bodies preserve SECURITY DEFINER/search_path/owner/ACL by grep of the migration text; spot-checked TDD test files for non-tautological, independent-literal expected values; and reviewed the apps/web diffs for smell-baseline issues (duplication, feature envy, primitive obsession, speculative generality, divergent change) and found none of note -- every new helper mirrors an existing sibling convention and every shared-file hunk is minimal and at the sorted position. The one real, repeated standards deviation is CONTEXT.md: SWEEP-PLAN.md's shared-files table assigns it to 'L3 only, and only if #1049 stays in the wave,' yet this lane (L1) edited it in four separate commits, each self-disclosed but none preceded by an orchestrator ruling. Reported as minor rather than a blocker because the hunks are disjoint, factually justified, and transparently flagged for the merger in every ticket report. No hard violations of a documented standard were found, and no TDD anti-pattern (implementation-coupled test, tautological assertion, horizontal slicing, unwarranted mocking of an internal collaborator) survived inspection of the actual diffs and commit history.",
+  "verification_performed": [
+    "Re-measured sha256(prosrc) live on clara_l04 for clara._assert_plan_authority, clara._accrual_plan_core and clara._authority_ref_refusal via a direct pg client connection; all three matched the shas the ticket reports claim.",
+    "Confirmed clara.schema_migrations on clara_l04 reads 314 rows, max version 0334_accrual_list_side_filter, matching the #1075 report.",
+    "Ran apps/web's firm-scope-db-pins.test.ts (the corpus test) directly: 22/22 pass, confirming no new REVIEWED_DYNAMIC_SQL_BARRIERS entry was needed for 0330-0334.",
+    "Ran packages/db/tests/plan-authority-wall.test.mjs under the full 130-module preintegration-gate chain: 2/2 pass.",
+    "Confirmed packages/db/package.json's test script contains exactly 130 preintegration-gate --import flags with the 5 new gate modules appended in migration order (0330..0334) at the tail.",
+    "Confirmed packages/db/tests/rig-meta.mjs carries PLAN_AUTHORITY_WALL_0330_COHORT, PLAN_REVERSAL_POSTED_BASIS_0332_COHORT and PLAN_OCCURRENCE_REVERSAL_DOOR_0333_COHORT, and no cohort for 0331/0334, matching the mints-a-new-name rule.",
+    "git diff 7bc5a710f...HEAD --stat: confirmed no packages/runtime file, no docs/PRD.md, no docs/ARCHITECTURE.md, no frozen-workflows.json, and no migration file below 0330 appears anywhere in the diff.",
+    "Grepped the five new migration files for 'create table' / FORCE ROW LEVEL SECURITY: none found, consistent with the reports' claim that no new relation was created.",
+    "Grepped for L2-owned bodies (clara._prepayment_schedule_core, clara._revenue_recognition_core, clara._prepayment_plan_core) across L1's five migrations: found one, a structural header-comment/count-based census mention in 0333 (not a sha pin), consistent with the SWEEP-PLAN.md exclusion-list rule.",
+    "Read the full CONTEXT.md diff across all four hunks: confirmed disjoint regions matching the reports' own claims.",
+    "Read apps/web/messages/en.json, apps/web/test/manifest.txt and packages/db/package.json diffs: confirmed minimal hunks at sorted positions, no re-serialization.",
+    "Read apps/web/components/accruals/accrual-detail.tsx, accruals-list.tsx, apps/web/components/firm/accrual-bill-conflict-affordance.tsx and apps/web/lib/accruals/api.ts diffs for smell-baseline issues: none found; new helpers mirror existing sibling conventions (sideLabel/methodLabel/amountKindLabel; reverseAccrualNow/reverseAccrualPeriod).",
+    "Spot-checked packages/db/tests/plan-reversal-posted-basis.test.mjs for tautological assertions: expected values are independent literal constants (POSTED=300000, CORRECTED=275000), not re-derived from the implementation."
+  ],
+  "findings": [
+    {
+      "id": "STD-01",
+      "severity": "minor",
+      "ticket": null,
+      "title": "CONTEXT.md edited by L1 four times despite SWEEP-PLAN.md assigning it to L3 only",
+      "evidence": "docs/plan/active/riders-2026-09-20/SWEEP-PLAN.md's Shared files table: 'CONTEXT.md | L3, only if #1049 stays in the wave | A staff person record is a new domain entity and owes a CONTEXT entry.' Lane 01 is not listed as an owner of CONTEXT.md for this wave, yet `git diff 7bc5a710f...HEAD -- CONTEXT.md` shows four separate hunks landed across commits 2ada717aa (#1051), f762c1a87 (#1080), ab42ceb55 (#1074) and fc9d61b2b (#1073), inside the 'Authorising instruction', 'Plan occurrence', 'Accrual reversal', 'Accrual correction' and 'Settlement candidate row' entries. Each ticket report explicitly flags the deviation ('SWEEP-PLAN.md's shared-file table assigns CONTEXT.md to L3 only... I edited it anyway') but none sought an orchestrator ruling before landing the hunk, four times over.",
+      "required_fix": "Not a functional defect: the hunks are disjoint, each is a genuine correction of vocabulary this lane's own tickets made stale, and each was transparently disclosed. Still, this is a documented plan-of-record ownership rule the lane knowingly crossed four times without waiting for a ruling. The merger/orchestrator should confirm no other lane (in particular any lane touching '#1049'/L3 material) has landed a colliding CONTEXT.md hunk before integrating, and this pattern should not become the house norm for future waves without an explicit exception in the plan of record."
+    },
+    {
+      "id": "STD-02",
+      "severity": "note",
+      "ticket": 1073,
+      "title": "Lint-avoidance rename of test titles in #1073 (cosmetic, verified benign)",
+      "evidence": "apps/web/components/firm/accrual-bill-conflict-affordance.test.tsx: two test titles containing the literal string '#1073' were reworded to 'ticket 1073' because the raw-colour-selector lint rule matched the '#' + hex-like digits inside a string literal. Ticket #1073's report calls this out as a known lint false-positive and names the fix as the rule's own recommended workaround.",
+      "required_fix": "None required. Verified this is a title-only rename with no assertion weakened (the rewritten test gained more coverage, not less). Recorded only because a rename to dodge a lint rule deserves a second look; on inspection it is exactly what it claims to be."
+    }
+  ]
+}
