@@ -757,7 +757,7 @@ end $c0338_obo$;
 --      and starts FINDING one.
 --
 -- THE THREE EDITS, and there are only three:
---   · five locals, declared;
+--   · nine locals, declared (five for the authority this arm binds, four for the lapse it names);
 --   · the authority the plan step is given, defaulted once and rebound only on the wake arm;
 --   · the wake arm itself -- resolve the firm's LIVE standing instruction, refuse by name when
 --     there is none or its author has left the firm, otherwise bind the directing human.
@@ -785,6 +785,7 @@ declare
   -- #1050 (0338 §F) — the clocked lane's DIRECTING HUMAN, the instruction that names them,
   -- and the authority the plan step is given.
   v_si_id uuid; v_directing uuid; v_auth_ref jsonb; v_auth_kind text; v_plan_author uuid;
+  v_dir_status text; v_dir_role text; v_lapse_axis text; v_lapse_text text;
 begin
   -- #915 — THE LANE IS A CLOSED SET, and an unknown one RAISES rather than falling through to the
   -- OBO branch. Unreachable from either door (both pass a literal); a later lane that widens the
@@ -868,20 +869,37 @@ begin
             'standing_remedy','clara.record_firm_standing_instruction')::text;
     end if;
 
-    -- THE INSTRUCTION STANDS, BUT ITS AUTHOR MUST STILL BE A LIVE MEMBER OF THE FIRM. A plan is
-    -- admitted every month AS this person; if they have left, `clara.admit_journal_work` refuses
-    -- and the plan posts nothing, forever. #1036's own lesson -- "configuring something that can
-    -- never run is worse than refusing" -- so the lane refuses HERE, at configuration time, by a
-    -- name of its own, and the remedy is the door another member uses to re-record the
-    -- instruction in their own name.
-    if not exists (select 1 from clara.firm_memberships m
-                    where m.firm_id = p_firm and m.user_id = v_directing
-                      and m.status = 'active') then
-      raise exception 'the member whose standing instruction authorises this schedule is no longer an active member of the firm'
+    -- THE INSTRUCTION STANDS, BUT ITS AUTHOR MUST STILL CARRY THE AUTHORITY THE PLAN WILL SPEND.
+    -- A plan is admitted every month AS this person, and `clara._admit_accounting_work_core` -- the
+    -- body every occurrence goes through -- asks TWO questions of them, not one: an ACTIVE
+    -- membership (`actor_not_active`) and a rank of at least bookkeeper (`insufficient_role`). The
+    -- first cut of this branch asked only the first, so a member who was DEMOTED rather than
+    -- removed still configured a schedule whose every occurrence then answered CLR04
+    -- `insufficient_role` -- measured on this rig, two occurrences refused, before the rank was
+    -- added (`p1050.wake.demoted`). #1036's own lesson -- "configuring something that can never
+    -- run is worse than refusing" -- so the lane asks BOTH here, at configuration time, under ONE
+    -- token with an `axis` that says which half lapsed, and the remedy is the door another member
+    -- uses to re-record the instruction in their own name.
+    --
+    -- THE FLOOR IS READ FROM THE ADMISSION WALL, not restated: `clara.role_rank('bookkeeper')` is
+    -- the same comparison `clara._admit_accounting_work_core` makes, so the two can never drift
+    -- into a state where this door admits what that one will refuse.
+    select m.status, m.role into v_dir_status, v_dir_role
+      from clara.firm_memberships m
+     where m.firm_id = p_firm and m.user_id = v_directing;
+    if v_dir_status is distinct from 'active'
+       or clara.role_rank(v_dir_role) < clara.role_rank('bookkeeper') then
+      v_lapse_axis := case when v_dir_status is distinct from 'active'
+                           then 'membership' else 'role_rank' end;
+      v_lapse_text := case when v_lapse_axis = 'membership'
+        then 'the member whose standing instruction authorises this schedule is no longer an active member of the firm'
+        else 'the member whose standing instruction authorises this schedule no longer ranks as a bookkeeper, so no occurrence of it could be posted' end;
+      raise exception '%', v_lapse_text
         using errcode='CLR03',
           detail=jsonb_build_object(
             'reason','wake_authority_lapsed',
-            'reason_text','the member whose standing instruction authorises this schedule is no longer an active member of the firm',
+            'reason_text', v_lapse_text,
+            'axis', v_lapse_axis,
             'lane','wake',
             'wake_kind', p_authority_ref ->> 'wake_kind',
             'task_id', p_authority_ref ->> 'task_id',

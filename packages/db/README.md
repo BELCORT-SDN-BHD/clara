@@ -7707,9 +7707,17 @@ resolves the firm's live instruction itself and hands the citation to the twin.
    wake_authority_absent`, the same token, lane, quoted wake kind and task and the same `remedy`
    (`clara.create_prepayment_schedule`) #1036's refusal carried, plus `standing_remedy` and
    `instruction_key` so the refusal names the door that gives the instruction.
-2. The member who recorded it must still be an ACTIVE member of the firm. Not → `CLR03
-   wake_authority_lapsed`, refused at configuration time rather than configuring a plan that could
-   never post (#1036's own lesson).
+2. The member who recorded it must still carry **the authority the plan will spend every month** —
+   both halves of it. `clara._admit_accounting_work_core`, which every occurrence goes through, asks
+   for an ACTIVE membership (`actor_not_active`) *and* a rank of at least bookkeeper
+   (`insufficient_role`), so this door asks for both too. Either missing → `CLR03
+   wake_authority_lapsed` with an `axis` of `membership` or `role_rank`, refused at configuration
+   time rather than configuring a plan that could never post (#1036's own lesson). The first cut
+   asked only about membership, and a member who was DEMOTED rather than removed still configured a
+   schedule whose every occurrence then answered CLR04 `insufficient_role` — measured on this rig
+   before the rank joined the test (`p1050.wake.demoted`; `p1050.wake.lapsed` holds the other axis).
+   The floor is read from the admission wall (`clara.role_rank('bookkeeper')`) rather than restated,
+   so the two cannot drift into a state where this door admits what that one refuses.
 3. Otherwise the plan is written through the OBO plan step with that member as `authorised_by`,
    `authority_kind = 'standing_instruction'`, and an `authority_ref` carrying BOTH the instruction
    row and the clocked task — so one row links the instruction, the wake and the plan. The schedule

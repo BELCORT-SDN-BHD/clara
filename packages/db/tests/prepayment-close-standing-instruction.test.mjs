@@ -553,6 +553,68 @@ async (t) => {
     "the refusal does not name the instruction whose author lapsed");
   assert.equal(d.standing_remedy, "clara.record_firm_standing_instruction",
     "the refusal does not name the door another member uses to re-record it");
+  assert.equal(d.axis, "membership",
+    "the refusal does not say WHICH half of the authority lapsed");
+
+  assert.deepEqual(await footprint(sc), before, "the refused wake left something durable behind");
+});
+
+test("p1050.wake.demoted -- a member who is still ACTIVE but no longer ranks as a bookkeeper has "
+  + "lost the authority the plan needs every month, so the clocked lane refuses at configuration "
+  + "time rather than writing a plan whose every occurrence would answer CLR04 insufficient_role",
+async (t) => {
+  if (await standingGate(t)) return;
+  const sc = await prepaidScene("p1050demoted");
+  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
+  const si = await record(sc.alice, { opKey: opk("p1050-demoted") });
+
+  const before = await footprint(sc);
+
+  // THE DEMOTION IS COMMITTED, for the reason the lapsed cell states: the wake door runs on its
+  // own `clara_wake_interactive` connection, so a role change held uncommitted would be invisible
+  // to it. Alice stays an ACTIVE member throughout -- this cell is about RANK and nothing else.
+  // A second owner goes first, because `clara._tf_guard_last_owner` refuses to leave the firm
+  // without one.
+  let err;
+  try {
+    await rootQuery(
+      "update clara.firm_memberships set role = 'owner' where firm_id = $1 and user_id = $2",
+      [sc.firm, sc.bob]);
+    await rootQuery(
+      "update clara.firm_memberships set role = 'viewer' where firm_id = $1 and user_id = $2",
+      [sc.firm, sc.alice]);
+    const still = await rootQuery(
+      "select status, role from clara.firm_memberships where firm_id = $1 and user_id = $2",
+      [sc.firm, sc.alice]);
+    assert.equal(still.rows[0].status, "active",
+      "this cell is about rank: the member must still be ACTIVE when the wake runs");
+    assert.equal(still.rows[0].role, "viewer");
+    err = await caught(() => wake12(sc.s,
+      { client: sc.client, entry: sc.entry, target: sc.target }));
+  } finally {
+    await rootQuery(
+      "update clara.firm_memberships set role = 'owner' where firm_id = $1 and user_id = $2",
+      [sc.firm, sc.alice]);
+    await rootQuery(
+      "update clara.firm_memberships set role = 'bookkeeper' where firm_id = $1 and user_id = $2",
+      [sc.firm, sc.bob]);
+  }
+  const restored = await rootQuery(
+    "select role from clara.firm_memberships where firm_id = $1 and user_id = $2",
+    [sc.firm, sc.alice]);
+  assert.equal(restored.rows[0].role, "owner", "the role mutant was not restored");
+
+  assert.ok(err,
+    "a demoted member's standing instruction still configured a plan that could never post");
+  assert.equal(err.code, "CLR03");
+  const d = JSON.parse(err.detail);
+  assert.equal(d.reason, "wake_authority_lapsed",
+    "a lapsed authority keeps its own token whichever half of it lapsed");
+  assert.equal(d.axis, "role_rank",
+    "the refusal does not say that it is the RANK, not the membership, that lapsed");
+  assert.equal(d.lane, "wake");
+  assert.equal(d.instruction_id, si.instruction_id);
+  assert.equal(d.standing_remedy, "clara.record_firm_standing_instruction");
 
   assert.deepEqual(await footprint(sc), before, "the refused wake left something durable behind");
 });
