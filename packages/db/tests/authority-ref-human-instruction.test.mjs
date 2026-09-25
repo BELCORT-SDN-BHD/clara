@@ -333,14 +333,33 @@ test("p977.definition.one both doors REACH clara._authority_ref_refusal — the 
   // AND THE TENANCY STEP IS NOT ONE, which is the integration recut's own claim, asserted here
   // rather than left to the roster's silence: a body that quietly went back to naming the
   // definition would otherwise only show up as a roster mismatch with no reason attached.
+  //
+  // #1150 [0364] FOLDS THE STEP ITSELF. 0353's own follow-up 1 asked for it: `clara._obo_plan_core`
+  // takes `recurring_journal` into its closed kind set and the tenancy step becomes a two-line
+  // caller of it, carrying only ADV-L08-01's client-status wall. From that generation on the step
+  // reaches the wall THROUGH the shared body rather than naming it, which is a stronger form of
+  // the same claim -- so what is asserted is the REACH, measured off the ledger rather than pinned,
+  // and the one thing that must never come back either way is a copy of the resolver or of the
+  // inline probe.
   if (tenancyStepLive) {
     const step = bodies.rows.find((r) => r.proname === "_tenancy_plan_core");
     assert.ok(step, "the tenancy plan step resolves but is not in the catalog census");
     assert.ok(!step.prosrc.includes(REFUSAL_CALL),
       "clara._tenancy_plan_core names clara._authority_ref_refusal again -- 0353's integration "
       + "recut onto #1051's shared predicate was lost");
-    assert.ok(step.prosrc.includes(PLAN_WALL_CALL),
-      "clara._tenancy_plan_core does not reach #1051's shared plan-authority wall at all");
+    const folded = (await rootQuery(
+      "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+      ["plan_reservation_namespace_obo_fold$"])).rows[0].n > 0;
+    if (folded) {
+      assert.ok(step.prosrc.includes("clara._obo_plan_core("),
+        "clara._tenancy_plan_core neither names #1051's wall nor delegates to the body that does");
+      assert.ok(!step.prosrc.includes(PLAN_WALL_CALL),
+        "clara._tenancy_plan_core reaches the shared wall itself AND through the shared body -- "
+        + "after #1150's fold the delegate owns no authority wall of its own");
+    } else {
+      assert.ok(step.prosrc.includes(PLAN_WALL_CALL),
+        "clara._tenancy_plan_core does not reach #1051's shared plan-authority wall at all");
+    }
     assert.ok(!normalizeSrc(step.prosrc).includes(INLINE_CHAT_LANE_EXISTENCE),
       "clara._tenancy_plan_core carries an inline chat-lane existence test of its own");
   }

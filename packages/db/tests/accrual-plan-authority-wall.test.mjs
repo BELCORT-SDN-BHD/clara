@@ -556,11 +556,23 @@ async () => {
   // unchanged and is asserted above: the wall's SENTENCE still lives in exactly one body. What
   // grows is the roster of bodies that REACH it, which is the ticket working rather than drifting.
   // Measured off the catalog, never assumed: the step joins the roster only where it exists.
+  //
+  // ...AND IT LEFT AGAIN AT #1150 [0364_plan_reservation_namespace_obo_fold.sql, riders closing
+  // wave lane L2], which is the SAME ticket working. 0353's own follow-up 1 asked for the tenancy
+  // plan step to stop being a third snapshot of the on-behalf-of plan step; 0364 §E widens
+  // `clara._obo_plan_core`'s closed kind set to `recurring_journal` and §F makes the tenancy step a
+  // two-line caller of it, carrying only ADV-L08-01's own client-status wall. The tenancy lane
+  // still reaches this predicate on every confirmation -- THROUGH the shared body -- so the claim
+  // this assertion makes is unchanged and the roster goes back to three. Probed at the ledger
+  // rather than assumed, so this file is true on a chain either side of 0364.
   const tenancyStepLive = (await rootQuery(
     "select to_regprocedure('clara._tenancy_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,"
     + "integer,text,date,date,jsonb)') is not null as ok")).rows[0].ok;
+  const tenancyStepFolded = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["plan_reservation_namespace_obo_fold$"])).rows[0].n > 0;
   assert.deepEqual(census.filter((c) => c.callsPredicate).map((c) => c.name),
-    tenancyStepLive
+    tenancyStepLive && !tenancyStepFolded
       ? ["_accrual_plan_core", "_obo_plan_core", "_tenancy_plan_core", "create_accounting_plan"]
       : ["_accrual_plan_core", "_obo_plan_core", "create_accounting_plan"],
     "and exactly the plan bodies call it — the two #1051 folded, this ticket's third, and #1137's "

@@ -152,13 +152,44 @@ const TENANCY_PLAN_STEP = {
   sha: "9560414f256f80e641cb04a60d140fa4bd0189c722db0f9f97b47a797e3699a3",
 };
 
+// …AND FROM #1150's GENERATION ON, THAT FOURTH WRITER IS A THIN DELEGATE AND THE COMPUTATION IS
+// clara._obo_plan_core's [0364_plan_reservation_namespace_obo_fold.sql, riders closing wave lane
+// L2]. This is the follow-up the comment above named: "once clara._obo_plan_core absorbs
+// `recurring_journal` (after #1051 and #1080), this body becomes a two-line caller and drops off
+// this roster the way a thin delegate does". 0364 §E widens that closed kind set and §F folds the
+// body, so the roster FOLLOWS THE COMPUTATION exactly as it followed the revision door's in
+// #1137's generation: the shared step joins, at its post-0364 sha, and the tenancy step is pinned
+// separately as a delegate below (T.5).
+//
+// clara._obo_plan_core belongs on this roster for the reason the other entries do and always did:
+// it CREATES an accounting plan, it takes the #929 client rung 203005004, and it calls the overlap
+// advisory with its own plan id. Before 0364 it was the prepayment and deferred-revenue
+// on-behalf-of lanes' plan writer and was not watched here; it now also carries the tenancy lane's,
+// so the unwatched-writer gap SPEC-L08-1137-E closed for 0353 would otherwise have reopened.
+//   bbe338e8… — the body 0338 wrote, as the sweep wave's integration merge recut it.
+//   1e366547… — the same body with `recurring_journal` in its closed kind set and that kind's
+//               entrance on the audit row.
+const PLAN_NS_FOLD_STEM = "plan_reservation_namespace_obo_fold$";
+const OBO_PLAN_STEP = {
+  fn: "clara._obo_plan_core(text,uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)",
+  sha: "1e36654777973175ed81b08bd579a4beb87339b07e4c3b6071d5bc2a33db9d56",
+};
+const TENANCY_PLAN_DELEGATE = {
+  fn: "clara._tenancy_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)",
+  sha: "67fd7548a7ded4d4343aec98ae6cd919c0963c48955f9b27538e904d00404a79",
+};
+
 /** The bodies that HOLD the computation (T.4), per generation. */
 async function recutRoster() {
-  const split = (await rootQuery(
-    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [REVISE_SPLIT_STEM])
+  const applied = async (stem) => (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [stem])
   ).rows[0].n > 0;
+  const split = await applied(REVISE_SPLIT_STEM);
   if (!split) return RECUT;
-  return [...RECUT.map((s) => (s.fn === REVISE_DOOR ? REVISE_SPLIT.core : s)), TENANCY_PLAN_STEP];
+  const base = RECUT.map((s) => (s.fn === REVISE_DOOR ? REVISE_SPLIT.core : s));
+  return await applied(PLAN_NS_FOLD_STEM)
+    ? [...base, OBO_PLAN_STEP]
+    : [...base, TENANCY_PLAN_STEP];
 }
 
 let world = null;
@@ -453,6 +484,28 @@ test("p929.tail -- outside-in re-proof of 0283's own tail: the template arm is g
       "the revision door no longer delegates to the core that holds its computation");
     assert.doesNotMatch(d.rows[0].src, /pg_advisory_xact_lock|for update/,
       "the thin delegate has grown a rung or a row lock of its own -- the computation is the core's");
+  }
+
+  // (T.6) …AND, FROM #1150's GENERATION ON, THE TENANCY LANE'S PLAN STEP IS THE SECOND SUCH THIN
+  //       DELEGATE. Same three claims as (T.5), for the same reason: it is pinned so a later edit
+  //       is a red here, it NAMES the body that holds the computation, and it holds no rung and no
+  //       plan row of its own. The one thing it keeps is its OWN wall — ADV-L08-01's client-status
+  //       check, which the shared body does not carry and must not gain, because the prepayment
+  //       and deferred-revenue on-behalf-of lanes admit acts it would refuse.
+  if ((await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [PLAN_NS_FOLD_STEM])
+  ).rows[0].n > 0) {
+    const d = await rootQuery(
+      `select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha, p.prosrc as src
+         from pg_proc p where p.oid = to_regprocedure($1)`, [TENANCY_PLAN_DELEGATE.fn]);
+    assert.equal(d.rows[0].sha, TENANCY_PLAN_DELEGATE.sha,
+      `${TENANCY_PLAN_DELEGATE.fn} is not at the body 0364 writes -- either that migration changed or another ticket recut it`);
+    assert.match(d.rows[0].src, /clara\._obo_plan_core\(/,
+      "the tenancy plan step no longer delegates to the body that holds its computation");
+    assert.doesNotMatch(d.rows[0].src, /pg_advisory_xact_lock|insert\s+into\s+clara\.accounting_plan/,
+      "the thin delegate has grown a rung or a plan row of its own -- the computation is the shared body's");
+    assert.match(d.rows[0].src, /client_inactive/,
+      "the tenancy plan step has lost the client-status wall ADV-L08-01 put there");
   }
 });
 
