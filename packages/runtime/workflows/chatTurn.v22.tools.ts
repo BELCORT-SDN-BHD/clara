@@ -227,18 +227,24 @@ function detailsWithBody(body: Record<string, unknown>, seedId: string): Record<
   return details;
 }
 
-/** The estate's sentence for a FIXED token, or the caller's own when the reason is a statement
- *  about this document rather than a token (the named region list, the chart gap, the producer's
- *  refusal). One lookup, so "known token" is decided in exactly one place. */
-function sentenceFor(reason: string | null, fallback: string): string {
-  const sentence = reason === null ? undefined : OPENING_SOURCE_REFUSALS[reason];
-  return sentence ?? fallback;
-}
-
-/** The act a person takes next, by the same rule. */
-function fixFor(reason: string | null, fallback: string | null): string | null {
-  const fix = reason === null ? undefined : OPENING_SOURCE_FIXES[reason];
-  return fix ?? fallback;
+/**
+ * THE ESTATE'S WORDING FOR A FIXED TOKEN, or the caller's own when the reason is a statement about
+ * this document rather than a token (the named region list, the chart gap, the producer's
+ * refusal). One lookup, so "known token" is decided in exactly one place — and ONE lookup for
+ * every table, so the two opening tools cannot decide it two ways.
+ *
+ * A single generic reader rather than a named pair per table: the first cut had
+ * `sentenceFor`/`fixFor` here and `refreshSentenceFor`/`refreshFixFor` eight hundred lines below,
+ * byte-identical apart from the table they closed over (the standards review of this cut named
+ * it). Four call sites now pass the table they mean.
+ */
+function wordingFor<T extends string | null>(
+  table: Readonly<Record<string, string>>,
+  reason: string | null,
+  fallback: T,
+): string | T {
+  const found = reason === null ? undefined : table[reason];
+  return found ?? fallback;
 }
 
 /**
@@ -285,7 +291,7 @@ export function openingSourceOutcome(
       code: "not_found",
       reason: OPENING_BASIS_NOT_FOUND,
       fix: "Open the client's Registers page and check the opening basis you mean is the one this conversation is about.",
-      message: sentenceFor(OPENING_BASIS_NOT_FOUND, "I cannot see that opening basis."),
+      message: wordingFor(OPENING_SOURCE_REFUSALS, OPENING_BASIS_NOT_FOUND, "I cannot see that opening basis."),
       details: { seed_id: ids.seedId },
     };
   }
@@ -300,11 +306,12 @@ export function openingSourceOutcome(
       ok: false,
       code,
       reason,
-      fix: fixFor(reason, null),
+      fix: wordingFor(OPENING_SOURCE_FIXES, reason, null),
       // NAMED, NOT REWORDED. When the estate has no sentence for the token there is none to
       // carry either — `mapOpeningDbError` keeps the code and the reason and drops the door's own
       // text — so the refusal says which refusal it was rather than inventing a description.
-      message: sentenceFor(
+      message: wordingFor(
+        OPENING_SOURCE_REFUSALS,
         reason,
         `The opening source could not be read: the database refused it (${code}${reason ? `, ${reason}` : ""}). Nothing was recorded.`,
       ),
@@ -322,8 +329,9 @@ export function openingSourceOutcome(
       ok: false,
       code: "unparseable",
       reason,
-      fix: fixFor(reason, ALL_OR_NOTHING_FIX),
-      message: sentenceFor(
+      fix: wordingFor(OPENING_SOURCE_FIXES, reason, ALL_OR_NOTHING_FIX),
+      message: wordingFor(
+        OPENING_SOURCE_REFUSALS,
         reason,
         `The opening source could not be read: ${reason ?? "the document could not be read"}. `
           + "Nothing was recorded — one unreadable line forfeits the whole document, because a "
@@ -1073,16 +1081,6 @@ export const OPENING_REFRESH_FIXES: Readonly<Record<string, string>> = Object.fr
     "Open the client's Registers page and check the opening basis you mean is the one this conversation is about.",
 });
 
-function refreshSentenceFor(reason: string | null, fallback: string): string {
-  const sentence = reason === null ? undefined : OPENING_REFRESH_REFUSALS[reason];
-  return sentence ?? fallback;
-}
-
-function refreshFixFor(reason: string | null, fallback: string | null): string | null {
-  const fix = reason === null ? undefined : OPENING_REFRESH_FIXES[reason];
-  return fix ?? fallback;
-}
-
 /**
  * THE CORE'S OWN ANSWER, TURNED INTO THE TOOL ENVELOPE — #986's eight-row table, verbatim, never
  * replaced by a generic message.
@@ -1125,8 +1123,9 @@ export function openingRefreshOutcome(
       ok: false,
       code,
       reason,
-      fix: refreshFixFor(reason, null),
-      message: refreshSentenceFor(
+      fix: wordingFor(OPENING_REFRESH_FIXES, reason, null),
+      message: wordingFor(
+        OPENING_REFRESH_REFUSALS,
         reason,
         `The opening basis could not be refreshed: the database refused it (${code}${reason ? `, ${reason}` : ""}). Nothing was changed.`,
       ),
@@ -1139,8 +1138,9 @@ export function openingRefreshOutcome(
       ok: false,
       code: "unparseable",
       reason,
-      fix: refreshFixFor(reason, ALL_OR_NOTHING_FIX),
-      message: refreshSentenceFor(
+      fix: wordingFor(OPENING_REFRESH_FIXES, reason, ALL_OR_NOTHING_FIX),
+      message: wordingFor(
+        OPENING_REFRESH_REFUSALS,
         reason,
         `The newest reading could not be read: ${reason ?? "the document could not be read"}. `
           + "Nothing was changed — one unreadable line forfeits the whole document, because a "

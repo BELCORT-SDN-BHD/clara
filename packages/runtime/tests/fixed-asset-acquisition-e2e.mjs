@@ -422,8 +422,36 @@ async function main() {
     // This leg opens it, answers it through the HUMAN door a person actually uses
     // (`clara.answer_work_question`), and reads what the run then wrote.
     const asked = await pollQuestion(workId, "particulars question");
-    assert.deepEqual(asked.source_ref, { kind: "fixed_asset", asset_id: asset.id },
+    assert.equal(asked.source_ref.kind, "fixed_asset",
       "the question cites the ASSET it is about — a fixed asset, never a basis line");
+    assert.equal(asked.source_ref.asset_id, asset.id);
+    // ---- 2a. #933 / A10 — THE PROPOSAL BLOCK, ON A REAL PARKED RUN -----------------------
+    //
+    // CUT PHASE 2026-09-25: `claraWork_v6` replaced `particularsQuestionV4` with
+    // `particularsQuestionV6`, whose ONE change is this `source_ref`. Until this leg no World run
+    // had ever parked on it, so the question text a person reads shipped undriven — which is what
+    // the cut's own spec review said (C1-SPEC-02). The keys are asserted by name rather than by a
+    // deepEqual against a literal, because the `reason` sentence is the derivation's prose and
+    // pinning it here would make this leg a copy of the unit cells rather than a drive of them.
+    const proposal = asked.source_ref.proposal;
+    assert.ok(proposal, "the parked question carries the PROPOSAL block claraWork_v6 adds");
+    assert.equal(proposal.v, 1, "…at the version apps/web's three entrances already read");
+    // THE LOAD-BEARING ONE. `wave4-lane05-fix.md`'s CORRECTED contract casts `fa.acquired_date` to
+    // `::text`; without it node-postgres hands back a JS Date at LOCAL midnight whose UTC spelling
+    // under Asia/Kuala_Lumpur is the PREVIOUS calendar day, and every depreciation charge from
+    // then on would run from 2026-08-31. This is the only place that cast is proved end to end.
+    assert.equal(proposal.start_date, "2026-09-01",
+      "the proposed in-service date is the acquisition's own posting date, never a day early");
+    assert.equal(proposal.residual_cents, 0, "…and a nil residual, the firm's #932 default");
+    // NOTHING GROUNDS A METHOD YET: this client's first asset on this account, no policy, no note.
+    // The proposal says so rather than guessing, which is the whole of #933's ruling.
+    assert.equal(proposal.method, null);
+    assert.equal(proposal.useful_life_months, null);
+    assert.match(String(proposal.reason), /Nothing on record grounds a depreciation method/);
+    assert.match(String(proposal.reason), new RegExp(FA_COST),
+      "…and it names the account it looked at");
+    console.log("[fa-acq-e2e] PASS 2a: claraWork_v6 parks with the #933 proposal block — start_date "
+      + `${proposal.start_date} (the ::text cast, proved end to end), residual ${proposal.residual_cents}, no method grounded`);
     assert.deepEqual(asked.fields.map((f) => f.key),
       ["method", "useful_life_months", "rate_bps", "residual_cents", "start_date", "description"],
       "…and carries the particulars field array, in the order the answering surface renders");
@@ -461,6 +489,39 @@ async function main() {
     assert.equal(await countEntries(one.client), 1, "no second entry");
     assert.equal((await assets(one.client)).length, 1, "and NO SECOND ASSET — the birth is idempotent on the cost line");
     console.log("[fa-acq-e2e] PASS 3: a lost acknowledgement replays onto the same Work and births no twin");
+
+    // ---- 3b. A SECOND ACQUISITION ON THE SAME ACCOUNT NOW HAS A GROUND ------------------
+    //
+    // The other half of #933, and the half a person would notice: the first asset on `1510` is now
+    // COMPLETE (leg 2b answered it straight-line over 60 months), so the derivation has a sibling
+    // to ground on and proposes rather than declines. One client, one account, two acquisitions —
+    // which is exactly the shape a firm's register grows in.
+    const twoIntent = randomUUID();
+    const twoAdmit = await api("POST", "/api/work/journal",
+      { clientId: one.client, intentKey: twoIntent, basis: acquisitionBasis("second compressor purchased") },
+      one.jwt);
+    assert.equal(twoAdmit.status, 202, `second admission 202 (got ${twoAdmit.status})`);
+    const twoWork = twoAdmit.body.work_id;
+    const twoDone = await pollWork(twoWork, one.jwt, COMMITTED, "second acquisition commits");
+    assert.equal(twoDone.work.status, "awaiting_input", "…and parks on its own particulars question");
+    const grown = await assets(one.client);
+    assert.equal(grown.length, 2, "two register rows, one per acquisition");
+    const twoAsset = grown.find((a) => a.id !== asset.id);
+    assert.ok(twoAsset, "…and the second is a row of its own");
+
+    const askedTwo = await pollQuestion(twoWork, "second particulars question");
+    const grounded = askedTwo.source_ref.proposal;
+    assert.ok(grounded, "the second parked question carries a proposal too");
+    assert.equal(grounded.method, "straight_line",
+      "…and it PROPOSES the method its sibling on this account already depreciates by");
+    assert.equal(Number(grounded.useful_life_months), 60, "…with that sibling's useful life");
+    assert.equal(grounded.start_date, "2026-09-01", "…the acquisition's own posting date, again unshifted");
+    assert.notEqual(String(grounded.reason), String(proposal.reason),
+      "…and it says WHY, which is a different sentence from 'nothing grounds one'");
+    console.log(`[fa-acq-e2e] PASS 3b: with one completed sibling on ${FA_COST} the proposal grounds — `
+      + `${grounded.method} over ${grounded.useful_life_months} months`);
+    // Left parked on purpose, and placed AFTER leg 3: this acquisition adds a journal entry, and
+    // leg 3's counts are written against the first Work alone.
 
     // ---- 5. current authority, re-read at the particulars door ---------------------------
     //
@@ -524,8 +585,11 @@ async function main() {
     ));
     assert.equal(applied.rows[0].r.particulars_complete, true,
       "the owner still holds the floor, so the run applies the answer on their behalf");
-    assert.equal(await countEntries(one.client), 2,
-      "…and answering wrote NO second journal: two acquisitions, two entries, and nothing else");
+    assert.equal(await countEntries(one.client), 3,
+      "…and answering wrote NO second journal: THREE acquisitions (legs 1, 3b and this one), three "
+      + "entries, and nothing else. The count moved from two to three when leg 3b joined this file: "
+      + "it is a count of acquisitions on this client, and the claim it carries — that ANSWERING a "
+      + "particulars question posts nothing — is unchanged");
     console.log("[fa-acq-e2e] PASS 5: the particulars door re-reads LIVE authority, refuses a demoted initiator by name, and writes no journal when it succeeds");
   } finally {
     if (!first.state.exited) first.child.kill("SIGKILL");
