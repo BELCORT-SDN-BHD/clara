@@ -345,6 +345,100 @@ comment on function clara.record_firm_standing_instruction(text, text, text) is
   '#1050: a named member of the firm records a firm-level standing instruction, with the one-line reason it is given under. Admin floor, clara_authenticated only -- no machine lane may reach it, because an instruction a machine recorded would name nobody. Version-forward: an unchanged re-recording by the same member is idempotent, a restated reason withdraws the live row and inserts a fresh one.';
 
 
+
+-- =====================================================================================
+-- §G — clara.withdraw_firm_standing_instruction — THE DOOR THAT TAKES IT BACK.
+--
+-- A STANDING INSTRUCTION THAT CANNOT BE WITHDRAWN IS A SWITCH, NOT AN INSTRUCTION, and the
+-- ruling's own words are "until somebody withdraws it". §A already carries the withdrawal
+-- interval; without this door the only way to reach it would be §B's version-forward fold, which
+-- always leaves a live row standing. A firm's first recording would then be permanent.
+--
+-- SAME FLOOR AS §B, and for the same reason: standing an act for every client of the firm, and
+-- STOPPING Clara from performing it, are the same firm-level governance decision seen from two
+-- sides. Owner rank clears it.
+--
+-- WHAT WITHDRAWAL DOES NOT DO, stated rather than left to be found: it does not touch a plan that
+-- was already written. Those plans cite the row that WAS in force when they were written and they
+-- keep posting under the member who authorised them, exactly as #940's own ruling leaves a running
+-- amortisation posting to term end when its account's roster enrolment is retired. Withdrawal
+-- closes the lane to NEW schedules. Whether it should also pause the plans it produced is a
+-- decision this ticket was not given, and it is filed as a follow-up rather than swept.
+-- =====================================================================================
+create or replace function clara.withdraw_firm_standing_instruction(
+    p_instruction_key text, p_reason text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $c0338_wd$
+declare
+  v_actor uuid; v_firm uuid; v_dedupe jsonb;
+  v_key text; v_reason text; v_row record;
+begin
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'withdrawing a standing instruction requires its idempotency key'
+      using errcode='CLR10', detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
+  end if;
+  select a.actor, a.firm into v_actor, v_firm
+    from clara._human_ctx(clara.role_rank('admin')) a;
+
+  v_key    := nullif(btrim(coalesce(p_instruction_key, '')), '');
+  v_reason := nullif(btrim(coalesce(p_reason, '')), '');
+
+  -- RESERVE-BEFORE-MUTABLE-VALIDATION, §B's placement and its reasoning: identity and authz
+  -- first, then the replay short-circuit, then everything that reads the world.
+  v_dedupe := clara._reserve_op(v_firm, 'withdraw_firm_standing_instruction', p_op_key,
+    clara._hash(jsonb_build_object('key', v_key, 'reason', v_reason)));
+  if v_dedupe is not null then
+    if v_dedupe ? 'pending' then
+      raise exception 'this standing-instruction key is held by an in-flight sibling'
+        using errcode='CLR13', detail='{"reason":"operation_in_flight"}';
+    end if;
+    return v_dedupe;
+  end if;
+
+  -- A WITHDRAWAL OWES ITS OWN SENTENCE. §A's ck_fsi_withdrawn makes it structural; this is the
+  -- typed answer, so a caller is told which half is missing rather than handed a 23514.
+  if v_reason is null then
+    raise exception 'withdrawing a standing instruction requires the one-line reason it is withdrawn under'
+      using errcode='CLR10',
+        detail='{"reason":"firm_standing_instruction_invalid","axis":"withdraw_reason_missing"}';
+  end if;
+  if v_key is null or v_key not in ('prepayment_schedule_at_close') then
+    raise exception 'unknown standing instruction %', coalesce(v_key, '<null>')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','firm_standing_instruction_invalid',
+          'axis','instruction_key_unknown', 'instruction_key', v_key)::text;
+  end if;
+
+  select * into v_row from clara.firm_standing_instructions
+   where firm_id = v_firm and instruction_key = v_key and withdrawn_at is null
+   limit 1 for update;
+  if not found then
+    raise exception 'this firm has no standing instruction of that kind to withdraw'
+      using errcode='CLR11',
+        detail=jsonb_build_object('reason','firm_standing_instruction_absent',
+          'instruction_key', v_key)::text;
+  end if;
+
+  -- THE ONE LAWFUL UPDATE §A.1 admits: the three withdrawal columns together, set once, on a row
+  -- that is not already withdrawn. Everything else on the row stays exactly as the member who
+  -- recorded it left it, so a plan that cites it still reads the basis it was written under.
+  update clara.firm_standing_instructions
+     set withdrawn_by = v_actor, withdrawn_at = now(), withdraw_reason = v_reason
+   where id = v_row.id;
+
+  perform clara._audit(v_firm, v_actor, null, null, 'withdraw_firm_standing_instruction', null,
+    jsonb_build_object('instruction_key', v_key, 'instruction_id', v_row.id, 'op_key', p_op_key));
+
+  return clara._finish_op(v_firm, 'withdraw_firm_standing_instruction', p_op_key,
+    jsonb_build_object('instruction_id', v_row.id, 'instruction_key', v_key,
+      'recorded_by', v_row.recorded_by, 'withdrawn_by', v_actor, 'active', false));
+end $c0338_wd$;
+revoke all on function clara.withdraw_firm_standing_instruction(text, text, text) from public;
+grant execute on function clara.withdraw_firm_standing_instruction(text, text, text)
+  to clara_authenticated;
+
+comment on function clara.withdraw_firm_standing_instruction(text, text, text) is
+  '#1050: a named member of the firm withdraws a firm-level standing instruction, with the one-line reason it is withdrawn under. Admin floor, clara_authenticated only. The row is kept forever with its withdrawal stamp, so a plan written while the instruction stood still reads the basis it was written under; what stops is NEW work -- the clocked lane refuses wake_authority_absent again.';
+
 -- =====================================================================================
 -- §C — clara.accounting_plans.authority_kind GAINS ONE VALUE, and exactly one.
 --
@@ -1386,6 +1480,26 @@ begin
      or has_function_privilege('public',
        'clara.record_firm_standing_instruction(text,text,text)'::regprocedure, 'EXECUTE') then
     raise exception '0338 tail: a machine lane reached the recording door -- an instruction a machine recorded would name nobody'
+      using errcode='CLR10';
+  end if;
+
+  -- 3b · THE WITHDRAW DOOR IS THE HUMAN LANE'S ALONE, on the same terms as the recording door.
+  if not has_function_privilege('clara_authenticated',
+       'clara.withdraw_firm_standing_instruction(text,text,text)'::regprocedure, 'EXECUTE') then
+    raise exception '0338 tail: clara_authenticated lost EXECUTE on the withdraw door'
+      using errcode='CLR10';
+  end if;
+  if has_function_privilege('clara_runtime',
+       'clara.withdraw_firm_standing_instruction(text,text,text)'::regprocedure, 'EXECUTE')
+     or has_function_privilege('clara_agent_ro',
+       'clara.withdraw_firm_standing_instruction(text,text,text)'::regprocedure, 'EXECUTE')
+     or has_function_privilege('clara_wake_interactive',
+       'clara.withdraw_firm_standing_instruction(text,text,text)'::regprocedure, 'EXECUTE')
+     or has_function_privilege('clara_wake_proactive',
+       'clara.withdraw_firm_standing_instruction(text,text,text)'::regprocedure, 'EXECUTE')
+     or has_function_privilege('public',
+       'clara.withdraw_firm_standing_instruction(text,text,text)'::regprocedure, 'EXECUTE') then
+    raise exception '0338 tail: a machine lane reached the withdraw door -- a firm''s delegation is taken back by a person'
       using errcode='CLR10';
   end if;
 

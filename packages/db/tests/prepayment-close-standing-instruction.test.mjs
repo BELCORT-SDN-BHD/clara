@@ -79,6 +79,13 @@ function record(sub, { key = KEY, reason = REASON, opKey } = {}) {
     [key, reason, opKey ?? opk("p1050-record")]).then((r) => r.rows[0].r);
 }
 
+/** The withdraw door, called for real as a named member through the governed human path. */
+function withdraw(sub, { key = KEY, reason = "p1050: the firm takes the instruction back", opKey } = {}) {
+  return humanQuery(sub,
+    "select clara.withdraw_firm_standing_instruction($1,$2,$3) as r",
+    [key, reason, opKey ?? opk("p1050-withdraw")]).then((r) => r.rows[0].r);
+}
+
 /** The live standing-instruction row of a firm, read as root. */
 async function liveRow(firm, key = KEY) {
   const r = await rootQuery(
@@ -606,4 +613,168 @@ async (t) => {
     [plan0.authority_kind, plan0.authority_ref.kind, plan0.authority_ref.id,
       plan0.authority_ref.task_id, plan0.authorised_by],
     ["standing_instruction", "firm_standing_instruction", si.instruction_id, sc.s.task, sc.alice]);
+});
+
+// ---------------------------------------------------------------------------------------------
+// A STANDING INSTRUCTION THAT CANNOT BE TAKEN BACK IS NOT AN INSTRUCTION, IT IS A SWITCH.
+//
+// The relation carries the withdrawal interval from §A, and the ruling's own words are "until
+// somebody withdraws it". A firm that could only ever record one would have delegated to Clara
+// permanently on its first try, which is the opposite of what a standing instruction is.
+// ---------------------------------------------------------------------------------------------
+test("p1050.withdraw.closes -- a named member withdraws the firm's standing instruction through "
+  + "the real door; the row keeps its interval and gains the withdrawal stamp, the clocked lane "
+  + "closes again with the SAME wake_authority_absent it gave before anything was instructed, and "
+  + "re-recording re-opens it",
+async (t) => {
+  if (await standingGate(t)) return;
+  const sc = await prepaidScene("p1050withdraw");
+  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
+  const si = await record(sc.alice, { opKey: opk("p1050-withdraw-rec") });
+
+  const WHY = "The firm will configure prepayment schedules by hand this year.";
+  const key = opk("p1050-withdraw");
+  const w = await withdraw(sc.alice, { reason: WHY, opKey: key });
+  assert.equal(w.instruction_id, si.instruction_id, "the withdrawal named a different row");
+  assert.equal(w.active, false);
+
+  const row = (await rootQuery(
+    "select * from clara.firm_standing_instructions where id = $1", [si.instruction_id])).rows[0];
+  assert.equal(row.withdrawn_by, sc.alice, "the withdrawal does not name the member who made it");
+  assert.ok(row.withdrawn_at, "the withdrawal left no stamp");
+  assert.equal(row.withdraw_reason, WHY, "a withdrawal owes its own sentence");
+  assert.equal(row.recorded_by, sc.alice, "the withdrawal rewrote the recording half of the row");
+  assert.equal(row.reason, REASON, "the withdrawal rewrote the instruction's own reason");
+  assert.equal(await liveRow(sc.firm), null, "the firm still carries a live instruction");
+
+  // A REPLAY under the same key is the same withdrawal, not a second one.
+  const again = await withdraw(sc.alice, { reason: WHY, opKey: key });
+  assert.equal(again.instruction_id, w.instruction_id);
+
+  // THE LANE CLOSES, with the sentence a firm that never instructed anything gets.
+  const err = await caught(() => wake12(sc.s,
+    { client: sc.client, entry: sc.entry, target: sc.target }));
+  assert.ok(err, "a withdrawn standing instruction still opened the clocked lane");
+  assert.equal(err.code, "CLR03");
+  assert.equal(JSON.parse(err.detail).reason, "wake_authority_absent");
+  assert.equal(JSON.parse(err.detail).standing_remedy, "clara.record_firm_standing_instruction");
+  const n = await rootQuery(
+    "select count(*)::int as n from clara.prepayment_schedules where client_id = $1", [sc.client]);
+  assert.equal(n.rows[0].n, 0, "the refused wake configured a schedule anyway");
+
+  // AND IT RE-OPENS. The withdrawn row is kept forever; a fresh one stands beside it.
+  const si2 = await record(sc.alice, { opKey: opk("p1050-withdraw-again") });
+  assert.notEqual(si2.instruction_id, si.instruction_id,
+    "re-recording resurrected the withdrawn row instead of minting a new one");
+  const r = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.ok(r.schedule_id, `the lane did not re-open: ${JSON.stringify(r)}`);
+  const plan = (await rootQuery(
+    "select authority_ref from clara.accounting_plans where id = $1", [r.plan_id])).rows[0];
+  assert.equal(plan.authority_ref.id, si2.instruction_id,
+    "the new plan cites the WITHDRAWN instruction rather than the one in force");
+
+  const all = await rootQuery(
+    "select count(*)::int as n from clara.firm_standing_instructions where firm_id = $1", [sc.firm]);
+  assert.equal(all.rows[0].n, 2, "the firm's instruction history was overwritten rather than kept");
+});
+
+test("p1050.withdraw.refusals -- withdrawing what nobody instructed is refused BY NAME, a blank "
+  + "sentence is refused, an unknown key is refused, and both doors are ADMIN-floored: a "
+  + "bookkeeper of the firm is refused by rank at each of them",
+async (t) => {
+  if (await standingGate(t)) return;
+  const sc = await prepaidScene("p1050floor");
+
+  const nothing = await caught(() => withdraw(sc.alice,
+    { reason: "nothing to take back", opKey: opk("p1050-nothing") }));
+  assert.ok(nothing, "a firm with no standing instruction withdrew one");
+  assert.equal(nothing.code, "CLR11");
+  assert.equal(JSON.parse(nothing.detail).reason, "firm_standing_instruction_absent");
+
+  await record(sc.alice, { opKey: opk("p1050-floor-rec") });
+
+  const blank = await caught(() => withdraw(sc.alice,
+    { reason: "   ", opKey: opk("p1050-blank") }));
+  assert.ok(blank, "a withdrawal with no sentence was accepted");
+  assert.deepEqual([JSON.parse(blank.detail).reason, JSON.parse(blank.detail).axis],
+    ["firm_standing_instruction_invalid", "withdraw_reason_missing"]);
+
+  const unknown = await caught(() => withdraw(sc.alice,
+    { key: "let_clara_do_anything", reason: "x", opKey: opk("p1050-unknownkey") }));
+  assert.ok(unknown, "an unknown instruction key was accepted");
+  assert.deepEqual([JSON.parse(unknown.detail).reason, JSON.parse(unknown.detail).axis],
+    ["firm_standing_instruction_invalid", "instruction_key_unknown"]);
+
+  // THE FLOOR. Standing an act is a firm-level governance act, so it sits at admin even though
+  // the act it authorises (configuring one client's amortisation) is bookkeeper work. Bob is a
+  // bookkeeper of this firm.
+  const bobRecords = await caught(() => record(sc.bob, { opKey: opk("p1050-bob-rec") }));
+  assert.ok(bobRecords, "a bookkeeper recorded a firm-level standing instruction");
+  const bobWithdraws = await caught(() => withdraw(sc.bob,
+    { reason: "x", opKey: opk("p1050-bob-wd") }));
+  assert.ok(bobWithdraws, "a bookkeeper withdrew a firm-level standing instruction");
+  for (const e of [bobRecords, bobWithdraws]) {
+    assert.equal(e.code, "CLR04", `a rank refusal is CLR04, got ${e.code}: ${e.message}`);
+  }
+  // …and the instruction is untouched by either refused attempt.
+  const row = await liveRow(sc.firm);
+  assert.ok(row && row.withdrawn_at === null, "a refused attempt moved the instruction");
+});
+
+// ---------------------------------------------------------------------------------------------
+// THE TWO DOORS' SHAPE — the ACL claim this ticket rests on, read off the live catalog.
+// An instruction a machine recorded would name nobody, which is the whole point of the ticket.
+// ---------------------------------------------------------------------------------------------
+test("p1050.doors.shape -- both doors are clara_authenticated's alone (no clara_runtime, no agent "
+  + "read role, no wake lane, no PUBLIC), security definer, owned by clara_fn_owner; neither has "
+  + "an OBO twin or a wake wrapper anywhere in the catalog; and the relation itself is readable "
+  + "only by the human lane and writable by nobody but the doors",
+async (t) => {
+  if (await standingGate(t)) return;
+
+  const sigs = [
+    "clara.record_firm_standing_instruction(text,text,text)",
+    "clara.withdraw_firm_standing_instruction(text,text,text)",
+  ];
+  for (const sig of sigs) {
+    const row = (await rootQuery(
+      `select coalesce(array_to_string(p.proacl::text[], '|'), '(default)') as acl,
+              pg_get_userbyid(p.proowner) as owner, p.prosecdef as secdef
+         from pg_proc p where p.oid = to_regprocedure($1)`, [sig])).rows;
+    assert.equal(row.length, 1, `${sig} does not resolve at its exact signature`);
+    assert.match(row[0].acl, /clara_authenticated=X\/clara_fn_owner/, `${sig}: the human lane lost EXECUTE`);
+    assert.doesNotMatch(row[0].acl,
+      /clara_runtime=|clara_agent_ro=|clara_agent_chat_ro=|clara_wake_|=X\/clara_fn_owner\|=X/,
+      `${sig}: a machine lane can reach a door only a person may use`);
+    assert.equal(row[0].owner, "clara_fn_owner");
+    assert.equal(row[0].secdef, true);
+  }
+
+  // NO TWIN AND NO WRAPPER, by NAME across the whole schema -- the stronger claim.
+  const kin = await rootQuery(
+    `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara'
+        and (p.proname like '%firm_standing_instruction%_for'
+             or p.proname like 'wake_%firm_standing_instruction%'
+             or p.proname like '%firm_standing_instruction%_wake')`);
+  assert.deepEqual(kin.rows, [],
+    `a machine twin of the standing-instruction doors exists: ${JSON.stringify(kin.rows)}`);
+
+  // THE RELATION. Forced RLS, SELECT for the human lane, no write grant to anybody, no grant at
+  // all to any machine role.
+  const rel = (await rootQuery(
+    `select c.relrowsecurity as rls, c.relforcerowsecurity as forced,
+            has_table_privilege('clara_authenticated','clara.firm_standing_instructions','SELECT') as h_sel,
+            has_table_privilege('clara_authenticated','clara.firm_standing_instructions','INSERT') as h_ins,
+            has_table_privilege('clara_authenticated','clara.firm_standing_instructions','UPDATE') as h_upd,
+            has_table_privilege('clara_authenticated','clara.firm_standing_instructions','DELETE') as h_del,
+            has_table_privilege('clara_runtime','clara.firm_standing_instructions','SELECT') as rt_sel,
+            has_table_privilege('clara_agent_ro','clara.firm_standing_instructions','SELECT') as ag_sel,
+            has_table_privilege('public','clara.firm_standing_instructions','SELECT') as pub_sel
+       from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'clara' and c.relname = 'firm_standing_instructions'`)).rows[0];
+  assert.deepEqual(
+    [rel.rls, rel.forced, rel.h_sel, rel.h_ins, rel.h_upd, rel.h_del, rel.rt_sel, rel.ag_sel, rel.pub_sel],
+    [true, true, true, false, false, false, false, false, false],
+    "the standing-instruction relation's posture moved");
 });

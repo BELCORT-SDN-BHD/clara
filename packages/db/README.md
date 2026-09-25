@@ -7630,6 +7630,11 @@ and `clara.accounting_plans.authority_kind` gains ONE value.
 |---|---|---|
 | A | `clara.firm_standing_instructions` | a new append-only relation: one live instruction per (firm, key), recorded by a named member, withdrawn by a stamp |
 | B | `clara.record_firm_standing_instruction` | the recording door — admin floor, `clara_authenticated` only |
+| G | `clara.withdraw_firm_standing_instruction` | the door that takes it back — same floor, same lane |
+| C | `clara.accounting_plans.authority_kind` | 0193's one-member CHECK gains `standing_instruction`, and nothing else |
+| D | `clara._authority_ref_refusal` | a fourth reference kind, `firm_standing_instruction`, resolved at FIRM scope and only while live |
+| E | `clara._obo_plan_core` | the two authority kinds admitted ONLY in their own strict pairing |
+| F | `clara._prepayment_schedule_core` | the `wake` arm stops refusing for want of a person and starts finding one |
 
 ### Why the relation is append-only rather than a toggle
 
@@ -7647,9 +7652,62 @@ The act the instruction authorises — configuring one client's amortisation sch
 work (`clara.create_prepayment_schedule`). **Standing** it, so that an unattended run performs it for
 every client of the firm until somebody withdraws it, is a firm-level governance act, which in this
 estate sits at admin (`clara.record_client_fact`, [0055](migrations/0055_client_facts_trio.sql))
-rather than at the floor of the act it authorises. Owner rank clears it.
+rather than at the floor of the act it authorises. Owner rank clears it. §G carries the same floor
+for the same reason: standing an act and stopping it are one decision seen from two sides.
+
+### Why the pairing, and why the human door is not widened
+
+`standing_instruction` is admitted only together with an `authority_ref` of kind
+`firm_standing_instruction`, and that kind only with `standing_instruction`. Without the pairing the
+widening would be a loosening: a `standing_instruction` citing a chat turn would be a label pasted
+on a person's typed decision, and an `explicit_instruction` citing a standing-instruction row would
+be a person claiming their firm's blanket delegation as something they themselves decided.
+
+`clara.create_accounting_plan` is **not** widened. Only the OBO twin is, because only an unattended
+lane has nobody at the keyboard. That also keeps §E's explicit branch byte-for-byte the wall that
+was there, which is what #915's and #941's parity cells (`p915.obo.refusals_match`,
+`p941.obo.authority` — they compare the two entrances' whole refusal payloads) measure. #977's
+closed world of exactly three readers of `clara._authority_ref_refusal` is unmoved: the wake lane
+resolves the firm's live instruction itself and hands the citation to the twin.
+
+### What the wake lane does now
+
+1. Resolve the firm's LIVE `prepayment_schedule_at_close` instruction. None → `CLR03
+   wake_authority_absent`, the same token, lane, quoted wake kind and task and the same `remedy`
+   (`clara.create_prepayment_schedule`) #1036's refusal carried, plus `standing_remedy` and
+   `instruction_key` so the refusal names the door that gives the instruction.
+2. The member who recorded it must still be an ACTIVE member of the firm. Not → `CLR03
+   wake_authority_lapsed`, refused at configuration time rather than configuring a plan that could
+   never post (#1036's own lesson).
+3. Otherwise the plan is written through the OBO plan step with that member as `authorised_by`,
+   `authority_kind = 'standing_instruction'`, and an `authority_ref` carrying BOTH the instruction
+   row and the clocked task — so one row links the instruction, the wake and the plan. The schedule
+   row still names `clara.agent_user_id()` as the run that wrote it, and its audit row carries
+   `via_wake_kind = 'close_prep'`.
+
+**The idempotency payload does not move.** The reservation still hashes the CALLER's own
+`p_authority_ref` (the honest `agent_wake` descriptor the wrapper builds), never the citation this
+body derives, because this door's own law is that the key identifies the decision a caller made.
+
+### What withdrawal does not do
+
+A withdrawn instruction closes the lane to NEW schedules. Plans already written keep posting under
+the member who authorised them, exactly as #940's ruling leaves a running amortisation posting to
+term end when its account's roster enrolment is retired. Whether withdrawal should also pause the
+plans it produced is a decision #1050 was not given; it is filed as a follow-up.
 
 **Redo-safe by construction** (#957): `create table if not exists`, `create or replace function`,
-`drop trigger if exists` before each `create trigger`, `drop policy if exists` before each policy.
-The file writes no row and backfills nothing, and its prestate reports REDO rather than refusing on
-its own objects.
+`drop trigger if exists` before each `create trigger`, `drop policy if exists` before each policy,
+and `drop constraint if exists` before §C's re-add. The file writes no row and backfills nothing.
+The prestate pins the three recut bodies by `sha256(prosrc)` measured on this lane's rig and admits
+exactly two pre-images each — the pin, or a body already carrying this file's own `0338`
+attribution — so a redo is admitted and real drift still refuses by name. Measured on this rig: the
+first apply reported `2 FIRST, 0 REDO`, the third `1 FIRST, 2 REDO`.
+
+**Integration seam, named rather than discovered.** `clara._obo_plan_core` is also written by lane
+L1 (#1051, which extracts one shared authority predicate from it and
+`clara.create_accounting_plan`). L1 merges first, so §E must be re-derived from that post-image at
+integration: the edit is additive and self-describing — one more admitted authority kind, one more
+admitted reference kind, and the strict pairing that binds them — and the explicit-instruction
+branch is unchanged, so folding it into an extracted predicate is a mechanical carry rather than a
+re-decision.

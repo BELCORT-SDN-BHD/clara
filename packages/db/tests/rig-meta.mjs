@@ -3377,7 +3377,7 @@ export const SCHEDULE_TERM_CORRECTION_0317_COHORT = [
 // absent" reason 0317's carries: the `db-slice-frontiers` matrix runs this package against
 // databases pinned at earlier frontiers where 0315 has applied and 0338 has not.
 //
-//   the ONE human door — clara_authenticated ONLY, ADMIN-floored in its own body. The act the
+//   the TWO human doors — clara_authenticated ONLY, ADMIN-floored in their own bodies. The act the
 //   instruction authorises is bookkeeper work; STANDING it for every client of the firm until
 //   somebody withdraws it is firm-level governance, which sits at admin here (0055's own floor).
 //   clara_runtime, both agent read roles and all four wake lanes gain ZERO and there is NO wake
@@ -3385,6 +3385,7 @@ export const SCHEDULE_TERM_CORRECTION_0317_COHORT = [
 //   whole point of the ticket. 0338's own tail asserts the absence by has_function_privilege.
 const FIRM_STANDING_INSTRUCTION_0338_HUMAN_FNS = [
   "record_firm_standing_instruction",
+  "withdraw_firm_standing_instruction",
 ];
 //   …and the UNGRANTED closure: the relation's withdraw-only trigger. Granted to NOBODY — reached
 //   only from the write path, exactly as `_tf_pae_retire_only` (0306) is.
@@ -3716,10 +3717,10 @@ export const ALLOWED = {
     // read roles and all four wake lanes gain ZERO, and neither an OBO twin nor a wake wrapper
     // exists for either of them anywhere in the catalog.
     ...SCHEDULE_TERM_CORRECTION_0317_HUMAN_FNS,
-    // #1050 [0338] the firm-level standing-instruction door -- see the block above.
-    // clara_authenticated ONLY, admin-floored in its own body; clara_runtime, both agent read
+    // #1050 [0338] the firm-level standing-instruction doors -- see the block above.
+    // clara_authenticated ONLY, admin-floored in their own bodies; clara_runtime, both agent read
     // roles and all four wake lanes gain ZERO, and neither an OBO twin nor a wake wrapper exists
-    // for it anywhere in the catalog.
+    // for either of them anywhere in the catalog.
     ...FIRM_STANDING_INSTRUCTION_0338_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
