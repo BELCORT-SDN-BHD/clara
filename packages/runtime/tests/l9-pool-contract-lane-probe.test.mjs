@@ -342,6 +342,53 @@ test("H-48 (#1128): _waitForLaneProbeSettleForTest waits for a NEW cycle, not a 
   }
 });
 
+test("H-48 (#1128, review round): a CONCURRENT caller gets the cycle actually in flight, never the previous one", async () => {
+  // ADV-L06-04. The fix above drives a fresh cycle with `await refreshOnce()`, which is right for
+  // the caller that STARTS one — but `refreshOnce` returned `inFlight` to anyone arriving while a
+  // cycle was busy, and nothing re-pointed `inFlight` at the cycle this helper started. So a second
+  // caller entering mid-cycle awaited the PREVIOUS cycle's already-resolved promise and read the
+  // verdict that cycle had left behind: the exact stale-verdict hole #1128 exists to close, one
+  // level up. `refreshOnce` now publishes the cycle it starts, so there is one answer for everyone.
+  _resetLaneProbeCacheForTest();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  try {
+    let calls = 0;
+    _setLaneProbeForTest(async (d) => {
+      calls += 1;
+      const secondRoundOrLater = calls > LANE_ROSTER.length;
+      // Round 2 HANGS until this cell releases it, so the second caller is guaranteed to arrive
+      // while that cycle is genuinely in flight rather than by luck of scheduling.
+      if (secondRoundOrLater) await gate;
+      return d.lane === "read"
+        ? { lane: d.lane, ok: !secondRoundOrLater }
+        : { lane: d.lane, ok: true, latency_ms: 1 };
+    });
+
+    const first = await _waitForLaneProbeSettleForTest();
+    assert.equal(first.lanes.find((l) => l.lane === "read").ok, true, "mandatory setup: cycle 1 reports 'read' healthy");
+
+    const starter = _waitForLaneProbeSettleForTest(); // starts cycle 2 and does not settle yet
+    // Give round 2's probes a turn to be dispatched, so the concurrent caller below genuinely
+    // enters while `busy` is true rather than before the cycle has begun.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(calls > LANE_ROSTER.length, `mandatory setup: cycle 2 is in flight (calls=${calls})`);
+    const concurrent = _waitForLaneProbeSettleForTest();
+
+    release();
+    const [started, joined] = await Promise.all([starter, concurrent]);
+
+    assert.equal(started.lanes.find((l) => l.lane === "read").ok, false,
+      "the caller that STARTED cycle 2 reads cycle 2's verdict");
+    assert.equal(joined.lanes.find((l) => l.lane === "read").ok, false,
+      "…and so does the caller that joined it — a waiter must never be handed a promise that "
+      + "resolves immediately and a verdict the cycle it joined has not written yet (#1128)");
+  } finally {
+    release();
+    _resetLaneProbeCacheForTest();
+  }
+});
+
 test("H-48 r2: a cycle that BLOWS its hard bound returns the verdict to pending", async () => {
   // withHardTimeout's timeout branch — the one that resets a good verdict — was unexercised.
   // A short cycle bound plus a prober that outlives it drives exactly that path.
