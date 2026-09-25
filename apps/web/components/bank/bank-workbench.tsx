@@ -27,6 +27,7 @@
 // query, just no longer defaulted.
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import type { BankTab } from "@/lib/navigation/tree";
 import { useTranslations } from "next-intl";
 import { SectionTabs } from "@/components/common/section-tabs";
 import { AccountsSection } from "./accounts-section";
@@ -38,8 +39,22 @@ import { ExceptionsSection } from "./exceptions-section";
 import { ReconciliationSection } from "./reconciliation-section";
 import { AgencySection } from "./agency-section";
 
-const TABS = ["accounts", "statements", "matching", "exceptions", "reconciliation", "agency"] as const;
-type BankTab = (typeof TABS)[number];
+// FIX ROUND (adversarial finding ADV-08). This tuple and `lib/navigation/tree.ts`'s `BankTab`
+// union were two hand-copies with NO link between them: this module imported nothing from the
+// navigation registry, so renaming a view here would not have redded the registry entry that
+// deep-links to it, and the two Needs-you rows #1060 repointed would have silently fallen back to
+// this workbench's default. The #1060 report claimed the opposite guarantee; this is that
+// guarantee, made real.
+//
+// BOTH DIRECTIONS, AT COMPILE TIME. `satisfies readonly BankTab[]` refuses a tab spelled here that
+// the registry's union does not carry; the `Exclude<…> extends never` line below refuses a value
+// the union carries that this tuple does not. The dependency runs component -> lib, which is the
+// direction every other import in this file already runs; the registry keeps owning the vocabulary.
+const TABS: readonly BankTab[] & readonly ["accounts", "statements", "matching", "exceptions", "reconciliation", "agency"] =
+  ["accounts", "statements", "matching", "exceptions", "reconciliation", "agency"] as const;
+type _EveryBankTabIsOfferedHere = Exclude<BankTab, (typeof TABS)[number]> extends never ? true : never;
+const _tabsAreExhaustive: _EveryBankTabIsOfferedHere = true;
+void _tabsAreExhaustive;
 
 function isTab(v: string | null): v is BankTab {
   return (TABS as readonly string[]).includes(v ?? "");

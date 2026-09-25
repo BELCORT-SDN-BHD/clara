@@ -3408,7 +3408,11 @@
       "reverseAria": "Reverse the {period} settlement",
       "reverseReasonLabel": "Reason",
       "reverseReasonPlaceholder": "Why is this being reversed?",
-      "confirmReverseSettlement": "Confirm reverse"
+      "confirmReverseSettlement": "Confirm reverse",
+      "settledUnmatched": "{period} — the bank line was released but the settlement entry is still posted. Reverse it to finish.",
+      "settledAwaitingChecker": "{period} — settlement drafted, waiting for a checker to approve it. Withdraw the draft to undo it.",
+      "withdrawSettlementDraft": "Withdraw draft",
+      "confirmWithdrawSettlementDraft": "Confirm withdraw"
     },
     "rentSettlements": {
       "heading": "Tenancy rent and deposits",

@@ -20,7 +20,10 @@
 // "AppShell.firmNav.work" in the sidebar and nothing goes red.
 
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import messages from "../../messages/en.json";
 import {
@@ -138,6 +141,39 @@ test("client nav and accounting children are viewer-floored, and still fail clos
 test("the vendor-bindings row is the ONLY one marked legacy, and the tax row the only beta", () => {
   assert.deepEqual(SETTINGS_SECTIONS.filter((s) => s.legacy).map((s) => s.id), ["vendorBindings"]);
   assert.deepEqual(ACCOUNTING_ITEMS.filter((i) => i.beta).map((i) => i.id), ["tax"]);
+});
+
+// ── one destination, one decider (fix round, ADV-09) ──────────────────────
+
+// #1060 gave the registry's bank row a `tab`, which MOVED the bank destination for every registry
+// caller: the sidebar, the accounting hub and ⌘K all land on Matching now. The adversarial lens
+// found the one surface that did not, because it never went through the registry at all --
+// `components/firm/client-home/client-bank-summary.tsx` spelled `/clients/:id/bank` by hand. Three
+// surfaces, two answers, and the drift was invisible because a hand-spelled href is still a valid
+// URL. This cell is the wall: the bank destination is decided in `accountingHref` and nowhere else.
+//
+// It scans SOURCE rather than behaviour deliberately -- the failure it catches is a second decider
+// appearing, which no amount of rendering the first one can reveal (the `*-census.test.ts` files
+// in apps/web/tests are the house precedent for a source scan with a stated claim).
+test("no component spells the bank destination by hand -- accountingHref decides it (ticket 1060, ADV-09)", () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const offenders: string[] = [];
+  const walk = (dir: string): void => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === "node_modules" || e.name === ".next") continue;
+      const full = join(dir, e.name);
+      if (e.isDirectory()) { walk(full); continue; }
+      if (!/\.tsx?$/.test(e.name) || /\.test\.tsx?$/.test(e.name)) continue;
+      const src = readFileSync(full, "utf8");
+      // A template href whose path ends at the bank segment: `/clients/${x}/bank` with nothing
+      // after it. The registry's own builder appends `?tab=`, so a caller that goes through it
+      // never produces this shape.
+      if (/href=\{`\/clients\/\$\{[^}]+\}\/bank`\}/.test(src)) offenders.push(full);
+    }
+  };
+  walk(join(root, "components"));
+  walk(join(root, "app"));
+  assert.deepEqual(offenders, [], "these spell the bank destination by hand instead of calling accountingHref");
 });
 
 // ── hrefs ────────────────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 
+import { ACCOUNTING_ITEMS, accountingHref } from "@/lib/navigation/tree";
 import { SectionHeader } from "@/components/common/section-header";
 import { listBankAccountProposals, listBankAccounts, listBankStatements } from "@/lib/bank/reads";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
@@ -37,9 +38,12 @@ type AccountLine = {
   unreadable: boolean;
 };
 
+const BANK_ITEM = ACCOUNTING_ITEMS.find((i) => i.id === "bank")!;
+
 export function ClientBankSummary({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientWorkspace");
   const opts = { session: sessionTokenAccessor };
+  const bankHref = accountingHref(clientId, BANK_ITEM);
 
   const accounts = useAsyncRead<AccountLine[]>(async () => {
     const rows = await listBankAccounts(clientId, opts);
@@ -103,8 +107,13 @@ export function ClientBankSummary({ clientId }: { clientId: string }) {
           {t("bankProposals", { n: proposals.data?.length ?? 0 })}
         </p>
       ) : null}
+      {/* FIX ROUND (adversarial finding ADV-09). This was the ONE hard-coded `/bank` link in the
+          app, and #1060 gave the navigation registry's bank row a `tab` — so the sidebar, the
+          accounting hub and Cmd-K all land on Matching while this card still landed on the
+          workbench's own default. Three surfaces, two answers. It goes through the registry's own
+          href builder now, like every other caller, so the destination is decided in ONE place. */}
       <Link
-        href={`/clients/${clientId}/bank`}
+        href={bankHref}
         className="text-xs text-primary underline-offset-4 hover:underline"
       >
         {t("bankOpenTab")}

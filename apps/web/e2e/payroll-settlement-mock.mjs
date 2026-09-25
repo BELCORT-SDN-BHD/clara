@@ -32,6 +32,13 @@ export const P947 = {
   refusedEntryId: "94706001-9470-4947-8947-947000000060",
   refusedLineId: "94706002-9470-4947-8947-947000000061",
   refusalAmountMismatch: "statement line 94706002 (100 cents) does not match this run's unsettled net pay (300000 cents)",
+  // RUN C (#1059 fix round) - a settlement ALREADY ACCEPTED, in some earlier session. It exists
+  // only in the ledger: an approved entry carrying 0298's `payroll_settlement` marker, riding a
+  // live bank match. Nothing in the browser remembers it, which is the whole point -- the panel
+  // must find it on a cold mount, exactly as it would after a reload or a fresh sign-in.
+  settledEntryId: "94707001-9470-4947-8947-947000000070",
+  settledPayrollEntryId: "94707002-9470-4947-8947-947000000071",
+  settledMatchId: "94707003-9470-4947-8947-947000000072",
 };
 
 export const P947_RPC_VERBS = new Set([
@@ -107,8 +114,56 @@ const RUNS = () => [
   },
 ];
 
+/** #1059's fix round - THE LEDGER HALF, three RLS-scoped table reads rather than a door.
+ *  `lib/bank/payroll-settlement-reversals.ts` derives the settlements a person can still undo from
+ *  `journal_entries` (0298's `payroll_settlement` marker on `flags`) plus the bank-match pair, so
+ *  this lane has to answer them or the panel's read fails. Each branch is scoped to THIS lane's own
+ *  client and falls through otherwise, so every other walk's `journal_entries` fixtures are
+ *  untouched -- the same discipline the RPC half above already follows.
+ *
+ *  STATELESS, like the rest of this file: the settlement is always there. What the two doors do to
+ *  it is proved against real Postgres (`packages/db/tests/payroll-settlement.test.mjs` S8) and at
+ *  the component seam (`payroll-settlements-section.test.tsx`); this lane proves the JOURNEY that
+ *  no other instrument can - that a person who never accepted anything in THIS browser session
+ *  still finds the settlement and its route on the built bundle. */
+const SETTLEMENT_ENTRY = () => ({
+  id: P947.settledEntryId,
+  status: "approved",
+  posting_date: "2026-07-02",
+  revision_token: null,
+  reversed_by: null,
+  flags: {
+    payroll_settlement: {
+      payroll_entry_id: P947.settledPayrollEntryId,
+      document_id: "94707004-9470-4947-8947-947000000073",
+      period_month: "2026-06-01",
+    },
+  },
+});
+
+function p947ClientScoped(url) {
+  return url.searchParams.get("client_id") === `eq.${P947.clientId}`;
+}
+
 /** The PostgREST half. Returns true when it answered, false to fall through. */
 export async function handleP947Supabase(request, response, path, url, sendJson, cors) {
+  if (request.method === "GET" && path === "/rest/v1/journal_entries") {
+    if (!p947ClientScoped(url)) return false;
+    sendJson(response, 200, [SETTLEMENT_ENTRY()], cors);
+    return true;
+  }
+  if (request.method === "GET" && path === "/rest/v1/bank_match_entry_members") {
+    if (!p947ClientScoped(url)) return false;
+    sendJson(response, 200, [
+      { match_id: P947.settledMatchId, entry_id: P947.settledEntryId, matched_cents: -300_000 },
+    ], cors);
+    return true;
+  }
+  if (request.method === "GET" && path === "/rest/v1/bank_matches") {
+    if (!p947ClientScoped(url)) return false;
+    sendJson(response, 200, [{ id: P947.settledMatchId, status: "live" }], cors);
+    return true;
+  }
   if (request.method !== "POST" || !path.startsWith("/rest/v1/rpc/")) return false;
   const verb = path.slice("/rest/v1/rpc/".length);
   if (!matchVerb(P947_RPC_VERBS, verb)) return false;

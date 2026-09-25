@@ -101,3 +101,14 @@ test("getNeedsYouAffordance('depreciation_authority_pending') returns null (a KN
   assert.equal(getNeedsYouAffordance("depreciation_authority_pending"), null);
   assert.notEqual(getNeedsYouAffordance("depreciation_authority_pending"), undefined);
 });
+
+// #1048 (0343, riders sweep wave lane 04) — the seventeenth row_kind, by name. The fix round's
+// STANDARDS finding: `lib/firm/needs-you.ts`'s own extension note names this file's by-name case
+// as sync point 4b for a new row kind, and the first cut registered the affordance without it.
+// This is a NON-NULL entry (the question has two answers and its own inline act), so the
+// discriminating claim is that the registry resolves it to a function — an entry left out would
+// make it `undefined` while every other case in this file still passed, which is exactly what the
+// F8 discipline above exists to catch.
+test("getNeedsYouAffordance resolves payroll_completeness_question (ticket 1048)", () => {
+  assert.equal(typeof getNeedsYouAffordance("payroll_completeness_question"), "function");
+});
