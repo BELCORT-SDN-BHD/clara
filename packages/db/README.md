@@ -7600,3 +7600,16 @@ closure hash, which is exactly right for a merged file and is an artifact of an 
 unmerged one. The lane database's version-2 row and its member were deleted by hand (append-only
 triggers bypassed as superuser) before each redo that moved the evaluator. The COMMITTED file is
 unchanged in shape and registers the final body on a first apply.
+
+**What is LIVE today, and what is not (spec finding L04-SPEC-03).** The PARKED QUESTION half is
+live end to end: a summary that prints no run totals reaches a named person under Needs you, their
+yes becomes the posting basis and the run posts in that same call. The TWO PAGE-PRINTED WITNESSES
+— a headcount equal to the lines read, and a page count of one — cannot fire in production, because
+the only channel that could supply them is `packages/runtime/workflows/payrollFacts.v1.prompts.mjs`,
+whose `PAYROLL_RUN_FIELDS` is a FROZEN eleven-element array carrying neither key. They are exercised
+by this file's own battery and by nothing else until a `payrollFacts_v2` asks the two optional
+questions (the prompt stanza and its wire shape are a successor contract in
+`reports/waveS-lane04-ticket1048.md` §9.1). **No release note and no ticket close may say that Clara
+posts from a printed headcount today.** The database half is deliberately built first: a frozen
+workflow's successor is cheap to ship against a door that already exists, and expensive the other
+way round.
