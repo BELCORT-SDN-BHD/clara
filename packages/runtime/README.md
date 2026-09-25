@@ -2101,12 +2101,16 @@ shapes still end in `.tmp`, so `SPOOL_REAPABLE` and `listJsonEntries` ignore the
 into place, so two probes colliding on one millisecond just overwrite and doubly-remove the same
 inode, which costs nothing.
 
-**What is still true after it, stated.** Two writers of one sidecar still race on the rename itself,
-and the last rename wins: a full transport write and a DB-row merge landing together can still leave
-the merge's shorter body on disk, which is the read-then-write residual `mergeTaskMeta`'s own header
-already names (task #28, P4), and which is now tracked as its own defect, #1044. What changed is that
-no reader ever sees a body no writer wrote, and no writer is told its write failed because a sibling
-won.
+**What was still true after it, stated — and CLOSED since, by #1044 (read the section below before
+this paragraph).** Two writers of one sidecar still raced on the rename itself, and the last rename
+won: a full transport write and a DB-row merge landing together could still leave the merge's
+shorter body on disk, which is the read-then-write residual `mergeTaskMeta`'s own header named
+(task #28, P4), and which was then tracked as its own defect, #1044. **That residual is no longer
+live**: `mergeTaskMeta` holds `withSidecarLock` across its read and its rename, so a write can no
+longer land inside a merge. What #1043 itself changed is that no reader ever sees a body no writer
+wrote, and no writer is told its write failed because a sibling won; the two plain `writeTaskMeta`
+calls of `p1043.collide` still settle in whatever order the filesystem picks, deliberately, because
+the lock's scope is the rename rather than the whole write.
 
 **Evidence.** `tests/intake-sidecar-race.test.mjs`'s `p1043.collide` — 200 rounds of the two real
 writer shapes against one task sidecar, asserting that no write is rejected, that the body on disk is
@@ -2154,16 +2158,40 @@ than by which call was made first. `p1043.collide`'s own non-vacuity control ("b
 rounds") depends on that, and it still holds: measured at 42/158 on this rig and 7/193 under WSL
 after the change, against 8/192 under WSL before it — the distribution did not move.
 
+**Every mutator of one sidecar takes the same turn — the delete included** (review round,
+ADV-L06-01). The first cut of this ticket put every WRITE of a sidecar through the lock and left
+`removeTaskMeta` outside it as a bare `rm`, so a terminal cleanup's delete landing between a merge's
+read and its rename was simply undone by that rename: **measured at 50 of 50 rounds**
+(`p1044.delete`). The ordering is the production one — `lib/reconciler-documents.mjs` snapshots
+every row still queued/held_egress/running and merges each onto its own sidecar in a sequential
+loop, while `workflows/parts/documentIngest.behavior_v2.mjs` calls `removeTaskMeta` the moment a
+task goes terminal — so a delete routinely lands inside a later task's merge window. Both removers
+(`removeTaskMeta`, and `removeIntakeSpool`'s metadata `rm`) now take their path's own lock.
+
 **The residual, stated.** This is an in-process lock, so the guarantee is exactly as strong as "one
 spool directory belongs to one runtime process" — which is how the spool is deployed: the default
 `CLARA_SPOOL_DIR` is a Fly volume, and a Fly volume is attached to one machine. Two processes
-sharing one directory would still need an on-disk compare-and-swap or an advisory file lock. Also
+sharing one directory would still need an on-disk compare-and-swap or an advisory file lock.
+
+**And the lock orders a delete against a mutation already running, never against one that has not
+started.** A `mergeTaskMeta` first called AFTER a delete has landed is lenient by contract: it merges
+onto `{}` and writes, so it RE-CREATES the sidecar. That is correct for the task with no sidecar yet
+which leniency exists for, and indistinguishable from the task whose sidecar was just collected — so
+a reconciler sweep whose snapshot predates a task going terminal can still leave a stray
+`task-<id>.json`. **Nothing collects it**: `SPOOL_REAPABLE` matches `intake-*` only, so the TTL sweep
+never touches a task sidecar, and widening it is not safe — a live task's sidecar can legitimately
+sit untouched for longer than the TTL, and reaping it would lose the transport fields the DB row does
+not carry. What a stray one costs is bounded but real: the reconciler's degraded arm
+(`listTaskMetas()` when the `clara.documents` SELECT is unavailable) reads it back as a live queued
+task. Out of this ticket's scope, recorded here because it is the one thing the lock does not close.
+
+Also
 unchanged, and out of this ticket's scope: `lib/intake.mjs:442`'s post-enqueue write rebuilds its
 body from the `task` snapshot taken BEFORE the enqueue, so a status or `lastError` the reconciler
 wrote during the enqueue is still overwritten by it. It can no longer cost the transport (that body
 carries it), which is what #1044 is about.
 
-**Evidence.** `tests/intake-sidecar-race.test.mjs`, three cells:
+**Evidence.** `tests/intake-sidecar-race.test.mjs`, five cells:
 
 - `p1044.lost_update` — both launch orders, one round each, reproduced by construction with a
   widened `engineConfig` rather than a sleep, plus a non-vacuity arm in which the merge is the last
@@ -2178,11 +2206,22 @@ carries it), which is what #1044 is about.
   body is a legal outcome of the race); and the lock map must be empty at the end, because a
   runtime mints a new task id for every document it ever ingests
   (`_sidecarLockCountForTest`, the same shape as `_resetIntakeGateForTest`).
+- `p1044.one_path` — the merge reads at the path it LOCKED. `mergeTaskMeta` resolves
+  `taskMetaPath(id)` once and reads, locks and writes that one string; the cell repoints
+  `CLARA_SPOOL_DIR` between the call and the locked turn and asserts the transport survives. Red
+  against the first cut (which read through `readTaskMeta(id)`, resolving the environment a third
+  time inside the turn): `the merge answered without ["storageKey","sha256","mime","format"]`.
+- `p1044.delete` — 50 rounds of a terminal cleanup against an in-flight merge, the delete launched
+  the way the reconciler's sweep and `documentIngest` interleave in production. Red at **50 of 50**
+  against a bare `rm`, green with both removers on the path's own lock, and the lock map is empty
+  at the end so a delete's turn is collected like every other.
 
-Vacuity control for all three: with `withSidecarLock` reduced to `return fn()` — the pre-#1044
-behaviour — `p1044.lost_update` reds on `merge first: the sidecar lost 'storageKey'`, `p1044.sweep`
-on `the sweep's merge dropped 'storageKey' (documentTransportless=1)`, and `p1044.rounds` at
-**169 of 200 rounds**. `spool.mjs` was restored byte for byte afterwards.
+Vacuity control for the first three: with `withSidecarLock` reduced to `return fn()` — the
+pre-#1044 behaviour — `p1044.lost_update` reds on `merge first: the sidecar lost 'storageKey'`,
+`p1044.sweep` on `the sweep's merge dropped 'storageKey' (documentTransportless=1)`, and
+`p1044.rounds` at **169 of 200 rounds**. `spool.mjs` was restored byte for byte afterwards. The two
+later cells were each written RED against the shipped code and turned green by the one-line change
+they name.
 
 ## #981 — one structured-detail carrier on a durable-Work refusal, instead of a fold per refusal
 

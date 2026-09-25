@@ -232,9 +232,14 @@ export async function writeTaskMeta(id, value) {
   await atomicJson(taskMetaPath(id), value);
 }
 
-export async function readTaskMeta(id) {
+/** ONE task sidecar, read at a path ALREADY RESOLVED — `null` when it is gone, and a parse error
+ *  still throws (unlike `readJsonAt`'s `{corrupt}` marker, which is `listJson`'s contract, not this
+ *  one). It exists so `mergeTaskMeta` can read, lock and write ONE string rather than resolve
+ *  `taskMetaPath(id)` — and with it `CLARA_SPOOL_DIR` — a second time inside its own locked turn
+ *  (#1044, review round ADV-L06-05). */
+async function readTaskMetaAt(path) {
   try {
-    const fh = await open(taskMetaPath(id), "r");
+    const fh = await open(path, "r");
     try {
       return JSON.parse(await fh.readFile("utf8"));
     } finally {
@@ -244,6 +249,10 @@ export async function readTaskMeta(id) {
     if (err?.code === "ENOENT") return null;
     throw err;
   }
+}
+
+export async function readTaskMeta(id) {
+  return readTaskMetaAt(taskMetaPath(id));
 }
 
 /**
@@ -272,11 +281,16 @@ export async function readTaskMeta(id) {
  * Its limit is stated where the lock is defined: one process, one spool directory.
  */
 export async function mergeTaskMeta(id, patch, { requireExists = false } = {}) {
-  // ONE `taskMetaPath(id)` for both: the lock's key and the write's target are the same string by
-  // construction, never two reads of `CLARA_SPOOL_DIR` that a test could change in between.
+  // ONE `taskMetaPath(id)` for ALL THREE: the read's source, the lock's key and the write's target
+  // are the same string by construction, never two reads of `CLARA_SPOOL_DIR` that a test could
+  // change in between. The first cut of this line kept that promise for the lock and the write and
+  // then read through `readTaskMeta(id)`, which resolves the path — and the environment — a THIRD
+  // time inside the locked turn: measured, a spool repointed between the call and that turn made
+  // the merge read an empty base out of one directory and write the transport-less result to the
+  // path it had locked in another (`p1044.one_path`, review round ADV-L06-05).
   const path = taskMetaPath(id);
   return withSidecarLock(path, async () => {
-    const current = await readTaskMeta(id);
+    const current = await readTaskMetaAt(path);
     if (requireExists && !current) {
       throw Object.assign(new Error(`document task ${id} has no durable runtime metadata`), { code: "internal" });
     }
@@ -395,14 +409,37 @@ export const listIntakeMetaEntries = () => listJsonEntries("intake-");
 export const listIntakeMetas = () => listJson("intake-");
 export const listTaskMetas = () => listJson("task-");
 
+/**
+ * A DELETE IS A MUTATION, so it takes the same turn every other mutation of this sidecar takes
+ * (#1044, review round ADV-L06-01).
+ *
+ * Both removers used to be a bare `rm`, outside `withSidecarLock` — and a bare `rm` landing between
+ * a merge's read and its rename is UNDONE by that rename: MEASURED at 50 of 50 rounds
+ * (`tests/intake-sidecar-race.test.mjs`, `p1044.delete`). The ordering is the production one, not a
+ * contrivance: `reconciler-documents.mjs` snapshots every row still queued/held_egress/running and
+ * merges each onto its own sidecar in a sequential loop, while `documentIngest.behavior_v2.mjs`
+ * calls `removeTaskMeta` the moment a task goes terminal, so a delete routinely lands inside a
+ * later task's merge window. Taking the path's own lock makes the two orderable: the delete waits
+ * for a merge already in flight and then stays done.
+ *
+ * THE RESIDUAL, STATED. This orders a delete against a mutation ALREADY RUNNING. It cannot order it
+ * against one that has not started: a `mergeTaskMeta` first called AFTER the delete has landed is
+ * lenient by contract (it merges onto `{}` and writes), so it re-creates the sidecar — which is
+ * correct for the task with no sidecar yet that leniency exists for, and indistinguishable from the
+ * task whose sidecar was just collected. A `task-<id>.json` left that way is PERMANENT:
+ * `SPOOL_REAPABLE` below matches `intake-*` only, so no TTL sweep ever collects a task sidecar, and
+ * widening it is not safe here — a live task's sidecar can legitimately sit untouched for longer
+ * than the TTL, and reaping it would lose the transport fields the DB row does not carry.
+ */
 export async function removeIntakeSpool(id, { metadata = true } = {}) {
   const paths = intakePaths(id);
   await rm(paths.bytes, { force: true }).catch(() => {});
-  if (metadata) await rm(paths.meta, { force: true }).catch(() => {});
+  if (metadata) await withSidecarLock(paths.meta, () => rm(paths.meta, { force: true }).catch(() => {}));
 }
 
 export async function removeTaskMeta(id) {
-  await rm(taskMetaPath(id), { force: true }).catch(() => {});
+  const path = taskMetaPath(id);
+  await withSidecarLock(path, () => rm(path, { force: true }).catch(() => {}));
 }
 
 export async function spoolUsage() {

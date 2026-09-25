@@ -51,7 +51,7 @@ after(async () => {
 
 const {
   _sidecarLockCountForTest, intakePaths, listIntakeMetaEntries, listIntakeMetas, mergeTaskMeta, readIntakeMeta,
-  readTaskMeta, spoolConfig, sweepSpoolTtl, taskMetaPath, writeIntakeMeta, writeTaskMeta,
+  readTaskMeta, removeTaskMeta, spoolConfig, sweepSpoolTtl, taskMetaPath, writeIntakeMeta, writeTaskMeta,
 } = await import("../lib/spool.mjs");
 const { recoverPendingDocumentIntakes } = await import("../lib/intake.mjs");
 const { reconcileDocumentTasks } = await import("../lib/reconciler.mjs");
@@ -476,6 +476,73 @@ test(`p1044.rounds: ${LOST_UPDATE_ROUNDS} rounds at the NATURAL body size keep e
     `every queue must be collected when it drains — ${_sidecarLockCountForTest()} left after `
     + `${LOST_UPDATE_ROUNDS} distinct sidecars, and a runtime mints a new task id for every document `
     + `it ever ingests`);
+});
+
+// ONE PATH, NOT THREE READS OF THE ENVIRONMENT (review round, ADV-L06-05). `mergeTaskMeta`'s own
+// header says the lock's key and the write's target are "the same string by construction, never
+// two reads of `CLARA_SPOOL_DIR` that a test could change in between" — and then read through
+// `readTaskMeta(id)`, which computes `taskMetaPath(id)` a THIRD time. The lock is taken and the
+// merge's turn runs in a later microtask, so anything that repoints the spool between the call and
+// that turn made the merge read one directory and write another: a lost update with the same
+// consequence #1044 exists to prevent, through the one door the header claimed was closed.
+test("p1044.one_path: a merge reads the sidecar at the path it locked, not at whatever the environment says later", async (t) => {
+  const dirA = await ownSpool(t);
+  const dirB = await mkdtemp(join(root, "spool-elsewhere-"));
+  const taskId = randomUUID();
+  const intake = intakeShapedTask(taskId, 1);
+  await writeTaskMeta(taskId, intake);
+
+  // Synchronous, so it lands before the locked turn's own read — no sleep and no race.
+  const merging = mergeTaskMeta(taskId, reconcilerShapedTask(taskId, 1));
+  process.env.CLARA_SPOOL_DIR = dirB;
+  const merged = await merging;
+  process.env.CLARA_SPOOL_DIR = dirA;
+
+  const missing = TRANSPORT_KEYS.filter((key) => merged?.[key] !== intake[key]);
+  assert.deepEqual(missing, [],
+    `the merge answered without ${JSON.stringify(missing)} — it read an EMPTY base out of ${dirB} and wrote the `
+    + `result back to the path it locked in ${dirA}, so the transport fields on disk were dropped by the merge `
+    + "that was supposed to preserve them (#1044)");
+  const onDisk = await readTaskMeta(taskId);
+  assert.deepEqual(TRANSPORT_KEYS.filter((key) => onDisk?.[key] !== intake[key]), [],
+    "…and the body left on disk at the locked path carries them too");
+  assert.equal(onDisk.n, 1, "…and the patch landed");
+});
+
+// THE DELETE IS A MUTATION TOO (review round, ADV-L06-01). `withSidecarLock` closed the merge
+// against every WRITE of the same sidecar and left the one remaining mutator — `removeTaskMeta` —
+// outside it, so a terminal cleanup's delete could land between a merge's read and its rename and
+// be undone by it. THE ORDERING IS THE PRODUCTION ONE, not a contrivance:
+// `reconciler-documents.mjs` snapshots the rows whose status is still queued/held_egress/running
+// and then merges each onto its own sidecar in a sequential loop, while
+// `documentIngest.behavior_v2.mjs` calls `services.removeTaskMeta` the moment a task goes terminal
+// — so the delete routinely lands inside a LATER task's merge window. The orphan it leaves is
+// permanent: `SPOOL_REAPABLE` matches `intake-*` only, so no TTL sweep ever collects a
+// `task-<id>.json`, and the reconciler's degraded arm (`listTaskMetas()` when the document SELECT
+// is unavailable) would read it back as a live queued task.
+const DELETE_ROUNDS = 50;
+
+test(`p1044.delete: ${DELETE_ROUNDS} rounds of a terminal cleanup against an in-flight merge leave the sidecar GONE`, async (t) => {
+  await ownSpool(t);
+  const resurrected = [];
+  for (let i = 1; i <= DELETE_ROUNDS; i += 1) {
+    const taskId = randomUUID();
+    await writeTaskMeta(taskId, intakeShapedTask(taskId, i));
+    // The widener is the same instrument the lost-update cells use: it lengthens the merge's own
+    // temp write so the delete lands INSIDE the window rather than needing a sleep to get there.
+    const merge = mergeTaskMeta(taskId, widenedRow(taskId, i));
+    const cleanup = removeTaskMeta(taskId);
+    await Promise.all([merge, cleanup]);
+    if (await readTaskMeta(taskId) !== null) resurrected.push(i);
+  }
+  assert.deepEqual(resurrected, [],
+    `a delete that has been ordered must stay done: ${resurrected.length} of ${DELETE_ROUNDS} rounds came back `
+    + `with the sidecar the terminal cleanup deleted (rounds ${JSON.stringify(resurrected.slice(0, 5))}). Nothing `
+    + `ever collects it — SPOOL_REAPABLE is intake-only — and the reconciler's degraded arm reads a stray `
+    + `task-<id>.json as a live queued task, so each one is a document that can be dispatched again (#1044)`);
+  assert.equal(_sidecarLockCountForTest(), 0,
+    `…and the delete's own turn is collected like every other: ${_sidecarLockCountForTest()} queue(s) left after `
+    + `${DELETE_ROUNDS} distinct sidecars`);
 });
 
 // ---------------------------------------------------------------------------
