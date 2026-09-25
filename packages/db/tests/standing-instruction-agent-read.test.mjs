@@ -1,0 +1,183 @@
+// #1147 [0362_standing_instruction_agent_read.sql] — THE FIRM STANDING INSTRUCTION'S THREE OPEN
+// HALVES, closed as far as they were given: a chat read door, the plans a withdrawal leaves
+// posting, and the deferred-revenue twin held by a census rather than by a comment.
+//
+// WHAT #1050 LEFT. Migration 0338 shipped the firm-level standing instruction whole on the HUMAN
+// lane: `clara.record_firm_standing_instruction` and `clara.withdraw_firm_standing_instruction`
+// are `clara_authenticated`-only by design (an instruction a machine recorded would name nobody),
+// the relation grants nothing to any machine role, and 0338's own tail asserts that. Three halves
+// #1050 was never given stayed open, and this file drives the two that are bounded:
+//
+//   1. THE CHAT MODEL HAS NO READ. A model asked "does this firm let Clara do this?" had no door
+//      and no relation it may read. §A of 0362 mints ONE — `clara.wake_get_firm_standing_instruction`
+//      — on 0320's / 0352's / 0353's own shape: EXECUTE to `clara_agent_ro` alone, one
+//      `clara.wake_fn_allowlist` row for the `interactive` kind, firm-scoped through the CALLER'S
+//      OWN credential rather than a firm argument.
+//   2. WITHDRAWAL DOES NOT NAME ITS CONSEQUENCE. The plans the instruction already authorised keep
+//      posting under the member who authorised them (#940's ruling for a retired roster enrolment,
+//      restated), and neither the door's answer nor the settings card said so. §B adds ONE key to
+//      the answer: `plans_still_posting`. WHAT WITHDRAWAL DOES TO A PLAN DOES NOT CHANGE HERE —
+//      whether it should also pause them is an owner ruling #1050 was not given and #1147 records
+//      rather than takes.
+//   3. THE DEFERRED-REVENUE TWIN HAS NO WAKE LANE. `clara._prepayment_schedule_core` admits
+//      ('human','obo','wake'); `clara._revenue_recognition_core` admits ('human','obo') and no wake
+//      wrapper for it exists. 0338 states that asymmetry in a header comment. This file holds it
+//      with a CENSUS instead, in the shape this estate already uses for a watched duplication
+//      (`p1137.obo.plan_step_parity`): read off the LIVE catalog, failing the day one side is
+//      widened without the other.
+//
+// THE SEAMS, named up front (WORK-ORDER rule 4):
+//   S1. `clara.wake_get_firm_standing_instruction(p_instruction_key text)` — the model lane's door,
+//       driven on a REAL least-privileged connection (`clara_agent_ro` + a real `interactive` wake
+//       credential), never as `postgres` and never by calling a core directly.
+//   S2. `clara.withdraw_firm_standing_instruction(p_instruction_key, p_reason, p_op_key)` — driven
+//       through `humanQuery` as a real signed-in admin, with a live plan present and with none.
+//   S3. The LIVE CATALOG — the relation's grants, the door's ACL, the allowlist, and the two
+//       schedule cores' closed lane sets. Structural by necessity: the claims are about what a
+//       LATER file may not do, which no behavioural cell written today can drive (WORK-ORDER rule
+//       4's own carve-out for a repo-documented structural cell).
+//
+// WHAT IT DELIBERATELY DOES NOT PROVE. The whole of #1050's behaviour — that is
+// `prepayment-close-standing-instruction.test.mjs`, which runs unchanged except for the ONE roster
+// this file's new read joins (`p1050.doors.shape`).
+//
+// FRONTIER-GATED on the `standing_instruction_agent_read$` stable stem, never a number — numbers
+// are claimed at merge (packages/db/README.md). A package-wide sweep preloads this file's
+// pre-integration gate module and skips LOUDLY on a chain below 0362; a FOCUSED run sets nothing
+// and FAILS, because a skip is not evidence.
+//
+// Serial discipline: --test-concurrency=1 (shared rig convention).
+
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { humanQuery, wakeQuery, rootQuery, ROLES, opk } from "./rig-helpers.mjs";
+import { mintWake5 } from "./wave-a-fixtures.mjs";
+import { ensurePrepay, prepayGate, prepaidScene, recordPeriod, wake12, caught }
+  from "./f-a4-pr2a-fixtures.mjs";
+
+const STEM = "standing_instruction_agent_read$";
+const READ_DOOR = "wake_get_firm_standing_instruction";
+
+/** The ONE instruction key 0338 mints; the closed set is one member today. */
+const KEY = "prepayment_schedule_at_close";
+const REASON = "p1147: our subscriptions are annual and we close monthly.";
+
+let skipped = 0;
+const markSkip = () => { skipped += 1; };
+let lane = null;
+
+before(async () => { await ensurePrepay(() => {}); });
+after(async () => {
+  if (skipped > 0) console.log(`p1147: ${skipped} cell(s) skipped -- probed at the live catalog`);
+});
+
+async function lanePresent() {
+  if (lane !== null) return lane;
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1", [STEM]);
+  lane = Number(r.rows[0].n) > 0;
+  return lane;
+}
+
+/** The armed skip: a package sweep on a pre-0362 chain skips LOUDLY; a focused run FAILS. */
+async function readGate(t) {
+  if (prepayGate(t, markSkip)) return true;
+  if (!(await lanePresent())) {
+    if (process.env.CLARA_ALLOW_MISSING_STANDING_INSTRUCTION_AGENT_READ !== "1") {
+      throw new Error(
+        `#1147: no migration matching /${STEM}/ is applied to this database and `
+        + "CLARA_ALLOW_MISSING_STANDING_INSTRUCTION_AGENT_READ is unset -- this is a FOCUSED run "
+        + "and must fail loudly rather than skip. Apply "
+        + "0362_standing_instruction_agent_read.sql, or preload "
+        + "./tests/standing-instruction-agent-read-preintegration-gate.mjs for an estate sweep "
+        + "against a pre-0362 chain.");
+    }
+    markSkip();
+    t.skip("#1147 (0362_standing_instruction_agent_read) not applied -- probed at the live catalog");
+    return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The two lanes' calls, spelled once.
+// ---------------------------------------------------------------------------------------------
+
+/** 0338's recording door, as a real signed-in member on the governed human path. */
+function record(sub, { key = KEY, reason = REASON, opKey } = {}) {
+  return humanQuery(sub, "select clara.record_firm_standing_instruction($1,$2,$3) as r",
+    [key, reason, opKey ?? opk("p1147-record")]).then((r) => r.rows[0].r);
+}
+
+/** 0338 §G's withdraw door, recut by 0362 §B, on the same governed human path. */
+function withdraw(sub, { key = KEY, reason = "p1147: the firm takes it back", opKey } = {}) {
+  return humanQuery(sub, "select clara.withdraw_firm_standing_instruction($1,$2,$3) as r",
+    [key, reason, opKey ?? opk("p1147-withdraw")]).then((r) => r.rows[0].r);
+}
+
+/** An `interactive` wake credential — what the chat lane's `readScoped` mints: plain, on behalf of
+ *  the initiating human, no client pin. */
+function chatCredential(firm, onBehalfOf) {
+  return mintWake5({ kind: "interactive", firm, onBehalfOf });
+}
+
+/** THE MODEL LANE'S DOOR, driven on the READ role the chat lane's read pool SET ROLEs to, under a
+ *  real wake credential bound txn-locally. Never as root, never by calling a body directly. */
+function readInstruction(secret, key = KEY) {
+  return wakeQuery(ROLES.agentRo, secret,
+    `select clara.${READ_DOOR}(p_instruction_key => $1) as result`, [key])
+    .then((r) => r.rows[0].result);
+}
+
+// =============================================================================================
+// S1 — THE MODEL LANE CAN ASK WHAT THE FIRM HAS INSTRUCTED, AND IS ANSWERED THE FIRM'S OWN WORDS.
+// =============================================================================================
+
+test("p1147.read.live -- under a live standing instruction the model lane's door answers the key, "
+  + "the firm's own sentence, the member who recorded it and when, driven on a real clara_agent_ro "
+  + "connection under an interactive wake credential rather than as postgres",
+async (t) => {
+  if (await readGate(t)) return;
+  const sc = await prepaidScene("p1147live");
+
+  // BEFORE the instruction exists the door must already answer -- absence is a STATE, not an
+  // error (law 2), and a model that met a raise here would have to guess what it meant.
+  const { secret } = await chatCredential(sc.firm, sc.bob);
+  const before = await readInstruction(secret);
+  assert.equal(before.active, false, `a firm that instructed nothing reads active:false: ${JSON.stringify(before)}`);
+  assert.equal(before.instruction_key, KEY);
+  assert.equal(before.reason, null);
+  assert.equal(before.recorded_by, null);
+  assert.equal(before.recorded_at, null);
+
+  // A NAMED MEMBER records it through the real human door.
+  const si = await record(sc.alice, { opKey: opk("p1147-live") });
+  assert.ok(si.instruction_id, "the recording door answered with no instruction");
+
+  const { secret: s2 } = await chatCredential(sc.firm, sc.bob);
+  const after = await readInstruction(s2);
+  assert.equal(after.active, true, `the door does not see the live instruction: ${JSON.stringify(after)}`);
+  assert.equal(after.instruction_key, KEY);
+  // THE FIRM'S OWN SENTENCE, verbatim: the row is the record of record and the reason is the whole
+  // point of the relation (0338 §A). A projection that dropped it would answer "yes" with no basis.
+  assert.equal(after.reason, REASON, "the reason sentence is not projected");
+  assert.equal(after.recorded_by, sc.alice, "the read does not name the member who recorded it");
+  assert.ok(typeof after.recorded_at === "string" && after.recorded_at.length > 0,
+    `the read carries no recorded_at: ${JSON.stringify(after)}`);
+
+  // …AND THE ROW IS WHAT IT PROJECTED, read independently as root.
+  const row = (await rootQuery(
+    `select id, reason, recorded_by, recorded_at from clara.firm_standing_instructions
+      where firm_id = $1 and instruction_key = $2 and withdrawn_at is null`, [sc.firm, KEY])).rows[0];
+  assert.ok(row, "the door answered active:true with no live row behind it");
+  assert.equal(row.recorded_by, after.recorded_by);
+  assert.equal(row.reason, after.reason);
+
+  // A WITHDRAWAL CLOSES THE READ: the door answers the LIVE instruction, and a withdrawn row is
+  // the firm's history, not its standing.
+  await withdraw(sc.alice, { opKey: opk("p1147-live-wd") });
+  const { secret: s3 } = await chatCredential(sc.firm, sc.bob);
+  const closed = await readInstruction(s3);
+  assert.equal(closed.active, false, "the door still reports a withdrawn instruction as standing");
+  assert.equal(closed.reason, null, "a withdrawn instruction's sentence still reaches the model lane");
+});
