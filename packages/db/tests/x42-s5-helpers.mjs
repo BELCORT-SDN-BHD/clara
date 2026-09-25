@@ -1548,6 +1548,51 @@ const SCHEDULE_CORRECTION_0317_CLOCK_NAMES = [
 // CLIENT_FINANCIAL_PACK_WAKE_0320_CLOCK_NAMES's reverse gate below.
 const WORK_SOURCE_REDERIVATION_0321_CLOCK_NAMES = ["settle_source_corrected_rederivation"];
 
+// RIDERS SWEEP WAVE (S) -- FOUR NAMES over two files, and every one of them is adjudicated the
+// CHEAP way, body by body, on the live 337-file catalog (from-scratch en_US.utf8 chain,
+// 2026-09-25). Arm (D) flags a bare clock token; a bare clock token is only a DEFECT where a DATE
+// comes from it, so each body below is measured for three things: what its clock lines actually
+// do, whether it declares a date-typed local, and whether any relation it writes carries a DATE
+// column at all.
+//
+//   prune_confirmation_attempts     (0348, #1046)   NEITHER CLOCK READ IS EVER WRITTEN.
+//   prune_invite_preview_attempts   (0348, #1046)   Both bodies read the clock only inside their
+//     own refusal guard -- `if p_before > now() - interval '15 minutes' then raise ... CLR10` and
+//     the same expression again in that raise's message -- which compares the caller's
+//     timestamptz argument against the 15-minute wall. The clock value reaches no column; the
+//     statement each body actually runs is a DELETE. Declared locals are `v_deleted bigint` and
+//     `v_tg "char"`, no date among them, and neither body carries a `::date`, a `current_date`, a
+//     `date_trunc` or a `clara._book_today()` token. clara.confirmation_attempts (6 columns) and
+//     clara.invite_preview_attempts (4 columns) carry ZERO date columns between them; every
+//     instant either holds is `timestamp with time zone` (attempted_at, settled_at).
+//   record_firm_standing_instruction   (0338, #1050)   withdrawn_at = now()
+//   withdraw_firm_standing_instruction (0338, #1050)   withdrawn_at = now()
+//     One clock line each, the same idiom, landing on the same column. The RECORD door carries it
+//     because it withdraws the firm's superseded instruction on its way in -- exactly the shape
+//     enrol_prepayment_account and retire_prepayment_account share above, and for the same reason.
+//     `clara.firm_standing_instructions` carries NINE columns and NOT ONE of them is a date
+//     (`information_schema.columns` where `data_type = 'date'` returns nothing for it);
+//     `recorded_at` and `withdrawn_at` are both `timestamp with time zone`. Neither body declares
+//     a date-typed local (`v_actor uuid; v_firm uuid; v_dedupe jsonb; v_key text; v_reason text;`
+//     plus a `record`) and neither carries a date token of any kind.
+//
+// So in all four the clock lands on a timestamptz target or on nothing at all, no date is derived
+// from any of them, and the house legal date is not owed: none of these bodies answers "what is
+// today". A body that later did would call clara._book_today() and belong on the arm (B) roster
+// instead. Both gates are on the file's STABLE STEM, never its number, for the reason :207-214
+// gives -- and this wave renumbered its own overflow block, which is that rule earning its keep.
+//
+// The wave's other twenty-three migrations add NO arm-(D) name, and that is MEASURED rather than
+// assumed: the live census over the integrated chain returns exactly these four names this roster
+// did not already hold, and removes none. 0352's and 0353's own moves are already carried by
+// REVIEW_QUEUE_0352_CLOCK_NAMES and REVISE_PLAN_0353_CLOCK_NAMES above.
+const STANDING_INSTRUCTION_0338_CLOCK_NAMES = [
+  "record_firm_standing_instruction", "withdraw_firm_standing_instruction",
+];
+const RATE_WALL_RETENTION_0348_CLOCK_NAMES = [
+  "prune_confirmation_attempts", "prune_invite_preview_attempts",
+];
+
 // #720 [0198, chat-clarify expiry] — ADDS NO NAME AND MOVES NONE, and that is MEASURED rather than
 // assumed: 0198 creates no body at all. It RECUTS exactly one, `clara.expire_due_interruptions`,
 // which already sits on WORK_QUESTIONS_0180_CLOCK_NAMES above, and the recut deletes a predicate
@@ -1746,6 +1791,14 @@ export async function s5BareTokenRoster(query) {
   // gate would witness the wrong file. See the array's own header for the adjudication.
   if (await appliedStem("work_source_correction_rederivation$")) {
     names.push(...WORK_SOURCE_REDERIVATION_0321_CLOCK_NAMES);
+  }
+  // RIDERS SWEEP WAVE (S) (0338, 0348) - stem-gated, never number-gated, for the reason :207-214
+  // gives. See the two arrays' shared header for the body-by-body adjudication.
+  if (await appliedStem("prepayment_close_standing_instruction$")) {
+    names.push(...STANDING_INSTRUCTION_0338_CLOCK_NAMES);
+  }
+  if (await appliedStem("rate_wall_attempts_retention$")) {
+    names.push(...RATE_WALL_RETENTION_0348_CLOCK_NAMES);
   }
   return names.sort();
 }
