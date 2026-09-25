@@ -130,11 +130,14 @@
 --   * It does not widen any human door's ACL by one role, and it mints no relation grant at all.
 --     The whole delta on the machine side is EIGHT EXECUTEs on eight new names and SIX allowlist
 --     rows for one wake kind.
---   * It does not change a signature, an envelope, a row key, a sort or a refusal code anywhere.
---     A document outside the caller's firm is still CLR11 `document % is not a live filing in your
---     firm`; a client outside it is still CLR11 `client not in your firm` on the settlement read
---     and `client is not in your firm` on the confirmations; the 35-day candidate window and the
---     `candidate_window_days` that travels with it are 0300's, untouched.
+--   * It does not change a signature, an envelope, a row key, a sort or a refusal code ON ANY
+--     HUMAN DOOR. A document outside the caller's firm is still CLR11 `document % is not a live
+--     filing in your firm`; a client outside it is still CLR11 `client not in your firm` on the
+--     settlement read and `client is not in your firm` on the confirmations; the 35-day candidate
+--     window and the `candidate_window_days` that travels with it are 0300's, untouched. The ONE
+--     refusal this file's own OBO plan step raises that no line of 0300 raises is
+--     clara.create_accounting_plan's `client_inactive`, copied verbatim so that the twin answers
+--     what the human door answers — see §F and the fix-round note in §I.
 --   * It mints no table, no column, no chart row, no event type and no role.
 --   * It does not touch `clara.create_accounting_plan`, `clara._obo_plan_core` or
 --     `clara._accrual_plan_core`. See the note on §F.
@@ -1894,11 +1897,17 @@ end $t1137_revconfirm_human$;
 --      nothing: "no human was named" and "the human named is nobody here" are different mistakes
 --      and only the first is the caller's own shape.
 --   3. THE AUTHORITY, LIVE AT THE MOMENT THE ACT IS TAKEN. An author with NO membership in this
---      firm answers EXACTLY as an unknown client does, so the pair cannot enumerate another firm's
---      clients; a DEACTIVATED member of THIS firm gets `authority_lost`, because they already knew
---      the client exists; and below the bookkeeper rank it is `insufficient_role` — the same floor
---      `clara._human_ctx` applies at the human door, applied here to the NAMED HUMAN rather than
---      to the connection.
+--      firm answers EXACTLY as an unknown client does, so a caller holding a NON-MEMBER's id
+--      cannot use that pair to enumerate another firm's clients; a DEACTIVATED member of THIS firm
+--      gets `authority_lost`, because they already knew the client exists; and below the
+--      bookkeeper rank it is `insufficient_role` — the same floor `clara._human_ctx` applies at the
+--      human door, applied here to the NAMED HUMAN rather than to the connection.
+--      [fix round, ADV-L08-04] THE CLAIM IS ABOUT THE NON-MEMBER ARM AND NOTHING WIDER. A caller
+--      that already knows one DEACTIVATED member of firm F CAN tell `authority_lost` (this client
+--      is F's) from CLR11 (it is not, or does not exist). That asymmetry is 0307's own ruling and
+--      it is deliberate — a person whose membership was withdrawn is owed the precise answer — and
+--      the caller here is `clara_runtime`, which reaches the row anyway. It is written down so a
+--      later reader does not take the sentence above for a property of the whole ladder.
 --   4. THE CLIENT, resolved to a firm, in the human door's own words and code.
 --
 -- WHAT THEY DO NOT DO: they take no actor from a JWT (there is none) and none from a session
@@ -1906,7 +1915,23 @@ end $t1137_revconfirm_human$;
 -- (the reservation is taken inside the shared core, under the human verb, over the CALLER'S OWN
 -- ARGUMENTS and not over the author — so a chat confirmation and a human replay of the same
 -- decision under the same key converge on ONE receipt and ONE plan); and they add no rule the
--- human door does not have, because every rule that is not about WHO is calling lives in the core.
+-- human door does not have.
+--
+-- [fix round, ADV-L08-01] AND THE REASON, CORRECTED. The first cut gave it as "every rule that is
+-- not about WHO is calling lives in the core" — which is not true of the PLAN STEP. The first
+-- confirmation's core branches: the human lane calls `clara.create_accounting_plan` and the OBO
+-- lane cannot (that door reads its actor from a JWT this connection does not carry), so it calls
+-- `clara._tenancy_plan_core`. Every rule of the plan step therefore has to be carried TWICE, and
+-- the client-status wall was carried zero times — the OBO entrance confirmed a rent plan for an
+-- `archived` or `onboarding` client the Contract page refuses. §F now carries it, at that door's
+-- own position, and tests/tenancy-agent-twins.test.mjs's p1137.obo.plan_step_parity compares the
+-- two bodies' refusal vocabularies on every run so the next divergence is a red.
+--
+-- THE REVISION PAIR HAS NO SUCH SPLIT and must not grow one: both entrances revise through
+-- `clara._revise_accounting_plan_core`, ONE body with no lane branch at all, and
+-- `clara.revise_accounting_plan` carries no client-status wall, so neither entrance refuses a
+-- non-active client (driven: p1137.revision.client_status_parity). Adding the wall to
+-- `clara.confirm_tenancy_rent_plan_revision_for` alone would CREATE a divergence, not close one.
 -- =====================================================================================
 create or replace function clara.confirm_tenancy_rent_plan_for(p_client uuid, p_author uuid,
     p_document uuid, p_rent_account text, p_payable_account text, p_judgement text, p_op_key text)

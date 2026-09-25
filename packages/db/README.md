@@ -7537,6 +7537,41 @@ For the same reason this file's prestate deliberately does NOT pin
 `clara.create_accounting_plan`, `clara._obo_plan_core`, `clara._accrual_plan_core` or
 `clara._authority_ref_refusal`.
 
+**What that duplication already cost, and the guard that now stands over it.** The first cut of this
+file left `clara.create_accounting_plan`'s CLIENT-STATUS wall out of `clara._tenancy_plan_core`, on
+a premise that was not true — the confirmation core above resolves the client's FIRM and the
+caller's identity, but it never reads `clara.clients.status`. Driven on the rig, the OBO entrance
+confirmed a rent plan for an `archived` or `onboarding` client that the Contract page refuses with
+CLR10 `client is not active -- no new accounting plan` (`client_inactive`); `onboarding` is the live
+case, because that is the state a tenancy is filed in during setup. Nothing posted either way —
+`clara._plan_admit_occurrence` and `clara.wake_due_plan_occurrences` both re-read the status — but
+the rows written would have held the `rent_plan_already_confirmed` and `payable_account_in_use`
+walls against the person's own confirmation once the client was activated. §F now carries the wall,
+verbatim and at that door's own position in the ladder: NOT at the `_for` entrance, where 0307 puts
+its own copy, because 0307's core is SHARED by both entrances and has nowhere else to put it while
+this body is the OBO lane's private stand-in for `clara.create_accounting_plan`. An entrance-level
+copy would sit above `clara._reserve_op` and above every draft wall — answering `client_inactive`
+where the human door answers `terms_incomplete`, and refusing the REPLAY of a confirmation the
+person already made. Both orders are driven in `tests/tenancy-agent-twins.test.mjs`
+(`p1137.obo.refusals_match` case 8, `p1137.obo.plan_step_parity` arms 3 and 4).
+
+Until the follow-up above lands, the standing guard is a cell rather than a comment:
+`p1137.obo.plan_step_parity` compares the two plan bodies' refusal vocabularies on every run, and a
+refusal `clara.create_accounting_plan` raises that `clara._tenancy_plan_core` does not must be on a
+named roster saying which wall above BOTH lanes makes it unreachable. `clara._tenancy_plan_core` is
+also on `plan-overlap-template-arm-retired.test.mjs`'s (T.4) roster now, beside the estate's three
+other plan writers, so the #929 client rung and the self-excluding overlap advisory are watched
+there too.
+
+**The REVISION pair is not affected and must not be "fixed" to match.** Both revision entrances go
+through `clara._revise_accounting_plan_core`, ONE body with no lane branch at all, and
+`clara.revise_accounting_plan` carries no client-status wall — so neither entrance refuses a
+non-active client (driven: `p1137.revision.client_status_parity`, both plans at revision 2 for an
+`archived` client). Adding the wall to `clara.confirm_tenancy_rent_plan_revision_for` alone would
+CREATE a divergence rather than close one. Whether the plan lane should refuse a revision for an
+archived client at all is 0193's question and a person's judgement, and it is carried as a
+follow-up rather than answered by a twin.
+
 **What the machine side bought, and nothing else.** Eight EXECUTEs on eight NEW names and six
 allowlist rows for one wake kind. No human door's ACL moved; the ten names of
 `TENANCY_RENT_0300_HUMAN_FNS` still hold zero machine-lane grants, and the tail asserts that role by
