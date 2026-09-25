@@ -145,7 +145,11 @@ test("the vendor-bindings row is the ONLY one marked legacy, and the tax row the
 test("the four register rows are ?tab= views of ONE workbench, and the object URLs are unchanged", () => {
   const href = (id: string) => accountingHref(A, ACCOUNTING_ITEMS.find((i) => i.id === id)!);
   assert.equal(href("journals"), `/clients/${A}/journals`);
-  assert.equal(href("bank"), `/clients/${A}/bank`);
+  // #1060 — the bank row now NAMES its tab too, outside the registers family: `/bank` is its own
+  // workbench with its own six-way sub-nav (`components/bank/bank-workbench.tsx`), and Matching is
+  // where a Needs-you row's act (accept a payroll or rent settlement candidate) actually lives, so
+  // the registry points there instead of the workbench's own default ("accounts").
+  assert.equal(href("bank"), `/clients/${A}/bank?tab=matching`);
   assert.equal(href("receivables"), `/clients/${A}/registers?tab=aging`);
   assert.equal(href("assets"), `/clients/${A}/registers?tab=fixedAssets`);
   // #640 — plans is its own route now, not a view of the registers workbench.
