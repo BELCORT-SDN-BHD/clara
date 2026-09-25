@@ -133,7 +133,9 @@ test("v6.reads: a not-found is the SAME answer for another firm's entry — no e
 
 test("v6.term: the tool has NO date field, and the fields are the closure's own", () => {
   const shape = Object.keys(v6Tools.answerPrepaymentTermInputSchemaV6.shape).sort();
-  assert.deepEqual(shape, ["context", "reason", "source_ref"]);
+  // TWO KEYS, NOT THREE: `context` left with the model's prose (C1-SPEC-05). What the person
+  // answering is shown beside the two dates is built by the RUN from its own read.
+  assert.deepEqual(shape, ["reason", "source_ref"]);
   for (const invented of ["period_start", "period_end", "service_period_start", "dates"]) {
     assert.equal(
       v6Tools.answerPrepaymentTermInputSchemaV6.safeParse({ reason: "the document states none", [invented]: "2026-01-01" }).success,
@@ -163,6 +165,52 @@ test("v6.term: the finder supplies the fields and the question, never the model"
       { content: [{ type: "tool-call", toolCallId: "c1", toolName: "answer_prepayment_term", input: { reason: "  " } }] },
     ]),
     null,
+  );
+});
+
+test("v6.term: the context is the RUN'S OWN READ — four facts, never whatever the model chose to write", () => {
+  // C1-SPEC-05. CUT-PLAN §1.2 A8 names the context exactly: `{document_id, source_entry_id,
+  // prepaid_account_code, total_cents}`. The first cut let the MODEL supply a free-text `context`,
+  // so the person answering the two-date question was shown model prose instead of the four facts
+  // the contract puts in front of them — on a question whose whole reason for existing is that a
+  // model may not supply the answer.
+  //
+  // Every one of the four is in `read_prepayment_source`'s own answer (the door's `entry.document_id`,
+  // `source_entry_id`, `prepaid.account_code`, `prepaid.total_cents`), so the run builds it from
+  // the read it already performed.
+  const readResult = {
+    type: "tool-result",
+    toolCallId: "r1",
+    toolName: "read_prepayment_source",
+    output: {
+      status: "ok",
+      source_entry_id: "5e5e5e5e-0000-4000-8000-000000000001",
+      entry: { status: "posted", document_id: "d0c0d0c0-0000-4000-8000-000000000002", posting_date: "2026-01-05" },
+      prepaid: { account_code: "1420", total_cents: 240000, candidate_legs: 1 },
+      term: { source: null, remedy: "clara.record_prepayment_stated_term" },
+    },
+  };
+  const asked = v6Impl.findQuestionCallV6([
+    { content: [readResult] },
+    { content: [{ type: "tool-call", toolCallId: "c1", toolName: "answer_prepayment_term", input: { reason: "the document states no service period" } }] },
+  ]);
+  assert.equal(asked.context, v6Impl.prepaymentTermContextV6(readResult.output));
+  // The four keys, each named, and nothing else: a reader of the question sees the facts, not a
+  // paraphrase of them.
+  for (const fact of ["5e5e5e5e-0000-4000-8000-000000000001", "d0c0d0c0-0000-4000-8000-000000000002", "1420", "240000"]) {
+    assert.ok(String(asked.context).includes(fact), `the context names ${fact}`);
+  }
+  // NO READ, NO CONTEXT. An absent fact is reported as absent rather than invented, and the
+  // question still parks — the two dates are what it is for.
+  const noRead = v6Impl.findQuestionCallV6([
+    { content: [{ type: "tool-call", toolCallId: "c1", toolName: "answer_prepayment_term", input: { reason: "the document states none" } }] },
+  ]);
+  assert.equal(noRead.context, undefined);
+  // AND THE MODEL CANNOT REACH THE SLOT AT ALL: `context` left the schema with the prose.
+  assert.equal(
+    v6Tools.answerPrepaymentTermInputSchemaV6.safeParse({ reason: "r", context: "whatever I like" }).success,
+    false,
+    "a model-written context is a rejected key, not an ignored one",
   );
 });
 

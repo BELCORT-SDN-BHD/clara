@@ -77,6 +77,7 @@ import {
   ANSWER_PREPAYMENT_TERM_TOOL,
   PREPAYMENT_TERM_FIELDS,
   PREPAYMENT_TERM_QUESTION,
+  READ_PREPAYMENT_SOURCE_TOOL,
 } from "./claraWork.v6.schemas.js";
 import {
   deriveFaParticularsProposal,
@@ -1198,7 +1199,61 @@ function questionFieldsV6(fields: ReadonlyArray<Record<string, unknown>>): AskQu
   return fields.map((f) => Object.assign({}, f)) as unknown as AskQuestionInputV3["fields"];
 }
 
-type RawCallV6 = { type?: string; toolName?: string; toolCallId?: unknown; input?: unknown };
+type RawCallV6 = {
+  type?: string; toolName?: string; toolCallId?: unknown; input?: unknown; output?: unknown;
+};
+
+/**
+ * THE FOUR FACTS THE PERSON ANSWERING THE TWO-DATE QUESTION IS SHOWN, built from the run's own
+ * read and from nothing else (C1-SPEC-05; CUT-PLAN §1.2 A8 names them:
+ * `{document_id, source_entry_id, prepaid_account_code, total_cents}`).
+ *
+ * Every one of them is already in `clara.read_prepayment_source_for`'s answer, so there is nothing
+ * to derive and nothing to ask a model for. An absent fact is reported as absent — "no document
+ * carrier" is itself one of the things a person needs to know here, because it is the difference
+ * between a term the estate could have read and one only they can state.
+ *
+ * A STRING, because `clara.open_work_question`'s `p_question` envelope carries `context` as one
+ * (`claraWork.v2.impl.ts`'s frozen step, and every surface that renders a question reads it that
+ * way). The shape is fixed here rather than composed per call, so two questions never describe the
+ * same four facts differently.
+ */
+export function prepaymentTermContextV6(read: unknown): string | undefined {
+  if (read === null || typeof read !== "object") return undefined;
+  const r = read as Record<string, unknown>;
+  const entry = (r.entry ?? {}) as Record<string, unknown>;
+  const prepaid = (r.prepaid ?? {}) as Record<string, unknown>;
+  const sourceEntryId = typeof r.source_entry_id === "string" ? r.source_entry_id : null;
+  if (sourceEntryId === null) return undefined;
+  const documentId = typeof entry.document_id === "string" ? entry.document_id : null;
+  const accountCode = typeof prepaid.account_code === "string" ? prepaid.account_code : null;
+  const totalCents =
+    prepaid.total_cents === null || prepaid.total_cents === undefined
+      ? null
+      : Number(String(prepaid.total_cents));
+  return [
+    `source_entry_id: ${sourceEntryId}`,
+    `document_id: ${documentId ?? "none — this payment carries no document, so no service period could be read from one"}`,
+    `prepaid_account_code: ${accountCode ?? "not determined — the entry does not carry exactly one debited asset leg"}`,
+    `total_cents: ${totalCents === null || !Number.isFinite(totalCents) ? "not determined" : String(totalCents)}`,
+  ].join("\n");
+}
+
+/** The newest `read_prepayment_source` ANSWER in the segment's own steps, or null. */
+function lastPrepaymentReadV6(
+  steps: ReadonlyArray<{ content?: ReadonlyArray<RawCallV6> }>,
+): unknown {
+  for (let i = steps.length - 1; i >= 0; i -= 1) {
+    const content = steps[i]?.content ?? [];
+    for (let j = content.length - 1; j >= 0; j -= 1) {
+      const part = content[j];
+      if (part?.type !== "tool-result") continue;
+      if (part.toolName !== READ_PREPAYMENT_SOURCE_TOOL) continue;
+      return part.output ?? null;
+    }
+  }
+  return null;
+}
 
 /**
  * The question call a segment ended on. v4's THREE arms, reached by calling v4's own finder, plus
@@ -1220,7 +1275,9 @@ export function findQuestionCallV6(
       // A QUESTION NOBODY CAN ACT ON IS WORSE THAN NONE: a call with no stated reason parks
       // nothing, exactly as v4's narrow arms refuse one.
       if (!reason) continue;
-      const context = typeof input.context === "string" && input.context.trim() ? input.context.trim() : undefined;
+      // THE CONTEXT IS THE RUN'S, NOT THE MODEL'S (C1-SPEC-05). `input` carries no `context` key —
+      // the schema rejects one — and the four facts come off the read this run already performed.
+      const context = prepaymentTermContextV6(lastPrepaymentReadV6(steps));
       const raw = input.source_ref;
       const sourceRef =
         raw !== null && typeof raw === "object" && typeof (raw as { kind?: unknown }).kind === "string"

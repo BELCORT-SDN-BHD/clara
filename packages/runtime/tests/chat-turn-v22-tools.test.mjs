@@ -366,6 +366,7 @@ test("v22.roster: the contracts this cut DEFERRED are absent BY NAME, and that i
     "read_agreement_terms",
     "read_tenancy_terms",
     "confirm_tenancy_rent_plan",
+    "confirm_tenancy_rent_plan_revision",
     "read_rent_settlement_candidates",
     // #940/#939's prohibitions: enrolling an account and stating a service period are a person's
     // judgements, and the doors hold no agent grant by owner default (0305/0315 assert it by

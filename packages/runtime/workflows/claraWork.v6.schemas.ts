@@ -123,11 +123,12 @@ export const answerPrepaymentTermInputSchemaV6 = z
         "WHY the service period is absent and what you already read looking for it — what the "
         + "source read returned, and what it did and did not record.",
       ),
-    context: z
-      .string()
-      .max(4000)
-      .optional()
-      .describe("What you already know about the prepayment, so the human is not asked to repeat it."),
+    // THERE IS NO `context` KEY, AND ITS ABSENCE IS THE SAME RULING AS THE ABSENT DATE FIELD
+    // (C1-SPEC-05). CUT-PLAN §1.2 A8 names the context the person answering must see:
+    // `{document_id, source_entry_id, prepaid_account_code, total_cents}` — four FACTS, each one
+    // already in `read_prepayment_source`'s own answer. The run builds it from that read
+    // (`prepaymentTermContextV6`), so what a person is shown beside the two dates is what the
+    // estate holds, never what the model chose to write about it.
     source_ref: workQuestionSourceRefSchema
       .optional()
       .describe("The document, chat task or basis line this prepayment came from, where there is one."),
