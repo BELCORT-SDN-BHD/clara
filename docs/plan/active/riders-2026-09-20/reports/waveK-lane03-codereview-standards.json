@@ -1,0 +1,54 @@
+{
+  "axis": "standards",
+  "lane": "waveK-lane03",
+  "fixed_point": "ffb629d73",
+  "diff_command": "git diff ffb629d73...HEAD",
+  "commit_range": "git log ffb629d73..HEAD --oneline",
+  "commits_reviewed": [
+    "6ee02513d fix(db): #1152 the accrual register reads a page at a time (0365)",
+    "05aad4851 test(db): #1152 the page walk, the omitted-cursor parity and the malformed cursor",
+    "3a26bc94a feat(web): #1152 the accrual register pages, and the side filter reaches the door",
+    "b141cf186 fix(runtime): #1151 the admission drill's terminal drain scopes to its own firms",
+    "fe48906db fix(runtime): #1151 the batch drill's receipt census is by identity",
+    "aec3f45d7 docs: #1145 the Workflow DevKit schema bootstrap command's durable home"
+  ],
+  "sources_used": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    "docs/plan/active/riders-2026-09-20/CLOSING-PLAN.md",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    ".claude/skills/code-review/SKILL.md",
+    "packages/db/README.md (## 0365, ## 0364 precedent for #1075/0334)",
+    "packages/runtime/README.md (#1151, #967 sections)",
+    "smell baseline (Fowler, Refactoring ch.3), pasted in the task"
+  ],
+  "verification_performed": [
+    "Re-ran packages/db/tests/accrual-register-pagination.test.mjs against clara_c03: 5/5 pass, 0 fail — matches ticket1152 report.",
+    "Re-ran packages/runtime/tests/queue-drain.test.mjs (in-memory): 8/8 pass — matches ticket1151 report.",
+    "Re-ran FREEZE_BASE_REF=ffb629d73 node scripts/check-frozen-workflows.mjs: OK, 347 frozen files verified, no manifest diff — confirms rule (a) holds for all three tickets.",
+    "Re-ran CI=true GITHUB_ACTIONS=true pnpm lint from the worktree root: exit 0.",
+    "Re-ran apps/web/tests/firm-scope-db-pins.test.ts against clara_c03: 22/22 pass — confirms rule (d) was honoured and no dynamic-SQL barrier was owed.",
+    "Read migration 0365_accrual_register_pagination.sql in full: prestate pins, redo-recognition branch, tail census (signature count, both refusal guards, posture re-read, comment) all present and structurally sound; drop-and-create precedent (0202/0267/0334) correctly followed; no new relation (FORCE RLS n/a); no role minted; no applied migration edited; no packages/runtime or frozen-workflows.json touched.",
+    "Confirmed no EXECUTE/format()/pg_get_functiondef splice in 0365 (grep), matching the report's claim that no firm-scope-db-pins barrier entry was owed.",
+    "Compared packages/db/tests/rig-meta.mjs and packages/db/package.json diffs against the CLOSING-PLAN shared-files rules: each lane touches only its own new section / sorted-position entry.",
+    "Compared use-accruals-register.ts's reload/loadMore duplication against the existing lib/firm/use-review-queue.ts precedent: the same shape, already justified there in writing ('duplicated rather than composed... the epoch discipline itself is proven there') — not a fresh smell, an established house idiom this ticket correctly mirrors rather than reinvents.",
+    "Confirmed the #1075/0334 precedent (commit 705520ed9, test commit c6355d4ef) already used the same migration-commit-then-test-commit split that #1152 repeats."
+  ],
+  "verdict": "accept",
+  "summary": "Both database tickets (#1152, #1151) and the documentation ticket (#1145) follow the repo's house law closely: correct drop-and-create migration discipline, full prestate/tail structural cells with measured (not copied) shas, redo-safety proven on both branches, posture/ACL/owner preserved and re-verified from the catalog, tests driven through the real door/HTTP boundary with independent sources of truth (never tautological, never through an internal collaborator), CLOSING-PLAN shared-file rules honoured, frozen-workflow law untouched and verified, and every gate this reviewer re-ran came back green exactly as the ticket reports claimed. One judgement-call finding on TDD commit sequencing for #1152 (production migration committed before any test), which mirrors an existing pattern already present in the repo's own #1075/0334 history rather than being unique to this lane.",
+  "findings": [
+    {
+      "id": "STD-1",
+      "severity": "minor",
+      "category": "test-quality / horizontal-slicing (judgement call)",
+      "title": "#1152's migration lands as a standalone commit with zero test coverage, before the test commit",
+      "file": "packages/db/migrations/0365_accrual_register_pagination.sql",
+      "commits": ["6ee02513d", "05aad4851"],
+      "evidence": "git log ffb629d73..HEAD --stat shows commit 6ee02513d ('fix(db): #1152 the accrual register reads a page at a time (0365)') adds 575 lines of production SQL and touches no test file at all; the only test file (packages/db/tests/accrual-register-pagination.test.mjs) is added in the SEPARATE, following commit 05aad4851 ('test(db): #1152 ...'). WORK-ORDER.md rule 4 requires vertical slices — 'one test -> see it red for the right reason -> the minimal code that turns it green' and 'a commit that adds a whole battery of red cells before any implementation is that anti-pattern' — and the reverse (a whole implementation committed with no test in the same commit) is the same horizontal-slicing failure mode in the opposite direction: the commit history alone gives no evidence a red test preceded this 575-line body.",
+      "mitigating_context": "The ticket's own report ('A NULL-propagation bug my own tests caught') and the migration's redo evidence (CLARA_MIGRATION_REDO=0365_accrual_register_pagination, documented in packages/db/README.md's ## 0365 section) show the migration WAS in fact exercised against real tests and fixed before the final commit was made -- the local dev loop was red/green even though the two commits were not interleaved. This exact split (migration-only commit, then a separate test-only commit) is also the established pattern for the immediately preceding ticket in the same family: #1075/0334 (commit 705520ed9 'fix(db): #1075 ...', followed by c6355d4ef 'test(db): #1075 ...'), so this is a repo-wide db-ticket convention this worker followed rather than a defect unique to this lane. The migration file's own §0/§T are themselves executable structural assertions (prestate pins, tail census) that run and fail at every apply -- the 'structural cell overrides /tdd' carve-out WORK-ORDER rule 4 grants may reasonably cover the migration file itself, leaving the .test.mjs file as the vertical-slice layer, which IS test-first evidenced by the documented redo.",
+      "required_fix": "None required for this ticket given precedent; worth a house-law clarification (in WORK-ORDER.md or packages/db/README.md's conventions section) on whether a migration's own structural §0/§T cells satisfy rule 4's red-green loop on their own, so future db tickets and reviewers are not left inferring it from commit messages."
+    }
+  ]
+}

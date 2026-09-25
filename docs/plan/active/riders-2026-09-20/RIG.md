@@ -195,3 +195,25 @@ Rig databases as left after the sweep release:
 - `rigsweep` (55707) and `rigsweepc` (55708) were dropped after the sweep gates closed.
 - `clara_fixS` (55750) is the CI-reds fix database.
 - `clara_sweep_e2e` (55701) is gate B's browser copy.
+
+## Closing wave (2026-09-26)
+
+Four code lanes, each on a NEW branch cut from `origin/main` at `ffb629d73` (the sweep wave's docs
+merge, main checkout HEAD at prep time). Each database is a `createdb -T clara_intS6` template copy
+on cluster 55742 — not a fresh migrate — since `clara_intS6` is the sweep merger's ordered 337-file
+chain that gate A proved byte-equal to a from-scratch chain (a template copy is the sanctioned rig
+shape per this file's own preface). All four lanes share cluster 55742.
+
+| lane | worktree | cluster port | database | Playwright triple | branch |
+|---|---|---|---|---|---|
+| L1 | `clara-wt/701` | 55742 | `clara_c01` | 3600 / 3601 / 3602 | `riders/wK-lane01` |
+| L2 | `clara-wt/702` | 55742 | `clara_c02` | 3610 / 3611 / 3612 | `riders/wK-lane02` |
+| L3 | `clara-wt/703` | 55742 | `clara_c03` | 3620 / 3621 / 3622 | `riders/wK-lane03` |
+| LC | `clara-wt/704` | 55742 | `clara_c04` | 3630 / 3631 / 3632 | `riders/wK-lane04` |
+
+All four databases verified at 337 rows / max `0361_reservation_release_advice` immediately after
+`createdb`, matching `clara_intS6`, and again read the same after each lane's dependency install,
+`pnpm --filter @clara/db migrate` (0 new applied on every lane), and its smoke test run. `clara_l02`
+(the pristine 312-file template) and `clara_intS6` itself were touched read-only (one `select
+count(*), max(version)` each) and are otherwise untouched. Full detail, commands and timings:
+`reports/waveK-rig-prep.md`.

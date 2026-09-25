@@ -1,0 +1,54 @@
+{
+  "axis": "standards",
+  "lane": "waveK-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\702",
+  "branch": "riders/wK-lane02",
+  "fixed_point": "ffb629d73",
+  "diff_command": "git diff ffb629d73...HEAD",
+  "commits_command": "git log ffb629d73..HEAD --oneline",
+  "tickets": ["#1150", "#1149"],
+  "sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/CLOSING-PLAN.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    ".claude/skills/tdd/SKILL.md",
+    ".claude/skills/tdd/tests.md (not present; tdd/SKILL.md carries the anti-patterns section referenced)",
+    ".claude/skills/tdd/mocking.md",
+    "packages/db/README.md (house migration law, ## 0361 and prior sections)",
+    "packages/db/tests/README.md",
+    "reports/waveK-lane02-ticket1150.md",
+    "reports/waveK-lane02-ticket1149.md",
+    "packages/db/migrations/0364_plan_reservation_namespace_obo_fold.sql (full read)",
+    "packages/db/tests/plan-reservation-namespace-fixtures.mjs (full read)",
+    "packages/db/tests/plan-reservation-namespace.test.mjs (structure + key cells read)",
+    "packages/db/tests/plan-reservation-namespace-preintegration-gate.mjs",
+    "packages/db/tests/errcode-catalog.test.mjs (full read)",
+    "diffs of packages/db/tests/{rig-helpers.mjs, work-journal-fixtures.mjs, accrual-correction.test.mjs, accrual-plan-authority-wall.test.mjs, authority-ref-human-instruction.test.mjs, plan-overlap-template-arm-retired.test.mjs, tenancy-agent-twins.test.mjs}",
+    "packages/db/package.json diff (gate list)",
+    "git log --stat ffb629d73..HEAD (vertical-slice verification)"
+  ],
+  "verdict": "accept",
+  "summary": "Both tickets are exceptionally well executed against every documented standard I checked: migration house law (bimodal FIRST/REDO prestate pins measured on the lane's own rig, a full tail re-measuring posture/owner/SECURITY DEFINER/search_path/ACL, a preintegration gate added at the sorted, migration-ordered position, no rig-meta.mjs entry correctly omitted since no name is minted), the shared-files table (package.json gate list, README new-section-only convention, rig-helpers.mjs as the sole CLR declaration site), and /tdd (verified vertical slicing via git log --stat -- each commit pairs a red-then-green test cell with its minimal migration hunk; expected values for the tenancy fixture drawn from an independent prior test file rather than recomputed; the errcode census derives its raised-code set from migration SQL text, never from the catalog under test or from pg_proc, avoiding tautology; a real, undone-and-reverified vacuity control was performed on every cell whose whole deliverable was a test). No mocking is used anywhere (real Postgres throughout), consistent with mocking.md's boundary-only guidance. No PRD/ARCHITECTURE edit, no applied migration edited, no frozen-workflow diff (git diff --name-only confirms every touched file is under packages/db). I found no hard violations of a documented standard. Two items below are judgement calls, both already disclosed and justified in the ticket reports rather than defects.",
+  "findings": [
+    {
+      "id": "STD-1",
+      "severity": "note",
+      "kind": "test-quality-judgement-call",
+      "title": "Three test seams drive private core functions directly rather than a public door",
+      "ticket": 1150,
+      "evidence": "packages/db/tests/plan-reservation-namespace-fixtures.mjs:447-464 (callConfirmCore, callRevisionCore) and :381-391 (callOboPlanCore) call clara._confirm_tenancy_rent_plan_core, clara._confirm_tenancy_rent_plan_revision_core and clara._obo_plan_core directly over rootQuery, bypassing every public door. This is the shape /tdd's anti-patterns section names ('mocks internal collaborators, tests private methods ... through a side channel'). It is disclosed as seams S5 and S7 in plan-reservation-namespace.test.mjs's own header comment and in reports/waveK-lane02-ticket1150.md section 1, with the reason given: p_lane and p_kind are reachable from no public door (every real caller passes a literal), so AC6's 'p_lane is refused outside its closed set, driven' and AC4's kind-set claim cannot be driven at any public seam at all -- the alternative was not testing the defensive branch, which WORK-ORDER rule 4's own vacuity-control spirit would not accept for dead-but-load-bearing code.",
+      "required_fix": "None required. This is a defensible, disclosed exception rather than a violation: no public seam exists to reach the branch under test, and both `_confirm_tenancy_rent_plan_core`/`_confirm_tenancy_rent_plan_revision_core` and `_obo_plan_core` are ungranted (clara_fn_owner only, measured), so only the rig's own superuser connection can reach them regardless. Flagging for the record since the review brief specifically asks to check for this pattern."
+    },
+    {
+      "id": "STD-2",
+      "severity": "note",
+      "kind": "smell-duplicated-code",
+      "title": "callConfirmCore and callRevisionCore are near-identical thin SQL wrappers",
+      "ticket": 1150,
+      "evidence": "packages/db/tests/plan-reservation-namespace-fixtures.mjs:447-464: callConfirmCore and callRevisionCore each build a single-statement `select clara._confirm_tenancy_rent_plan[_revision]_core(p_firm=>...,p_actor=>...,p_lane=>...,p_client=>...,p_document=>...,...,p_op_key=>...) as result` and unwrap `.rows[0].result` the same way, differing only in the function name and the two revision-only vs confirm-only arguments.",
+      "required_fix": "None required -- a labelled judgement call only. The two wrappers call different SQL functions with different argument lists (five own args on one, three on the other), so a shared helper would need a parameter list expressive enough to cover both, trading two short, readable functions for one with conditional shape -- not a clear win at this size. Worth a second look only if a third such core wrapper is added later."
+    }
+  ]
+}

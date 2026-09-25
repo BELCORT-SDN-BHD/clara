@@ -1,0 +1,76 @@
+{
+  "axis": "standards",
+  "lane": "waveK-lane04",
+  "base": "ffb629d73",
+  "diff_range": "ffb629d73...HEAD",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\704",
+  "tickets_in_scope": [1144],
+  "sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md (skimmed for domain-vocabulary scope only; this ticket mints none)",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    "docs/plan/active/riders-2026-09-20/CLOSING-PLAN.md",
+    "docs/plan/active/riders-2026-09-20/CUT-PLAN.md",
+    ".claude/skills/code-review/SKILL.md (smell baseline)",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "docs/plan/active/riders-2026-09-20/reports/waveK-lane04-ticket1144.md",
+    "packages/runtime/workflows/registry.ts",
+    "packages/runtime/workflows/chatTurn.v23.{ts,impl,prompt,tools,reads,tenancy,refusals,usage}.ts",
+    "packages/runtime/workflows/claraWork.v7.{ts,impl,prompt,tools,bundle,errors}.ts",
+    "packages/runtime/plugins/startWorld.ts",
+    "packages/runtime/src/buildInfoRoutes.ts",
+    "packages/runtime/scripts/parts-parity-exemptions.mjs",
+    "scripts/check-frozen-workflows.selftest.mjs",
+    ".github/actions/db-live-gates/action.yml",
+    "packages/runtime/README.md",
+    "live pg_proc source of clara._fa_particulars_complete on clara_c04 (55742)"
+  ],
+  "compliance_checks_passed": [
+    "No edit to docs/PRD.md or docs/ARCHITECTURE.md (git diff ffb629d73...HEAD -- docs/PRD.md docs/ARCHITECTURE.md is empty; the report's own follow-up 1 correctly hands the stale ARCHITECTURE.md pins to the orchestrator rather than editing them in-lane).",
+    "Zero packages/db diff: `git diff --name-only ffb629d73...HEAD -- packages/db` is empty. The ticket needs no migration and none was written; rule (d)'s web-pins-corpus obligation is correctly not triggered.",
+    "Frozen law (a): only packages/runtime/workflows, registry.ts, packages/runtime/plugins/startWorld.ts and frozen-workflows.json were touched among the four LC-exclusive paths; every other changed path (README.md, buildInfoRoutes.ts, scripts/parts-parity-exemptions.mjs, check-frozen-workflows.selftest.mjs, test files, the one .github/actions hunk) is permitted runtime/CI surface, not restricted to LC by rule (a) or claimed by another lane's shared-files row.",
+    "`node scripts/check-frozen-workflows.mjs` (re-run): OK -- 362 frozen files verified, 62 \"use workflow\" modules all frozen+registered, 3 retired -- matching the report's claim exactly.",
+    "`node scripts/check-frozen-workflows.mjs --compare-base ffb629d73` (re-run): OK -- 347 existing entries retain the same hash and deployed flag, 15 additions, 3 recorded retirements -- matching the report's claim exactly, and confirming no deploy-locked body was edited.",
+    "No chatTurn.v22.* or claraWork.v6.* SOURCE file appears in the diff; only their TEST files were edited, and those edits are honest self-corrections of a stale pin literal (the same 'trap sprung on itself' pattern v22's own comments predicted and the last cut's cell demonstrated), not a weakening of what the cells assert.",
+    "`node packages/runtime/scripts/check-parts-parity.mjs` (re-run): OK -- work_result's construction sites include claraWork.v7.impl.ts and none in any chatTurn.*, confirming the report's 'no new wire kind, no parity entry owed' claim for all seven tools.",
+    "`node scripts/check-worker-paths.mjs` (re-run): OK -- 2 spawn sites, unaffected by this diff.",
+    "`CI=true GITHUB_ACTIONS=true pnpm lint` (re-run, full monorepo): exit 0, no errors or warnings in any workspace, matching the report's claim.",
+    "All three new unit test files re-run and match the report's counts exactly: chat-turn-v23-tools.test.mjs 17/17, chat-turn-v23-tenancy.test.mjs 17/17, clara-work-v7.test.mjs 7/7.",
+    "All edited test files re-run and match the report's counts exactly: chat-turn-v22-tools.test.mjs 21/21, clara-work-v6.test.mjs 8/8, l9-build-info.test.mjs 17/17, local-db-gate-drivers-census.test.mjs 8/8.",
+    "registry.ts's five-per-class edit (import, dispatch, re-export, workflowBodies entry, workflowPins entry) for both chatTurn and claraWork matches CUT-PLAN.md \u00a72.2's textual shapes exactly, including the required two-space-indented trailing-comma entries and the superseded bodies (chatTurn_v22, claraWork_v6) staying imported/exported/rostered under policy (c).",
+    "claraWork.v7.impl.ts's loadFaProposalInputsStepV7 six-condition completeness predicate was independently re-verified against the LIVE pg_proc source of clara._fa_particulars_complete on clara_c04: the SQL clauses (depreciation_start_date, depreciation_method, the three method-specific arms for none/straight_line/reducing_balance) match clause for clause -- the report's 'independent source of truth, not a re-derivation' claim holds.",
+    "TDD vertical-slice discipline holds at commit granularity for all 9 commits (git show --stat on each): every commit that adds behaviour bundles its implementation file(s) with the test file(s) that exercise it in the same commit; no commit adds a whole battery of red test cells with no accompanying implementation. The one test-only commit (ea48a81ea) fixes two pre-existing hand-maintained census literals (l9-build-info.test.mjs's bundle list, chat-turn-v22-tools.test.mjs's claraWork half) that the whole-suite run caught stale -- a maintenance correction of an existing cell, not new red-then-green work.",
+    "The e2e walk commit (5344c2771) demonstrates a genuine red-then-green cycle against a real defect: driving read_tenancy_terms against a real World surfaced governedRefusalV23 losing a door-sent detail.reason, and the same commit both adds the walk and fixes chatTurn.v23.reads.ts/.refusals.ts/.tenancy.ts, pinned by a unit cell quoting the measurement.",
+    "CONTEXT.md correctly untouched: the CLOSING-PLAN shared-files table assigns it to L1 only, and the ticket report correctly records that this cut mints no new domain vocabulary.",
+    "Docs updated in the same commits: packages/runtime/README.md gains the pins section, and scripts/check-frozen-workflows.selftest.mjs's #815 closure-attribution roster is re-measured (not guessed) for all eight new-or-grown entries, with its prose counts refreshed to match."
+  ],
+  "findings": [
+    {
+      "id": "STD-1",
+      "ticket": 1144,
+      "severity": "minor",
+      "kind": "smell:duplicated-code",
+      "title": "The 'no client pin / client mismatch' two-wall check is repeated verbatim six times across chatTurn.v23.reads.ts and chatTurn.v23.tenancy.ts instead of being hoisted into chatTurn.v23.refusals.ts, the module both files already import shared helpers from",
+      "evidence": "The identical five-statement shape appears at packages/runtime/workflows/chatTurn.v23.reads.ts:149-162 (runReadPayrollPostingState), :274-287 (runReadPayrollSettlementState), :409-422 (runReadAgreementTerms), and packages/runtime/workflows/chatTurn.v23.tenancy.ts:255-268 (runReadRentSettlementCandidates), :466-479 (runConfirmTenancyRentPlan), :644-657 (runConfirmTenancyRentPlanRevision): `if (!ctx.clientId) { return noClientRefusalV23(<reason>, <message>); } if (input.client_id !== ctx.clientId) { return clientMismatchRefusalV23(<reason>, <message>, input.client_id); } const clientId = ctx.clientId;`. Only the two reason tokens and two message strings vary per call site; the control shape, the two refusal constructors invoked and the final rebinding are byte-identical six times. Both files already import `noClientRefusalV23` and `clientMismatchRefusalV23` from chatTurn.v23.refusals.ts, which is the module the tools' own header names as 'the refusal envelope the seven new tools share... a shared helper in either [reads.ts or tenancy.ts] would be a cycle' -- refusals.ts itself has no such cycle risk and is the natural home for the sequencing, not just the two leaf constructors.",
+      "why_it_matters": "Six independent call sites of the same five-line sequence is the Duplicated Code shape by definition: a future change to the wall's order, its early-return shape, or a new client-scoping rule (e.g. an audit hook, a rate limit) needs six edits instead of one, and the risk is exactly the kind this closure's own docs elsewhere warn about (chatTurn.v23.refusals.ts's header: 'a second copy of an envelope is how two tools in one version come to disagree about what a refusal looks like'). The module already generalises one layer (the two constructors); it stops one layer short of generalising the sequence that calls them.",
+      "required_fix": "Add one helper to chatTurn.v23.refusals.ts, e.g. `requireClientPin(ctx, inputClientId, noClientReason, noClientMessage, mismatchReason, mismatchMessage): {ok:false,...} | {ok:true, clientId:string}`, and have all six call sites destructure its result instead of repeating the two-branch sequence. Not a same-review blocker -- v23 is a frozen closure and this file is already merged into the diff being reviewed -- but worth taking at the next chatTurn version cut, since every future client-scoped tool in this family will otherwise copy the same six-line block a seventh time."
+    },
+    {
+      "id": "STD-2",
+      "ticket": 1144,
+      "severity": "note",
+      "kind": "smell:mysterious-name (formatting, not naming)",
+      "title": ".github/actions/db-live-gates/action.yml's new v23 e2e step collapses the file's own one-variable-per-line env convention into a single line with irregular multi-space gaps, unlike every neighbouring block in the same file including the v22 block immediately above it",
+      "evidence": "action.yml:443-457 (the v22 block, kept unchanged): `PGPORT=$PGC_PORT \\` / `PGDATABASE=clara_wave_b_ci \\` / `RELAY_TEST_MODE=1 \\` / `WORKFLOW_POSTGRES_URL=\"...\" \\` / `  node \"...\" tests/chat-turn-v22-e2e.mjs`, one assignment per line with a backslash continuation. The new v23 line directly below it (action.yml:457, per `git diff ffb629d73...HEAD -- .github/actions/db-live-gates/action.yml`) instead reads as one physical line: `PGPORT=$PGC_PORT         PGDATABASE=clara_wave_b_ci         RELAY_TEST_MODE=1         WORKFLOW_POSTGRES_URL=\"postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci\"           node \"...\" tests/chat-turn-v23-e2e.mjs`, with runs of 8-11 literal spaces where the sibling block has newlines-plus-backslash.",
+      "why_it_matters": "Bash still parses the collapsed line correctly (whitespace-separated env assignments before a command are equivalent whichever way the line wraps), and the driver behind it (world-gate.mjs on tests/chat-turn-v23-e2e.mjs) is exercised and passes, so this is cosmetic only -- not a functional defect and not something CI would catch. It is a real, visible deviation from the file's own established convention in the very same file for the very same list of four variables, most likely an artifact of how the multi-line block was pasted, and it is the kind of hunk a future diff of this file will misread as a meaningful change.",
+      "required_fix": "Reformat the new step's env assignment to the file's own one-per-line backslash-continuation style, matching the v22 block immediately above it. Purely cosmetic; safe to fold into any future touch of this file rather than a same-review blocker."
+    }
+  ],
+  "smell_baseline_notes_not_filed_as_findings": [
+    "Duplicated Code (judgement call, not filed): claraWork.v7.tools.ts restates the whole of runRecordJournalEntryV7 (including withTransientRetry) byte-for-byte from v6's equivalent except for the CLARA_WORK_BUNDLE_V7_DIGEST literal. This is the frozen-workflow versioning pattern itself (docs/ARCHITECTURE.md \u00a710, 'a behavioural change ships as a new _vN export, never an in-place edit'), explicitly documented as necessary by the module's own header and identical to how v3/v4/v6 each restated the same function over their own predecessors, so the repo-overrides rule applies and this is not filed as a standards finding.",
+    "Message Chains / long door-call strings (judgement call, not filed): the two confirmation tools in chatTurn.v23.tenancy.ts spell out seven- and five-argument named-parameter SQL calls (`p_client => $1::uuid, p_author => $2::uuid, ...`) inline rather than through a query-builder abstraction. This matches the file's own stated house rule ('THE DOOR IS SPELLED HERE, LITERALLY... this file is the one a reviewer greps for the verb it calls', chatTurn.v23.reads.ts:55-58) and every predecessor version's own practice, so it is a deliberate, documented convention rather than a smell.",
+    "Primitive Obsession (judgement call, not filed): refusal reason tokens and CLR sqlstate codes travel as bare strings throughout the new modules rather than a shared enum. This is the estate's own pre-existing idiom for typed refusal tokens across the whole runtime package (not introduced by this ticket), so it is noted but not filed."
+  ],
+  "summary": "#1144's diff is unusually disciplined against this repo's own frozen-workflow law: zero edits to any deploy-locked v22/v6 source file, the registry's five-edit-per-class shape followed exactly, check-frozen-workflows/--compare-base/parts-parity/worker-paths and CI=true lint all re-run clean and matching the report's own claims, and the one genuinely load-bearing new predicate (loadFaProposalInputsStepV7's six-condition completeness check) independently verified byte-for-byte against the live database function it claims as its source of truth. TDD vertical-slice discipline holds at commit granularity across all 9 commits, including a real red-then-green cycle in the e2e-walk commit that found and fixed an actual defect (a lost detail.reason on a door-sent CLR11). The two findings filed are both judgement-call smells, not standards violations: a six-times-repeated client-pin/mismatch check that the closure's own refusals module could absorb (STD-1, minor), and a cosmetic single-line collapse of the file's own established multi-line env-var convention in one CI YAML hunk (STD-2, note). Neither blocks acceptance."
+}

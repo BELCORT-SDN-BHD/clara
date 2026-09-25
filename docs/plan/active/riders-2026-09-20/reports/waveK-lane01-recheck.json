@@ -1,0 +1,55 @@
+{
+  "axis": "RECHECK",
+  "lane": "riders wave K, lane 01",
+  "branch": "riders/wK-lane01",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\701",
+  "fixed_point": "ffb629d73",
+  "head_verified": "87ab0de1cd25de0e41e644baa950a13fc50c30fa",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/waveK-lane01-fix.md",
+  "source_reports": [
+    "waveK-lane01-codereview-spec.json",
+    "waveK-lane01-review-adversarial.json"
+  ],
+  "tickets": [1147, 1148],
+  "what_was_rerun": [
+    "packages/db: node --test --test-concurrency=1 <154 preintegration-gate imports> tests/standing-instruction-agent-read.test.mjs tests/payroll-posting-state-read.test.mjs tests/prepayment-close-standing-instruction.test.mjs against clara_c01 -> 35 tests / 35 pass / 0 fail / 0 skip (9+8+18, matches fix report)",
+    "packages/db: same chain, tests/operation-census.test.mjs tests/rig-isolation.test.mjs -> 33 tests / 32 pass / 0 fail / 1 skip (matches fix report; the one skip is T19's own destructive-reset gate, unrelated to this lane)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test payroll-posting-section.test.tsx payroll-posting-state.test.ts standing-instructions-card.test.tsx standing-instructions.test.ts firm-scope-db-pins.test.ts -> 53 tests / 53 pass / 0 fail (8+6+11+6+22, matches fix report)",
+    "apps/web: node scripts/run-tests.mjs (whole unit suite) -> 5273 tests / 142 suites / 5271 pass / 0 fail / 2 skip (matches fix report exactly)",
+    "pnpm typecheck (apps/web, packages/runtime) -> Done, no errors",
+    "CI=true GITHUB_ACTIONS=true pnpm lint -> exit 0",
+    "node scripts/check-frozen-workflows.mjs -> OK, 347 frozen files verified, append-only vs origin/main, 60 \"use workflow\" modules all frozen+registered",
+    "git diff --stat ffb629d73...HEAD -- packages/runtime and -- frozen-workflows.json -> both empty",
+    "pnpm --filter @clara/db migrate (with PG env set) -> 0 new applied, 339 total, no drift",
+    "source read of packages/db/migrations/0362_standing_instruction_agent_read.sql \u00a7B and \u00a7TAIL -- confirms the family-keyed predicate (SPEC-02/ADV-01) and the positive pg_roles allowlist (ADV-05) are the shipped bodies, not just the report's prose",
+    "source read of packages/db/migrations/0363_payroll_posting_state_read.sql \u00a7A(3b) and apps/web/lib/documents/payroll-posting-state.ts / components/documents/payroll-posting-section.tsx -- confirms duplicate_scope is projected and blocksOnThisDocumentsOwnEntry(state) gates the panel to silence on the caller's own posted entry (SPEC-01/ADV-02)",
+    "source read of packages/db/tests/prepayment-close-standing-instruction.test.mjs p1050.doors.shape -- confirms LAWFUL_MACHINE_SIGNATURES is a name+argument-list permit-list, not a STABLE/writers boolean filter (ADV-03)",
+    "source read of packages/db/tests/standing-instruction-agent-read.test.mjs p1147.read.acl -- confirms it asks pg_roles positively (0363's own p1148.acl.census shape) rather than a four-name loop (ADV-05)",
+    "source read of apps/web/messages/en.json:7754 and standing-instructions-card.test.tsx -- confirms standingWithdrawnPlans' =0 arm now reads \"No schedule opened under it was running when you took it back\" and a doesNotMatch(/nothing keeps posting/i) cell pins it (ADV-04)",
+    "independent (non-JSON.parse) key-count scan of apps/web/messages/en.json for standingWithdrawnPlans / standingWithdrawalStopNote / payrollPosting -> each occurs exactly once, no duplicate introduced by the fix round",
+    "git status --short in the worktree throughout -> clean; this recheck made no edits and no commits"
+  ],
+  "verdict": "accept",
+  "findings": [],
+  "carried_debts_not_lane_defects": [
+    {
+      "id": "SPEC-03",
+      "ticket": 1147,
+      "severity": "minor",
+      "status": "still open, correctly not closed by this lane",
+      "note": "The owner ruling #1147 asks to be recorded on the ticket is still not on GitHub #1147. WORK-ORDER and this lane's own prompt forbid writing to GitHub. The question is written out in packages/db/README.md's 0362 section and in waveK-lane01-ticket1147.md. This is an orchestrator action item, not a lane defect; correctly re-flagged as such in waveK-lane01-fix.md \u00a71 and \u00a75."
+    },
+    {
+      "id": "SPEC-04",
+      "ticket": 1147,
+      "severity": "minor",
+      "status": "still open, correctly not closed by this lane",
+      "note": "The from-scratch chain through 0363 was not run in this worktree. CLOSING-PLAN.md risk 1 explicitly assigns that proof to the integrator on a disposable cluster ('nobody runs a second from-scratch chain on this cluster'). The lane re-proved the first-apply branch of both prestates instead, which is what is available to it. Integrator debt, not a lane defect."
+    }
+  ],
+  "successor_items_confirmed_not_regressions": [
+    "ADV-04's underlying race (no FOR SHARE/FOR KEY SHARE lock in clara._prepayment_schedule_core's wake arm) is intentionally left open per the fix report's own disposition: the required_fix offered two options (lock, or reword the sentence to stop promising a future it cannot see) and the fix round took the second, which is a full resolution of the finding as written, not a partial one. Filed as a successor ticket item in \u00a74.3 of the fix report.",
+    "ADV-06 (recorded_by projected as a bare uuid, no wake door resolves it to a person) was already a note-severity, non-blocking finding in the adversarial report and is carried into the successor contract (\u00a74.1) unchanged, as the original review itself required."
+  ],
+  "summary": "Re-ran every cell the fix report's SPEC/ADV findings depend on, plus the shared-file and frozen-law gates, on the current head (87ab0de1c) against clara_c01, and read the shipped bodies for the three majors rather than trusting the report's prose. All five FIXED findings (SPEC-01/ADV-02, SPEC-02/ADV-01, ADV-03, ADV-05, ADV-04) are confirmed fixed in the actual migration/test/component source, and every gate the fix report claims green reran green with matching counts: 35 db cells (the three touched files), 33/32/1-skip (the two estate gates), 53 web cells, 5273/5271/2-skip (the whole web unit suite), typecheck clean, lint exit 0, frozen-workflows check OK with an empty packages/runtime diff, and migrate at 0 new / 339 total. Nothing newly broke. The two items still open (SPEC-03's owner-ruling comment and SPEC-04's from-scratch chain) are both explicitly assigned away from this lane by WORK-ORDER/CLOSING-PLAN rules and were correctly not attempted here; both are minor severity, so nothing above minor remains against the lane. Accept."
+}

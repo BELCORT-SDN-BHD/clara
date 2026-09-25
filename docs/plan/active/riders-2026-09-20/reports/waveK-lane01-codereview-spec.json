@@ -1,0 +1,107 @@
+{
+  "axis": "SPEC",
+  "lane": "riders wave K, lane 01",
+  "branch": "riders/wK-lane01",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\701",
+  "fixed_point": "ffb629d73",
+  "diff": "git diff ffb629d73...HEAD (21 files, +3125/-10)",
+  "commits": [
+    "3210958f7 feat(db): #1147 the model lane gets a read of the firm's standing instruction (0362 A)",
+    "0b5bdc736 test(db): #1147 the read door is no oracle, and it opened no act (0362 A cells)",
+    "de93a7f4c feat(db): #1147 withdrawing a standing instruction says how many plans keep posting (0362 B)",
+    "5475b3a0e test(db): #1147 the deferred-revenue asymmetry is held by a census, not by a comment",
+    "19c50a99e feat(web): #1147 a firm is told what its withdrawal did NOT stop, and how to stop it",
+    "1f015edfd docs(db): #1147 the 0362 README section, with the ruling it records and the pins it took",
+    "ae374a6f1 feat(db): #1148 a document page can ask why a payslip did not post (0363 A)",
+    "057ce4a08 test(db): #1148 the read is no oracle, projects five keys, floors at viewer, and answers about a payslip",
+    "fd9c8b76f feat(web): #1148 the payroll lane's granted read has a web module, and it rewords nothing",
+    "55a1cc734 feat(web): #1148 the document page says why a payslip did not post, in the database's own words",
+    "97a89dd01 docs(db): #1148 the 0363 README section, its pins and the two refusals it tells apart",
+    "e210b1db3 fix: #1148 two lint defects of my own, found by the runner's own chain"
+  ],
+  "spec_source": "GitHub issues #1147 and #1148 (BELCORT-SDN-BHD/clara). Both carry ZERO comments (gh api repos/BELCORT-SDN-BHD/clara/issues/<n>/comments returns []), so each issue BODY is the whole contract and no owner ruling overrides it.",
+  "verdict": "accept-with-fixes",
+  "reruns": [
+    "packages/db: node --test --test-concurrency=1 $GATES(308 flags) tests/standing-instruction-agent-read.test.mjs tests/payroll-posting-state-read.test.mjs against clara_c01 -> 14 pass / 0 fail / 0 skip (8 + 6, matching both reports)",
+    "packages/db: same chain, tests/prepayment-close-standing-instruction.test.mjs -> 18 pass / 0 fail (the amended p1050.doors.shape census)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test payroll-posting-section.test.tsx payroll-posting-state.test.ts standing-instructions.test.ts standing-instructions-card.test.tsx -> 26 pass / 0 fail (5+4+6+11, matching both reports)",
+    "worktree root: CI=true GITHUB_ACTIONS=true pnpm lint -> exit 0 (AC8 of both tickets confirmed)",
+    "already-satisfied claim (#1147 AC5): git show ffb629d73:apps/web/messages/en.json carries standingWithdrawalNote at line 7748, and the base card battery already carries the 'two facts a firm must know' cell -- the claim holds",
+    "live probes on clara_c01 driving the estate's own doors (scratch scripts under the session scratchpad; no tracked file touched): a successfully POSTED payslip read through clara.get_payroll_posting_state, and record/withdraw/record/withdraw plus a restate cycle read through clara.withdraw_firm_standing_instruction"
+  ],
+  "findings": [
+    {
+      "id": "SPEC-01",
+      "ticket": 1148,
+      "severity": "major",
+      "kind": "requirement implemented wrongly / untested state",
+      "title": "The new document-page section tells a person their SUCCESSFULLY posted payslip 'was not posted again -- open that entry to decide whether this is a correction or a re-upload'",
+      "evidence": "Ticket line: 'The document page's payroll panel then says why a summary did not post, reading the new door rather than the queue.' PayrollPostingSection (apps/web/components/documents/payroll-posting-section.tsx:88-99) renders state.sentence verbatim for EVERY payroll_summary with no gate on verdict or rung, and is mounted unconditionally for that kind on the accounting tab (apps/web/components/documents/document-detail.tsx:396-402). But clara._payroll_posting_verdict reaches rung 10 no_duplicate_entry with scope same_document for a payslip whose OWN entry stands on it (packages/db/migrations/0343_payroll_completeness_witness.sql:1665-1672, v_dup_entry := clara._document_posting_entry(v_client, p_document)), and 0343:1846-1852 builds the sentence 'Payroll run %s is already posted (%s, %s). This payslip was not posted again -- open that entry to decide whether this is a correction or a re-upload.' DRIVEN ON clara_c01 through the estate's own doors (seedPayrollChart + readPayrollDoc for month 2026-11 on world.clients.A1, then select clara.get_payroll_posting_state($1) as alice): posted=true, entry a0544b62-3d9f-4986-ace0-9f029c122ef8, and the door answered {verdict:'blocked', rung:'no_duplicate_entry', reason:'duplicate_entry', sentence:'Payroll run November 2026 is already posted (Payroll run November 2026, 2026-11-30). This payslip was not posted again -- open that entry to decide whether this is a correction or a re-upload.'}. So on the happy path the accounting tab reads 'A posted entry of <client> currently stands on this document.' immediately followed by 'Payroll posting' and that sentence. Neither battery reaches the state: the six db cells drive facts_read, completeness_witness, a foreign document, an unknown id, a non-payslip and the floor; the five component cells drive a blocked sentence, a parked question, a non-payroll page, a moved kind and a banner refusal.",
+      "required_fix": "Decide and test what the panel says when the verdict is not a genuine block for this document: either render nothing when rung is no_duplicate_entry and the duplicate's scope is same_document (the payslip's own entry), or give that case a settled sentence of the panel's own. Add a cell for a successfully posted payslip on both sides (db: drive the door against a posted run; web: the component for a posted state). If the behaviour is intended, it needs an explicit ruling rather than a silent render."
+    },
+    {
+      "id": "SPEC-02",
+      "ticket": 1147,
+      "severity": "major",
+      "kind": "requirement implemented wrongly",
+      "title": "plans_still_posting counts only plans citing the CURRENT instruction row, so after a second recording the card says 'Nothing was running under it, so nothing keeps posting' while a plan keeps posting",
+      "evidence": "Ticket line: 'The withdraw door's answer additionally carries the number of live plans that were authorised by the instruction being withdrawn, and the settings card states plainly, in a message key, that those plans keep posting under the member who authorised them.' The count keys on the ROW id (packages/db/migrations/0362_standing_instruction_agent_read.sql, B: and ap.authority_ref ->> 'id' = v_row.id::text). But 0338's record door is version-forward: a restated reason, or simply recording the instruction again after a withdrawal, supersedes the live row and inserts a fresh one with a new id (packages/db/migrations/0338_prepayment_close_standing_instruction.sql:436-468), while an already-authorised plan keeps citing the OLD id (0338:1102, jsonb_build_object('kind','firm_standing_instruction','id', v_si_id, ...)). DRIVEN ON clara_c01 through the human doors only (record -> real wake12 plan -> withdraw -> record -> withdraw): withdrawal 1 answered plans_still_posting=1, withdrawal 2 answered plans_still_posting=0, and the plan was STILL status='active' afterwards. A second probe took the restate path (record, plan, record with a new reason, withdraw) and also answered 0 with the plan active. The web module passes 0 straight through (apps/web/lib/firm/standing-instructions.ts:133-140) and the card renders standingWithdrawnPlans at count 0, whose text is 'Nothing was running under it, so nothing keeps posting.' (apps/web/messages/en.json) -- a positive false statement in exactly the situation the ticket exists to correct ('A firm that takes an instruction back reasonably believes it stopped something'). Both new count cells (p1147.withdraw.counts, p1147.withdraw.counts_only_what_still_posts) use a single instruction row per firm, so neither reaches this state.",
+      "required_fix": "Count the firm's live plans for the instruction KEY family rather than the single row id -- authority_ref ->> 'instruction_key' = v_key (0338 already writes that key into authority_ref) plus firm_id and status='active' -- or restrict the card's zero sentence to 'nothing keeps posting under this recording'. Add a cell for record -> plan -> withdraw -> record -> withdraw."
+    },
+    {
+      "id": "SPEC-03",
+      "ticket": 1147,
+      "severity": "minor",
+      "kind": "requirement partial",
+      "title": "The owner ruling the ticket asks to be recorded ON the ticket is not on the ticket",
+      "evidence": "Ticket line: 'Whether withdrawal should also pause them is an accounting and product ruling #1050 was not given, and Clara asks rather than decides: record the question on this ticket, leave the behaviour alone.' #1147 carries ZERO comments (gh api .../issues/1147/comments returns []), and the lane may not comment (WORK-ORDER rule 2: 'never comment on or close a GitHub issue'). The question IS written out in packages/db/README.md's 0362 section and in reports/waveK-lane01-ticket1147.md follow-up 2, which is the lane's only lawful home for it. This is an orchestrator debt, not a worker defect.",
+      "required_fix": "The orchestrator posts the question as a comment on #1147 (or files it as an owner-ruling ticket) before the wave closes, so the criterion is met where the ticket asked for it."
+    },
+    {
+      "id": "SPEC-04",
+      "ticket": 1147,
+      "severity": "minor",
+      "kind": "acceptance criterion unmet at lane level",
+      "title": "Both tickets' 'the from-scratch chain is green' criterion carries no lane evidence",
+      "evidence": "#1147 AC7 and #1148 AC7 both read 'The migration applies from scratch and on a populated database, first-apply branch proved, and the from-scratch chain is green.' Both reports record the populated applies, the redos and the first-apply branch (re-proved inside rolled-back transactions, with three refusal arms for 0363) but state 'from-scratch chain: NOT run here' under Unverified. CLOSING-PLAN.md risk 1 assigns that proof to the integrator on a disposable cluster, so the lane is compliant -- but the criterion is open for BOTH migrations until it runs.",
+      "required_fix": "Integrator runs the ordered from-scratch chain through 0363 on a disposable cluster and records it against both tickets before either is closed."
+    },
+    {
+      "id": "SPEC-05",
+      "ticket": 1147,
+      "severity": "note",
+      "kind": "requirement implemented differently",
+      "title": "The read door has no viewer-floor check; the ticket says 'at the viewer floor'",
+      "evidence": "Ticket line: 'A granted, security-definer, read-only door answers the firm's live standing instruction for the agent read role, firm-scoped through the caller's own context rather than a firm argument, at the viewer floor.' clara.wake_get_firm_standing_instruction (0362 A) performs no rank check at all: it resolves clara.wake_context(), asks the allowlist and requires an on_behalf_of. The migration states the reasoning (A, bullet 3) and the lane drives it: p1147.read.floor_is_the_credential shows a viewer reading the relation herself AND clara.mint_wake_credential refusing CLR10 to mint on a viewer's behalf, so the reachable floor is bookkeeper+ -- strictly narrower than the ticket asked, never looser. Recorded so the merger does not read 'viewer floor' in the ticket and 'no floor' in the body as a gap.",
+      "required_fix": "None required. If a viewer-rank statement is wanted in the body for the day the credential floor moves, it is a successor edit, not this ticket's."
+    },
+    {
+      "id": "SPEC-06",
+      "ticket": 1148,
+      "severity": "note",
+      "kind": "behaviour not asked for",
+      "title": "A third refusal, CLR10 / not_a_payroll_summary, beyond the brief's refusal mapping",
+      "evidence": "The brief's Refusal mapping names only 'CLR11 not-found for a document that is not this firm's, CLR04 for the role floor, anything else surfacing verbatim as a door refusal.' 0363 A adds a kind gate raising CLR10 with detail {\"reason\":\"not_a_payroll_summary\"}, and the web module and section carry a dedicated arm for it (isNotAPayrollSummary, rendered as silence). The reasoning is sound and written out (0363 A(2b); reports/waveK-lane01-ticket1148.md section 3): without it the door handed an invoice would answer 'This payroll summary has not been read yet.' over a supplier bill. p1148.read.kind proves the firm wall is asked FIRST, so the kind refusal is no cross-firm oracle. Flagged only because it is an addition to the contract the brief wrote, and it is an arm the successor chat tool must carry.",
+      "required_fix": "None. Keep the refusal in the successor contract (section 8 of the ticket report already does) so the chat tool never surfaces it as a firm-facing sentence."
+    },
+    {
+      "id": "SPEC-07",
+      "ticket": 1148,
+      "severity": "note",
+      "kind": "behaviour not asked for",
+      "title": "The answer carries a sixth key, document_id, beyond the brief's five",
+      "evidence": "Ticket line: 'It projects the verdict's sentence, verdict, rung, reason and completeness, and not the whole rung_vector.' 0363 A returns those five plus document_id, which is the caller's own argument echoed back and carries no information the caller did not supply. p1148.read.projection pins the key set at exactly those six and asserts 'rung_vector' in r === false after first reading the internal as root to show the door NARROWS. No leak, no missing key.",
+      "required_fix": "None."
+    },
+    {
+      "id": "SPEC-08",
+      "ticket": 1147,
+      "severity": "note",
+      "kind": "existing guard weakened",
+      "title": "#1050's 'no machine twin by NAME' census becomes a property test that a future firm-argument read would pass",
+      "evidence": "packages/db/tests/prepayment-close-standing-instruction.test.mjs (p1050.doors.shape) asserted kin.rows deepEqual [] for every clara function matching wake_%firm_standing_instruction% and its siblings. The diff replaces that with a filter admitting any such function that is STABLE and granted to clara_agent_ro and to no writer role. That is necessary -- 0362 mints exactly such a read and the file is frontier-gated at 0338, so a name roster would red every pre-0362 chain -- and the reasoning is written into the cell. The residue: a later wake_get_firm_standing_instruction_for(firm uuid) that is STABLE and agent_ro-granted would now pass this census, so the 'no firm argument' property that makes 0362's door a non-oracle is held only by p1147.read.no_oracle, not by the family census. Re-run: 18 pass / 0 fail.",
+      "required_fix": "Optional: have the census also refuse a matching body whose argument list names a firm, so the non-oracle property is held structurally as well as behaviourally."
+    }
+  ],
+  "summary": "Both tickets are built, and every criterion but the from-scratch chain carries lane evidence that re-runs green (14 db cells, 26 web cells, CI lint exit 0). Two spec defects survive verification, both user-facing and both in states no cell reaches: #1148's new panel renders the verdict's re-file sentence on a payslip that posted perfectly well, telling the reader to decide whether it is a correction or a re-upload; and #1147's plans_still_posting keys on the instruction ROW rather than the key family, so a firm that records the instruction a second time is told at withdrawal that nothing keeps posting while a plan is still active. Both were driven on clara_c01 through the estate's own doors rather than argued from the code. The remainder are one orchestrator debt (the owner ruling the ticket asked to be recorded on #1147 is not on it), one integrator debt (the from-scratch chain, which the closing plan assigns away from the lane), and four notes."
+}

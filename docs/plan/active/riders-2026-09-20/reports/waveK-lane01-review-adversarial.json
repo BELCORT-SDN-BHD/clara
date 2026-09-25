@@ -1,0 +1,103 @@
+{
+  "axis": "ADVERSARIAL",
+  "lane": "waveK / L1 (lane01)",
+  "branch": "riders/wK-lane01",
+  "worktree": "C:/Users/zhant/Desktop/clara-wt/701",
+  "base": "ffb629d73",
+  "database": "127.0.0.1:55742 / clara_c01 (339 files, max 0363_payroll_posting_state_read)",
+  "tickets": [
+    "#1147 (migration 0362)",
+    "#1148 (migration 0363)"
+  ],
+  "head_commits": [
+    "3210958f7 feat(db): #1147 the model lane gets a read of the firm's standing instruction (0362 SA)",
+    "0b5bdc736 test(db): #1147 the read door is no oracle, and it opened no act (0362 SA cells)",
+    "de93a7f4c feat(db): #1147 withdrawing a standing instruction says how many plans keep posting (0362 SB)",
+    "5475b3a0e test(db): #1147 the deferred-revenue asymmetry is held by a census, not by a comment",
+    "19c50a99e feat(web): #1147 a firm is told what its withdrawal did NOT stop, and how to stop it",
+    "1f015edfd docs(db): #1147 the 0362 README section, with the ruling it records and the pins it took",
+    "ae374a6f1 feat(db): #1148 a document page can ask why a payslip did not post (0363 SA)",
+    "057ce4a08 test(db): #1148 the read is no oracle, projects five keys, floors at viewer, and answers about a payslip",
+    "fd9c8b76f feat(web): #1148 the payroll lane's granted read has a web module, and it rewords nothing",
+    "55a1cc734 feat(web): #1148 the document page says why a payslip did not post, in the database's own words",
+    "97a89dd01 docs(db): #1148 the 0363 README section, its pins and the two refusals it tells apart",
+    "e210b1db3 fix: #1148 two lint defects of my own, found by the runner's own chain"
+  ],
+  "what_was_re_run": [
+    "packages/db: node --test --test-concurrency=1 <308 gate flags> tests/standing-instruction-agent-read.test.mjs -> tests 8 / pass 8 / fail 0",
+    "packages/db: node --test --test-concurrency=1 <308 gate flags> tests/payroll-posting-state-read.test.mjs -> tests 6 / pass 6 / fail 0",
+    "apps/web: lib/documents/payroll-posting-state.test.ts 4/4; lib/firm/standing-instructions.test.ts 6/6; components/documents/payroll-posting-section.test.tsx 5/5; components/firm-admin/standing-instructions-card.test.tsx 11/11",
+    "apps/web: tests/firm-scope-db-pins.test.ts -> tests 22 / suites 3 / pass 22 / fail 0 (closing-plan rule (d); no barrier entry is owed - 0362 and 0363 contain 0 pg_get_functiondef splices)",
+    "node scripts/check-frozen-workflows.mjs -> OK, 347 frozen files verified, append-only vs origin/main; git diff ffb629d73...HEAD -- packages/runtime is EMPTY (rule (a) satisfied for L1)",
+    "independent (non-JSON.parse) duplicate-key scan of apps/web/messages/en.json -> no duplicate keys; each of the four new keys occurs exactly once, at its sorted position"
+  ],
+  "attack_surface_cleared": [
+    "TENANCY, 0362 read door: clara.wake_get_firm_standing_instruction takes NO firm argument; the firm is clara.wake_context()'s own answer. The live body of wake_context() confirms it re-validates the credential's on_behalf_of as status='active' AND clara.role_rank(role) >= clara.role_rank('bookkeeper') on every use, so the migration's floor claim is measured, not recalled.",
+    "READ-ONLY POOL: the migration claims the door 'runs inside the read pool's read-only transaction' and no cell drives that. DRIVEN: begin; set transaction read only; set local role clara_agent_ro; wake secret; select clara.wake_get_firm_standing_instruction(...) -> OK (clara.assert_wake_allowed is VOLATILE but writes nothing).",
+    "SUSPENDED / REMOVED MEMBER: clara.firm_memberships_status_check admits only ('active','removed'); clara.jwt_firm() and clara.actor_role_rank() both filter status='active'. A removed member driving clara.get_payroll_posting_state is refused CLR04 'actor has no active membership' (driven).",
+    "0363 FLOOR JUSTIFICATION: clara.list_review_queue - the surface that already renders this exact sentence - is itself clara._human_ctx(clara.role_rank('viewer')), measured off the catalog, so the new door lowers no floor. clara.documents' human RLS policy is firm-wide (firm_id = clara.jwt_firm()) with no per-client narrowing for the human lane, so a viewer learns nothing about a client they could not already see.",
+    "0363 EXISTENCE ORACLE: re-ran p1148.read.no_oracle (foreign document vs unminted uuid compared on code/message/detail/hint/constraint/table/column) and p1148.read.kind (another firm's INVOICE answers CLR11, not the CLR10 kind refusal).",
+    "IDEMPOTENCY UNDER REPLAY: clara._reserve_op(uuid,text,text,bytea) raises CLR10 'op_key reused with different args' on a hash mismatch (live body read), and a replay with the same payload returns the stored receipt. A receipt stored before 0362 carries no plans_still_posting; apps/web/lib/firm/standing-instructions.ts:133-140 positively checks for an integer >= 0 and renders null as SILENCE, which is correct and is covered by a cell.",
+    "LOCK ORDER: 0362 SB adds no lock. It keeps 0338's order (op reservation, then `select ... for update` on the instruction row) and then a plain count of clara.accounting_plans; no plan, Work, task or interruption lock is taken, so no new ordered pair exists.",
+    "INTEGER CENTS / CALENDAR DAYS: 0362 adds count(*)::int only; 0363 projects the verdict's own keys and re-derives no money and no date.",
+    "SPLICE ANCHORS: neither migration splices - 0 occurrences of pg_get_functiondef in either file."
+  ],
+  "findings": [
+    {
+      "id": "ADV-01",
+      "ticket": 1147,
+      "severity": "major",
+      "kind": "correctness / firm-facing false statement",
+      "title": "plans_still_posting counts only the withdrawn ROW's plans, so a firm that ever restated or re-recorded its instruction is told 'Nothing was running under it' while schedules keep posting",
+      "evidence": "0362 SB counts on `ap.authority_ref ->> 'id' = v_row.id::text` (packages/db/migrations/0362_standing_instruction_agent_read.sql:379-385), i.e. on the ROW being withdrawn. But 0338's record door is version-forward: read off the LIVE catalog, clara.record_firm_standing_instruction supersedes the live row whenever the reason OR the recording member differs (`if found and v_existing.reason = v_reason and v_existing.recorded_by = v_actor then ... else update ... set withdrawn_at = now(), withdraw_reason = 'superseded by a restated standing instruction' ... insert ...`). Plans authorised before the restatement keep citing the SUPERSEDED row. DRIVEN on clara_c01 through the estate's own doors (scratchpad probe3.mjs): alice records R1 = f698c59b-53ac-44d6-8c4a-a82a3aa49338; the real close_prep wake wrapper writes plan e1572d5d-ee97-43a8-abd0-5bb741471d50 with authority_ref {\"id\":\"f698c59b...\",\"kind\":\"firm_standing_instruction\",\"instruction_key\":\"prepayment_schedule_at_close\",\"wake_kind\":\"close_prep\"}; alice restates the reason -> R1 withdrawn as 'superseded by a restated standing instruction', R2 = 502bfbda-de2f-40b1-a7ed-853bf83289c1 inserted; alice withdraws -> receipt {\"instruction_id\":\"502bfbda...\",\"plans_still_posting\":0}; the plan re-read as root is still {\"id\":\"e1572d5d...\",\"status\":\"active\"}. apps/web/components/firm-admin/standing-instructions-card.tsx:149 then renders apps/web/messages/en.json:7754's =0 arm: \"Nothing was running under it, so nothing keeps posting.\" That is the exact false belief #1147 exists to remove (issue #1147: 'A firm that takes an instruction back reasonably believes it stopped something'). No cell covers a superseded row: p1147.withdraw.counts and p1147.withdraw.counts_only_what_still_posts each record the instruction exactly once, and neither the migration header nor waveK-lane01-ticket1147.md mentions restatement.",
+      "required_fix": "Count the firm's instruction rather than the row. Every standing-instruction plan already carries authority_ref ->> 'instruction_key' (89 of 89 rows on clara_c01, measured), so the predicate becomes `ap.authority_ref ->> 'instruction_key' = v_key` (or the id IN the set of this firm's rows for that key), with `ap.firm_id = v_firm and ap.status = 'active' and ap.authority_kind = 'standing_instruction'` unchanged. Add a cell that records, authorises a plan, RESTATES the reason, withdraws, and asserts plans_still_posting = 1. If the orchestrator rules the receipt must stay row-scoped, then the =0 message must stop asserting that nothing keeps posting."
+    },
+    {
+      "id": "ADV-02",
+      "ticket": 1148,
+      "severity": "major",
+      "kind": "correctness / wrong sentence on the success path",
+      "title": "The new document-page section renders for EVERY payroll summary, so a payslip that posted correctly is told 'This payslip was not posted again -- decide whether this is a correction or a re-upload'",
+      "evidence": "apps/web/components/documents/payroll-posting-section.tsx gates only on documentKind === 'payroll_summary' (line 57) and then renders state.sentence verbatim (lines 91-97) with no test on verdict, rung or the duplicate's scope; apps/web/components/documents/document-detail.tsx:403 mounts it immediately under the liveClaim / noLiveClaim line on the ACCOUNTING tab. clara._payroll_posting_verdict answers verdict='blocked', rung='no_duplicate_entry' for a payslip whose OWN entry exists (scope same_document, via clara._document_posting_entry(v_client, p_document)), and that sentence is written for a re-file attempt. DRIVEN end to end on clara_c01 (scratchpad probe2.mjs): seedPayrollChart + readPayrollDoc(month 2027-06) posts entry 72eb326d-6c88-478e-8a40-e7d5de67eaf2 (approved, memo 'Payroll run June 2027') from the document; clara.get_payroll_posting_state, called through humanQuery as firm A's VIEWER carol, answers sentence = \"Payroll run June 2027 is already posted (Payroll run June 2027, 2027-06-30). This payslip was not posted again -- open that entry to decide whether this is a correction or a re-upload.\" The ordinary success page therefore reads 'A posted entry of <client> currently stands on this document.' followed by the heading 'Payroll posting' and a sentence saying the payslip was not posted and inviting the reader to decide whether it is a correction or a re-upload - about its own entry. The ticket's scope is 'a document page that wants to say this payslip did not post because ...'; none of the five cells in payroll-posting-section.test.tsx drives a posted or a ready verdict.",
+      "required_fix": "Decide what the page says when the verdict is not a blocked-before-posting state: render nothing when the duplicate the verdict names is this document's own entry (the door does not project the duplicate scope today, so either project it or gate on the entries the page already holds), and render nothing for verdict === 'ready'. Add a component cell for a posted payslip and one for a ready verdict."
+    },
+    {
+      "id": "ADV-03",
+      "ticket": 1147,
+      "severity": "major",
+      "kind": "guard weakened on a false equivalence",
+      "title": "The amended p1050.doors.shape census admits a machine-lane WRITE twin: 'STABLE, therefore it cannot write' is false once the body calls a VOLATILE helper",
+      "evidence": "packages/db/tests/prepayment-close-standing-instruction.test.mjs:1122 replaces #1050's exact refusal (assert.deepEqual(kin.rows, []) - no wake_%firm_standing_instruction% name at all, anywhere in the schema) with `const unlawful = kin.rows.filter((r) => !r.is_read || !r.agent || r.writers)`, justified by the new comment: 'STABLE (Postgres refuses every INSERT/UPDATE/DELETE inside a non-volatile function, so such a body CANNOT write)'. PostgreSQL refuses a data-modifying STATEMENT written directly inside a non-volatile function; it does not stop that function calling a VOLATILE one that writes. PROVEN on clara_c01 inside a transaction that was rolled back (scratchpad stable_write.sql): created clara._adv_volatile_writer(uuid,text) (VOLATILE, inserts into clara.firm_standing_instructions) and clara.wake_record_firm_standing_instruction(uuid,text) declared `stable security definer`, owner clara_fn_owner, revoked from public, granted to clara_agent_ro alone. The amended census's own query then answers {proname: wake_record_firm_standing_instruction, is_read: true, agent: true, writers: false}, so `unlawful` is empty and the cell stays GREEN; the same call returned a new instruction id and `select count(*) from clara.firm_standing_instructions where reason = 'ADVERSARIAL: a STABLE body that wrote'` = 1. After the rollback, `select count(*) from pg_proc ... in ('_adv_volatile_writer','wake_record_firm_standing_instruction')` = 0. The wall #1050 owns - no machine lane may RECORD or WITHDRAW a standing instruction - is now satisfiable by a machine-lane write door.",
+      "required_fix": "Add the fact that actually closes it: refuse any name in the family whose prosrc reaches a VOLATILE clara body, or list the lawful READ signatures explicitly (the shape 0363's own p1148.acl.census uses, which enumerates every clara_% role from pg_roles and asserts the reached set exactly). At minimum delete the sentence claiming STABLE implies the body cannot write, because that claim is the amendment's whole justification."
+    },
+    {
+      "id": "ADV-04",
+      "ticket": 1147,
+      "severity": "minor",
+      "kind": "race between two sessions",
+      "title": "A close_prep run in flight at the moment of withdrawal lands an active plan that the receipt has already counted as absent",
+      "evidence": "0362 SB's header claims the count is taken 'After the stamp, inside the same transaction, so what it reports is the world the withdrawal leaves behind rather than the one it found'. It reports the withdrawing transaction's SNAPSHOT. The wake arm of clara._prepayment_schedule_core resolves the instruction with a plain `select fsi.id, fsi.recorded_by ... where fsi.withdrawn_at is null limit 1` (live body read - no FOR SHARE, no FOR UPDATE), and the withdraw door's own `for update` is on the instruction row only, so nothing serialises the two. DRIVEN with TWO real connections (scratchpad probe4.mjs): connection W opens a transaction, sets role clara_wake_interactive under a real close_prep credential and calls clara.wake_establish_prepayment_schedule -> plan 92c820ab-91e8-4c7f-bc2e-16f8db54c3f2 written and NOT committed; a second connection withdraws as alice and commits -> receipt plans_still_posting = 0; W then commits and the plan reads status='active' citing that instruction. The card says 'Nothing was running under it, so nothing keeps posting.' Narrower than ADV-01 (it needs an overlapping unattended run) but the same false sentence.",
+      "required_fix": "Either take a FOR SHARE / FOR KEY SHARE on the instruction row in the wake arm so the two serialise (outside this ticket's scope - raise it as a successor item), or stop the receipt claiming to describe the world after the withdrawal and word the =0 case so it does not assert that nothing keeps posting."
+    },
+    {
+      "id": "ADV-05",
+      "ticket": 1147,
+      "severity": "minor",
+      "kind": "assertion weaker than its own claim",
+      "title": "0362's tail ACL check is a four-name denylist, not the allowlist its comment claims; a grant to any other clara role passes",
+      "evidence": "packages/db/migrations/0362_standing_instruction_agent_read.sql:471 tests `v_acl ~ 'clara_runtime=|clara_authenticated=|clara_wake_|clara_agent_chat_ro='` plus a PUBLIC arm, under a comment saying 'Read off the ACL rather than asked role by role, so a grant to a role this file never names is caught too'. PROVEN on clara_c01 inside a rolled-back transaction (scratchpad re4.sql): after `grant execute on function clara.wake_get_firm_standing_instruction(text) to clara_freeform_ro`, the tail's first check does not fire (the clara_agent_ro entry is still there), its second does not fire either, and has_function_privilege('clara_freeform_ro', ...) = true - the tail would have applied happily. This cluster carries clara_freeform_ro, clara_stripe_webhook, clara_invite_preview, clara_agent_read_login and clara_auth_wall, none of which the regex names; clara_agent_chat_ro, which it does name, is not a role that exists here. p1147.read.acl has the same shape (a fixed four-role loop). By contrast #1148's p1148.acl.census enumerates `pg_roles where rolname like 'clara\\_%'` and asserts the reached set is exactly ['clara_authenticated'].",
+      "required_fix": "Assert the ACL positively: read every clara_% role from pg_roles plus public and require the reached set to be exactly {clara_agent_ro}, in the 0362 tail and in p1147.read.acl - 0363's own shape."
+    },
+    {
+      "id": "ADV-06",
+      "ticket": 1147,
+      "severity": "note",
+      "kind": "projection a caller cannot use",
+      "title": "The read door names the recording member as a bare user uuid, and no wake-lane door resolves a uuid to a person",
+      "evidence": "0362 SA projects recorded_by as the raw uuid, and waveK-lane01-ticket1147.md's successor contract carries it as \"recorded_by\": \"<user uuid>\". Catalog census on clara_c01: of the 11 clara.wake_get_% doors, ZERO project a display name (no clara.wake_% body matches '%display_name%', '%full_name%' or '%users u%'). The chat tool the next cut builds can therefore say that an instruction stands and when, but cannot say WHO recorded it without inventing a name or dropping the field, although the brief lists 'the recording member' as one of the four projections.",
+      "required_fix": "Not blocking. Either project the member's display name beside the uuid in a later cut, or state in the successor contract that the tool must not attempt to name the person."
+    }
+  ],
+  "summary": "Six adversarial findings, three of them major. No tenancy hole and no floor regression was found on either new door: #1148's wrapper walls on clara.documents.firm_id before it reads anything and answers one CLR11 both for a foreign document and for an unminted uuid, and #1147's wake read takes no firm argument at all and rides a credential that clara.wake_context() re-validates as an ACTIVE bookkeeper+ on every use. The three majors are about what the two halves SAY. The withdrawal receipt counts the withdrawn ROW rather than the firm's instruction, so a firm that restated it is told 'Nothing was running under it, so nothing keeps posting' while an amortisation schedule keeps posting (ADV-01, driven through the estate's own doors). The new document-page section renders for every payroll summary, so a payslip that posted correctly is told it 'was not posted again' and invited to decide whether it is a correction or a re-upload (ADV-02, driven end to end). And the amended p1050.doors.shape census rests on 'STABLE, therefore it cannot write', which a STABLE body calling a VOLATILE helper disproves - a machine-lane WRITE twin of the standing-instruction door now passes that census (ADV-03, proven inside a transaction that was rolled back). Two minors (a withdrawal / close_prep race with the same false sentence, and a tail ACL denylist that misses five of this cluster's roles) and one note (recorded_by is a uuid no wake door can resolve).",
+  "verdict": "accept-with-fixes"
+}
