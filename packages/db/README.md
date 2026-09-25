@@ -7807,3 +7807,73 @@ The count is in fact three on both chains, with different members —
 `sign_depreciation_authority`, `_assert_plan_authority`, `_obo_plan_core` with it — which is
 exactly why a count was the wrong assertion. `p1050.authority.human_lane_unwidened` holds both
 facts from the test side, on either chain.
+
+## 0361 — one map of "which door releases this claim", and the carry-down stops naming one that cannot (#1078 fix round, riders sweep wave, lane 02)
+
+[0361_reservation_release_advice.sql](migrations/0361_reservation_release_advice.sql) closes the
+spec review's finding L02-SPEC-01 (major, 2026-09-25), the standards review's STD-1 and the
+adversarial review's ADV-L02-10, on the branch that carried 0335–0338.
+
+**What 0337 left.** #1078 widened `clara._acct_role_reserved` to a THIRD domain — the
+prepayment-account roster now reserves its enrolled codes — and taught three of that census's
+consumers to answer per domain: the bank belt's machine token (0337 §C), the fixed-asset profile
+door's release sentence (§D) and the staff-advance enrolment door's re-enrolment advice (§E). The
+FOURTH consumer was not touched. `clara._draft_opening_item_core`, the opening-balance carry-down,
+asks the same census through `clara._fa_role_claim_conflict` and reported **every** non-fixed-asset
+claim as `coa_account_advance_reserved`, under a remedy naming only `retire_staff_advance_account`
+and "retire the profile that holds it". Neither releases a prepayment-roster claim, which is the
+class [0042](migrations/0042_wave_d_b0_shared_authorities.sql):2110 names (WDB-R2: *a refusal must
+name a followable remedy, or say honestly that there is none*). The same default also mis-reported
+a **fixed-asset cross-role** claim — reachable since 0042, long before the third domain existed.
+
+**Why a map rather than a fourth copy of the `case`.** All three of 0337's dispatches were written
+as *prepayment → its answer, ELSE the advance answer*, and the `else` is how a whole domain came to
+be mis-reported without anybody noticing. `clara._reservation_release_advice(text)` answers two
+facts per domain — the token a machine reads, the sentence a person acts on — and **raises**
+`CLR10 reservation_domain_unmapped` on a domain it does not know. A fifth register meets that raise
+at its first refusal instead of quietly inheriting the staff-advance answer.
+
+| § | object | what it is |
+|---|---|---|
+| A | `clara._reservation_release_advice` | the one map: token, door, and what releasing the claim costs |
+| B | `clara._fa_assert_code_unreserved` | 0337 §C's body verbatim except the `case` that chose the token |
+| C | `clara.upsert_fa_account_profile` | 0337 §D's body verbatim except the `case` that chose the sentence |
+| D | `clara._draft_opening_item_core` | the fourth consumer, corrected — a guarded splice |
+| E | `clara._fa_role_claim_conflict` | a deterministic `order by (domain, role)` |
+
+**§D is a splice, and that is this body's own idiom.** `clara._draft_opening_item_core` is a
+445-line body written out whole only in [0017](migrations/0017_wave_b.sql); both later corrections
+to it — 0041 §4.5's four-part carry-down recut and 0042 §5.15c's reservation arm — read
+`pg_get_functiondef`, COUNTED an anchor, replaced it and refused on any other count. Re-typing 444
+unrelated lines to change one sentence and one token would put them under this file's signature.
+Both anchors here are counted before anything is written, each replacement is a single
+dollar-quoted literal, and the block no-ops on a redo by detecting its own marker in the installed
+body. The entry in `apps/web/tests/firm-scope-db-pins.corpus.ts` records the review.
+
+**What did NOT change.** No wall, no admission, no refusal that did not already happen. Every edit
+is what a refusal SAYS. `clara._adv_enrolment_admission` is deliberately NOT recut: its per-domain
+text is not a release sentence but a RE-ENROLMENT NARRATIVE with an axis of its own (a live
+fixed-asset REGISTER ROW is permanent where an ACTIVE profile is not, and the two get different
+advice under the same `fa` domain), so folding four narrative shapes and a permanence flag into
+the map would make the map the thing that is hard to read. The duplication that was real — one
+token, one release sentence — is what §A owns.
+
+**§E, and why an `order by` is not cosmetic.** `clara._fa_role_claim_conflict` read the census with
+`limit 1` and no ordering, and every caller branches on the single domain it returns. While the
+census could only answer `fa` or `staff_advance` for one code that was harmless; once a refusal
+names a per-domain release DOOR, an arbitrary choice is an arbitrary REMEDY. Ordered
+alphabetically on `(domain, role)` — there is no ranking between registers to encode, and
+inventing one would be a policy nobody ruled.
+
+**Driven, not asserted.** `reservation-release-advice.test.mjs` drives the real seed door
+(`clara.seed_fixed_asset`) on a client whose own prepayment roster holds the code and reads the
+refusal: `coa_account_prepayment_reserved`, a sentence naming `retire_prepayment_account` and what
+retiring it leaves running, and no mention of `retire_staff_advance_account`. The same door on a
+staff-advance code answers 0041's token and sentence unchanged, and on a fixed-asset cross-role
+claim now answers `coa_account_fa_reserved`. The map's unmapped-domain raise is driven too. Every
+cell went red first against a deliberately broken map, and green again once 0361 was redone.
+
+**Redo-safe by construction** (#957): `create or replace function` throughout, and §D's splice
+detects its own marker and returns without touching the body. The prestate admits exactly two
+pre-images per recut body — the sha measured on this lane's rig, or a body already carrying this
+file's own `0361` attribution — so a redo is admitted and real drift refuses by name.
