@@ -506,7 +506,14 @@ export function firstInvalidClaimField(issues: readonly ClaimIssue[]): ClaimFiel
  * `already_settled` IS NOT "no journal": the expense debits land against the stated payment
  * account. A settlement producing one leg is a refusal, not a shortcut.
  */
-export function derivedLines(draft: ClaimDraft): JournalDraftLine[] {
+export function derivedLines(
+  draft: ClaimDraft,
+  /** #1066 — the SAME advance_id → real-account lookup `toClaimWire` takes, so the preview never
+   *  shows a different posting than the door will actually make. `null`/omitted (every pre-#1066
+   *  caller) resolves every allocation to the claim's own typed `advanceAccountCode`, collapsing
+   *  to the single leg this function always produced. */
+  advanceAccountCodes: ReadonlyMap<string, string> | null = null,
+): JournalDraftLine[] {
   const lines: JournalDraftLine[] = draft.items
     .filter((i) => !isPendingItem(i))
     .map((item) => ({
@@ -515,6 +522,29 @@ export function derivedLines(draft: ClaimDraft): JournalDraftLine[] {
       credit_cents: 0,
       description: item.description.trim().slice(0, ITEM_DESCRIPTION_MAX_CHARS),
     }));
+  if (draft.settlement === "advance_application") {
+    // #1066 — ONE CREDIT LEG PER ADVANCE ACCOUNT, mirroring `clara._claim_journal_basis`'s own
+    // widening (migration 0301) exactly: each confirmed allocation's REAL account (falling back to
+    // the claim's own head account when unknown), summed per account, in ACCOUNT-CODE ORDER — the
+    // same grouping `packages/db/tests/staff-expense-claim-allocations.test.mjs`'s own
+    // `allocatedBasis` helper computes as the independent expected shape for `p931.accounts`. A
+    // single-account claim (every allocation resolves to the same account) collapses to exactly
+    // the one leg this function always produced.
+    const rows = claimAllocations(draft);
+    const headAccount = advanceAccountCodes?.get(rows[0]?.advanceId ?? "") ?? draft.advanceAccountCode.trim();
+    const byAccount = new Map<string, number>();
+    for (const r of rows) {
+      const code = advanceAccountCodes?.get(r.advanceId) ?? headAccount;
+      byAccount.set(code, (byAccount.get(code) ?? 0) + r.amountCents);
+    }
+    for (const code of [...byAccount.keys()].sort()) {
+      lines.push({
+        account_code: code, debit_cents: 0, credit_cents: byAccount.get(code)!,
+        description: draft.settlement,
+      });
+    }
+    return lines;
+  }
   lines.push({
     account_code: settlementAccountCode(draft),
     debit_cents: 0,

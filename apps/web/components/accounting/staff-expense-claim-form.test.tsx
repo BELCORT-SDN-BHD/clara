@@ -997,3 +997,51 @@ test("ticket 1066 with the enrolment register unread, no second-account candidat
     await h.unmount();
   }
 });
+
+test("ticket 1066 the SUGGESTED split across two accounts is confirmed and sent with each row's own account", async () => {
+  // END TO END: the chooser offers both accounts (this commit's first cell), and what is
+  // CONFIRMED and SENT names each row's own account so the door's arm (b) and its head-consistency
+  // check (0340) both see the truth, rather than the earlier cells' pure-function proof alone.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, ""); // one item, RM 480.00, claimant 1190
+
+  let sent: Submitted | null = null;
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => [
+      ...ENROLMENTS,
+      { id: "e-second-account", account_code: "1191", person_label: "Farah binti Idris" },
+    ],
+    loadAdvances: async () => staffAdvanceSummary([
+      // OLDEST first: Farah's own, 1190, 300.00 outstanding.
+      advanceRow({ outstanding_cents: 30000, issue_date: "2026-01-10" }),
+      // A SECOND enrolled account, 1191, 200.00 outstanding, dated later.
+      advanceRow({
+        account_code: "1191", enrolment_id: "e-second-account", person_label: "Farah binti Idris",
+        advance_id: SECOND_ACCOUNT_ADVANCE, outstanding_cents: 20000, issue_date: "2026-02-01",
+        enrolment_active: true,
+      }),
+    ]),
+    submit: async (_a, input) => { sent = input; return { kind: "accepted", workId: "w", taskId: null, logicalOpId: null, status: "queued", replayed: false, claimId: "c" }; },
+  }));
+  try {
+    await h.settle();
+    // THE ONE-CLICK SUGGESTION, oldest first: 300.00 off the claimant's own, 180.00 off the second
+    // account — 480.00 exactly, the item's own total.
+    const suggest = h.find((n) => attrOf(n, "data-testid") === "advance-suggest");
+    assert.ok(suggest, "the suggest-by-date button is on screen");
+    await h.fireEvent(suggest, "click");
+    await h.settle();
+    await submitForm(h);
+    assert.ok(sent, "a split confirmed across two accounts is a complete claim");
+    const claim = (sent as unknown as Submitted).claim;
+    assert.equal(claim.advanceAccountCode, "1190",
+      "the head (the OLDEST, on the claimant's own account) sets the claim's own column");
+    assert.deepEqual(claim.advanceAllocations, [
+      { advanceId: FARAH_ADVANCE, amountCents: 30000 },
+      { advanceId: SECOND_ACCOUNT_ADVANCE, amountCents: 18000, accountCode: "1191" },
+    ], "the head states no account of its own; the second-account row states exactly its own");
+  } finally {
+    await h.unmount();
+  }
+});

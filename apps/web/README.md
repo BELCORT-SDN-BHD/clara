@@ -2296,5 +2296,38 @@ as before. `suggestAllocationsByDate` is untouched: it is already account-agnost
 `issue_date` first, across whatever candidates it is given), so a claim spanning two accounts
 suggests correctly with no change there either.
 
+**The wire and the preview needed the per-allocation account too, and this ticket owns that as
+well** (#1052's own paragraph named it: "the per-allocation account code and derived-preview legs a
+cross-account allocation would need on the wire, are #1066's"). Offering a second-account candidate
+in the chooser is not enough on its own: `clara._assert_claim_basis` (0340) refuses a claim whose
+`claim.advance_account_code` disagrees with the confirmed list's own first entry, and
+`clara._claim_allocations` (0301) defaults any allocation missing its own `account_code` to that
+same field — so a confirmed row on the second account would silently be treated as living on the
+claimant's own account and refused `not_this_client`, or worse, credited to the wrong one.
+
+- **`toClaimWire`** takes a fourth, optional `advanceAccountCodes: ReadonlyMap<string, string> | null`
+  (advance_id → its real account). `claim.advance_account_code` now follows the confirmed list's
+  HEAD allocation's real account — falling back to the typed field when the lookup is absent or
+  does not know that id, byte-identical to every caller before this ticket, since the head's real
+  account and the typed field were always the same value when only one account could ever be
+  offered. A non-head row states its own `accountCode` only when it differs from the head's,
+  mirroring 0301's own "the caller decides, the door defaults" shape.
+- **`derivedLines`** takes the same lookup as its second, optional argument and, for an
+  `advance_application` claim, groups the confirmed allocations by their REAL account (again
+  falling back to the head's account when unknown) instead of always emitting one leg on
+  `settlementAccountCode(draft)` — one credit leg per account, summed, in account-code order,
+  mirroring `clara._claim_journal_basis`'s own widening (migration 0301) exactly. A single-account
+  claim collapses to the one leg this function has always produced.
+- **The form** builds the lookup once, `advanceAccountCodes` — every row of the SAME
+  `staff_advance_summary` read `advanceCandidates` narrows, keyed by `advance_id`, not only the
+  offered rows, so a stored draft naming an advance a later read no longer offers still resolves —
+  and passes it to both.
+- **The independent source of truth for the exact wire shape and the exact grouping** is
+  `packages/db/tests/staff-expense-claim-allocations.test.mjs`'s own `p931.accounts` cell, already
+  proved end to end through the real door: its `allocClaim` helper states
+  `advanceAccountCode: allocations[0].account_code ?? SECHART.advance` and its `allocatedBasis`
+  helper groups exactly `a.account_code ?? c.advance_account_code`. Neither number nor rule here
+  was invented for this ticket; both are read off that file.
+
 **What is deliberately out of scope**, per the ticket: no staff master, and no widening of the chat
 tool's own allocation handling beyond its existing successor contract (`chatTurn_v22`).

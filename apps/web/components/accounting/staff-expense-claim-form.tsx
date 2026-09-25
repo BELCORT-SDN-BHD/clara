@@ -301,6 +301,19 @@ export function StaffExpenseClaimFormView({
       return a.enrolment_active && claimantLabel !== null && a.person_label.trim().toLowerCase() === claimantLabel;
     });
   }, [advancesRead.data, draft.claimantAccountCode, claimantLabel]);
+  /** #1066 — advance_id → the REAL account it sits on, off the SAME `staff_advance_summary` read
+   *  `advanceCandidates` narrows — every advance this client has, not only the offered ones, so a
+   *  stale confirmed id (a stored draft naming an advance a later read no longer offers) still
+   *  resolves rather than silently falling back to the typed field. Fed to `toClaimWire` and
+   *  `derivedLines` so the wire and the preview never disagree with what the door will actually
+   *  do with a cross-account confirmed list. `null` while unread: both callers already fall back
+   *  to the claim's own typed `advanceAccountCode`, exactly as they did before this ticket. */
+  const advanceAccountCodes = useMemo(() => {
+    if (advancesRead.data === null) return null;
+    const map = new Map<string, string>();
+    for (const a of advancesRead.data.advances) map.set(a.advance_id, a.account_code);
+    return map;
+  }, [advancesRead.data]);
   /** #1052 — WHERE AN OFFERED ADVANCE CAME FROM, when it did not come from the claimant's own
    *  enrolment. The owner's ruling of 2026-09-24 on #931 requires the editor to show it "beside
    *  each such advance, […] so the preparer's confirmation is a confirmation of that specific
@@ -330,7 +343,7 @@ export function StaffExpenseClaimFormView({
     () => (showIssues ? validateClaimDraft(draft, knownCodes, enrolledCodes) : []),
     [showIssues, draft, knownCodes, enrolledCodes],
   );
-  const lines = useMemo(() => derivedLines(draft), [draft]);
+  const lines = useMemo(() => derivedLines(draft, advanceAccountCodes), [draft, advanceAccountCodes]);
   const total = claimTotalCents(draft);
 
   // PERSIST ON EVERY EDIT. Not debounced: the payload is small, the storage is synchronous, and a
@@ -445,7 +458,7 @@ export function StaffExpenseClaimFormView({
   };
 
   const send = async () => {
-    const claim = toClaimWire(draft, knownCodes, enrolledCodes);
+    const claim = toClaimWire(draft, knownCodes, enrolledCodes, advanceAccountCodes);
     if (claim === null) return; // unreachable: the caller validated first
     // OMITTED ENTIRELY when there is no document — the route reads an absent and an empty list
     // identically (`toDbSourceRefs`), and sending `[]` would be the same request with more bytes.

@@ -537,6 +537,32 @@ test("wire.allocations.accounts: with no lookup given, behaviour is byte-identic
   ]);
 });
 
+test("derive.lines.accounts: a confirmed list on TWO accounts previews TWO credit legs, account-code order", () => {
+  // The SAME worked example as the wire cells above, and the SAME independent source of truth:
+  // `p931.accounts` in packages/db/tests/staff-expense-claim-allocations.test.mjs, already proved
+  // end to end through the real door (40,000 sen credits 1190, 20,500 sen credits 1191). A
+  // preparer who confirms this split must see the SAME two legs the door will actually post,
+  // before they submit — a single leg on one account would misstate which books move.
+  const draft = advanceDraft([
+    { advanceId: ADV_A, amountCents: 40000 },
+    { advanceId: ADV_B, amountCents: 20500 },
+  ]);
+  const lookup = new Map([[ADV_A, "1190"], [ADV_B, "1191"]]);
+  assert.deepEqual(derivedLines(draft, lookup).map((l) => [l.account_code, l.debit_cents, l.credit_cents]), [
+    ["6200", 48000, 0],
+    ["6210", 12500, 0],
+    ["1190", 0, 40000],
+    ["1191", 0, 20500],
+  ]);
+
+  // WITH NO LOOKUP (every pre-#1066 caller, and the same conservative default `toClaimWire` takes):
+  // every row resolves to the claim's own typed `advanceAccountCode`, so the two rows collapse
+  // into the SAME single leg the form has always shown — byte-identical to before this ticket.
+  assert.deepEqual(derivedLines(draft).at(-1)!, {
+    account_code: "1190", debit_cents: 0, credit_cents: 60500, description: "advance_application",
+  });
+});
+
 test("suggest.byDate: the one-click suggestion is OLDEST FIRST and stops at the claim", () => {
   // THE WORKED EXAMPLE, stated rather than recomputed. Three outstanding advances:
   //   Jan 40,000 · Feb 30,000 · Mar 5,000 — against a 60,500 claim.
