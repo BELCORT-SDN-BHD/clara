@@ -7471,3 +7471,83 @@ as a follow-up rather than swept in silently.
 were exercised on the lane database: the FIRST APPLY of the complete file with both bodies put back
 at their 0317 pre-images by hand (prestate reported `2 FIRST, 0 REDO`), and the REDO branch through
 `CLARA_MIGRATION_REDO=0336_revenue_recognition_plan_op_key`.
+
+## 0337 — the prepayment-account roster reserves its enrolled codes (#1078, riders sweep wave, lane 02)
+
+`clara.enrol_prepayment_account` ([0306_prepayment_account_roster.sql](migrations/0306_prepayment_account_roster.sql)
+§B, recut by 0308 for the deferred-revenue purpose and by 0315 §H for its race handler) wrote a
+roster row and reserved **nothing**. `clara._acct_role_reserved`
+([0043_wave_d_b1_staff_advances.sql](migrations/0043_wave_d_b1_staff_advances.sql) line 756) — the
+shared census of which register holds a client's chart code — unioned the fixed-asset family and the
+staff-advance register and had never known the prepayment roster exists. So a code enrolled as a
+prepayment account this morning could be bound as a registered bank account, enrolled into the
+fixed-asset register (directly or through the opening-balance carry-down), or enrolled as a
+staff-advance account this afternoon, and every one of those was **admitted**. The collision then
+surfaced days later at the schedule door, as a `prepayment_source_unfit` refusal carrying the shared
+wall's `bank_account` axis — which is #1078's own sentence: *"nothing prevents the double-enrolment
+from happening in the first place"*.
+
+**The owner ruling of 2026-09-24** on #1078 is two answers, and only the second is built here:
+`account_inactive` stays a known, harmless dead axis for chart accounts (no deactivation door is
+built), and the prepayment roster **does** reserve its enrolled accounts, the way its fixed-asset and
+staff-advance siblings already do.
+
+### What 0337 changes
+
+| § | body | what moves |
+|---|---|---|
+| A | `clara._acct_role_reserved` | a third arm: LIVE prepayment-roster enrolments, `domain = 'prepayment'`, `role = ` the enrolment's purpose, `owner_ref = ` the code |
+| B | `clara._adj_line_eligibility_breach` | its reservation read SKIPS the new domain, so every answer this wall gives is the answer it gave before 0337 |
+
+§A is the whole of the reservation: the bank belt (`clara._fa_assert_code_unreserved`, reached from
+the `t_bank_accounts_fa_reserved` trigger), the fixed-asset discriminator
+(`clara._fa_role_claim_conflict`, read by the profile door, the opening-balance carry-down and the
+disposal-reversal wall) and the staff-advance admission predicate
+(`clara._adv_enrolment_admission`) all read the census, so one arm closes all three at once and
+cannot drift from them. A fourth reader spliced into three doors is exactly the drift 0042's own
+tails exist to prevent.
+
+### §B is the load-bearing half, and it is not a softening
+
+The fixed-asset and staff-advance reservations mean *"a register machine owns this code; an ad-hoc
+line must not touch it"*. A prepayment-roster enrolment means the **opposite**: this account IS the
+prepaid asset (or the contract liability) that the amortisation lane exists to post against — and
+that lane asks the shared wall about that very code, in five places:
+`clara._prepayment_schedule_core` and `clara._revenue_recognition_core` on the source leg, both
+attention reads, and `clara.enrol_prepayment_account` on the code being enrolled.
+
+Measured on the lane rig with §A in and §B out: the schedule door refuses its own enrolled prepaid
+leg (`prepayment_source_unfit` / `prepaid_account_ineligible`), the attention bands drop every
+candidate they exist to offer, and a bookkeeper restating an enrolment's reason is refused by their
+own live enrolment. Because the wall could not see the roster **before** 0337 either, filtering the
+domain out is precisely what keeps every answer identical; `p1078.wall.unmoved` measures that at the
+wall and at the doors, and `p940.*` re-measures the five axes it always did.
+
+### What 0337 deliberately does not do
+
+- It builds **no chart-account deactivation door** and makes `account_inactive` no more reachable
+  than it was. That is the first half of the owner's ruling.
+- It does **not** touch `clara._acct_role_reserved_at`, the as-of twin. Its single reader is
+  `clara._fa_gl_leg_foreign`, which asks "was a NON-FA register holding this code when that leg was
+  booked" for the fixed-asset tie-out; a prepayment arm there would make every leg on a prepayment
+  account foreign to the FA register as of that date, which is an accounting answer nobody asked to
+  change. The twin is pinned in §0 so the asymmetry is a decision and a drift is visible.
+- It does **not** reserve a code whose enrolment has been RETIRED while a schedule still runs
+  against it. #940's owner decision 5 says retiring closes the account to NEW schedules and leaves a
+  running one posting to term end, so that state is reachable and is not covered here; closing it
+  needs either a precondition on `clara.retire_prepayment_account` or a second disjunct over live
+  plans, and both are a decision #1078 did not give. Recorded as a follow-up rather than swept.
+
+### A consequence worth writing down
+
+After 0337 the schedule door's `prepaid_account_ineligible` arm is **no longer reachable for an
+enrolled account through any governed door**. Each of the wall's five axes is closed ahead of it:
+`account_unknown` and `account_inactive` have no door at all, `control_account` needs a re-type that
+`clara._upsert_account_core` refuses on any account carrying lines, and `bank_account` and
+`account_reserved` are what 0337 itself now refuses. The arm stays in the body as defence in depth,
+`p1078.wall.unmoved` measures that it is still asked, and `p940.schedule.roster_gate` says so in its
+own comment instead of quietly dropping the claim.
+
+**Redo-safe by construction (#957).** Every statement is `create or replace function`, between a
+marker-tolerant prestate (each recut body admits its pinned pre-image OR a body already carrying
+this file's `0337` attribution) and a tail that reads the live catalog.
