@@ -190,6 +190,132 @@ async function evaluate(version, textEnv, visionEnv) {
   return r.rows[0].state;
 }
 
+/** The eleven accounts this lane reaches, with the names 0150/0295 seed them under. A client's
+ *  own chart is what the plan resolves against; this puts a payroll-capable chart on a rig
+ *  client, through the real writer door. */
+const PAYROLL_CHART = [
+  { code: "6000", name: "Salaries and Wages", type: "expense" },
+  { code: "6010", name: "EPF Contribution (Employer)", type: "expense" },
+  { code: "6020", name: "SOCSO Contribution (Employer)", type: "expense" },
+  { code: "6030", name: "EIS Contribution (Employer)", type: "expense" },
+  { code: "6040", name: "HRDF (HRD Corp) Levy Expense", type: "expense" },
+  { code: "2100", name: "EPF (KWSP) Payable", type: "liability" },
+  { code: "2110", name: "SOCSO (PERKESO) Payable", type: "liability" },
+  { code: "2120", name: "EIS (SIP) Payable", type: "liability" },
+  { code: "2130", name: "PCB (MTD) Payable", type: "liability" },
+  { code: "2140", name: "HRDF (HRD Corp) Levy Payable", type: "liability" },
+  { code: "2040", name: "Salaries Payable", type: "liability" },
+];
+
+let opSeq = 0;
+const opk = (tag) => `p1048-${tag}-${Date.now()}-${++opSeq}`;
+
+async function seedPayrollChart(sub, client) {
+  for (const a of PAYROLL_CHART) {
+    await upsertAccount(sub, { client, code: a.code, name: a.name, type: a.type, opKey: opk("coa") });
+  }
+}
+
+async function hasWitnessConsent(client) {
+  const r = await rootQuery(
+    `select exists(select 1 from clara.client_egress_purpose_activations a
+        join clara.client_egress_purpose_consents c
+          on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id and c.purpose=a.purpose
+       where a.client_id=$1 and a.purpose='witness_extraction'
+         and a.deactivated_at is null and c.revoked_at is null) as live`,
+    [client],
+  );
+  return r.rows[0].live === true;
+}
+
+/** A FILED payroll-summary pdf with a done OCR extraction and one cited region, born through the
+ *  real doors (#945's own `payrollDoc` shape), never by surgery. */
+async function payrollDoc(sub, client) {
+  const firm = await firmOf(client);
+  if (!(await hasWitnessConsent(client))) {
+    const evidence = await consentEvidenceDoc(sub, { firm });
+    const grant = await grantPurpose(sub, { client, purpose: "witness_extraction", evidenceDocument: evidence.documentId });
+    await activatePurpose(sub, { client, purpose: "witness_extraction", consent: grant.consent_id });
+  }
+  const doc = await filedDocument(sub, { firm, client, kind: "payroll_summary" });
+  const extractionId = await seedExtraction({ firm, document: doc.documentId, engineKind: "ocr", status: "done" });
+  await seedRegion({ firm, extraction: extractionId, fieldPath: "payroll.run.gross_pay", textContent: "5,000.00" });
+  return { ...doc, firm, client, extractionId };
+}
+
+/** Drive a payroll document all the way through the lane: filed, routed, claimed, read. Returns
+ *  the document and the persist receipt (whose `posting` object says what the read led to). */
+async function readPayrollDoc(sub, client, { answers = PRINTED, witness = null, rows = null } = {}) {
+  const doc = await payrollDoc(sub, client);
+  await enqueueInvoiceFacts(doc.documentId);
+  const task = (
+    await rootQuery(
+      `select id from clara.document_processing_tasks
+        where document_id=$1 and lane='payroll_facts' and status='queued'
+        order by version_n desc limit 1`,
+      [doc.documentId],
+    )
+  ).rows[0];
+  assert.ok(task, "mandatory setup: the router queued a payroll_facts task");
+  const claimed = await claimTask(task.id, { egressApproved: true });
+  assert.equal(claimed.status, "running", `mandatory setup: the task is claimable (got ${JSON.stringify(claimed)})`);
+  const sha = (await rootQuery("select sha256 from clara.documents where id=$1", [doc.documentId])).rows[0].sha256;
+
+  const receipt = (
+    await rootQuery("select clara.persist_payroll_facts($1,$2::jsonb,$3::jsonb,$4) as receipt", [
+      task.id,
+      JSON.stringify({
+        input_pin: doc.extractionId,
+        prompt_hash: "p1048-text",
+        envelope: envelope({ channel: "text", answers, witness, rows }),
+      }),
+      JSON.stringify({
+        input_pin: sha,
+        prompt_hash: "p1048-vision",
+        envelope: envelope({ channel: "vision", answers, witness, rows }),
+      }),
+      1,
+    ])
+  ).rows[0].receipt;
+  assert.equal(receipt.status, "done", `mandatory setup: the read settled (got ${JSON.stringify(receipt)})`);
+  return { ...doc, taskId: task.id, receipt };
+}
+
+/** The fact state this lane BANKED for a document -- read off the stored text row, never
+ *  re-derived, because the rows the evaluator summed no longer exist by the time it is read. */
+async function bankedState(documentId) {
+  const r = await rootQuery(
+    `select e.envelope->'payroll_state' as state
+       from clara.document_extractions e
+      where e.document_id=$1 and e.engine_kind='payroll_text_facts' and e.status='done'
+      order by e.version_n desc limit 1`,
+    [documentId],
+  );
+  return r.rows[0]?.state ?? null;
+}
+
+async function verdict(documentId) {
+  return (await rootQuery("select clara._payroll_posting_verdict($1) as v", [documentId])).rows[0].v;
+}
+
+const entriesOf = async (documentId) =>
+  (
+    await rootQuery(
+      `select id, status, posting_date::text as posting_date, memo, flags, maker_actor, checker_actor
+         from clara.journal_entries where document_id=$1 order by created_at`,
+      [documentId],
+    )
+  ).rows;
+
+const legsOf = async (entryId) =>
+  (
+    await rootQuery(
+      `select line_no, account_code, debit_cents::bigint, credit_cents::bigint, description
+         from clara.journal_lines where entry_id=$1 order by line_no`,
+      [entryId],
+    )
+  ).rows;
+
 // ---------------------------------------------------------------------------
 // W1 — the evaluator's successor
 // ---------------------------------------------------------------------------
@@ -301,4 +427,51 @@ test("W2 · the two witness questions are KNOWN but OPTIONAL: the eleven are sti
     witness: { "payroll.run.page_count": { state: "computed", raw: "1" } },
   });
   assert.equal(await answersOk(badState, "text"), false, "there is still no third state");
+});
+
+// ---------------------------------------------------------------------------
+// W3 — the persist door banks a v2 state
+// ---------------------------------------------------------------------------
+
+test("W3 · the lane banks a v2 fact state, and the witness answers ride the stored run-level answers", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: NO_TOTALS,
+    witness: { "payroll.run.employee_count": value("2"), "payroll.run.page_count": value("1") },
+  });
+
+  const state = await bankedState(doc.documentId);
+  assert.ok(state, "the read banked a fact state on the text row");
+  assert.equal(state.state_version, "v2", "…and it is the SUCCESSOR's state, so the witness is durable");
+  assert.equal(state.completeness.verdict, "witnessed");
+  assert.equal(state.completeness.witness, "headcount");
+  assert.equal(state.completeness.rows_read, 2);
+
+  // The witness answers are stored beside the eleven, because the persist door stores the
+  // channel's answers verbatim -- so a later reader can see WHAT the page printed, not merely
+  // what the evaluator concluded.
+  const stored = (
+    await rootQuery(
+      `select e.envelope->'payroll'->'answers' as answers
+         from clara.document_extractions e
+        where e.document_id=$1 and e.engine_kind='payroll_text_facts' and e.status='done'
+        order by e.version_n desc limit 1`,
+      [doc.documentId],
+    )
+  ).rows[0].answers;
+  assert.equal(stored["payroll.run.employee_count"].raw, "2");
+  assert.equal(stored["payroll.run.page_count"].raw, "1");
+
+  // AND THE STRIP IS UNTOUCHED: no per-employee cell reached the store, on either row of the pair.
+  const anyRows = (
+    await rootQuery(
+      `select count(*)::int as n from clara.document_extractions e
+        where e.document_id=$1 and e.engine_kind in ('payroll_text_facts','payroll_vision_facts')
+          and e.envelope->'payroll' ? 'rows'`,
+      [doc.documentId],
+    )
+  ).rows[0].n;
+  assert.equal(anyRows, 0, "the per-employee quotes are still consumed and discarded, never stored");
 });

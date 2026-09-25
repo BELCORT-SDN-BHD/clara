@@ -866,3 +866,101 @@ comment on function clara._payroll_answers_ok(jsonb, text) is
   '#945, widened by #1048: the payroll family''s OWN closed answer vocabulary -- eleven REQUIRED run-level questions, two OPTIONAL completeness witnesses (payroll.run.employee_count, payroll.run.page_count), six per-employee cells, `not_printed` a first-class answer everywhere, an unknown key at any level a refusal. The witnesses are optional because payrollFacts_v1 is FROZEN and does not ask them yet: requiring them would refuse every live payroll read at the write boundary. Optional means may be absent, never may be malformed -- a witness answer that IS present is held to the same two-state, non-blank, 200-character shape as one of the eleven. Deliberately NOT an arm of clara._witness_answers_ok: a versioned workflow may not couple its shape to another family''s frozen files. Ungranted; its only caller is clara.persist_payroll_facts, which runs as the owner.';
 
 reset role;
+
+-- =====================================================================================
+-- SectionD  THE LANE BANKS A v2 STATE -- clara.persist_payroll_facts spliced.
+--
+--     SPLICED, NEVER RE-TYPED (the 0017:1553 / 0093 / 0260 / 0297 idiom). This reads the INSTALLED
+--     definition off the catalog, asserts the anchor occurs EXACTLY ONCE, replaces only there and
+--     executes the result. Everything 0296 wrote and everything 0297 spliced in -- the strip, the
+--     eleven typed regions, the citation resolution, the usage metering, the post, the settle
+--     receipt -- is preserved BY CONSTRUCTION rather than by a careful human copy, and the
+--     postcheck re-reads the committed catalog to prove the untouched regions survived.
+--
+--     ONE ANCHOR, ONE BYTE OF MEANING: the evaluator call moves from v1 to v2. Nothing else in
+--     this door changes, and that is the point of a one-anchor splice -- the witness answers are
+--     already stored, because step 7 stores the channel's answers VERBATIM and the two new keys
+--     are answers like any other. The eleven typed regions are still the eleven: this file does
+--     not mint a document_regions row for a witness, because a count is not a monetary fact a
+--     person clicks on the page and clara._assert_field_path would have to learn two more paths
+--     for no reader. The witness is legible in the banked state and in the stored answers, which
+--     is where every reader of it looks.
+--
+--     WHY THE BANKED STATE AND NOT A RE-DERIVATION. 0296's own header says it: the rows the
+--     evaluator sums are STRIPPED at this boundary, so the state cannot be recomputed from what is
+--     stored. The completeness verdict is therefore banked at the one moment its inputs exist,
+--     beside the answers it judges -- and a reading judged today stays judged the way it was, even
+--     if a later _v3 changes what a witness means.
+--
+--     A v1 STATE ALREADY BANKED STAYS v1 AND STILL POSTS. Every payroll pair read before this
+--     migration carries `state_version: v1` and no `completeness` object at all. SectionF's recut
+--     plan admits both versions by name; a v1 state simply has no witness, which puts it on the
+--     parked-question path -- the honest answer, and the one a person can actually act on.
+-- =====================================================================================
+do $w1048_persist$
+declare
+  v_sig text := 'clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)';
+  v_def text; v_next text; v_anchor text; v_repl text;
+  v_n int; v_pre_owner text; v_pre_acl text; v_post_owner text; v_post_acl text;
+  v_pre_sha text; v_post_sha text;
+begin
+  select pg_get_functiondef(p.oid), p.proowner::regrole::text, p.proacl::text,
+         encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')
+    into v_def, v_pre_owner, v_pre_acl, v_pre_sha
+    from pg_proc p where p.oid = v_sig::regprocedure;
+
+  if position('evaluate_payroll_run_state_v2' in v_def) > 0 then
+    raise notice '#1048 SectionD: clara.persist_payroll_facts already calls the v2 evaluator -- splice already applied, nothing to do (redo)';
+  else
+    -- ONE ANCHOR, asserted to occur EXACTLY once, and it is a single dollar-quoted literal rather
+    -- than a `||` chain with chr(): apps/web/test/sqlFunctionCensus.ts proves what a migration's
+    -- dynamic `execute` installs by RECONSTRUCTING the statement from its parts, and it cannot
+    -- evaluate chr(). A replacement it cannot reconstruct makes the whole splice an unresolved
+    -- execute and the census fails closed (0297's own measured lesson, recorded in its SectionG).
+    v_anchor := $p1048a$  v_state := clara.evaluate_payroll_run_state_v1(v_text_env, v_vision_env);$p1048a$;
+    v_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#1048 SectionD splice: the evaluator-call anchor appears % time(s), expected 1', v_n
+        using errcode = 'CLR10';
+    end if;
+    v_repl := $p1048b$  -- #1048: the SUCCESSOR evaluator. v1's eleven verdicts byte for byte, plus the two
+  --     completeness witnesses and the completeness verdict read off them against the row
+  --     census. The witness answers are already inside v_text_env/v_vision_env: they are
+  --     ordinary run-level answers, admitted as OPTIONAL by clara._payroll_answers_ok.
+  v_state := clara.evaluate_payroll_run_state_v2(v_text_env, v_vision_env);$p1048b$;
+    v_next := replace(v_def, v_anchor, v_repl);
+
+    if v_next = v_def then
+      raise exception '#1048 SectionD splice: no byte moved -- refusing a no-op apply' using errcode = 'CLR10';
+    end if;
+    execute v_next;
+
+    select p.proowner::regrole::text, p.proacl::text,
+           encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')
+      into v_post_owner, v_post_acl, v_post_sha
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_post_owner is distinct from v_pre_owner or v_post_acl is distinct from v_pre_acl then
+      raise exception '#1048 SectionD postcheck: persist_payroll_facts changed owner (% -> %) or ACL (% -> %)',
+        v_pre_owner, v_post_owner, v_pre_acl, v_post_acl using errcode = 'CLR10';
+    end if;
+    if v_post_sha = v_pre_sha then
+      raise exception '#1048 SectionD postcheck: prosrc sha256 did not change -- the splice was a no-op'
+        using errcode = 'CLR10';
+    end if;
+    raise notice '#1048 SectionD: clara.persist_payroll_facts spliced -- the payroll lane now banks a v2 state. owner (%) and ACL byte-unchanged. prosrc sha256: % -> %.', v_post_owner, v_pre_sha, v_post_sha;
+  end if;
+
+  -- BOTH BRANCHES: the regions this file must not have disturbed are re-read from the COMMITTED
+  -- catalog, so a redo proves them too -- 0296's per-employee STRIP, its completed event, 0297's
+  -- own post call, and the absence of any surviving v1 call.
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  if position('''payroll'', jsonb_build_object(''channel'',''text'',''answers'', v_text_env->''payroll''->''answers'')' in v_def) = 0
+     or position('document.payroll_facts_completed' in v_def) = 0
+     or position('_post_payroll_run' in v_def) = 0
+     or position('evaluate_payroll_run_state_v2' in v_def) = 0
+     or position('evaluate_payroll_run_state_v1' in v_def) <> 0 then
+    raise exception '#1048 SectionD postcheck: the recut body lost 0296''s per-employee STRIP or its completed event, lost 0297''s post call, did not gain the v2 evaluator, or still calls v1'
+      using errcode = 'CLR10';
+  end if;
+end
+$w1048_persist$;
