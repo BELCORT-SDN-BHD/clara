@@ -23,6 +23,30 @@
 -- tell a plan a person typed from a plan a person's standing instruction produced. Nothing is
 -- admitted on the agent's own authority: the wall #977/0250 built is not loosened anywhere.
 --
+-- THE SECTIONS, IN THE ORDER THIS FILE WRITES THEM (dependency order, not alphabetical):
+--
+--   §A  clara.firm_standing_instructions             the instruction itself, append-only
+--   §B  clara.record_firm_standing_instruction       a named member records it (admin floor)
+--   §G  clara.withdraw_firm_standing_instruction     …and takes it back (same floor, same lane)
+--   §C  clara.accounting_plans.authority_kind        0193's one-member CHECK gains ONE value
+--   §D  clara._authority_ref_refusal                 a FOURTH reference kind, at FIRM scope
+--   §E  clara._obo_plan_core                         the two kinds, admitted only in their pairing
+--   §F  clara._prepayment_schedule_core              the 'wake' arm finds the directing human
+--
+-- WHAT THIS FILE DELIBERATELY DOES NOT DO.
+--   · It does not widen `clara.create_accounting_plan`. Only a lane with nobody at the keyboard
+--     needs the second authority kind, and leaving the human door at one keeps §E's explicit
+--     branch byte-for-byte the wall that was there — which is what #915's and #941's parity cells
+--     measure. The door is PINNED in §0 so the asymmetry is deliberate and a drift is visible.
+--   · It gives the deferred-revenue twin no wake lane. `clara._revenue_recognition_core`'s lane
+--     set is ('human','obo') and no wake wrapper for it exists anywhere in the catalog, so there
+--     is nothing there for a standing instruction to authorise. Pinned in §0 for the same reason.
+--   · It does not touch `clara.wake_establish_prepayment_schedule`: same name, same seven
+--     arguments, same ACL, same allowlist row (the ticket's own words). The lane re-opens inside
+--     the shared core, which is where #1036's own header said to re-open it.
+--   · It does not pause a plan whose standing instruction is later withdrawn. See §G.
+--   · It mints no role, no grant to any machine lane, and no second value anywhere else.
+--
 -- =====================================================================================
 
 set local statement_timeout = '20min';  -- PRECAUTIONARY, not load-bearing: this file creates one
@@ -549,7 +573,8 @@ begin
 end $c0338_arr$;
 
 -- =====================================================================================
--- §E — clara._obo_plan_core (0308 §D, recut by 0941's fold into one body). VERBATIM except the
+-- §E — clara._obo_plan_core (0308 §D, #941's fold of the two OBO plan steps into one body).
+--      VERBATIM except the
 --      authority-kind wall and the reference-kind wall, each widened by exactly one member, and
 --      the two admitted ONLY in their own pairing.
 --
