@@ -20,7 +20,11 @@
 //     putting it there would make an unsubmitted decision look like a shareable fact.
 //
 // No `lib/navigation/tree.ts` row is added: `/bank` is still ONE route
-// (`{ id: "bank", segment: "bank", … }`), and `?tab=` is a query, not a segment.
+// (`{ id: "bank", segment: "bank", … }`), and `?tab=` is a query, not a segment. #1060 has that
+// one row NAME "matching" as its `tab` (the same field `receivables`/`assets` already carry for
+// the registers workbench), so a Needs-you row and every other registry caller deep-link straight
+// here instead of this workbench's own default ("accounts") — still no second route, still one
+// query, just no longer defaulted.
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";

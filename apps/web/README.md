@@ -773,6 +773,15 @@ reload or a shared link could not reach the Matching tab at all. **No new route 
 workbench, and the right answer for a sub-nav, where a tab is a view of one page rather than a
 place. **A multi-selection stays OUT of the URL**: a selection set is a draft, not an address.
 
+**#1060 — the registry's `bank` ROW now names that query.** No new route, still: `ACCOUNTING_ITEMS`'s
+existing `bank` entry (`lib/navigation/tree.ts`) gained `tab: "matching"`, the same field
+`receivables`/`assets` already carry to deep-link past the registers workbench's own default. The
+bank workbench's own default stays "accounts" (unchanged, above); the registry now points every
+caller — the sidebar, the accounting hub, ⌘K's Go palette, and `lib/firm/needs-you-links.ts`'s
+`payroll_net_pay_unsettled`/`rent_payable_unsettled` rows — at Matching instead, since that is
+where `PayrollSettlementsSection` and `RentSettlementsSection` actually render the accept act each
+row exists to dispatch to.
+
 **ONE DECISION, ONE KEY, on `match_bank_line` only** (`lib/bank/match-opkey.ts`). Its operation
 key is DERIVED from the intent tuple `{client, sorted line ids, sorted entry ids, cents, ack
 flag}` — the same tuple `clara._reserve_op` hashes server-side — plus each selected entry's

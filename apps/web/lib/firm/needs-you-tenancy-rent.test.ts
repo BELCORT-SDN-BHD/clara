@@ -74,7 +74,10 @@ test("#949: the unpaid month opens the bank tab, and the escalation opens the do
   // The settlement row's act is on the bank surface: find the line that paid the rent and accept
   // it. The escalation row's act is on the contract page: read what the tenancy says and confirm
   // the revision. They are different places because they are different decisions.
-  assert.equal(needsYouRowHref({ row_kind: SETTLEMENT, client_id: CLIENT }), `/clients/${CLIENT}/bank`);
+  // #1060 — REPOINTED from the bare `/bank` to `?tab=matching`, the same repoint #947's own
+  // settlement kind gets: the registry now names the Matching view, so the settlement row no
+  // longer lands one tab away from `RentSettlementsSection`.
+  assert.equal(needsYouRowHref({ row_kind: SETTLEMENT, client_id: CLIENT }), `/clients/${CLIENT}/bank?tab=matching`);
   assert.equal(needsYouRowHref({ row_kind: ESCALATION, client_id: CLIENT }), `/clients/${CLIENT}/documents`);
   assert.equal(hasOwningTab({ row_kind: SETTLEMENT }), true);
   assert.equal(hasOwningTab({ row_kind: ESCALATION }), true);
