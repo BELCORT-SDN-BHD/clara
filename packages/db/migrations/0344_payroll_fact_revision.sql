@@ -838,6 +838,114 @@ end $fn$;
 reset role;
 
 -- =====================================================================================
+-- §H  THE LINEAGE READ PUBLISHES THE PAYROLL CHAIN'S NUMBERS TOO -- clara.list_source_revisions.
+--
+--     THE 0217 BODY, CARRIED VERBATIM, plus one observation and two keys. This is the read the
+--     document surface takes its facts version from (apps/web/components/documents/
+--     document-detail.tsx:273), and that version is what a revision QUOTES: the door refuses CLR19
+--     when the number has moved. On a payroll summary the invoice chain is empty, so `facts_version`
+--     is 0 and every payroll revision quoted against it would refuse -- a control that cannot work.
+--
+--     BESIDE, NOT INSTEAD. `facts_version` and `current_facts_extraction_id` keep their exact
+--     meanings and their exact values; the two new keys are additive, so every existing reader of
+--     this read is unaffected, and a document that carries both readings reports both.
+--
+--     THE LINEAGE ITSELF IS UNTOUCHED. A payroll correction is a `fact` revision in
+--     clara.document_fact_revisions like any other, and it appears in the same chronological
+--     lineage with the same shape -- which is exactly what AC3 asks for when it says the revision
+--     must be auditable the same way an invoice fact revision is.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara.list_source_revisions(p_document uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $fn$
+declare c record; d record; obs record; pobs record; v_result jsonb;   -- #1056: pobs
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  if p_document is null then return null; end if;
+  select * into d from clara.documents where id = p_document and firm_id = c.firm;
+  if not found then return null; end if;
+  select * into obs from clara._document_source_observation(p_document);
+  -- #1056 · THE PAYROLL CHAIN'S OWN NUMBERS, beside the invoice chain's rather than instead of
+  -- them. A document may carry either reading (and, in principle, both), and the caller has to
+  -- know WHICH version to quote for the row it is offering a control on -- a payroll row quoted
+  -- against the invoice chain's `facts_version` would refuse CLR19 against 0 every time.
+  select * into pobs from clara._payroll_source_observation(p_document);
+
+  with revisions as (
+    select r.recorded_at as at,
+      jsonb_build_object(
+        'entry_kind', r.revision_kind,
+        'at', r.recorded_at,
+        'revision_id', r.id,
+        'client_id', r.client_id,
+        'field_path', r.field_path,
+        'prior_value', r.prior_value,
+        'new_value', r.new_value,
+        'observed_extraction_id', r.observed_extraction_id,
+        'observed_version_n', r.observed_version_n,
+        'resulting_extraction_id', r.resulting_extraction_id,
+        'reason', r.reason,
+        'recorded_by', r.recorded_by) as entry
+      from clara.document_fact_revisions r
+     where r.document_id = p_document and r.firm_id = c.firm
+  ), corrections as (
+    select coalesce(fc.completed_at, fc.approved_at, fc.proposed_at) as at,
+      jsonb_build_object(
+        'entry_kind', 'wrong_client_correction',
+        'at', coalesce(fc.completed_at, fc.approved_at, fc.proposed_at),
+        'correction_id', fc.id,
+        'status', fc.status,
+        'from_client', fc.from_client,
+        'to_client', fc.to_client,
+        'reason', fc.reason,
+        'maker', fc.maker,
+        'checker', fc.checker,
+        'proposed_at', fc.proposed_at,
+        'approved_at', fc.approved_at,
+        'completed_at', fc.completed_at,
+        'retired_filings', coalesce((select jsonb_agg(jsonb_build_object(
+              'filing_id', f.id, 'client_id', f.client_id, 'retired_at', f.retired_at,
+              'retirement_reason', f.retirement_reason) order by f.retired_at, f.id)
+            from clara.document_filings f
+           where f.document_id = p_document and f.firm_id = c.firm
+             and f.correction_id = fc.id and f.retired_at is not null), '[]'::jsonb)) as entry
+      from clara.filing_corrections fc
+     where fc.document_id = p_document and fc.firm_id = c.firm
+  ), retirements as (
+    select f.retired_at as at,
+      jsonb_build_object(
+        'entry_kind', 'filing_retired',
+        'at', f.retired_at,
+        'filing_id', f.id,
+        'client_id', f.client_id,
+        'retirement_reason', f.retirement_reason) as entry
+      from clara.document_filings f
+     where f.document_id = p_document and f.firm_id = c.firm
+       and f.retired_at is not null and f.correction_id is null
+  ), merged as (
+    select at, entry from revisions
+    union all select at, entry from corrections
+    union all select at, entry from retirements
+  )
+  select jsonb_build_object(
+    'document_id', p_document,
+    'document_kind', d.document_kind,
+    'facts_version', obs.facts_version,
+    'authoritative_extraction_id', obs.authoritative_extraction_id,
+    'current_facts_extraction_id', obs.facts_extraction_id,
+    'payroll_facts_version', pobs.facts_version,
+    'current_payroll_facts_extraction_id', pobs.facts_extraction_id,
+    'lineage', coalesce((select jsonb_agg(m.entry order by m.at, m.entry->>'entry_kind') from merged m), '[]'::jsonb))
+  into v_result;
+  return v_result;
+end $fn$;
+
+reset role;
+
+-- =====================================================================================
 -- §Z  TAIL -- what this file left behind, re-read from the COMMITTED catalog.
 -- =====================================================================================
 do $p1056_tail$
@@ -963,6 +1071,39 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice '#1056 tail: OK -- clara._revisable_payroll_run_field holds the eleven run-level questions and nothing below the run level; clara._revisable_fact_lane answers `payroll` for those eleven, `invoice` for the invoice lane''s own unwidened closed set and NULL for everything else; all five helpers are granted to nobody; and clara.revise_document_fact keeps its owner, volatility, DEFINER-ness, search_path and clara_authenticated-only ACL, carries all seventeen 0268 guards this tail re-reads, gained the seven #1056 points, no longer asks the invoice field wall directly, and guards the posted-entry pin on the payroll lane alone.';
+  -- (7) THE LINEAGE READ gained two keys and lost none, and its own disposition is unmoved. The
+  --     additive half matters as much as the new half: every existing reader of this read is a
+  --     surface that would break silently on a renamed or dropped key.
+  select count(*)::int into v_n from pg_proc p
+   where p.oid = 'clara.list_source_revisions(uuid)'::regprocedure
+     and p.proowner::regrole::text = 'clara_fn_owner'
+     and p.prosecdef and p.provolatile = 's'
+     and p.proconfig @> array['search_path=clara, pg_temp'];
+  if v_n <> 1 then
+    raise exception '#1056 tail: clara.list_source_revisions changed owner, volatility, DEFINER-ness or search_path'
+      using errcode = 'CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.list_source_revisions(uuid)'::regprocedure;
+  foreach v_needle in array array[
+    '''facts_version'', obs.facts_version',
+    '''authoritative_extraction_id'', obs.authoritative_extraction_id',
+    '''current_facts_extraction_id'', obs.facts_extraction_id',
+    '''payroll_facts_version'', pobs.facts_version',
+    '''current_payroll_facts_extraction_id'', pobs.facts_extraction_id',
+    'clara._payroll_source_observation(p_document)',
+    '''wrong_client_correction''', '''filing_retired'''] loop
+    if position(v_needle in v_src) = 0 then
+      raise exception '#1056 tail: clara.list_source_revisions is missing %', quote_literal(v_needle)
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+  foreach v_role in array array['clara_agent_ro','clara_runtime','public'] loop
+    if pg_catalog.has_function_privilege(v_role, 'clara.list_source_revisions(uuid)', 'execute') then
+      raise exception '#1056 tail: the lineage read became callable by %', v_role using errcode = 'CLR10';
+    end if;
+  end loop;
+
+  raise notice '#1056 tail: OK -- clara._revisable_payroll_run_field holds the eleven run-level questions and nothing below the run level; clara._revisable_fact_lane answers `payroll` for those eleven, `invoice` for the invoice lane''s own unwidened closed set and NULL for everything else; all five helpers are granted to nobody; and clara.revise_document_fact keeps its owner, volatility, DEFINER-ness, search_path and clara_authenticated-only ACL, carries all seventeen 0268 guards this tail re-reads, gained the seven #1056 points, no longer asks the invoice field wall directly, guards the posted-entry pin on the payroll lane alone, and clara.list_source_revisions keeps its own disposition and its three invoice keys while gaining the payroll chains two.';
 end
 $p1056_tail$;

@@ -7263,3 +7263,117 @@ PARTIAL signal rather than guessing. Both branches were exercised on the lane da
 APPLY through `pnpm db:migrate` (with all four recut pins checked), and the REDO branch through
 `CLARA_MIGRATION_REDO=0318_knowledge_fye_pair_applicability` after the promotion door was put back
 at its pre-image for `kp.14`'s vacuity control.
+
+## 0344 — a person corrects a misread payroll fact through the document Revise control (#1056, riders sweep wave, lane 05)
+
+`0344_payroll_fact_revision.sql` gives `clara.revise_document_fact` a **second lane** rather than
+a second door. #945 (0296) taught the estate to read a payroll summary and #946 (0297) to post one
+unattended; neither gave a person a way to correct a figure the reader took wrong. The one human
+fact door was invoice-shaped end to end — its field wall is `clara._revisable_invoice_field`, its
+observation counts `invoice_facts` extractions, and the extraction it appends is an `invoice_facts`
+row — so `payroll.run.gross_pay` passed the canonical grammar and was then refused
+`field_path_not_revisable`.
+
+**What a payroll correction does, and where it lands.** The correction appends a new
+`payroll_text_facts` extraction under `clara-fact-human:v1`, carrying the other ten questions
+forward as regions and the corrected one as the person typed it, at `engine_confidence = 1`. The
+envelope carries the corrected `payroll_state` — which is the key `clara._payroll_posting_verdict`
+reads (0297:597) — plus `payroll.channel = 'human'` and the same human provenance keys the invoice
+lane writes. Nothing lands in the invoice chain, because an `invoice_facts` row here would be
+invisible to the gate: that is the "silent desynchronization" the ticket forbids, arriving by the
+quietest possible road.
+
+**The accounting answer to the ticket's own question** — "whether a correction re-runs the posting
+verdict or is blocked once posted" — is BOTH, because they are two different runs.
+
+* **An unposted run.** The correction moves the reading. The gate is `stable` and derived from the
+  newest payroll pair banked for the document, so asking it again answers about the corrected
+  figures — the Needs-you row `payroll_posting_blocked` included, which is why that row clears
+  itself when the block does. **Nothing posts.** The unattended post is reachable from
+  `clara.persist_payroll_facts` alone (0297 §G's splice) and this lane "deliberately has no 'post
+  it anyway' door, because nothing in this lane is posted on a guess"
+  (`apps/web/components/firm/needs-you-affordances.tsx:128-130`). A correction corrects the
+  READING; it is not an instruction to post.
+* **An already-posted run.** Refused, by name: `CLR10` / `payroll_run_already_posted`, carrying the
+  entry's id, status, posting date and memo, and saying in words to reverse that entry first. A
+  posted entry is corrected by reversing it and booking the corrected one, never by editing the
+  evidence underneath it while it stands — and the posted entry pins the very extraction it was
+  drafted from (`flags->'payroll_run'->>'extraction_id'`, 0297:960), so admitting the revision
+  would leave approved books citing a superseded reading with nothing anywhere saying so. It is the
+  same family as the live-bank-statement pin this door has carried since 0217:602, and the estate
+  already supports the act that clears it: `clara.reverse_entry` makes
+  `clara._document_posting_entry` answer NULL, the correction is then admitted, and the month
+  re-opens exactly as 0297:697 already says a reversal does.
+
+The pin is **payroll-only**. The invoice lane has never carried a posted-entry wall and #1056 rules
+on the payroll lane; widening the invoice lane here would be a behaviour change nobody asked for to
+a door two other batteries pin.
+
+**What a human declaration makes of the fact state.**
+`clara._payroll_state_with_human_fact(jsonb, text, text, bigint)` replaces the VERDICT on the one
+question and nothing else: `state` becomes `established`, `printed_cents` the declared figure (NULL
+for `payroll.run.period`, the one non-monetary question), `printed_raw` the declared rendering,
+`basis` the new vocabulary member `human_declared`, and `reason` null. `state_version` stays `v1`
+because `clara._payroll_entry_plan` refuses any other value (0297:415) and a corrected run that
+made the whole gate unreadable would be worse than the defect; the provenance is disclosed instead
+in a top-level, sorted `human_declared` array that a machine-produced state never carries.
+
+It **carries unchanged** `computed_cents`, both channel quotes, and the whole `rows` object. That
+last carry is load-bearing: rungs 3 and 4 of the gate read `rows.contested`, `rows.unbalanced` and
+`rows.unchecked` directly (0297:607-634), so a run whose quoted employee rows disagree or fail
+their own gross-minus-deductions identity **stays blocked** however many run-level figures a person
+declares. A person cannot clear a row problem from the run line, and this body does not let them
+appear to. `clara.evaluate_payroll_run_state_v1` is neither called nor touched: it is a registered,
+frozen closure (0296 §D.1) and it takes the two full channel envelopes, whose per-employee quotes
+were stripped and discarded at read time by construction (0296 step 7).
+
+**Two bounds on a declared payroll figure**, and together they keep every figure the door admits
+inside the window the frozen evaluator could itself have read, so a declared figure and a
+machine-read one are always comparable: `payroll_value_negative` (no run-level payroll question is
+ever negative on a payslip, and a negative one would flip the side of the leg
+`clara._payroll_entry_plan` draws from it) and `payroll_value_out_of_range` (0296's own
+normalisation admits at most thirteen integer digits and two decimals — 999,999,999,999,999 cents —
+while the shared `clara._normalize_invoice_cents` carries no such bound). One shape still reads
+differently in the two rules and is admitted here: a rendering padded with leading zeros past
+thirteen digits, which this door reads to the cents its digits state and 0296's regex would have
+called unreadable. It is recorded rather than closed, because closing it would mean a fourth copy
+of a normalisation rule the estate already keeps two of, deliberately (0296's own header says why).
+
+**Versioning.** On the payroll lane the appended extraction's `version_n` counts across the KIND,
+not across `clara-fact-human:v1`. `clara._payroll_posting_verdict` picks the reading it judges by
+`version_n desc, extracted_at desc` (0297:599): a human row reusing the machine's own number would
+have to win a tie-break on the clock instead of winning outright. The four-column unique on
+`clara.document_extractions` is (document, engine, version_n, kind), so a higher number under a
+different engine collides with nothing. `clara._payroll_source_observation` repeats the gate's
+ordering verbatim for the same reason — the door must never revise one reading while the gate
+judges another — and its `facts_version` is a COUNT of done `payroll_text_facts` rows, not a
+`version_n`, for 0217:433's reason restated in this lane's terms.
+
+**The lineage read.** `clara.list_source_revisions` gains `payroll_facts_version` and
+`current_payroll_facts_extraction_id` BESIDE the three invoice keys, which keep their exact meanings
+and values. The surface takes the version a revision must quote from this read, and a payroll row
+quoted against the invoice chain's `facts_version` would refuse `CLR19` against 0 every time. The
+lineage array itself is untouched: a payroll correction is a `fact` revision in
+`clara.document_fact_revisions` like any other, which is what makes it auditable the same way an
+invoice fact revision is.
+
+**What this file does NOT do.** It does not re-post and it mints no Needs-you row kind — clearing a
+block does not post the run, and a run whose block a person has cleared is not surfaced as
+"waiting". That gap is not new: `payroll-summary-posting.test.mjs`'s own S2 cell already records
+that "a run blocked by a missing account reads READY the moment the chart gains it" with nothing
+posting it, and a re-post path is a separate decision about who may ask for an unattended post a
+second time. It is filed as a follow-up rather than built here.
+
+**No new granted name.** The five helpers (`_revisable_payroll_run_field`, `_revisable_fact_lane`,
+`_payroll_source_observation`, `_payroll_state_with_human_fact`, `_document_live_posted_entry`) are
+reached from a definer body alone and the tail proves it role by role; the two recut doors keep
+their signatures, owners, volatility, DEFINER-ness, `search_path` and ACLs, which the tail also
+re-reads from the committed catalog.
+
+**Redo-safe by construction (#957).** Every statement is `create or replace function`. The prestate
+detects its own redo by ONE signal — either recut body already carrying the `#1056` marker — and
+refuses a body at neither its pinned pre-image nor this file's post-image. Both branches were
+exercised on the lane database: the FIRST-APPLY branch through `pnpm db:migrate` against the pinned
+pre-images, and the REDO branch through `CLARA_MIGRATION_REDO=0344_payroll_fact_revision` across
+five successive fix rounds. The file recuts three bodies statically and contains no dynamic SQL at
+all, so no entry in `apps/web/tests/firm-scope-db-pins.corpus.ts` is owed.

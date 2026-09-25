@@ -550,3 +550,47 @@ test("S6 · reversing the entry re-opens the reading, and the same correction is
   assert.deepEqual(rows[0].prior_value, { text: "5,000.00", cents: 500000 },
     "…against the figure the reversed entry had been booked from");
 });
+
+// ---------------------------------------------------------------------------------------------
+// S7 — the lineage read, which is where the surface gets the number a revision must quote
+// ---------------------------------------------------------------------------------------------
+
+const listRevisions = async (sub, document) =>
+  (await humanQuery(sub, "select clara.list_source_revisions(p_document => $1) as r", [document]))
+    .rows[0].r;
+
+test("S7 · the lineage read publishes the PAYROLL facts version beside the invoice one", async (t) => {
+  if (gate(t)) return;
+
+  const doc = await blockedRun("2026-11");
+
+  const before = await listRevisions(world.users.alice, doc.documentId);
+  // The invoice keys are unchanged and still honest about a payroll summary: there is no invoice
+  // reading here, and `facts_version` 0 is what a surface reads today when it offers no control.
+  assert.equal(before.facts_version, 0);
+  assert.equal(before.current_facts_extraction_id, null);
+  // …and the payroll keys say what IS here. Without them the document surface has no number to
+  // quote for a payroll row, and every attempt would refuse CLR19 against version 0.
+  assert.equal(before.payroll_facts_version, 1);
+  const machine = (await payrollExtractionsOf(doc.documentId))
+    .find((e) => e.engine_kind === "payroll_text_facts");
+  assert.equal(before.current_payroll_facts_extraction_id, machine.id);
+
+  await reviseFact(world.users.alice, {
+    document: doc.documentId, fieldPath: "payroll.run.net_pay",
+    value: "4,200.00", observedVersion: 1,
+  });
+
+  const after = await listRevisions(world.users.alice, doc.documentId);
+  assert.equal(after.payroll_facts_version, 2, "the number the NEXT revision must quote");
+  assert.notEqual(after.current_payroll_facts_extraction_id, machine.id);
+  assert.equal(after.facts_version, 0, "the invoice chain is still empty, and still says so");
+
+  // THE LINEAGE ITSELF is the one 0217 already publishes — a payroll correction is a `fact`
+  // revision like any other, which is AC3's "auditable the same way an invoice fact revision is".
+  const entries = after.lineage.filter((e) => e.entry_kind === "fact");
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].field_path, "payroll.run.net_pay");
+  assert.equal(entries[0].observed_version_n, 1);
+  assert.deepEqual(entries[0].new_value, { text: "4,200.00", cents: 420000 });
+});
