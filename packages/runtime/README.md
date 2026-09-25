@@ -57,6 +57,36 @@ a rollback should still drain parked confirmations rather than assume they resum
 `.superRefine`, so `ask_question`'s `fields[]` superRefine contributes nothing to the hashed text.
 **v6 changes no refinement.** Stated here by hand because no gate will state it.
 
+#### What the cut's FIX ROUND changed, and the one migration it added
+
+The two-axis review and the adversarial lens over the whole lane diff produced five changes worth
+a reader's attention here, because three of them move behaviour a person sees.
+
+* **A recording is not its own look-alike (migration `0323`).** `chatTurn_v22` probes for duplicate
+  trade invoices BEFORE it admits, and the admission door is idempotent on its intent key — so a
+  retried tool call was shown the invoice its own earlier attempt had admitted and asked the person
+  whether to duplicate their own recording. `0323` adds a SIBLING probe carrying that intent key
+  (`clara.probe_trade_invoice_duplicates_for(uuid,uuid,text,jsonb,text)`), leaving 0275's
+  four-argument door byte-untouched for `chatTurn_v21`'s parked runs. **Deploy 0323 before this
+  image**; the reverse order is free.
+* **`record_anyway` and `allocations_confirmed` no longer reach the intent key.** A tool-local flag
+  that is the person's ANSWER to a question is not part of what is being recorded, and hashing it
+  minted a second key for one recording: measured, a retry admitted a second invoice with the same
+  reference, date and total.
+* **A look-alike question ENDS the turn.** `stoppedOnDuplicateQuestionV22` joins the stop set beside
+  `stoppedOnTerminalPost`, so one model segment can no longer probe, set `record_anyway` itself and
+  record while the acknowledgement door writes a durable row asserting a person was warned. Because
+  stopping costs the model the step it would have narrated in, the segment appends the door's own
+  question as a `text` part — no new wire kind — and the person answers in a later turn.
+* **The prepayment term question shows four facts, not model prose.** `answerPrepaymentTermInputSchemaV6`
+  has no `context` key; the run builds `{source_entry_id, document_id, prepaid_account_code,
+  total_cents}` from its own `read_prepayment_source` answer.
+* **The re-derivation belt no longer declines `source_moved_again`.** A second correction landing
+  before the sweep retires nothing (the Work is already cancelled), so the decline consumed the
+  correction's op key and left a retired instruction with no successor and nothing on Needs-you.
+  The successor is now derived from the document's LIVE reading, which is where the ruling already
+  puts the figures.
+
 * **`chatTurn_v22`** — v21's thirty-nine tools by import plus exactly ONE: `read_opening_source`
   (#985, the contract #656 wrote and v21 deliberately left out). It takes `{client_id, seed_id}`
   `.strict()` and nothing else — no amount, no account code, no document id — because the tie

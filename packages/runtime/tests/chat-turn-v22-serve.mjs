@@ -166,6 +166,13 @@ const CLAIM_INPUT = envJson("CLARA_V22_CLAIM");
  *  the parent could not support. The cues are the caller's, so this file invents no phrasing. */
 const INVOICE_CUE = process.env.CLARA_V22_INVOICE_CUE || null;
 const CLAIM_CUE = process.env.CLARA_V22_CLAIM_CUE || null;
+/** THE PERSON'S ANSWER TO THE LOOK-ALIKE QUESTION, in their own words. The cut's fix round made
+ *  `duplicates_found` a STOP (`stoppedOnDuplicateQuestionV22`), so the answer cannot come from the
+ *  same segment: the turn ends with the question on screen and the person answers in a later turn.
+ *  The script therefore keys on what the PERSON said, which is what the real model keys on too —
+ *  the conversation's history is text, never tool results (`messageFromParts_v10`), so the question
+ *  reaches the next turn as the sentence `withDuplicateQuestionTextV22` appended. */
+const GO_AHEAD_CUE = process.env.CLARA_V22_GO_AHEAD_CUE || null;
 /** This leg's own client. Every run-lane probe is gated on it, for the reason v21's own bootstrap
  *  writes out: these legs share throwaway databases carrying every earlier run's Works, a fresh
  *  engine's reconciler will dispatch one, and a probe that spoke for a stranger's run would report
@@ -255,8 +262,11 @@ model.doStream = async (options) => {
       };
     }
     const last = invoiceAnswers[invoiceAnswers.length - 1];
-    // THE BRANCH THAT IS THE WHOLE POINT. A look-alike is a QUESTION: the tool wrote nothing, gave
-    // back what this client already holds, and the person says go ahead.
+    // THE BRANCH THAT IS THE WHOLE POINT. A look-alike is a QUESTION: the tool wrote nothing and
+    // gave back what this client already holds. The script REPORTS it and says nothing else — the
+    // turn is over, because `stoppedOnDuplicateQuestionV22` ends the segment on that result. A
+    // model that tried to answer here would be answering its own question, which is exactly the
+    // control the cut's fix round added (ADV-C1-02).
     if (last && last.ok === true && last.status === "duplicates_found") {
       if (!duplicateQuestionReported) {
         duplicateQuestionReported = true;
@@ -268,11 +278,24 @@ model.doStream = async (options) => {
       }
       return {
         stream: simulateReadableStream({
-          chunks: toolChunks("v22i1", "start_trade_invoice_work", recordAnyway(INVOICE_INPUT)),
-          chunkDelayInMs: 2,
+          chunks: textChunks("I have asked, and I am waiting."), chunkDelayInMs: 2,
         }),
       };
     }
+  }
+
+  // THE PERSON CAME BACK AND SAID GO AHEAD. A turn of its own, after a human message — which is
+  // the only way `record_anyway` can now be set, and the reason the acknowledgement row means
+  // something when a reviewer reads it months later.
+  if (INVOICE_INPUT !== null && GO_AHEAD_CUE !== null && asked.includes(GO_AHEAD_CUE)
+      && toolOutputs(prompt, "start_trade_invoice_work").length === 0) {
+    console.log("[v22-serve] chat call: the person said go ahead; recording with record_anyway");
+    return {
+      stream: simulateReadableStream({
+        chunks: toolChunks("v22i1", "start_trade_invoice_work", recordAnyway(INVOICE_INPUT)),
+        chunkDelayInMs: 2,
+      }),
+    };
   }
 
   if (CLAIM_INPUT !== null && wantsClaim) {

@@ -1358,8 +1358,8 @@ canonical form for that field's value**:
 | field | what "unchanged" means | why |
 |---|---|---|
 | every monetary path | the normalised **cents** | 0268's own rule, unchanged and reached by delegation |
-| `invoice.currency` | the **ISO 4217 code**, case-insensitively | the standard defines the code, not its typography, and this estate stores it upper-cased everywhere it reaches the books |
-| `invoice.invoice_date` | the **calendar day**, when both sides spell one | `5 March 2026` and `2026-03-05` are the same day |
+| `invoice.currency` | the **ISO 4217 code**, case-insensitively, **when both sides spell a three-letter code** | the standard defines the code, not its typography, and this estate stores it upper-cased everywhere it reaches the books — but a region carrying PROSE ("Ringgit Malaysia") has no canonical form and gets the text rule, which the first cut got wrong (ADV-C1-06) |
+| `invoice.invoice_date` | the **calendar day**, when both sides spell one **unambiguously** | `5 March 2026` and `2026-03-05` are the same day. `clara._fact_calendar_day` pins `DateStyle` to `ISO, YMD`, so a slash or dot date whose meaning depends on the session (`03/05/2026` is 3 May on a Malaysian invoice and 5 March under this cluster's MDY) answers NULL and falls through to the text rule. Without the pin the guard REFUSED a real correction of an ambiguous printed date, and which one it refused moved with the session — measured across all three orderings (ADV-C1-04) |
 | everything else (`invoice.vendor_name`, `invoice.invoice_id`, a registration number, …) | the **trimmed text**, exactly as before | the estate has no canonical form for a name or an identifier, so the recorded spelling IS the fact — a professional correcting `ACME SDN BHD` to the mixed case actually printed on the page is making a real correction, and folding that into the guard would leave them a door that refuses the only edit they wanted |
 
 `clara._fact_value_changed(jsonb,jsonb)` is **not** recut: it still answers exactly what it always
@@ -1390,8 +1390,33 @@ restartable backlog plus an exactly-once settlement is what survives that. A lan
 between admitting and settling re-reads the SAME correction and re-admits idempotently, because the
 successor's `intent_key` is the op key and `clara.admit_journal_work` replays on it.
 
-**0321 writes no row at apply** (§TAIL T9). Corrections retired before it stay exactly where #885
-left them until the runtime lane reaches them.
+**0321 writes no row at apply** (§TAIL T9) — on a FIRST APPLY, which is the only mode that can
+state it. §0 hands §TAIL its mode through 0115's temporary-table idiom, because between the first
+apply and a REDO of an unmerged file a rig runs the battery and the lane writes real settlements
+this file did not write; the redo branch reports the count instead of refusing over it. A
+from-scratch chain always takes the first-apply branch. Corrections retired before 0321 stay
+exactly where #885 left them until the runtime lane reaches them.
+
+**A RECORDING IS NOT ITS OWN LOOK-ALIKE** (#1135's cut-phase fix round,
+`0323_trade_invoice_probe_self_exclusion.sql`). `chatTurn_v22` calls #1007's duplicate probe BEFORE
+`clara.admit_trade_invoice_work`, and the admission door is idempotent on its intent key — so a
+retried tool call was shown the invoice its OWN earlier attempt had admitted, and the tool asked
+the person whether to record a duplicate of their own recording. Measured on `clara_l01` as
+`clara_runtime` in one rolled-back transaction: probe 0 matches → admit invoice X → admit again
+under the same key replays X → probe now returns X.
+
+0323 adds SIBLINGS and edits nothing: `clara._trade_invoice_probe_core(uuid,text,jsonb,text)` calls
+0275's three-argument core and removes the invoices recorded under the caller's own intent key,
+restating `match_count` over what survives; `clara.probe_trade_invoice_duplicates_for(uuid,uuid,text,jsonb,text)`
+(`clara_runtime`) is the door that carries the key. Neither new argument has a DEFAULT, so a
+four-argument call still resolves to 0275's own door — which `chatTurn_v21`'s parked runs reach and
+which §TAIL pins byte-for-byte along with four other bodies. The acknowledgement door is
+deliberately untouched: with the self-match gone a retried identical recording is shown the same
+earlier invoices, hashes the same `ack_digest` and replays the first row, while 0275's own
+ADV-1007-1 ruling — a second acknowledgement under one key for DIFFERENT figures is a second record
+by design — stays true and stays green. Pinned by
+`packages/db/tests/trade-invoice-probe-self-exclusion.test.mjs` (4 cells, one of which reproduces
+the self-match against the four-argument door so the fix cannot be quietly undone).
 
 **A question whose source was corrected is not answerable — even where the Work is carved out.**
 The retirement rule deliberately does not touch a Work holding a committed receipt (#676's

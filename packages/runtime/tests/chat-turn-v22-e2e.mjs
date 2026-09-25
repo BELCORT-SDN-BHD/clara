@@ -12,12 +12,15 @@
 //
 // WHAT IT PROVES, and every one of these needs a real World plus a real HTTP boundary:
 //
-//   1. A LOOK-ALIKE IS A QUESTION, NOT A REFUSAL, AND NOTHING IS WRITTEN WHILE IT IS ASKED (#1007).
+//   1. A LOOK-ALIKE IS A QUESTION, NOT A REFUSAL, IT ENDS THE TURN, AND NOTHING IS WRITTEN WHILE
+//      IT IS ASKED (#1007, with the cut's fix round ADV-C1-02).
 //      Turn 1 records a supplier bill. Turn 2 sends the SAME particulars: the tool probes, finds
-//      the first, and hands the matches back — the model SEES `duplicates_found`, no second Work
-//      exists at that moment, and no acknowledgement row does either. Then the person says record
-//      it anyway, and a second Work is admitted with EXACTLY ONE acknowledgement row carrying the
-//      invoice the probe showed. Two turns are two requests; the count is the measurement.
+//      the first, and hands the matches back — the model SEES `duplicates_found` and the SEGMENT
+//      STOPS there, so the turn settles with the question on the transcript, no second Work and no
+//      acknowledgement. Only then does the person come back, in the same session, and say record it
+//      anyway; that turn admits a second Work with EXACTLY ONE acknowledgement row carrying the
+//      invoice the probe showed. A model that could answer its own question would make that row a
+//      record of a warning nobody received; the count and the task id are the measurement.
 //
 //      AND THE CONTROL THAT KEEPS IT HONEST (v21's trap 1, designed out rather than discovered):
 //      the acknowledgement's `shown` array is compared against the FIRST turn's own invoice id,
@@ -415,10 +418,14 @@ async function main() {
   // make "the claim landed on turn three" a claim this file could not support.
   const INVOICE_CUE = "Alpha Supplies";
   const CLAIM_CUE = "against the February advances";
+  // THE PERSON'S ANSWER TO THE LOOK-ALIKE QUESTION. The cut's fix round made `duplicates_found` a
+  // STOP, so the answer is a turn of its own — which is the whole control (ADV-C1-02).
+  const GO_AHEAD_CUE = "go ahead and record it anyway";
 
   const engine = spawnServe({
     CLARA_V22_INVOICE: JSON.stringify(invoiceInput(one.counterparty)),
     CLARA_V22_INVOICE_CUE: INVOICE_CUE,
+    CLARA_V22_GO_AHEAD_CUE: GO_AHEAD_CUE,
     CLARA_V22_CLAIM: JSON.stringify(claimInput(enrolmentId, advanceA, advanceB)),
     CLARA_V22_CLAIM_CUE: CLAIM_CUE,
     CLARA_V22_CLIENT_ID: one.client,
@@ -430,11 +437,14 @@ async function main() {
     assert.match(engine.state.serving ?? "", /claraWork=claraWork_v6/, "…and THIS cut's Work body");
     console.log(`[v22-e2e] engine ready; serving bundle=${WORK_BUNDLE_ID} digest=${engine.state.banner}`);
 
-    /** ONE SESSION PER TURN, and that is the shape the measurement wants rather than a convenience.
-     *  Two recordings of one document are two REQUESTS — a preparer comes back to it, or a
-     *  colleague does — and the duplicate probe is CLIENT-scoped precisely because a session is not
-     *  what makes two documents the same document. Driving them through one session would also make
-     *  turn 2's intent key depend on turn 1's transcript, which is not what is being measured. */
+    /** ONE SESSION PER RECORDING, and that is the shape the measurement wants rather than a
+     *  convenience. Two recordings of one document are two REQUESTS — a preparer comes back to it,
+     *  or a colleague does — and the duplicate probe is CLIENT-scoped precisely because a session
+     *  is not what makes two documents the same document. Driving them through one session would
+     *  also make turn 2's intent key depend on turn 1's transcript, which is not what is measured.
+     *
+     *  THE ONE EXCEPTION IS THE ANSWER TO A QUESTION (leg 2b), which runs in the session that
+     *  asked it, because that is where a person answers. */
     async function newSession(title) {
       const r = await api("POST", "/api/chat/sessions", { clientId: one.client, title }, one.jwt);
       assert.equal(r.status, 201, `session created (got ${r.status} ${JSON.stringify(r.body)})`);
@@ -461,13 +471,16 @@ async function main() {
       throw new Error(`the chat turn never settled (task ${taskId}); last status=${last}`);
     }
 
-    async function turn(text, title) {
-      const sessionId = await newSession(title);
+    async function turnIn(sessionId, text) {
       const r = await api("POST", `/api/chat/${sessionId}/turns`,
         { turnKey: `tk_${randomUUID().slice(0, 12)}`, parts: [{ type: "text", text }] }, one.jwt);
       assert.equal(r.status, 202, `the turn is accepted (got ${r.status} ${JSON.stringify(r.body)})`);
       assert.ok(r.body.task_id, "and it names the chat task");
       return r.body.task_id;
+    }
+
+    async function turn(text, title) {
+      return turnIn(await newSession(title), text);
     }
 
     async function waitInvoices(n, label, deadlineMs = 150000) {
@@ -511,9 +524,10 @@ async function main() {
     assert.equal(claimsAfterFirst.rows[0].n, 0, "turn one recorded a bill and nothing else");
     console.log(`[v22-e2e] PASS 1: turn one admitted one trade-invoice Work and acknowledged nothing`);
 
-    // ---- 2. TURN TWO: the same bill again, and the question ---------------
+    // ---- 2. TURN TWO: the same bill again, and the question that ENDS the turn ------------
     assert.ok(TASK_TERMINAL.has(await settleTask(firstTask)), "turn one settled before turn two speaks");
-    const secondTask = await turn(`Record ${INVOICE_CUE}' March bill for RM1,060 including SST.`, "v22-again");
+    const againSession = await newSession("v22-again");
+    const secondTask = await turnIn(againSession, `Record ${INVOICE_CUE}' March bill for RM1,060 including SST.`);
     const end = Date.now() + 150000;
     while (Date.now() < end && engine.state.duplicateQuestion === null) await sleep(250);
     assert.ok(engine.state.duplicateQuestion,
@@ -525,14 +539,50 @@ async function main() {
     assert.match(String(asked.question), /Record this one anyway, or stop\?/,
       "and the question asks rather than refuses — the owner's ruling, in the words the model reads");
 
+    // THE TURN IS OVER, AND NOTHING WAS WRITTEN (ADV-C1-02, the cut's fix round). Before
+    // `stoppedOnDuplicateQuestionV22` joined the stop set, the loop continued and ONE model segment
+    // could probe, set `record_anyway` itself and record — while
+    // `clara.record_trade_invoice_duplicate_ack` wrote a durable row asserting a person had been
+    // warned. The only wall was prose in the prompt. This is that wall, measured: the turn settles
+    // with the question on screen, no second invoice, and no acknowledgement.
+    assert.ok(TASK_TERMINAL.has(await settleTask(secondTask)), "the question SETTLES the turn");
+    const stillOne = await rig.rootQuery(
+      "select count(*)::int n from clara.trade_invoices where client_id = $1", [one.client]);
+    assert.equal(stillOne.rows[0].n, 1,
+      "the model could not answer its own question: still ONE invoice after the turn that asked");
+    const acksAfterQuestion = await rig.rootQuery(
+      "select count(*)::int n from clara.trade_invoice_duplicate_acks where client_id = $1", [one.client]);
+    assert.equal(acksAfterQuestion.rows[0].n, 0,
+      "…and NO acknowledgement: a row saying a person was warned may not exist before they answered");
+    // AND THE QUESTION REACHED THE PERSON. Stopping the loop costs the model the step it would
+    // have narrated in, so the segment appends the door's own sentence as a text part — without it
+    // the turn would end in silence and there would be nothing to answer.
+    const said = await rig.rootQuery(
+      `select parts from clara.chat_messages where session_id = $1 and role = 'assistant'
+        order by seq desc limit 1`, [againSession]);
+    const saidText = (said.rows[0]?.parts ?? [])
+      .filter((p) => p && p.type === "text").map((p) => String(p.text)).join("\n");
+    assert.match(saidText, /Record this one anyway, or stop\?/,
+      "the question is on the transcript the person reads, not only in a tool result");
+    console.log("[v22-e2e] PASS 2a: the look-alike ended the turn — question on the transcript, no invoice, no acknowledgement");
+
+    // ---- 2b. THE PERSON COMES BACK AND SAYS GO AHEAD ---------------------
+    //
+    // A TURN OF ITS OWN, which is the point: `record_anyway` is now reachable only from a turn that
+    // follows a human message. It runs in the SAME session, because that is where a person answers
+    // — and the history a turn is given is TEXT (`messageFromParts_v10` drops tool results), so the
+    // question the model reads back is the sentence the segment appended above.
+    const goAheadTask = await turnIn(againSession, `Yes — ${GO_AHEAD_CUE}.`);
+
     const afterSecond = await waitInvoices(2, "the acknowledged recording lands");
     assert.equal(afterSecond.length, 2, "and then, and only then, a SECOND invoice");
     const secondInvoice = afterSecond.find((r) => String(r.id) !== String(firstInvoice.id));
     assert.ok(secondInvoice, "the second row is a different row");
     const secondWork = await rig.rootQuery(
       "select * from clara.accounting_work where id = $1", [secondInvoice.work_id]);
-    assert.equal(String(secondWork.rows[0].source_refs[0].task_id), String(secondTask),
-      "admitted by the SECOND turn — two turns are two requests, and the intent keys differ");
+    assert.equal(String(secondWork.rows[0].source_refs[0].task_id), String(goAheadTask),
+      "admitted by the turn that ANSWERED, never by the turn that asked — which is the whole "
+      + "point of the stop: two turns are two requests, and their intent keys differ");
 
     const acks = await rig.rootQuery(
       "select * from clara.trade_invoice_duplicate_acks where client_id = $1", [one.client]);
@@ -550,7 +600,7 @@ async function main() {
     const shown = Array.isArray(ack.shown) ? ack.shown.map((x) => String(x.invoice_id)) : [];
     assert.deepEqual(shown, [String(firstInvoice.id)],
       "the acknowledgement names the invoice the probe actually showed, and nothing else");
-    console.log(`[v22-e2e] PASS 2: a look-alike asked, the person said go ahead, and one acknowledgement rode with the recording`);
+    console.log(`[v22-e2e] PASS 2b: the person answered in a turn of their own, and one acknowledgement rode with the recording`);
 
     // ---- 3. the two Works run on claraWork_v6 -----------------------------
     for (const [label, work] of [["first", firstInvoice.work_id], ["second", secondInvoice.work_id]]) {
@@ -567,7 +617,7 @@ async function main() {
     console.log(`[v22-e2e] PASS 3: both Works ran on ${WORK_BUNDLE_ID} and their receipts record its digest`);
 
     // ---- 4. TURN THREE: one claim, two advances, and the split a person confirmed
-    assert.ok(TASK_TERMINAL.has(await settleTask(secondTask)), "turn two settled before turn three speaks");
+    assert.ok(TASK_TERMINAL.has(await settleTask(goAheadTask)), "the go-ahead turn settled before the next one speaks");
     const claimTask = await turn(`Settle Farah's March trip ${CLAIM_CUE}.`, "v22-claim");
     const endClaim = Date.now() + 150000;
     while (Date.now() < endClaim && engine.state.splitRefusal === null) await sleep(250);
