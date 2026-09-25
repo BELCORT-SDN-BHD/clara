@@ -40,7 +40,8 @@ const LIVE: FirmStandingInstruction = {
 };
 
 const RECORDED: StandingInstructionOutcome = { kind: "recorded", instructionId: LIVE.id };
-const WITHDRAWN: StandingInstructionOutcome = { kind: "withdrawn", instructionId: LIVE.id };
+const WITHDRAWN: StandingInstructionOutcome =
+  { kind: "withdrawn", instructionId: LIVE.id, plansStillPosting: 0 };
 
 async function mount(view: View, writers: {
   record?: StandingInstructionWriter;
@@ -167,5 +168,90 @@ test("ticket 1050 — the card states the two facts a firm must know before it d
   try {
     assert.match(h.text(), /covers every client of this firm/i);
     assert.match(h.text(), /keeps posting to the end of its term/i);
+  } finally { await h.unmount(); }
+});
+
+// #1147 — WHAT A WITHDRAWAL DOES NOT STOP, SAID ON SCREEN.
+//
+// The plans a standing instruction already authorised keep posting under the member who authorised
+// them, and until #1147 the card said so only as a standing note: a firm that had just taken the
+// instruction back learned nothing about what it had NOT stopped. Migration 0362 §B makes the
+// withdraw door answer with `plans_still_posting`; these cells drive what the card does with it.
+//
+// WHAT WITHDRAWAL DOES TO A PLAN IS UNCHANGED, and that is the point: the card's job here is to
+// stop a firm believing it stopped something.
+
+const withdrawnWith = (plansStillPosting: number | null): StandingInstructionOutcome =>
+  ({ kind: "withdrawn", instructionId: LIVE.id, plansStillPosting });
+
+test("ticket 1147 — a withdrawal that leaves schedules running SAYS SO, with the number, and says they keep posting under the member who authorised them", async () => {
+  const h = await mount({ status: "ready", data: LIVE }, { withdraw: async () => withdrawnWith(3) });
+  try {
+    await h.act(() => { setFieldValue(reasonField(h) as Stub, "We will set these up by hand."); });
+    await clickButton(buttonMatching(h, /take this back/i) as Stub);
+    await h.settle();
+    const text = h.text();
+    assert.match(text, /Taken back\. Clara will ask again/i, `the 1050 receipt line is gone: ${text}`);
+    // THE NUMBER THE DATABASE ANSWERED WITH, not a word for "some".
+    assert.match(text, /3 schedules/i, `the count of plans still posting is not shown: ${text}`);
+    assert.match(text, /keep posting/i, `what those plans do is not said: ${text}`);
+    assert.match(text, /authorised/i, `who they post under is not said: ${text}`);
+  } finally { await h.unmount(); }
+});
+
+test("ticket 1147 — ONE is one, and a withdrawal that stopped nothing running says WHAT WAS TRUE AT THE MOMENT, not what will be true afterwards", async () => {
+  for (const [count, pattern] of
+    [[1, /One schedule/i], [0, /was running when you took it back/i]] as const) {
+    const h = await mount({ status: "ready", data: LIVE }, { withdraw: async () => withdrawnWith(count) });
+    try {
+      await clickButton(buttonMatching(h, /take this back/i) as Stub);
+      await h.settle();
+      assert.match(h.text(), pattern, `plans_still_posting=${count} reads wrong: ${h.text()}`);
+      // …and never the plural sentence for a singular fact.
+      if (count === 1) assert.doesNotMatch(h.text(), /1 schedules/i, "a plural sentence for one schedule");
+      // FIX ROUND (ADV-04). The count is the withdrawing transaction's SNAPSHOT. The wake arm of
+      // clara._prepayment_schedule_core resolves the live instruction with a plain
+      // `select … limit 1` and takes no share lock (read off the installed body on clara_c01), and
+      // the withdraw door's own `for update` is on the instruction ROW, so an unattended close_prep
+      // run already in flight can commit a plan a moment later. A `=0` sentence that asserted
+      // "nothing keeps posting" would then be a firm-facing false statement in exactly the window
+      // this key exists to close. The zero arm therefore states what was MEASURED, at the moment it
+      // was measured, and promises nothing about afterwards.
+      if (count === 0) {
+        assert.doesNotMatch(h.text(), /nothing keeps posting/i,
+          `the zero arm promises a future this transaction cannot see: ${h.text()}`);
+      }
+    } finally { await h.unmount(); }
+  }
+});
+
+test("ticket 1147 — a count the door did not answer with is NOT painted as zero: the card says nothing about the number rather than telling a firm it stopped everything", async () => {
+  // `plansStillPosting: null` is what a database below 0362 produces (`lib/firm/standing-
+  // instructions.ts`). Silence is the honest rendering; the standing note below still says a
+  // running schedule is not stopped.
+  const h = await mount({ status: "ready", data: LIVE }, { withdraw: async () => withdrawnWith(null) });
+  try {
+    await clickButton(buttonMatching(h, /take this back/i) as Stub);
+    await h.settle();
+    const text = h.text();
+    assert.match(text, /Taken back\. Clara will ask again/i);
+    assert.doesNotMatch(text, /was running when you took it back/i,
+      `an unknown count was painted as zero: ${text}`);
+    assert.doesNotMatch(text, /schedules? opened under it/i, `an unknown count was painted: ${text}`);
+  } finally { await h.unmount(); }
+});
+
+test("ticket 1147 — and the card says HOW TO STOP ONE, in its own key, whether or not a withdrawal has happened: a firm reads it before it decides", async () => {
+  const h = await mount({ status: "ready", data: LIVE }, { withdraw: async () => withdrawnWith(2) });
+  try {
+    // The 1050 note (what withdrawal does not do) and the 1147 note (what to do instead) sit
+    // together, and both are there BEFORE anybody presses anything.
+    assert.match(h.text(), /keeps posting to the end of its term/i);
+    // SPECIFIC ON PURPOSE. `standingWithdrawalNote` already contains the word "end" ("to the end
+    // of its term"), so a loose /end/ would have passed before this key existed.
+    assert.match(h.text(), /pause or end/i,
+      `the card does not say how a running schedule is stopped: ${h.text()}`);
+    assert.match(h.text(), /Client → Plans/,
+      `the card does not say WHERE it is stopped: ${h.text()}`);
   } finally { await h.unmount(); }
 });

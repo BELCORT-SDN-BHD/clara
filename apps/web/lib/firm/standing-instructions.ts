@@ -87,7 +87,18 @@ export async function loadPrepaymentStandingInstruction(
  *  its own reason token; it is never re-worded here and never retried. */
 export type StandingInstructionOutcome =
   | { readonly kind: "recorded"; readonly instructionId: string }
-  | { readonly kind: "withdrawn"; readonly instructionId: string }
+  | {
+      readonly kind: "withdrawn";
+      readonly instructionId: string;
+      /** #1147 — `clara.withdraw_firm_standing_instruction`'s `plans_still_posting` (migration
+       *  0362 §B): how many LIVE plans this instruction authorised, which KEEP POSTING under the
+       *  member who authorised them. Withdrawal stops new schedules, never a running one.
+       *
+       *  `null` means THE DOOR DID NOT SAY — a database below 0362 answers 0338's shorter receipt
+       *  — and it is not the same fact as 0. A surface that read an absence as "nothing is still
+       *  running" would tell a firm, in words, that it had stopped something it had not. */
+      readonly plansStillPosting: number | null;
+    }
   | {
       readonly kind: "refused";
       readonly code: string;
@@ -117,6 +128,16 @@ function receiptId(out: unknown): string | null {
   if (typeof out !== "object" || out === null) return null;
   const id = (out as Record<string, unknown>).instruction_id;
   return typeof id === "string" && id.length > 0 ? id : null;
+}
+
+/** #1147 — the withdrawal's `plans_still_posting` (migration 0362 §B), POSITIVELY CHECKED the way
+ *  `receiptId` above checks the receipt. Anything that is not a whole, non-negative count reads
+ *  `null`: the door did not say, and this build says so rather than filling the gap with a number
+ *  a firm would act on. */
+function plansStillPosting(out: unknown): number | null {
+  if (typeof out !== "object" || out === null) return null;
+  const n = (out as Record<string, unknown>).plans_still_posting;
+  return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : null;
 }
 
 /** `clara.record_firm_standing_instruction(p_instruction_key, p_reason, p_op_key)` — admin floor,
@@ -158,7 +179,7 @@ export async function withdrawPrepaymentStandingInstruction(
     }, opts);
     const id = receiptId(out);
     if (id === null) return { kind: "unavailable" };
-    return { kind: "withdrawn", instructionId: id };
+    return { kind: "withdrawn", instructionId: id, plansStillPosting: plansStillPosting(out) };
   } catch (err) {
     return refusal(err);
   }

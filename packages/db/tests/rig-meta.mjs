@@ -391,6 +391,24 @@ const AGREEMENT_0299_COHORT = [...AGREEMENT_0299_RUNTIME_FNS];
 // _post_payroll_run) keep the grants they already had, which the migration's own tail re-derives.
 const PAYROLL_COMPLETENESS_0343_HUMAN_FNS = ["answer_payroll_completeness"];
 const PAYROLL_COMPLETENESS_0343_COHORT = [...PAYROLL_COMPLETENESS_0343_HUMAN_FNS];
+// #1148 [0363, a granted document-scoped read of the payroll posting verdict] — its OWN cohort per
+// the "wholly present or wholly absent" rule, exactly as PAYROLL_0296 and PAYROLL_COMPLETENESS_0343
+// are: folding it into either array would red every database whose chain stops before 0363.
+//
+//   get_payroll_posting_state — ONE clara_authenticated door at the VIEWER floor (body-enforced,
+//     through clara._human_ctx, the estate's one floor body). It wraps
+//     clara._payroll_posting_verdict, which stays UNGRANTED: before 0363 the only way to SEE the
+//     verdict was a Needs-you queue row or the entry's own receipt, so a document page that wanted
+//     to say "this payslip did not post because …" had no read to call. The wrapper projects the
+//     verdict's sentence, verdict, rung, reason and completeness and NOT its rung_vector.
+//
+//   NOTHING ELSE MOVES, and 0363's own tail re-derives all of it: the internal keeps its
+//   owner-only ACL, clara_runtime and both agent read roles and all four wake lanes gain ZERO
+//   (a model-lane twin is a successor contract for a later cut, not this file's business), and
+//   the two surfaces that already reach the verdict — answer_payroll_completeness and
+//   list_review_queue — keep the grants they had.
+const PAYROLL_POSTING_STATE_0363_HUMAN_FNS = ["get_payroll_posting_state"];
+const PAYROLL_POSTING_STATE_0363_COHORT = [...PAYROLL_POSTING_STATE_0363_HUMAN_FNS];
 // #1061 [0342, the payroll registry's business_operation catches up to #946] — COMMENT-ONLY,
 // deliberately, and for the SAME reason #782's 0245 entry and #988's 0246 entry above carry none.
 //
@@ -3183,6 +3201,35 @@ export const TENANCY_AGENT_TWINS_0353_COHORT = [
   ...TENANCY_AGENT_TWINS_0353_UNGRANTED_FNS,
 ];
 // #1137 END
+// #1147 [0362, the model lane reaches the firm's own standing instruction] — its own cohort,
+// bimodal on the same terms 0320's, 0352's and 0353's are: wholly present once 0362 applies,
+// wholly absent before it, because the `db-slice-frontiers` matrix runs this package against
+// databases pinned at earlier frontiers where 0338 has applied and 0362 has not.
+//
+//   ONE READ, and it is the TENTH wake wrapper clara_agent_ro has ever held. 0338 shipped the firm
+//   standing instruction whole on the HUMAN lane and gave the chat model no door and no relation
+//   it may read, so a model asked "does this firm let Clara do this?" could only guess. This read
+//   is FIRM-SCOPED THROUGH THE CREDENTIAL (no firm argument at all), carries one `interactive`
+//   allowlist row on top of the EXECUTE, and runs inside the read pool's read-only transaction.
+//
+//   WHAT clara_agent_ro DID NOT GAIN, and what makes this an addition rather than a widening: the
+//   two WRITE doors. `record_firm_standing_instruction` and `withdraw_firm_standing_instruction`
+//   stay on FIRM_STANDING_INSTRUCTION_0338_HUMAN_FNS below, clara_authenticated only, and 0362's
+//   own tail re-reads that after it applies -- an instruction a machine recorded would name
+//   nobody. The RELATION's grants do not move either: the machine lane reads it through this
+//   definer door precisely because it holds nothing on it.
+//
+//   NO UNGRANTED CORE, and that is law 31 rather than an omission: this read has ONE entrance.
+//   The member's own web read needs no door -- forced RLS plus `firm_id = clara.jwt_firm()` and a
+//   SELECT grant to clara_authenticated (0338 §A.2) -- so a core would be an ungranted body with
+//   exactly one caller.
+const STANDING_INSTRUCTION_AGENT_READ_0362_AGENT_FNS = [
+  "wake_get_firm_standing_instruction",
+];
+export const STANDING_INSTRUCTION_AGENT_READ_0362_COHORT = [
+  ...STANDING_INSTRUCTION_AGENT_READ_0362_AGENT_FNS,
+];
+// #1147 END
 // #635 [0233, the firm's real legal, commercial and model-usage state] — its own cohort, and
 // the FIRST on this roster that deliberately is NOT "wholly absent" before its migration.
 //
@@ -3980,6 +4027,10 @@ export const ALLOWED = {
     // ONLY, bookkeeper floor body-enforced; clara_runtime, both agent read roles and all four wake
     // lanes gain ZERO, and the two internals it reaches through hold no role at all.
     ...PAYROLL_COMPLETENESS_0343_HUMAN_FNS,
+    // #1148 [0363] the payroll posting-state read — see the block above. clara_authenticated ONLY,
+    // viewer floor body-enforced; clara_runtime, both agent read roles and all four wake lanes gain
+    // ZERO, and clara._payroll_posting_verdict — the body it wraps — stays ungranted to every role.
+    ...PAYROLL_POSTING_STATE_0363_HUMAN_FNS,
     // #949 [0300] the tenancy contract-terms + rent-plan lane — see the block above.
     // clara_authenticated ONLY, floors body-enforced (viewer for the four reads, bookkeeper for
     // the six acts); clara_runtime, both agent read roles and all four wake lanes gain ZERO, and
@@ -4049,7 +4100,14 @@ export const ALLOWED = {
     // transaction, each with one `interactive` allowlist row on top of the EXECUTE. The ten HUMAN
     // doors they front (TENANCY_RENT_0300_HUMAN_FNS) stay absent from this roster, and the two
     // ACT twins 0353 also mints are clara_runtime's, never this role's.
-    ...TENANCY_AGENT_TWINS_0353_AGENT_FNS]),
+    ...TENANCY_AGENT_TWINS_0353_AGENT_FNS,
+    // #1147 [0362] the TENTH wake wrapper this role holds, on the same terms as 0320's, 0352's
+    // and 0353's: a READ, inside the read pool's read-only transaction, with one `interactive`
+    // allowlist row on top of the EXECUTE. The two WRITE doors it sits beside
+    // (FIRM_STANDING_INSTRUCTION_0338_HUMAN_FNS) stay absent from this roster, and so does the
+    // relation itself -- this role holds no table grant on clara.firm_standing_instructions and
+    // reads it only through this definer door.
+    ...STANDING_INSTRUCTION_AGENT_READ_0362_AGENT_FNS]),
   [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...BINDING_PROPOSAL_PR1_WAKE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS, ...F_A5B_PR1_WAKE_FNS, ...CARD1_SEAM_WAKE_FNS,
     // [Wave-F Track A, F-A5b card 1] wake_compose_metric_preview_v2 -- 'interactive' ONLY,
     // permanently (CD-16), beside its untouched v1 twin in AUTHORING_0077_WAKE_FNS.
@@ -4547,6 +4605,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("#947 0298 payroll net-pay settlement", PAYROLL_SETTLEMENT_0298_COHORT, liveNames));
   failures.push(...cohortFailures("#948 0299 agreement-contract reading + acquisition lane", AGREEMENT_0299_COHORT, liveNames));
   failures.push(...cohortFailures("#1048 0343 payroll completeness witness", PAYROLL_COMPLETENESS_0343_COHORT, liveNames));
+  failures.push(...cohortFailures("#1148 0363 payroll posting-state read", PAYROLL_POSTING_STATE_0363_COHORT, liveNames));
   failures.push(...cohortFailures("#949 0300 tenancy contract terms + recurring rent plan", TENANCY_RENT_0300_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3 PR-1a bank/COA core extractions", EXTRACTION_F_A3_PR1A_COHORT, liveNames));
   failures.push(...cohortFailures("#623 0178 accounting-work lane", WORK_JOURNAL_0178_COHORT, liveNames));
@@ -4793,6 +4852,14 @@ export async function grantMatrixFailures() {
   if (tenancyTwinsLive.length !== 0) {
     failures.push(...cohortFailures("#1137 0353 tenancy model-lane reads and on-behalf-of confirmations",
       TENANCY_AGENT_TWINS_0353_COHORT, liveNames));
+  }
+  // #1147 [0362] — bimodal on the same terms as 0353's above: wholly present once 0362 applies,
+  // wholly absent before it. A one-name cohort cannot be PARTIAL, and it is declared as a cohort
+  // anyway so that an accidental grant to any OTHER role fails here rather than passing silently.
+  const standingReadLive = STANDING_INSTRUCTION_AGENT_READ_0362_COHORT.filter((n) => liveNames.has(n));
+  if (standingReadLive.length !== 0) {
+    failures.push(...cohortFailures("#1147 0362 firm standing instruction model-lane read",
+      STANDING_INSTRUCTION_AGENT_READ_0362_COHORT, liveNames));
   }
   // #718 [0197] — the coding lane's evidence-link lookback. A PARTIAL cohort here is a reopened
   // race, not a narrower boundary (see the block where the roster is declared).

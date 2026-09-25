@@ -131,7 +131,32 @@ export function StandingInstructionsCard({
               <StateBanner tone="info">{t("standingRecorded")}</StateBanner>
             ) : null}
             {outcome?.kind === "withdrawn" ? (
-              <StateBanner tone="info">{t("standingWithdrawn")}</StateBanner>
+              <StateBanner tone="info">
+                <p>{t("standingWithdrawn")}</p>
+                {/* #1147 — WHAT THE WITHDRAWAL DID NOT STOP, at the moment it is taken back.
+                    `clara.withdraw_firm_standing_instruction` answers with how many LIVE plans the
+                    instruction authorised (migration 0362 §B); they keep posting under the member
+                    who authorised them, and withdrawal does not change that. A firm that has just
+                    taken an instruction back reasonably believes it stopped something, and this is
+                    the one moment it is worth saying that it did not.
+
+                    `null` IS NOT ZERO and is rendered as SILENCE. It means the door did not say
+                    (a database below 0362), and painting it as a count of zero would state as fact
+                    the very thing this sentence exists to correct. The standing note below still
+                    tells the person that a running schedule is not stopped.
+
+                    AND THE ZERO ARM STATES A MOMENT, NOT A FUTURE (fix round, ADV-04): the count is
+                    the withdrawing transaction's snapshot, and the clocked lane takes no share lock
+                    on the instruction row, so a `close_prep` run already in flight can land a plan
+                    just after. "No schedule opened under it was running when you took it back" is
+                    what was measured; "nothing keeps posting" would have been a promise this
+                    transaction cannot make. */}
+                {outcome.plansStillPosting !== null ? (
+                  <p className="mt-1">
+                    {t("standingWithdrawnPlans", { count: outcome.plansStillPosting })}
+                  </p>
+                ) : null}
+              </StateBanner>
             ) : null}
             {outcome?.kind === "refused" ? (
               <StateBanner
@@ -181,6 +206,12 @@ export function StandingInstructionsCard({
 
             <p className="max-w-prose text-xs text-muted-foreground">{t("standingScopeNote")}</p>
             <p className="max-w-prose text-xs text-muted-foreground">{t("standingWithdrawalNote")}</p>
+            {/* #1147 — …AND WHAT TO DO INSTEAD. The note above says a running schedule is not
+                stopped; without this one the person is left with a fact and no act. It is shown
+                always, not only after a withdrawal, because this is what a firm needs to read
+                BEFORE it decides. The words name the real surface (`Client → Plans`, the pause and
+                end doors `plan-lifecycle-dialogs.tsx` drives) rather than an SQL function. */}
+            <p className="max-w-prose text-xs text-muted-foreground">{t("standingWithdrawalStopNote")}</p>
           </>
         ) : null}
       </CardContent>

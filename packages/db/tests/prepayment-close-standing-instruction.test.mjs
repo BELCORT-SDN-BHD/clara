@@ -1088,15 +1088,64 @@ async (t) => {
     assert.equal(row[0].secdef, true);
   }
 
-  // NO TWIN AND NO WRAPPER, by NAME across the whole schema -- the stronger claim.
+  // NO WRITE TWIN AND NO WRITE WRAPPER, by NAME across the whole schema -- the stronger claim,
+  // and the one this ticket actually owns.
+  //
+  // AMENDED BY #1147 [0362], and the amendment is the point rather than an exemption. This cell
+  // used to refuse EVERY `wake_%firm_standing_instruction%` name, which was exact while the whole
+  // family was write-only: nothing machine-shaped existed here at all. #1147 mints ONE READ --
+  // `clara.wake_get_firm_standing_instruction`, clara_agent_ro only, one `interactive` allowlist
+  // row, no firm argument -- because a chat model asked "does this firm let Clara do this?" had no
+  // door and no relation it may read (#1050's own follow-up 3). What #1050 owns is that no machine
+  // lane may RECORD or WITHDRAW one; so the roster below names the ONE lawful machine reader and
+  // still refuses every other machine-shaped name in the family, including a `wake_record_…` or a
+  // `wake_withdraw_…` that a later file might add by reflex. 0362's own battery is
+  // standing-instruction-agent-read.test.mjs.
+  //
+  // FIX ROUND (ADV-03): THE AMENDMENT'S FIRST JUSTIFICATION WAS FALSE AND IS GONE. It said that
+  // STABLE alone makes a body a read -- "Postgres refuses every INSERT/UPDATE/DELETE inside a
+  // non-volatile function, so such a body CANNOT write". PostgreSQL refuses a data-modifying
+  // STATEMENT written directly inside a non-volatile function; it does not stop that function
+  // CALLING a VOLATILE one that writes. MEASURED on clara_c01 inside a transaction that was rolled
+  // back: a `clara.wake_record_firm_standing_instruction(uuid,text)` declared `stable security
+  // definer`, owned by clara_fn_owner, granted to clara_agent_ro alone and calling a VOLATILE
+  // helper, inserted a real standing-instruction row -- and the previous filter answered
+  // {is_read: true, agent: true, writers: false} and stayed green. The wall #1050 owns was
+  // satisfiable by a machine-lane WRITE door.
+  //
+  // SO THE ROSTER IS NAMED, WITH ITS ARGUMENT LIST, AND IT IS A PERMIT-LIST RATHER THAN A
+  // REQUIRE-LIST. That is what keeps it from going stale on the frontier this file gates at (0338,
+  // not 0362): on a chain where 0362 has not applied the family is empty, and an empty set has
+  // nothing to refuse. Naming the ARGUMENTS closes the half the catalog facts alone could not: a
+  // later `wake_get_firm_standing_instruction_for(firm uuid)` -- a FIRM argument, which is what
+  // would make this read an existence oracle for another firm's row -- fails here rather than only
+  // in #1147's own behavioural cell. The three catalog facts stay beside the name, because a body
+  // that merely borrowed the signature and then gained a writer role must fail too.
+  const LAWFUL_MACHINE_SIGNATURES = new Map([
+    // The ONE read 0362 mints: no firm argument, the instruction key alone.
+    ["wake_get_firm_standing_instruction", "p_instruction_key text"],
+  ]);
   const kin = await rootQuery(
-    `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    `select p.proname,
+            pg_get_function_identity_arguments(p.oid) as args,
+            p.provolatile = 's' as is_read,
+            has_function_privilege('clara_agent_ro', p.oid, 'EXECUTE') as agent,
+            (has_function_privilege('clara_runtime', p.oid, 'EXECUTE')
+             or has_function_privilege('clara_wake_interactive', p.oid, 'EXECUTE')
+             or has_function_privilege('clara_wake_proactive', p.oid, 'EXECUTE')
+             or has_function_privilege('public', p.oid, 'EXECUTE')) as writers
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'clara'
         and (p.proname like '%firm_standing_instruction%_for'
              or p.proname like 'wake_%firm_standing_instruction%'
              or p.proname like '%firm_standing_instruction%_wake')`);
-  assert.deepEqual(kin.rows, [],
-    `a machine twin of the standing-instruction doors exists: ${JSON.stringify(kin.rows)}`);
+  const unlawful = kin.rows.filter(
+    (r) => LAWFUL_MACHINE_SIGNATURES.get(r.proname) !== r.args
+      || !r.is_read || !r.agent || r.writers);
+  assert.deepEqual(unlawful, [],
+    "a machine-shaped body in the standing-instruction family is not the ONE read #1147 minted -- "
+    + "its name, its argument list or its grants are not what this cell admits: "
+    + JSON.stringify(unlawful));
 
   // THE RELATION. Forced RLS, SELECT for the human lane, no write grant to anybody, no grant at
   // all to any machine role.
