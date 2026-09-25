@@ -272,13 +272,16 @@ export async function readTaskMeta(id) {
  * Its limit is stated where the lock is defined: one process, one spool directory.
  */
 export async function mergeTaskMeta(id, patch, { requireExists = false } = {}) {
-  return withSidecarLock(taskMetaPath(id), async () => {
+  // ONE `taskMetaPath(id)` for both: the lock's key and the write's target are the same string by
+  // construction, never two reads of `CLARA_SPOOL_DIR` that a test could change in between.
+  const path = taskMetaPath(id);
+  return withSidecarLock(path, async () => {
     const current = await readTaskMeta(id);
     if (requireExists && !current) {
       throw Object.assign(new Error(`document task ${id} has no durable runtime metadata`), { code: "internal" });
     }
     const next = { ...(current ?? {}), ...patch, updatedAt: new Date().toISOString() };
-    await atomicJson(taskMetaPath(id), next, { locked: true });
+    await atomicJson(path, next, { locked: true });
     return next;
   });
 }
