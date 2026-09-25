@@ -2330,6 +2330,54 @@ export const AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT = [
 const FYE_PAIR_WALL_0310_UNGRANTED_FNS = ["_knowledge_assert_fye_pair"];
 export const FYE_PAIR_WALL_0310_COHORT = [...FYE_PAIR_WALL_0310_UNGRANTED_FNS];
 
+// #1051 [0330, ONE authority-wall predicate for clara.create_accounting_plan and
+// clara._obo_plan_core] — its own cohort, for the same "wholly present or wholly absent" reason
+// 0250's carries: the `db-slice-frontiers` matrix runs this package against databases pinned at
+// earlier frontiers where 0308 has applied and 0330 has not. `_assert_plan_authority` is
+// UNGRANTED like `_authority_ref_refusal`, whose definition it wraps: the main sweep fails the
+// moment a grant appears on it, this cohort fails if it ever DISAPPEARS from the two plan doors
+// that must both call it (see plan-authority-wall.test.mjs's own census cell). ONE name, because
+// 0330 mints exactly one.
+const PLAN_AUTHORITY_WALL_0330_UNGRANTED_FNS = ["_assert_plan_authority"];
+export const PLAN_AUTHORITY_WALL_0330_COHORT = [...PLAN_AUTHORITY_WALL_0330_UNGRANTED_FNS];
+
+// #1074 [0332, a reversal reverses what its own occurrence POSTED] — its own cohort, for the same
+// "wholly present or wholly absent" reason 0330's carries: the `db-slice-frontiers` matrix runs
+// this package against earlier frontiers where 0308 has applied and 0332 has not.
+// `_plan_posted_entry_lines` is UNGRANTED, the same posture its two siblings
+// `_plan_amortisation_period_line` (0223) and `_plan_accrual_period_line` (0303) carry — it reads
+// every client's `clara.journal_lines` under a SECURITY DEFINER, so the main sweep fails the moment
+// a grant appears on it, and 0332's own tail fails if it ever stops being reached from
+// `_plan_admit_occurrence`. ONE name, because 0332 mints exactly one: the admission core it recuts
+// has existed since 0193.
+const PLAN_REVERSAL_POSTED_BASIS_0332_UNGRANTED_FNS = ["_plan_posted_entry_lines"];
+export const PLAN_REVERSAL_POSTED_BASIS_0332_COHORT = [...PLAN_REVERSAL_POSTED_BASIS_0332_UNGRANTED_FNS];
+
+// #1073 [0333, the THIRD accrual/bill-conflict remedy: one period's own correcting entry] — its
+// own cohort, for the same "wholly present or wholly absent" reason 0332's carries: the
+// `db-slice-frontiers` matrix runs this package against earlier frontiers where 0302/0332 have
+// applied and 0333 has not.
+//
+//   the ONE new human door — clara_authenticated ONLY, bookkeeper-floored in its own body. It
+//   admits exactly ONE reversal occurrence through clara._plan_admit_occurrence for a period a
+//   person named, and walks no catch-up window; clara_runtime, both agent read roles and all four
+//   wake lanes gain ZERO — no OBO twin, no agent read, no wake wrapper, the same posture
+//   clara.skip_plan_occurrence (0302) carries for the sibling remedy. It mints no ungranted
+//   internal at all: everything it stands on (the admission core, the reversal-date rule, the
+//   plan door context, the two schedule helpers) already existed.
+const PLAN_OCCURRENCE_REVERSAL_DOOR_0333_HUMAN_FNS = ["reverse_plan_occurrence"];
+export const PLAN_OCCURRENCE_REVERSAL_DOOR_0333_COHORT = [...PLAN_OCCURRENCE_REVERSAL_DOOR_0333_HUMAN_FNS];
+
+// #1075 [0334, the accrual register's side filter moves server-side] — NO COHORT CHANGE, NO NEW
+// NAME, for the same "still the SAME name and ACL" shape #905's (0267) own note beside 0189's
+// cohort records. `clara.list_accrual_adjustments` is a DROP-and-CREATE (a new parameter cannot
+// be added by `create or replace`, the same reason 0202/#770 and 0267/#905 give for
+// `list_activity`/`p_work` and `list_accounting_work`/`p_receipt_since`), but a drop-and-create of
+// the SAME name is not a new name: 0334's own tail re-reads owner clara_fn_owner, SECURITY
+// DEFINER, STABLE and the literal ACL {clara_fn_owner, clara_authenticated} unchanged after the
+// recut, so `ACCRUAL_ADJUSTMENTS_0222_HUMAN_FNS` above (which already lists
+// "list_accrual_adjustments") covers the widened door as-is.
+
 // #979 [0251, the depreciation authority read tells "never had one" apart from "had one, and it
 // was retired"] — NO COHORT, NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed, for
 // the same reason #797's (0212) and #720's (0198) blocks state theirs. 0251 creates no function:
@@ -3751,6 +3799,11 @@ export const ALLOWED = {
     // row `clara._plan_admissible_event`'s own picker already treats as handled — it does not
     // recut or nest the admission core.
     ...ACCRUAL_BILL_CONFLICT_0302_HUMAN_FNS,
+    // #1073 [0333] the one-period reversal door — the THIRD remedy for the same conflict row, see
+    // the block above. clara_authenticated ONLY, bookkeeper floor body-enforced; clara_runtime,
+    // both agent read roles and all four wake lanes gain ZERO. It admits one occurrence through
+    // the admission core rather than recutting it, and it touches neither existing remedy.
+    ...PLAN_OCCURRENCE_REVERSAL_DOOR_0333_HUMAN_FNS,
     // #939 [0305] the stated-prepayment-term door — see the block above. clara_authenticated
     // ONLY, bookkeeper-floored in its own body; clara_runtime, both agent read roles and all four
     // wake lanes gain ZERO, and no wake wrapper for it exists anywhere in the catalog.
@@ -4321,6 +4374,21 @@ export async function grantMatrixFailures() {
   const fyePairWallLive = FYE_PAIR_WALL_0310_COHORT.filter((n) => liveNames.has(n));
   if (fyePairWallLive.length !== 0) {
     failures.push(...cohortFailures("#1031 0310 knowledge fye pair wall", FYE_PAIR_WALL_0310_COHORT, liveNames));
+  }
+  // #1051 [0330] — bimodal like 0310's: wholly present once 0330 applies, wholly absent before it.
+  const planAuthorityWallLive = PLAN_AUTHORITY_WALL_0330_COHORT.filter((n) => liveNames.has(n));
+  if (planAuthorityWallLive.length !== 0) {
+    failures.push(...cohortFailures("#1051 0330 shared plan authority wall", PLAN_AUTHORITY_WALL_0330_COHORT, liveNames));
+  }
+  // #1074 [0332] — bimodal like 0330's: wholly present once 0332 applies, wholly absent before it.
+  const postedReversalBasisLive = PLAN_REVERSAL_POSTED_BASIS_0332_COHORT.filter((n) => liveNames.has(n));
+  if (postedReversalBasisLive.length !== 0) {
+    failures.push(...cohortFailures("#1074 0332 posted-entry reversal basis", PLAN_REVERSAL_POSTED_BASIS_0332_COHORT, liveNames));
+  }
+  // #1073 [0333] — bimodal like 0332's: wholly present once 0333 applies, wholly absent before it.
+  const oneperiodReversalLive = PLAN_OCCURRENCE_REVERSAL_DOOR_0333_COHORT.filter((n) => liveNames.has(n));
+  if (oneperiodReversalLive.length !== 0) {
+    failures.push(...cohortFailures("#1073 0333 one-period reversal door", PLAN_OCCURRENCE_REVERSAL_DOOR_0333_COHORT, liveNames));
   }
   // #652 [0222] — bimodal like F-A6's: wholly present once 0222 applies, wholly absent before it,
   // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.

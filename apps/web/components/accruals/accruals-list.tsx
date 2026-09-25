@@ -138,7 +138,15 @@ function AccrualRow({ clientId, row }: { clientId: string; row: AccrualListRow }
         <span className="block">{t("termRange", { from: row.service_period_start, to: row.service_period_end })}</span>
         <span className="block text-xs">{methodLabel(t, row.method?.rule ?? "")}</span>
       </TableCell>
-      <TableCell className="tabular-nums">{formatCents(row.amount_cents)}</TableCell>
+      <TableCell className="tabular-nums">
+        {formatCents(row.amount_cents)}
+        {/* #1071 — the Amount column names its OWN kind, beside the money: `amount_cents` is the
+            per-period figure under `stated_amount` but the WINDOW TOTAL under
+            `stated_period_amount` (#937), and a reader scanning this column alone had no way to
+            tell which. The Term column's method sentence already says the same fact in different
+            words, but this is the label at the figure itself. */}
+        <span className="block text-xs text-muted-foreground">{amountKindLabel(t, row.method?.rule ?? "")}</span>
+      </TableCell>
       <TableCell className="text-muted-foreground">
         {t("windowFromTo", { from: row.effective_from, to: row.effective_to })}
       </TableCell>
@@ -177,6 +185,21 @@ export function methodLabel(t: Translate, rule: string): string {
     stated_amount: t("methodStatedAmount"),
     // #937 — the second rule the ledger performs. An unenumerated value still prints as itself.
     stated_period_amount: t("methodStatedPeriodAmount"),
+  };
+  return labels[rule] ?? rule;
+}
+
+/** #1071 — WHICH KIND OF FIGURE the Amount column's `amount_cents` is, beside the money itself:
+ *  under `stated_amount` it is the amount THIS accrual posts every period; under
+ *  `stated_period_amount` (#937) `amount_cents` is the TOTAL across the whole authority window,
+ *  and the per-period figures live only in `period_amounts` (rendered on the detail view, #1070 —
+ *  the register does not render them, by that ticket's own scope). Same honest raw-value fallback
+ *  as `sideLabel`/`methodLabel`: a rule this build has not enumerated prints as itself rather than
+ *  a false claim about which kind the figure is. */
+export function amountKindLabel(t: Translate, rule: string): string {
+  const labels: Record<string, string> = {
+    stated_amount: t("amountKindPerPeriod"),
+    stated_period_amount: t("amountKindWindowTotal"),
   };
   return labels[rule] ?? rule;
 }

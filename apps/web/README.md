@@ -2105,6 +2105,54 @@ Three things that component now says which neither surface said before:
 The accrual form's method hint is rule-dependent for the same reason (#937): it stated that one rule
 exists, beside a control that offers two.
 
+## #1070 — the accrual detail view renders the per-period schedule
+
+`clara.get_accrual_adjustment` (0303/#937) has answered with `period_amounts` since the door was
+widened; `components/accruals/accrual-detail.tsx` (#652) never read it, so a reader of a
+`stated_period_amount` accrual's OWN detail page saw only the window-total `amount_cents` and no
+breakdown by due date — the create and correction forms both already rendered the block
+(`AccrualPeriodAmountsBlock`, above), and the side was already on this same page (#942's own note at
+`accrual-detail.tsx:90-93`), so the detail view was the one surface still missing a fact the register
+and both forms already told a reader.
+
+**Read-only, and absent rather than empty.** The array is always present — `[]` under `stated_amount`
+— so the new section renders when `period_amounts.length > 0` and not at all otherwise; there is no
+third state to invent for "this accrual does not use this rule". Each row is the due date and its
+own stated amount, the same two fields `AccrualPeriodAmountsBlock` edits, under the SAME heading key
+(`periodAmountsHeading`, "Amount for each period") so a reader who has seen either form recognises
+the label. Unlike the form's block this is not a control: no select, no remove button, no running
+total — the amounts are already admitted, and a detail page does not offer to change a row the door
+already wrote.
+
+`components/accruals/accrual-detail.test.tsx` is the first dedicated unit test file for this
+component (none existed before this ticket): it proves the per-period schedule renders its own due
+dates and amounts, that the section is absent for a `stated_amount` row, and that the side (already
+built) renders labelled consistently with the list and forms.
+
+## #1071 — the register's Amount column names whether its figure is per period or a window total
+
+`clara.list_accrual_adjustments` answers `amount_cents` with two different meanings depending on
+`method.rule`: under `stated_amount` it is the figure THIS accrual posts every period; under
+`stated_period_amount` (#937) it is the TOTAL across the whole authority window, and the per-period
+figures live only in `period_amounts`, which the register does not render (that is #1070's detail
+view, by #1070's own out-of-scope line). `components/accruals/accruals-list.tsx`'s Amount column
+printed the bare figure for both rows alike, so a reader scanning the register could not tell — from
+the Amount column alone — which fact they were looking at. The Term column's method sentence
+(`methodLabel`, unchanged by this ticket) already states the same fact in different words, but not
+beside the money, which is where a reader who reads figures first needs it.
+
+**A new short label beside the money, for both rows.** `amountKindLabel` (beside `sideLabel` and
+`methodLabel`, same honest raw-value fallback for a rule this build has not enumerated) maps
+`stated_amount` → "Per period" and `stated_period_amount` → "Window total"
+(`amountKindPerPeriod` / `amountKindWindowTotal`), rendered as a `text-xs` line under the figure —
+the same shape `occurrenceCount` already uses under the State badge. Both cases are labelled rather
+than leaving the per-period case silent, so the column reads the same way for every row instead of
+asking a reader to infer "no label means per period".
+
+`components/accruals/accruals-list.test.tsx`'s `1071.list.amount-kind` cell is the coverage: one
+`stated_amount` row and one `stated_period_amount` row, distinguishable amounts, and the label tied
+to the right row's own figure in both directions (neither label leaks onto the other row's amount).
+
 ## #940 — which accounts hold prepayments, and what the surfaces say when none do
 
 Before migration 0306 any ordinary asset account could be amortised: the prepaid-leg wall is
@@ -2221,3 +2269,61 @@ from a refused one in the database's own word, and the who/when/why behind a per
 **Copy is EN only**, for the reason #940 records above: this build ships a single static locale, so
 the brief's "en and zh copy" has no zh catalogue to land in. The namespace is `DeferredRevenue`,
 plus six keys in `PrepaymentAccounts` for the panel's purpose control and its row badges.
+
+## #1073 — a third remedy for "a bill posted inside an accrued period", and what makes it a third
+
+The `accrual_bill_conflict` item offered two remedies (#938): **Reverse now**, which calls
+`clara.request_plan_catch_up` over the window `[the flagged due date, its scheduled reversal date]`,
+and **Skip this period's next occurrence**, which settles a FUTURE period and touches the flagged one
+not at all. Neither is "book the correcting entry for exactly this one period". **Reverse this period
+only** is, and it calls `clara.reverse_plan_occurrence` (0333) with the flagged period's own due
+date — `p_plan`, `p_due`, `p_op_key`, and nothing else.
+
+**The surface computes no window, because it no longer has to.** `reverseAccrualNow` still mirrors
+`clara._plan_reversal_date` by hand (`accrualReversalDate` in `lib/accruals/api.ts`) in order to
+build the catch-up's `p_to`; `reverseAccrualPeriod` sends a PERIOD and the database resolves that
+date itself. The mirror stays for the remedy that needs it and is not part of the new act — a
+schedule rule with two homes eventually has two answers.
+
+**The sentence beside the control claims no ledger difference, because there is none.** On this lane
+both remedies admit the same occurrence and leave the same amount on the books for the period —
+measured on two identically configured clients in
+`packages/db/tests/plan-occurrence-reversal-door.test.mjs` (`p1073.one_period`), not inferred. What
+differs is the ACT: its own receipt, its own audit verb, and a refusal that names the OCCURRENCE
+(`not_yet_due`) where the catch-up names the window (`catch_up_in_future`). The copy says exactly
+that: *"books the reversing entry for this period alone, and can never touch another period. It
+leaves the same amount on the books for this period as Reverse now does."*
+
+**Two conditions behind that sentence, recorded so they are a decision rather than an accident**
+(review round 2026-09-25, SPEC-05 and ADV-L01-02).
+
+* *"the same amount"* is unconditional as written, and it is true of every schedule this estate
+  admits — but only because one wall elsewhere makes the counter-example unreachable. "Reverse now"
+  is a CATCH-UP over `[dueDate, accrualReversalDate(dueDate)]`, and on a monthly schedule due on the
+  1st that window's last day would also be the NEXT period's accrual day, so the catch-up would
+  admit a second event. `clara._assert_plan_schedule` refuses exactly that plan shape by name
+  (`reversal_collides_with_next_occurrence`), which is why no such accrual exists to contradict the
+  copy. If that wall is ever relaxed, this sentence is the first thing that becomes false; the
+  owner's call is whether to keep it or name the period instead.
+* The two remedies leave the same LEDGER and a different HISTORY. "Reverse now" commits its receipt
+  whether or not the occurrence was admitted, so a refusal it reaches (for instance a period whose
+  accrual never posted) stays recorded on the plan for a colleague to read. "Reverse this period
+  only" refuses by raising, which rolls the record back with the act and frees the idempotency key
+  for a real retry. Both behaviours are right for their own shape; the person pressing one of two
+  buttons is not told which they get. Driven through both doors by
+  `packages/db/tests/plan-occurrence-reversal-door.test.mjs`'s
+  `p1073.history.refusal_record_diverges`.
+
+**One component, both surfaces.** `components/firm/accrual-bill-conflict-affordance.tsx` is what the
+firm-wide Needs-you inbox mounts through `NEEDS_YOU_AFFORDANCES` and what the Accruals page's own
+conflict section (`components/accruals/accrual-bill-conflicts.tsx`) mounts directly — the shape #938's
+fix round collapsed to one copy. A third control added there reaches both surfaces by construction,
+and the unit battery asserts the registry entry rather than assuming it. The browser walk
+(`accrual.walk.reversePeriod`) drives the control on the Accruals page and proves the one thing only
+a browser can: a governed refusal reaches the person VERBATIM — `CLR10 · not_yet_due` and the
+database's own sentence — instead of the act appearing to have worked. It is also the first refusal
+cell this walk has ever had.
+
+**The plan-not-active face says "none of the remedies", not "neither".** All three are plan-lane
+doors that refuse `plan_ended` / `plan_paused`; the row stays (the double count has not gone away)
+and the controls go, which is the same 裁-187 law #938's fix round applied to the first two.

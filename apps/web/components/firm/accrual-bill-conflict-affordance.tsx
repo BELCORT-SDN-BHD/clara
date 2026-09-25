@@ -1,7 +1,8 @@
 "use client";
 
 // #938 — the inline act on an `accrual_bill_conflict` row: "reverse now" (clara.request_plan_
-// catch_up, the EXISTING plan-lane door, unchanged) and "skip this period's next occurrence"
+// catch_up, the EXISTING plan-lane door, unchanged), "reverse this period only" (#1073's
+// clara.reverse_plan_occurrence, 0333) and "skip this period's next occurrence"
 // (clara.skip_plan_occurrence, #938's own new door). Registered in ./needs-you-affordances.tsx,
 // the open_question-affordance.tsx pattern every inline affordance follows: its own file, one
 // line in that table, never a branch added to needs-you-row.tsx itself.
@@ -13,6 +14,17 @@
 // "REVERSE NOW" MAY HONESTLY REFUSE. Reversing before the scheduled reversal date is not
 // possible — the DoorRefusal (`catch_up_in_future`) surfaces verbatim through `error`, exactly
 // as any other refused act does; nothing here pretends an early reversal happened.
+//
+// #1073 — THE THIRD REMEDY, AND WHY IT IS A THIRD RATHER THAN A RENAME. "Reverse this period
+// only" calls `clara.reverse_plan_occurrence`, which takes the FLAGGED PERIOD and admits exactly
+// one occurrence; the database resolves that period's scheduled reversal date itself, so this
+// control sends no window and mirrors no schedule rule (`reverseAccrualNow` above still has to,
+// because a catch-up takes one). On this lane both leave the SAME amount on the books for the
+// period — measured, not assumed (packages/db/tests/plan-occurrence-reversal-door.test.mjs,
+// `p1073.one_period`) — so the sentence beside the controls says exactly that and claims no
+// ledger difference it cannot show. What differs is the ACT: its own receipt, its own audit verb,
+// and a refusal that names the occurrence (`not_yet_due`) rather than a window
+// (`catch_up_in_future`). Both refusals surface verbatim, through the same `error`.
 //
 // WHAT THE FIX ROUND ADDED, and why each belongs on THIS surface rather than only on the
 // Accruals page (AC2 names both):
@@ -37,7 +49,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { journalEntryHref } from "@/lib/navigation/tree";
 import { sideLabel } from "@/components/accruals/accruals-list";
-import { reverseAccrualNow, skipNextAccrualOccurrence } from "@/lib/accruals/api";
+import {
+  reverseAccrualNow, reverseAccrualPeriod, skipNextAccrualOccurrence,
+} from "@/lib/accruals/api";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { ErrorMessage } from "./data-state";
 import type { NeedsYouAffordanceProps } from "./needs-you-affordances";
@@ -60,6 +74,10 @@ export function AccrualBillConflictAffordance({ row, busy, error, act }: NeedsYo
 
   const reverseNow = () =>
     act(() => reverseAccrualNow(planId, dueDate, { session: sessionTokenAccessor }).then(() => undefined));
+
+  // #1073 — the same two values, and nothing else: the plan and the flagged period. No window.
+  const reversePeriod = () =>
+    act(() => reverseAccrualPeriod(planId, dueDate, { session: sessionTokenAccessor }).then(() => undefined));
 
   const submitSkip = async () => {
     if (!reason.trim()) return;
@@ -124,11 +142,17 @@ export function AccrualBillConflictAffordance({ row, busy, error, act }: NeedsYo
             <Button type="button" size="sm" variant="outline" onClick={() => void reverseNow()} disabled={busy}>
               {t("accrualBillConflictReverseNow")}
             </Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => void reversePeriod()} disabled={busy}>
+              {t("accrualBillConflictReversePeriod")}
+            </Button>
             <Button type="button" size="sm" variant="outline" onClick={() => setSkipping(true)} disabled={busy}>
               {t("accrualBillConflictSkipNext")}
             </Button>
           </div>
           <p className="max-w-prose text-xs text-muted-foreground">{t("accrualBillConflictRemedyHint")}</p>
+          <p className="max-w-prose text-xs text-muted-foreground">
+            {t("accrualBillConflictReversePeriodHint")}
+          </p>
         </>
       )}
     </div>

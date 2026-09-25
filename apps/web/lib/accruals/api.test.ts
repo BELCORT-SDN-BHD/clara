@@ -8,7 +8,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  accrualReversalDate, derivedAccrualLines, reverseAccrualNow, skipNextAccrualOccurrence,
+  accrualReversalDate, derivedAccrualLines, reverseAccrualNow, reverseAccrualPeriod,
+  skipNextAccrualOccurrence,
 } from "./api";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -91,6 +92,34 @@ test("skipNextAccrualOccurrence: POSTs skip_plan_occurrence with p_plan/p_after_
   assert.equal(seenBody.p_after_due, "2026-01-31");
   assert.equal(seenBody.p_reason, "vendor now bills directly");
   assert.ok(typeof seenBody.p_op_key === "string" && seenBody.p_op_key.length > 0);
+});
+
+// ── reverseAccrualPeriod — clara.reverse_plan_occurrence, #1073's own new door ─────────────────
+
+test("reverseAccrualPeriod: POSTs reverse_plan_occurrence with p_plan/p_due and a fresh op_key, and sends NO window", async () => {
+  let seenUrl = "";
+  let seenBody: Record<string, unknown> = {};
+  await withMockedFetch(
+    async (url, init) => {
+      seenUrl = String(url);
+      seenBody = JSON.parse(String(init?.body));
+      return jsonResponse(
+        { plan_id: "plan-1", due_date: "2026-01-31", reversal_due_date: "2026-02-01", reversed: true },
+        200,
+      );
+    },
+    async () => {
+      await reverseAccrualPeriod("plan-1", "2026-01-31", { session: fakeSession("tok") });
+    },
+  );
+  assert.match(seenUrl, /\/rpc\/reverse_plan_occurrence$/);
+  assert.equal(seenBody.p_plan, "plan-1");
+  assert.equal(seenBody.p_due, "2026-01-31", "the flagged period's own due date, byte for byte");
+  assert.ok(typeof seenBody.p_op_key === "string" && (seenBody.p_op_key as string).length > 0);
+  // THE WHOLE POINT OF THE THIRD REMEDY: it names a PERIOD, so the surface computes no window and
+  // mirrors no schedule rule. The database resolves the reversal date itself.
+  assert.deepEqual(Object.keys(seenBody).sort(), ["p_due", "p_op_key", "p_plan"],
+    "no p_from, no p_to — the caller sends a period, never a window");
 });
 
 // ── derivedAccrualLines — the preview mirrors clara._accrual_journal_basis ON BOTH SIDES (#942) ──

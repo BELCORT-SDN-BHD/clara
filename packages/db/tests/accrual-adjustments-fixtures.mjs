@@ -16,7 +16,8 @@
 //         -> {accrual_id, plan_id, revision_id, revision, kind, status, posted,
 //             configuration_receipt{fn,op_key}, occurrence|null, next_occurrences[], overlap_warning}
 //   clara.create_accrual_adjustment_for(p_client, p_author, …same…)   -- clara_runtime ONLY
-//   clara.list_accrual_adjustments(p_client, p_from, p_to) -> {client_id, from, to, accruals[]}
+//   clara.list_accrual_adjustments(p_client, p_from, p_to, p_side?) -- #1075 (0334) added p_side,
+//       server-side, default null (every side) -> {client_id, from, to, side, accruals[]}
 //   clara.get_accrual_adjustment(p_accrual)                -> {accrual_id, …, plan{}, occurrences[]}
 //
 // THE TYPED PARTICULARS (`p_accrual`) — every refusal path is prefixed `accrual.` so it can never
@@ -262,11 +263,23 @@ export async function createAccrualAdjustmentFor({
   return r.rows[0].result;
 }
 
-export async function listAccrualAdjustments(sub, { client, from = null, to = null } = {}) {
-  const r = await humanQuery(sub, namedCall("list_accrual_adjustments", [
-    { name: "p_client", cast: "uuid" }, { name: "p_from", cast: "date" },
-    { name: "p_to", cast: "date" },
-  ]), [client, from, to]);
+export async function listAccrualAdjustments(sub, { client, from = null, to = null, side = null } = {}) {
+  // #1075 (0334) added p_side FOURTH, server-side, default null. The parameter is sent to the
+  // door ONLY when a caller actually asks for it: every OTHER caller of this fixture (the base
+  // #652 battery, gated on 0222 alone, and #942's own revenue-side battery, gated on 0304) never
+  // passes `side`, and this keeps their named call at the exact three-argument shape those
+  // batteries have always sent — so neither becomes an unstated dependency on 0334 having
+  // applied. Only accrual-list-side-filter.test.mjs (frontier-gated on 0334's own stem) passes
+  // `side` and reaches the fourth argument.
+  const specs = [
+    { name: "p_client", cast: "uuid" }, { name: "p_from", cast: "date" }, { name: "p_to", cast: "date" },
+  ];
+  const params = [client, from, to];
+  if (side !== null) {
+    specs.push({ name: "p_side", cast: "text" });
+    params.push(side);
+  }
+  const r = await humanQuery(sub, namedCall("list_accrual_adjustments", specs), params);
   return r.rows[0].result;
 }
 

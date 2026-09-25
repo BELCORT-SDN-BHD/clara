@@ -69,16 +69,38 @@ const RECUT = [
   // and put 0300's three-kind wall into 0308's pasted body; that commit derives a7c108d5... from
   // 0308's own pasted text, whose pre-edit sha256 reproduced c8e99098... exactly, and the
   // from-scratch chain confirms it against the live catalog.
-  // What this pin is FOR is unaffected by either recut and is re-checked below against the LIVE
-  // body, structurally rather than by transcription: the client rung 203005004 still sits above
-  // any clara.accounting_plans row lock, and the advisory is still passed this door's own plan
-  // id. That is the point of pinning the text rather than the migration number.
+  // RE-BASED A THIRD TIME. #1051 (0330_plan_authority_wall_predicate.sql, riders sweep wave lane
+  // 01) FOLDS this body's authority wall out into one shared predicate,
+  // `clara._assert_plan_authority`, which `clara._obo_plan_core` calls too — the two walls were
+  // two hand-written copies and 0308's "verbatim" claim about them was no longer true. One block
+  // of this body becomes one `perform`, and the three declarations that block alone used go with
+  // it; nothing else in the body moves, and nothing this door admits or refuses moves either
+  // (all three authority_ref kinds survive on BOTH doors — see plan-authority-wall.test.mjs's
+  // own both-doors drive). That takes a7c108d5... to 544cd88e..., measured on the lane rig after
+  // 0330 applied and re-derived from 0330's own file text.
+  // What this pin is FOR is unaffected by any of the three recuts and is re-checked below
+  // against the LIVE body, structurally rather than by transcription: the client rung 203005004
+  // still sits above any clara.accounting_plans row lock, and the advisory is still passed this
+  // door's own plan id. That is the point of pinning the text rather than the migration number.
   { fn: "clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)",
-    sha: "a7c108d5dd4febbae9f98a87b42b69468aec31f1731336b2185c8e91b1b0951c" },
+    sha: "544cd88ecaa5b5237969aff36b1bd0d8a5cdf41aacea234e6415d3df54b523ea" },
   { fn: "clara.revise_accounting_plan(uuid,text,text,int,text,date,date,jsonb,text,text)",
     sha: "8a6e69efac967592592bf3e8d08683145e5b43456a63fe673788337349382886" },
+  // RE-CUT BY #1080 (0331_accrual_plan_authority_wall.sql, riders sweep wave lane 01), the
+  // sibling of the #1051 re-base recorded above and for the same reason: this body carried the
+  // THIRD hand-written copy of the plan authority wall, plus 0222's own inline `exists` probes
+  // against clara.agent_tasks, which never read a named chat task's kind or author. 0331 points
+  // it at clara._assert_plan_authority — the predicate #1051 minted — so a wake task or an
+  // autodraft run can no longer authorise an accrual plan through the on-behalf entrance. One
+  // block becomes one `perform`, the three declarations that block alone used go with it, and
+  // 0331's own tail proves nothing else moved by putting 0222's block back and re-hashing to
+  // 31adc6d4... That takes 31adc6d4... to 89d2ac3a..., measured on the lane rig after 0331
+  // applied.
+  // What this pin is FOR is unaffected, and is re-checked below against the LIVE body
+  // structurally rather than by transcription: the client rung 203005004 still sits above any
+  // clara.accounting_plans row lock and the advisory is still passed this door's own plan id.
   { fn: "clara._accrual_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,int,text,date,date,jsonb)",
-    sha: "31adc6d4ae74d220b33fc950d164b0a256cafc914b2e1486400db20124939bc5" },
+    sha: "89d2ac3a33e8dcda53b0f42a6c500a6a9aefd567af57ecfe181ce82eaa248625" },
 ];
 
 let world = null;
