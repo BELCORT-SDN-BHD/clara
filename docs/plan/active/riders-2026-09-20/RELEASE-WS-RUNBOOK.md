@@ -976,34 +976,217 @@ provisioned Workflow DevKit schema.
 
 ---
 
-## § RESULTS (as run, ____-__-__, UTC)
+## § RESULTS (as run, 2026-09-25, UTC)
 
-**Authority.**
+**Authority.** The owner's riders plan of 2026-09-20 (each wave ends with its hosted release and the
+tickets close on hosted evidence), the release-ownership ruling of 2026-09-17, and the beta ruling
+that hosted users and data are test data (#826, 2026-09-15, carried in `ARCHITECTURE.md` §5.F).
+"Owner says go" is gate 0a's own checklist item; no separate go/no-go capture exists among this
+window's named logs, so it is recorded here as asserted by the checklist rather than independently
+verified.
 
-**Gates 0a.**
+**Gates 0a.** `main` = RELEASE_SHA = `322fdf29105c76132ec874dd70a7d3e24c5453e4` (PR #1143, merge of
+`integration/riders-sweep`), tree clean at RELEASE_SHA (`prep.log`). `--plan` gate exit=0: 25 pending
+files, frozen manifest **347 entries, 0 UNLOCKED (deployed:false)**, matching main's own reading and
+unchanged at every later read in this window (pre-window, post-window: still 347/0). Registry-view
+cell: **# pass 7 # fail 0**. This wave moves no frozen pin and adds no manifest entry, confirmed
+three times (`prep.log`'s `--plan` gate, `reads-pre.log`, `reads-post.log`). The two readings gate 0a
+asked for before the window both came back clean: **D-CHECK-SWAP** (0338) found hosted's
+`accounting_plans_authority_kind_check` at `CHECK ((authority_kind = 'explicit_instruction'::text))`
+with 0 rows on `clara.accounting_plans`, 0 of them outside the new list, so the constraint swap is a
+widening with nothing to fail on; **D-BACKFILL-ONBOARDING-PLAN-ITEMS** (#1098's ticket, 0347) found 0
+committed firm-scope onboarding plans on hosted, so the backfill's own read is 0 rows before the
+window is even open (confirmed again after, see Step 10). **D-ROLE-REACH's `clara_authenticated`
+half** (the one check no rig could ever answer) read `current_user=postgres`, not a superuser, but
+`clara_authenticated exists=true MEMBER=true USAGE=true` alongside `clara_fn_owner`'s already-known
+membership, so hosted's migrating role can become both roles this wave asks for (`reads-pre.log`).
+**The web rollback lever's own pre-window dry-redeploy of `3089d906-…@100%` is not captured as a
+separate log among this window's artifacts**; `web-promote.log`'s pre-promote listing (`Version(s):
+(100%) 3089d906-5bae-48cb-9666-72dff5aa8ef4`, tag `refresh-061a6992`) is the only confirmation
+available, taken at step 8 rather than at gate 0a. Step 1's `fly auth whoami` is likewise not
+captured as its own log; every fly call across this window (`probe-create.log`, `step7.log`,
+`web-promote.log`) succeeded under one session and `step7.log` reads exactly one machine before and
+after.
 
-**Step 1.**
+**Step 1.** Not separately logged this window (see Gates 0a).
 
-**Step 2.**
+**Step 2.** Probe `8917edb6625118` created on `refresh-061a6992`
+(`registry.fly.io/clara-runtime:refresh-061a6992@sha256:11f5fb843d6bb695a9b010c09ab413725200dccbb86bff6056922b4b37f59975`,
+265 MB), state `created` then started (`probe-create.log`).
 
-**Step 3, pre-window reads.**
+**Step 3, pre-window reads (14:57:30Z to 14:57:55Z, `reads-wS.mjs --prod --baseline
+scratchpad/wS/fp-wS-hosted.json`).** Server `db=postgres port=5432`, PostgreSQL 17.6,
+`en_US.UTF-8`. Ledger **312 / `0323_trade_invoice_probe_self_exclusion`**, drift gate 312/312,
+pending set exactly the 25 files above the frontier, 0 PARSE GAP; the script wrote
+`ceremony-wS/reads-wS.state.json` for `--post` to re-derive the arithmetic. Estate fingerprint vs the
+rig baseline: **11365 keys compared, 11349 equal, 16 env lines**, all the same role-level
+Supabase-managed facts waves 2 to 4 and the cut met (no seventeenth). **Body-pin ledger: 145 of 145
+measurable pins at a value their own file admits, 0 GAP**; 19 pins CHAIN-INTERNAL (an earlier pending
+file produces the body), 11 NEWBORN; 11 of the 145 are BIMODAL and 7 are measured under the
+`sha256(prosrc::bytea)` recipe (0345, 0346) rather than `convert_to(...,'UTF8')`, both recipes agreeing
+on every body read this window (no backslash hazard hit). The thirteen hand checks: **all ok**,
+including **D-WAVE-MINTED-NAMES** (29 new names, 1 recut blind: `_prepayment_plan_core`),
+**D-CAPABILITY-REGISTRY** (live `registry_version` 6 across 240 rows, 12 `payroll_summary`, both
+below 0342's and 0343's stamps of 7 and 8), **D-RATE-WALL-TRIGGERS** (both append-only triggers `[O]`,
+row counts `clara.invite_preview_attempts=1`, `clara.confirmation_attempts=4`), **D-WAKE-ALLOWLIST**
+(none of the 8 rows present; allowlist would go 106 → 114), **D-MACHINE-LANE-GRANTS** (21 `clara%`
+roles present, none of the 13 targets already holds the grant it is about to receive), and
+**D-SPLICE-ANCHORS** (all 5 anchors matched). The body census: 0 non-terminal `workflow_runs`, 0
+stranded, no successor body introduced (this wave moves no pin). Quiescence census: no F10 holder, no
+lock on any of the nineteen watched relations, the `statement_facts running` row the same known orphan
+since 2026-09-19, 0 non-terminal `accounting_work`. **Verdict CLEAN.**
 
-**Step 3f, backup.**
+**Step 3f, backup (14:57:55Z to 14:59:02Z).** Full dump
+`packages/db/backups/clara-clara-graphile-worker-workflow-workflow-drizzle-2026-09-25T14-58-04-276Z.sql`
+= **221,258,058 bytes**, plus globals
+`clara-globals-2026-09-25T14-59-01-185Z.sql` (byte count not printed by this wrapper, consistent with
+every prior wave's own record). Run under WSL's own node, through the pooler CA-path workaround.
 
-**Steps 4 and 5, before the window.**
+**Steps 4 and 5, before the window.** Runtime image
+`registry.fly.io/clara-runtime:refresh-322fdf29` =
+`sha256:20ab8c8352fd4372f1c8a6f50f2f163f742e92c65c7fa6dc1f227435a608344f` (265 MB), built 14:55:54Z to
+14:58:27Z from a detached checkout at RELEASE_SHA (`prep.log`, `image-build.log`). The build log
+carries three benign `ERROR failed to read input source map` lines from third-party
+`@ai-sdk/openai`/`@ai-sdk/gateway`/`@ai-sdk/provider-utils` packages missing their own `.js.map`
+files; the build still exited 0 and pushed the manifest, so this reads as pre-existing dependency
+noise rather than a build defect. Web Worker version `fa2c6c0b-474c-40dc-9f6e-5064a2488a47`, tag
+`refresh-322fdf29`, built at `HEAD=322fdf29105c76132ec874dd70a7d3e24c5453e4`, `porcelain=[]`, uploaded
+14:57:40Z (`web-build.log`, `web-promote.log`'s own `Created:` stamp), not promoted.
 
-**Step 6, the window.**
+**Step 6, the window.** 6a: `machine stop 48ee715b763048` 14:59:17Z, `stopping` 14:59:20Z, `stopped`
+14:59:25Z. 6b: census through the probe (14:59:25Z, `census-6b.log`): **CLEAN**: no F10 holder, no
+lock on any of the nineteen watched relations, 0 non-terminal `workflow_runs`, the
+`document_processing_tasks` `statement_facts running` row the same known orphan, 12 idle
+`clara_runtime_login` sessions. 6c: `migrate.mjs` through the probe DSN, 14:59:31Z to 15:01:22Z
+(1 min 51 s): **`migrate: 25 new migration(s) applied · 337 total`**, all 25 files on their FIRST-APPLY
+branch, every prestate and tail notice OK, no CLR, no lock wait, no `55P03`, no `42501`, no `22P02`.
+The notices worth naming: 0330 to 0334 (L1) all FIRST APPLY with `_authority_ref_refusal`
+byte-identical to its #977 pre-image; 0338 (L2) 3 FIRST/0 REDO, `_obo_plan_core` explicitly
+`FIRST(0330/#1051)`, confirming the cross-lane chain; 0341's `clara_authenticated` tail applied
+cleanly, confirming Step 3's D-ROLE-REACH reading held live; 0344 (L5) `revise_document_fact` FIRST
+from its 0321 pre-image; 0347 (#1098) planted **0 tin item(s)** (0 committed firm-scope plans
+existed); 0352 (L8, #1136) 17 row kind(s) each projected once, matching lane L4's seventeenth row
+kind; 0360 (L5's fix round) both bimodal pins spliced clean
+(`_payroll_posting_verdict` `378086068b… → 4c350623e4…`, `revise_document_fact` `4b9a264d57… →
+279e4b818c…`); 0361 4 FIRST/0 REDO. 6d: ledger **337 / `0361_reservation_release_advice`**: branch
+(ii), drive forward.
 
-**Post reads.**
+**Post reads (15:01:22Z to 15:01:33Z, `reads-wS.mjs --post --prod --baseline
+scratchpad/wS/fp-wS-upg.json`).** Ledger 312 + 25 = 337 at 0361, all 25 new rows at their file
+checksum, drift gate 337/337 clean. Fingerprint vs the UPGRADED baseline: **11466 keys, 11450 equal,
+16 env lines** (same set, nothing else). Section (f), read through the probe while the machine was
+still stopped: the two new relations (`firm_standing_instructions`, `payroll_completeness_answers`)
+present, RLS enabled AND forced, 0 rows each; the 8 wake-allowlist rows present, allowlist now 114;
+the 12 EXECUTE grants and 1 SELECT grant each at exactly the ACL the runbook specified (twin =
+`{clara_fn_owner, clara_agent_ro}` or `{clara_fn_owner, clara_runtime}`, core = `{clara_fn_owner}`
+alone); L1's authority wall at one predicate, `_assert_plan_authority` reachable by nobody
+(`false | true`); L2's widened CHECK reading `ANY (ARRAY['explicit_instruction',
+'standing_instruction'])` with 0 live plans outside it; L3's claim validator and work reads at their
+post-images; L4's registry at `registry_version 8` across 240 rows (6 `stored_only` / 6 `supported`
+payroll pairs), high-water record `8 | 1 | 240` consistent; L7's two prune verbs SECURITY DEFINER,
+`lock_timeout=3s`, granted to `clara_runtime` alone; L8's 49 signatures all at their expected owner
+and posture, the 8 model-lane twins each carrying `clara_agent_ro` and nothing beyond, and **no
+`__t1136_`/`__t1137_` scaffolding survives** (0 rows). **One read failed rather than answered: L5's
+knowledge-key/agent-read query (#1090, #1092) returned `42703` (`undefined_column`)**: the script's
+own SQL references `clara.knowledge_keys.retired_at`, a column that does not exist on that relation,
+so the whole combined read aborted and printed the Postgres error code instead of a count. The
+correct knowledge-keys figure is recoverable from the separate reference-count read below (15, up
+from 14) and from 0345's own migrate notice ("the catalog now holds 15 keys"), but the runbook's own
+promise to have this "counted" in section (f) is unmet as written; `reads-wS.mjs` needs a fix (drop
+`retired_at` from that query, or add the column if one was intended) before its next use. Body
+census and quiescence census: unchanged from pre-window (0 non-terminal, 0 stranded, same orphan row);
+runtime sessions read `(none)` because the machine was still stopped at read time. **Verdict CLEAN.**
 
-**Step 7.**
+**Step 7.** Probe destroyed 15:01:50Z (`machines: 1` after). `fly deploy --image …@sha256:20ab8c83…`
+15:01:55Z to 15:02:39Z (reached `stopped`); `machine start` 15:02:40Z; `/ready` 200 at 15:03:00Z.
+**Outage: 14:59:17Z to 15:03:00Z, 3 min 43 s** (14:59:25Z stopped to 15:03:00Z ready, 3 min 35 s of
+that without a runtime). Boot line: `serving git_sha=322fdf29105c76132ec874dd70a7d3e24c5453e4
+frontier=0361_reservation_release_advice(337) bodies=60 pins closeExample=closeExampleV1
+chatTurn=chatTurn_v22 claraWork=claraWork_v6 documentIngest=documentIngest_v2
+invoiceFacts=invoiceFacts_v1 statementFacts=statementFacts_v4 witnessFacts=witnessFacts_v3
+payrollFacts=payrollFacts_v1 agreementFacts=agreementFacts_v1 autoDraft=autoDraft_v10 …`; **the log
+capture itself cuts off after ten of the fourteen pins** (`step7.log`'s boot line is 403 characters
+and ends mid-list). The four missing from the capture (`firmInterview`, `clientOnboarding`,
+`bankAgent`, `closePrep`) are not independently confirmed by this line, but both `reads-pre.log` and
+`reads-post.log` print the identical, complete 14-pin string derived from the same unchanged
+`registry.ts`, which is the corroboration available. **`frontier` MOVED and `bodies` DID NOT**
+(`bodies=60`, unchanged); `stranded bodies n=0` printed BEFORE `durable world started pid=644`; SIX
+`clara-work/v1..v6` bundle banners, v6 digest
+`e716d9b046d60052b579d2b6a4f69ce72407393b4ff259a391e479d8f2fca0a5` (matches the merger's measured
+digest); `CONTROL listening`; `LEADER acquired`. `/ready` pools: `runtime`, `read`, `write`,
+`freeform`, `stripe_webhook`, `auth_wall`, `invite_preview` all `ok:true`; `bank` skipped
+(`dsn_not_configured`, expected).
 
-**Step 8.**
+**Step 8.** `wrangler versions deploy fa2c6c0b-…@100%` 15:03:31Z to 15:03:38Z (previous
+`3089d906-5bae-48cb-9666-72dff5aa8ef4`, tag `refresh-061a6992`). Signed-out smoke: `/login`,
+`/favicon.ico`, `/icon.png` 200; `/pending`, `/api/build-info`, `/checkout/cancel` 307 to
+`/login?next=…`; `/settings/registrations`, `/admin/registrations` 307 to `/operator`; cross-origin
+POST `/auth/confirm/resend` 403; runtime `/ready` 200, **exact match to the expected roster**.
+Signed-in per-lane walks: **NOT done in this window** (no operator browser session captured among
+this window's logs); the owner's next check is the lane table in section 8 of the draft, with L1's
+three rows, L2's two, L3's two and L7's checklist row drivable without any client upload.
 
-**Step 9, rollback preflight demonstration.**
+**Step 9, rollback preflight demonstration (second probe `e8207e3b226568` on `refresh-061a6992`,
+bundle streamed over `ssh console`).** Probe created 15:04:10Z; bundle streamed, 11,754,677 bytes,
+sha256 `1ded5130a87a06e09f49fe495c577722caae75e5f43de935120ec3cfa4d2b37b` verified equal on both sides
+(the probe's own file and the streamed copy). Run through the **live machine's DSN**, per the
+runbook. **Gate (a)** (`FRONTIER_RULES` body rules) and **gate (b)** (door-contract rules): both
+satisfied: `clara.schema_migrations frontier: 0361_reservation_release_advice`, rules checked
+`0195_work_egress_purpose_and_execution_trace`, `0254_intake_refusal_record`,
+`0279_fa_closed_year_arrears`, contracts declared `fa_parked_run_v1`, `intake_refusal_record_v1`,
+"the target satisfies every rule the applied schema carries." **Gate (c)** (stranded-body census):
+hosted read **0 non-terminal workflow runs across 0 names** at this moment, a lighter reading than
+gate C's synthetic 3-across-3 rehearsal quoted in the draft, but the verdict is the same and for the
+same reason: `refresh-061a6992` exports the identical 60-body roster, so the census is vacuously
+satisfied either way. **Verdict ALLOWED at 15:04:10Z-15:05:08Z** (`rollback-preflight.log`,
+`bba79km95.output`, byte-for-byte matching output). Probe destroyed 15:05:08Z, one machine left.
+Consistent with the draft's own conclusion: this snapshot does not degrade with time, because no pin
+moves and no successor body exists.
 
-**Step 10.**
+**Step 10.** Covered by the post reads above (15:01:22Z-15:01:33Z, machine still stopped, DSN via the
+probe): ledger 312 + 25 = 337 at 0361, drift gate over all 337 rows, fingerprint vs the UPGRADED
+baseline unchanged at 16 env lines. **The reference counts that moved**: `clara.wake_fn_allowlist`
+106 → **114** (the 8 rows named in the draft, all `interactive`); `clara.trigger_taxonomy` 156 →
+**157** (`document.payroll_completeness_answered`); `clara.knowledge_keys` 14 → **15** (0345's one
+`depreciation_policy` row). **The draft's own "reference counts that MOVE" table omitted this
+relation, even though L5's own prose promised to count it**; add it to that table before this
+runbook's next re-derivation. `clara.onboarding_plan_items` unchanged at 29 (0 committed firm-scope
+plans existed, so 0347's backfill wrote nothing, confirmed twice, pre-window and again in section
+(f)'s dedicated L7 read: `0 | 0 | 0`); `clara.document_capabilities` unchanged at 240 rows, every row
+rewritten twice (`registry_version` 6 → 7 → 8); the two new relations present and empty.
+**One pair of counts moved that the draft did not anticipate and this record cannot explain**:
+`clara.confirmation_attempts` read 4 pre-window and **0** post-migrate; `clara.invite_preview_attempts`
+read 1 pre-window and **0** post-migrate. Both relations carry append-only AND no-truncate triggers
+(`t_confirmation_attempts_append_only`, `t_confirmation_attempts_no_truncate`,
+`t_invite_preview_attempts_append_only`, `t_invite_preview_attempts_no_truncate`, all `[O]`/enabled
+in both reads), and 0348 only builds indexes and installs prune verbs in this window; it calls
+neither of them. This is recorded as an open finding for the owner rather than diagnosed here.
+The eight lane questions (L1's one-predicate wall, L2's two relations and two doors, L3's claim
+validator and work reads, L4's registry and witness, L5's correcting door (its own knowledge-key
+half unmeasured per the 42703 finding above), L7's backfill and retention verbs, L8's twins and cores)
+all read exactly as expected in section (f) of `reads-post.log`, except that one gap. Quiescence
+census re-read clean.
 
-**Step 11.**
+**Step 11.** No step 11a in this ceremony: `frozen-workflows.json` reads 347 entries, 0 still
+UNLOCKED, confirmed identically at plan-time, pre-window and post-window (`prep.log`, `reads-pre.log`,
+`reads-post.log`); this wave adds no manifest entry, so there is nothing to lock. Tickets: see
+`reports/waveS-closures.md`.
 
-**Deviations from the draft.**
+**Deviations from the draft.** The migrate ran in 1 min 51 s for 25 files, close to wave 4's 1 min
+33 s for 21 and the cut's 22 s for 3, proportionate to file count. Three findings the draft could not
+have anticipated: (1) the post-migrate section (f) read for L5's knowledge-key/agent-read question
+(#1090, #1092) errored `42703 undefined_column` on a `retired_at` column that does not exist on
+`clara.knowledge_keys`, so that question is unmeasured as written even though the correct count (15)
+is recoverable from elsewhere in the same read; (2) `clara.confirmation_attempts` and
+`clara.invite_preview_attempts` read 4 and 1 rows before the window and 0 and 0 after, on two
+append-only, no-truncate-triggered tables this release does not itself write to, an unexplained drop
+flagged for the owner rather than diagnosed; (3) `step7.log`'s own boot-line capture truncates after
+ten of the fourteen pins (a capture-length artefact, not a boot defect: `bodies=60` and the ten
+visible pins are unmoved, and the full 14-pin string is corroborated identically by both the pre- and
+post-window reads of the unchanged `registry.ts`). Everything else read exactly as the draft
+predicted: the ledger arithmetic (`312 + 25 = 337`), the 0338 constraint widening (0 rows affected),
+the 0347 backfill (0 rows, 0 committed firm-scope plans), the D-ROLE-REACH `clara_authenticated`
+reading (both memberships true), the frozen-manifest reading (347/0 unchanged, no step 11a), and
+step 9's rollback preflight (ALLOWED, matching the draft's own inverted expectation from the cut).
+The one thing genuinely not done in the window, disclosed rather than hidden: step 8's signed-in
+per-lane walks, which need the owner's own browser session and are the owner's next check.

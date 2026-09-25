@@ -176,3 +176,22 @@ Seven code lanes on the wave-4 lane clusters, each database rebuilt from scratch
 | spare | `clara-wt/636` | 55742 | `clara_l02` | 3510 / 3511 / 3512 | `riders/wS-spare-636` |
 
 Windows cannot reach TCP 55772 to 55871 today (a Hyper-V or WSL NAT exclusion range), so every new cluster takes a port below 55772: rigw4 55700, rigw4h 55701, rigw4c 55702, the cut gate's disposable rigcut 55706, the fix workers' disposable clusters 55704, 55705, 55707. rigw2, rigw3 and rigw3h were dropped on 2026-09-25 after the wave-4 release.
+
+## Hosted (2026-09-25)
+
+Hosted is released to the sweep wave: database **337 files / head `0361_reservation_release_advice`**,
+runtime **`refresh-322fdf29`** =
+`registry.fly.io/clara-runtime@sha256:20ab8c8352fd4372f1c8a6f50f2f163f742e92c65c7fa6dc1f227435a608344f`,
+web **`fa2c6c0b-474c-40dc-9f6e-5064a2488a47`** (`RELEASE-WS-RUNBOOK.md` § RESULTS, 2026-09-25). The
+previous runtime `refresh-061a6992` and previous web `3089d906-5bae-48cb-9666-72dff5aa8ef4` remain
+lawful rollback targets: no frozen body moved this release (`registry.ts` byte-unchanged, `347/0
+UNLOCKED`), and step 9's rollback preflight against `refresh-061a6992` read ALLOWED.
+
+Rig databases as left after the sweep release:
+
+- `clara_w4_hosted` (55701) and `clara_w4_coll` (55702) are now at 337 after gate B's replay.
+- `clara_l02` (55742) is still the pristine 312-file template (unmigrated past the cut phase).
+- `clara_intS` through `clara_intS6` (55742) are the sweep wave's integration replays.
+- `rigsweep` (55707) and `rigsweepc` (55708) were dropped after the sweep gates closed.
+- `clara_fixS` (55750) is the CI-reds fix database.
+- `clara_sweep_e2e` (55701) is gate B's browser copy.
