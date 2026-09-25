@@ -75,6 +75,36 @@ export const LANE_SUFFIXES = {
 /** The flat list of declared suffixes. */
 export const DECLARED_SUFFIXES = Object.values(LANE_SUFFIXES).flat();
 
+/**
+ * THE TWO WITHIN-LANE PAIRS THIS WAVE DOES NOT CLOSE, named one signature at a time.
+ *
+ * The ticket's first desired behaviour is "no two plan-creating bodies share a nested reservation
+ * namespace", and its census "fails on any two that share one". Two pairs are still shared, both
+ * INSIDE one lane: the prepayment lane's `:plan` and the deferred-revenue lane's `:rrplan` are each
+ * derived by the schedule core and by the `replace_…` door. One key spent on
+ * `create_prepayment_schedule` and then on `replace_prepayment_schedule` therefore still collides on
+ * `<key>:plan` and is still answered `clara._reserve_op`'s untyped CLR10 — driven, not inferred
+ * (`waveK-lane02-review-adversarial.json` ADV-01). `CLOSING-PLAN.md` scopes #1150 to "the remaining
+ * nested `:plan` derivations on the accrual and tenancy doors", so closing them here would recut two
+ * more bodies and widen the ticket.
+ *
+ * They are therefore a ROSTER rather than a silence: `partitionProblems` tolerates exactly these
+ * bodies on exactly these suffixes, and a THIRD deriver — or any body reaching for a suffix no pair
+ * names — fails by name. The day the follow-up consolidates a pair, the entry must DROP: a roster
+ * body that no longer derives its suffix is itself a problem, the same discipline `LANE_SUFFIXES`
+ * carries for a suffix that has lost every deriver.
+ */
+export const ACKNOWLEDGED_SHARED_DERIVERS = new Map([
+  [":plan", [
+    "clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)",
+    "clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text)",
+  ]],
+  [":rrplan", [
+    "clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)",
+    "clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)",
+  ]],
+]);
+
 /** The lane each declared suffix belongs to. */
 export const LANE_OF_SUFFIX = new Map(
   Object.entries(LANE_SUFFIXES).flatMap(([lane, xs]) => xs.map((x) => [x, lane])));
@@ -116,21 +146,35 @@ function maskSql(src) {
   return out.join("");
 }
 
-/** The name of the call whose argument list encloses the offset `at`, or null. */
-function enclosingCall(masked, at) {
+/**
+ * The names of the calls whose argument lists enclose the offset `at`, INNERMOST FIRST.
+ *
+ * Outwards rather than one level, because a derivation is no less handed to a plan door for being
+ * wrapped on the way: `clara.create_accounting_plan(…, coalesce(p_op_key || ':plan', 'x'))` reserves
+ * `<key>:plan` at that door exactly as the plain form does, and a reader that stopped at `coalesce`
+ * dropped the row in silence (`waveK-lane02-review-adversarial.json` ADV-02, driven).
+ */
+function enclosingCalls(masked, at) {
+  const names = [];
   let depth = 0;
   for (let i = at - 1; i >= 0; i -= 1) {
     const c = masked[i];
+    // A `;` at depth 0 is the end of the PREVIOUS statement: no argument list reaches across it,
+    // so nothing further left encloses this derivation. (Literals and comments are already blanked,
+    // so this is the only place a `;` can be.)
+    if (c === ";" && depth === 0) break;
     if (c === ")") depth += 1;
     else if (c === "(") {
       if (depth === 0) {
+        // An unnamed parenthesis is a grouping one — `(p_op_key || ':plan')` — so keep walking out.
         const m = /(?:clara\.)?([a-z_][a-z0-9_]*)\s*$/i.exec(masked.slice(Math.max(0, i - 120), i));
-        return m ? m[1] : null;
+        if (m) names.push(m[1]);
+      } else {
+        depth -= 1;
       }
-      depth -= 1;
     }
   }
-  return null;
+  return names;
 }
 
 /**
@@ -164,8 +208,8 @@ export function derivationsIn(bodies) {
     const re = /p_op_key\s*\|\|\s*'(:[a-z_]+)'/g;
     let m;
     while ((m = re.exec(src)) !== null) {
-      const door = enclosingCall(masked, m.index);
-      if (!door || !PLAN_DOORS.includes(door)) continue;
+      const door = enclosingCalls(masked, m.index).find((name) => PLAN_DOORS.includes(name));
+      if (!door) continue;
       const k = `${m[1]}|${door}|${sig}`;
       if (seen.has(k)) continue;
       seen.add(k);
@@ -178,8 +222,10 @@ export function derivationsIn(bodies) {
 
 /**
  * THE PARTITION, stated once: what is WRONG with a set of derivations, as a list of sentences.
- * Empty means every nested plan reservation in the estate belongs to exactly one lane, so no two
- * lanes can collide on one — which is the whole claim #1150 makes.
+ * Empty means every nested plan reservation in the estate belongs to exactly one lane AND is
+ * derived by exactly one body — except the two within-lane pairs `ACKNOWLEDGED_SHARED_DERIVERS`
+ * names, which are the residual `CLOSING-PLAN.md` scopes out of this wave and which must be listed
+ * body by body to be tolerated at all.
  */
 export function partitionProblems(rows) {
   const problems = [];
@@ -209,6 +255,40 @@ export function partitionProblems(rows) {
       problems.push(
         `${sig} derives nested plan reservations of ${ls.size} lanes (${[...ls].sort().join(", ")}) `
         + "— one body, one lane, or a key spent on both collides on a reservation neither caller names");
+    }
+  }
+  // ONE SUFFIX, ONE BODY — the other half of the ticket's own census sentence. Two bodies on one
+  // suffix collide on a reservation neither caller names just as surely when they sit in the SAME
+  // lane: one key spent at `create_prepayment_schedule` and then at `replace_prepayment_schedule`
+  // is answered `_reserve_op`'s untyped CLR10 today. The two pairs that remain are tolerated only
+  // because they are named body by body, and only while every one of them still derives it.
+  for (const [suffix, sigs] of [...derivers].sort()) {
+    const acknowledged = ACKNOWLEDGED_SHARED_DERIVERS.get(suffix);
+    const actual = [...sigs].sort();
+    if (!acknowledged) {
+      if (actual.length > 1) {
+        problems.push(
+          `${actual.length} bodies derive the nested plan reservation '${suffix}' `
+          + `(${actual.join(", ")}) — one suffix, one body, or a key spent at two of them collides `
+          + "on a reservation neither caller names");
+      }
+      continue;
+    }
+    for (const sig of actual) {
+      if (!acknowledged.includes(sig)) {
+        problems.push(
+          `${sig} joins the acknowledged '${suffix}' pair (${[...acknowledged].sort().join(", ")}) `
+          + "— that namespace is already shared by two bodies and must not gain a third; give this "
+          + "body its own suffix");
+      }
+    }
+    for (const sig of [...acknowledged].sort()) {
+      if (!actual.includes(sig)) {
+        problems.push(
+          `${sig} no longer derives '${suffix}' — the acknowledged pair has been closed, so drop `
+          + "the entry from ACKNOWLEDGED_SHARED_DERIVERS rather than leave it tolerating a sharing "
+          + "that no longer exists");
+      }
     }
   }
   return problems.sort();

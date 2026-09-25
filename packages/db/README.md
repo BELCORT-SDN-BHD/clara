@@ -10531,11 +10531,37 @@ mints no database role. And it leaves the **within-lane** sharing 0336 also left
 `:rrplan`, so one key spent on a lane's create door and again on its replace door still collides
 inside that lane. That is one lane's own namespace rather than two lanes sharing one, which is the
 partition 0336 chose and this file follows; it is recorded as a follow-up rather than swept in.
+The collision is **driven**, not inferred: one key spent on `create_prepayment_schedule` and then on
+`replace_prepayment_schedule` is answered `CLR10 op_key reused with different args` with
+`detail = null` (`waveK-lane02-review-adversarial.json` ADV-01). The two pairs are therefore named
+body by body in `ACKNOWLEDGED_SHARED_DERIVERS` rather than tolerated in silence — see the census
+paragraph below.
 
 **The census is the guard.** `p1150.namespace.census`
 (`tests/plan-reservation-namespace.test.mjs`) discovers every `p_op_key || ':x'` derivation in the
 `clara` schema, works out which call encloses it, keeps the ones handed to a plan door — dropping
 `:approve`, `:match`, `:settle`, `:post`, `:draft`, `:resolve`, `:assess`,
 `:add_client_identifier` and `:file_document_write`, which belong to the bank, payroll, fixed-asset
-and document families — and asserts the partition. No roster of bodies is written down anywhere;
-the only hand-written thing is which lane each suffix belongs to.
+and document families — and asserts the partition. The only hand-written things are which lane each
+suffix belongs to (`LANE_SUFFIXES`) and the two within-lane pairs above
+(`ACKNOWLEDGED_SHARED_DERIVERS`).
+
+**One suffix, one body** is the other half of the same census, and it is a second cell:
+`p1150.namespace.one_suffix_one_body`. The lane partition alone reads clean on two bodies of ONE
+lane sharing a suffix, which is exactly the residual above, so the pairs are listed signature by
+signature and anything else fails by name — a third deriver of `:plan` or `:rrplan`, or a second
+body on any other suffix. The roster is measured against the live catalog in the same cell, and a
+listed body that stops deriving its suffix is itself a problem, so the day the follow-up
+consolidates a pair the cell says which entry to drop. Both directions are shown red against a
+deliberately broken subject inside the cell (a decoy body deriving `':plan'` under
+`create_accounting_plan`, a second decoy on `':tnplan'`, and the live rows with one pair member
+removed).
+
+**What the census can and cannot see.** It reads a derivation written as `p_op_key || ':x'` and
+attributes it to the nearest ENCLOSING plan-door call, walking outwards through wrapper calls
+(`coalesce(p_op_key || ':plan', …)` inside `create_accounting_plan(…)` is attributed to the door, not
+dropped). It still cannot see a key carried through a local variable first
+(`v_key := p_op_key; … v_key || ':plan'`), because both the SQL-side filter and the reader key on the
+parameter name: a clean census means "no deriver written in terms of `p_op_key`", not "no deriver".
+Nothing on the catalog takes that shape today, and the tail assertions of this file pin the six
+bodies it recuts directly rather than through the census.

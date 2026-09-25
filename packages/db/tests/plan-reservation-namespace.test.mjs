@@ -35,7 +35,8 @@ import {
   namespaceScene, accrualLaneIn, tenancyLaneIn, pastSpan,
   createPrepaymentSchedule, createAccrualAdjustment, correctAccrualAdjustment, accrual,
   confirmRentPlan, receiptsUnder, opk1150, caught, detailOf, spendReviseKey,
-  nestedPlanCensus, partitionProblems, LANE_OF_SUFFIX, PLAN_DOORS,
+  nestedPlanCensus, partitionProblems, LANE_OF_SUFFIX, PLAN_DOORS, DECLARED_SUFFIXES,
+  ACKNOWLEDGED_SHARED_DERIVERS,
   callConfirmCore, callRevisionCore, receiptsLike, confirmRentPlanFor, confirmationAuditVia,
   bodyOf, planRow, planCreateAudit, setClientStatus, callOboPlanCore, createPrepaymentScheduleFor,
   basis,
@@ -288,9 +289,13 @@ async (t) => {
   if (unready(t)) return;
 
   const rows = await nestedPlanCensus();
-  assert.ok(rows.length >= 10,
-    `the census found only ${rows.length} nested plan reservations — the instrument, not the estate, `
-    + "is what changed");
+  // A FLOOR THE ESTATE CANNOT LEGITIMATELY FALL THROUGH: every declared suffix must have at least
+  // one deriver (the partition below says so by name), so fewer rows than declared suffixes means
+  // the instrument stopped reading, not that the estate consolidated. A hard `>= 10` would have
+  // reddened on the very within-lane consolidation `ACKNOWLEDGED_SHARED_DERIVERS` is waiting for.
+  assert.ok(rows.length >= DECLARED_SUFFIXES.length,
+    `the census found only ${rows.length} nested plan reservations for ${DECLARED_SUFFIXES.length} `
+    + "declared suffixes — the instrument, not the estate, is what changed");
   assert.deepEqual(partitionProblems(rows), [],
     "the estate's nested plan reservations no longer partition by lane");
 
@@ -338,7 +343,12 @@ async (t) => {
     src: "begin\n  perform clara.create_accounting_plan(p_client, p_op_key || ':plan');\n"
        + "  perform clara.revise_accounting_plan(p_plan, p_op_key || ':acrev');\nend",
   }]);
-  assert.deepEqual(partitionProblems(twoLanes).filter((s) => s.includes("_p1150_decoy_two_lanes")).length, 1,
+  // The decoy reaches for ':plan' and ':acrev', so it trips the one-suffix-one-body rule as well;
+  // the sentence THIS control is about is the LANE one, so it is matched rather than counted.
+  assert.equal(
+    partitionProblems(twoLanes)
+      .filter((s) => s.includes("_p1150_decoy_two_lanes") && s.includes("nested plan reservations of 2 lanes"))
+      .length, 1,
     "the census does not notice a body that derives two lanes' nested reservations");
   const undeclared = await nestedPlanCensus([{
     sig: "clara._p1150_decoy_undeclared(uuid)",
@@ -348,6 +358,106 @@ async (t) => {
     "the census does not notice a suffix no lane declares");
   // …and the decoys really were the only difference: the live estate is still clean.
   assert.deepEqual(partitionProblems(rows), [], "the vacuity control left the census reading dirty");
+});
+
+// ===========================================================================================
+// AC2, THE OTHER HALF — ONE SUFFIX, ONE BODY.
+//
+// The brief asks for a census that "fails on any two [bodies] that share one" suffix, not only on
+// any two LANES. The lane partition above is the weaker statement, and the review drove the gap:
+// one key spent on `create_prepayment_schedule` and then on `replace_prepayment_schedule` still
+// collides on `<key>:plan` and is still answered `clara._reserve_op`'s untyped CLR10 — the exact
+// defect #1150 exists to remove — while `partitionProblems` reads clean, because both bodies are
+// in the prepayment lane.
+//
+// CLOSING-PLAN.md scopes this wave to "the remaining nested `:plan` derivations on the accrual and
+// tenancy doors", so the two WITHIN-LANE pairs are not closed here. They are named instead, one
+// signature at a time, in `ACKNOWLEDGED_SHARED_DERIVERS`: a THIRD deriver of either suffix, or any
+// body reaching for a suffix no pair acknowledges, now fails BY NAME — so the day the follow-up
+// closes the two pairs, the guard the criterion asked for is already the one standing.
+// ===========================================================================================
+
+test("p1150.namespace.one_suffix_one_body — no nested plan reservation is derived by two bodies "
+  + "except the two within-lane pairs this wave names, and a body joining either fails by name",
+async (t) => {
+  if (unready(t)) return;
+
+  const rows = await nestedPlanCensus();
+
+  // 1 · THE ROSTER IS MEASURED, not declared: every acknowledged pair is a pair that really is
+  //     shared on this catalog today, and every suffix shared on this catalog today is one of them.
+  const derivers = new Map();
+  for (const r of rows) {
+    if (!derivers.has(r.suffix)) derivers.set(r.suffix, new Set());
+    derivers.get(r.suffix).add(r.sig);
+  }
+  const sharedLive = [...derivers].filter(([, s]) => s.size > 1).map(([x]) => x).sort();
+  assert.deepEqual(sharedLive, [...ACKNOWLEDGED_SHARED_DERIVERS.keys()].sort(),
+    "the suffixes two bodies share on this catalog are not the ones ACKNOWLEDGED_SHARED_DERIVERS names");
+  for (const [suffix, sigs] of ACKNOWLEDGED_SHARED_DERIVERS) {
+    assert.deepEqual([...derivers.get(suffix)].sort(), [...sigs].sort(),
+      `the acknowledged '${suffix}' pair is not the pair deriving it on this catalog`);
+  }
+  assert.deepEqual(partitionProblems(rows), [],
+    "the acknowledged pairs must be the only sharing the census tolerates");
+
+  // 2 · A THIRD BODY REACHING INTO AN ACKNOWLEDGED PAIR'S SUFFIX — the review's own decoy shape,
+  //     the one the lane partition read clean on: a new deriver of ':plan' under
+  //     create_accounting_plan, which is exactly what the three bodies 0364 moved looked like.
+  const joiner = await nestedPlanCensus([{
+    sig: "clara._p1150_decoy_joins_plan(uuid)",
+    src: `begin
+  perform clara.create_accounting_plan(p_client, p_op_key || ':plan');
+end`,
+  }]);
+  const joinerProblems = partitionProblems(joiner).filter((s) => s.includes("_p1150_decoy_joins_plan"));
+  assert.equal(joinerProblems.length, 1,
+    `a new body deriving ':plan' must fail by name; problems were ${JSON.stringify(partitionProblems(joiner))}`);
+  assert.match(joinerProblems[0], /:plan/,
+    "the refusal must name the suffix the new body reached for");
+
+  // 2b · …AND THE SAME BODY WITH ITS KEY WRAPPED. The instrument must attribute a derivation to
+  //      the plan door that ENCLOSES it, not only to the call that immediately holds it: a deriver
+  //      is no less a deriver for writing `coalesce(p_op_key || ':plan', …)`, and dropping it would
+  //      let the next one in silently.
+  const wrapped = await nestedPlanCensus([{
+    sig: "clara._p1150_decoy_wrapped_plan(uuid)",
+    src: `begin
+  perform clara.create_accounting_plan(p_client, coalesce(p_op_key || ':plan', 'x'));
+end`,
+  }]);
+  assert.deepEqual(
+    wrapped.filter((r) => r.sig.includes("_p1150_decoy_wrapped_plan")),
+    [{ suffix: ":plan", door: "create_accounting_plan",
+      sig: "clara._p1150_decoy_wrapped_plan(uuid)" }],
+    "a derivation wrapped in a scalar call inside a plan door must still be censused, at that door");
+  assert.equal(
+    partitionProblems(wrapped).filter((s) => s.includes("_p1150_decoy_wrapped_plan")).length, 1,
+    "a wrapped deriver of ':plan' must fail by name like a plain one");
+
+  // 3 · TWO BODIES ON A SUFFIX NO PAIR ACKNOWLEDGES — the tenancy lane's own, closed by 0364.
+  const second = await nestedPlanCensus([{
+    sig: "clara._p1150_decoy_second_tnplan(uuid)",
+    src: `begin
+  perform clara.create_accounting_plan(p_client, p_op_key || ':tnplan');
+end`,
+  }]);
+  assert.equal(
+    partitionProblems(second).filter((s) => s.includes("_p1150_decoy_second_tnplan")).length, 1,
+    "a second body deriving ':tnplan' must fail by name");
+
+  // 4 · AND THE OTHER DIRECTION: an acknowledged pair that has been CLOSED must drop from the
+  //     roster rather than sit there granting a permission nothing needs. Pure, so the day the
+  //     follow-up consolidates the prepayment lane this cell says what to edit.
+  const consolidated = rows.filter(
+    (r) => !(r.suffix === ":plan" && r.sig.startsWith("clara.replace_prepayment_schedule")));
+  const closedProblems = partitionProblems(consolidated)
+    .filter((s) => s.includes("replace_prepayment_schedule") && s.includes("ACKNOWLEDGED_SHARED_DERIVERS"));
+  assert.equal(closedProblems.length, 1,
+    `a roster entry whose body no longer derives the suffix must say so; problems were ${JSON.stringify(partitionProblems(consolidated))}`);
+
+  // …and the decoys really were the only difference.
+  assert.deepEqual(partitionProblems(rows), [], "the controls left the census reading dirty");
 });
 
 // ===========================================================================================
