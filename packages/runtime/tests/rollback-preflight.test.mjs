@@ -48,8 +48,10 @@ import * as rig from "./rig.mjs";
 // that a hand-written INSERT here would get wrong, and their own `after` hook removes the sources
 // it registered.
 import { BANK_DUE_TYPE, registerSource, plantHeldWakeTask, plantQueuedClosePrepTask } from "./g1-wake-bodies.fixtures.mjs";
-// #1151 — the same module `intake-admission-e2e.mjs` calls at its own end; proving the wiring here,
-// against real firm-scoped rows, is what the standalone e2e driver cannot cheaply repeat per round.
+// #1151 — the same module `intake-admission-e2e.mjs` calls at its own end. Proving the SCOPED
+// gate here, against real firm-scoped rows on a real estate, is what the standalone e2e driver
+// cannot cheaply repeat per round. The narrowing lives in that module, not in the shipped
+// `lib/rollback-preflight.mjs` this file otherwise exercises (SPEC-K3-03).
 import { waitForQueueDrain } from "./queue-drain.mjs";
 import {
   AGENT_TASK_KIND_CLASSES,
@@ -719,7 +721,7 @@ test("637.pf: #1015 — an explicit ask for the FULL document picture (documentT
   }
 });
 
-test("637.pf: #1151 — a firmIds scope excludes another firm's HELD wake task, and waitForQueueDrain still fails naming THIS leg's own live task, never the excluded one", { skip: SKIP }, async () => {
+test("637.pf: #1151 — a firmIds-scoped waitForQueueDrain drains past another firm's HELD wake task, and still fails naming THIS leg's own live task", { skip: SKIP }, async () => {
   // THE DEFECT `tests/queue-drain.mjs`'s `waitForQueueDrain` exists to fix (#1151, candidates
   // E26/E27; `waveS-lane06-fix.md` / `waveS-lane06-fix-2.md` follow-up 2). `clara_intake_ci` is
   // always built fresh, but a rig CLONE of a used estate carries OTHER firms' client data — and
@@ -728,6 +730,12 @@ test("637.pf: #1151 — a firmIds scope excludes another firm's HELD wake task, 
   // rows are `enabled = false`. No engine a leg's own process runs will EVER clear a row it was
   // never responsible for. Unscoped, this call cannot tell "a stranger's stuck row" from "this
   // leg's own admitted work still live" — it answers both the same way: TIMED OUT.
+  //
+  // THE NARROWING ITSELF LIVES IN `tests/queue-drain.mjs`, NOT IN THIS MODULE'S OWN
+  // `censusUnboundTasks` (SPEC-K3-03: #1151's "Out of scope" line forbids a product code path,
+  // and `lib/rollback-preflight.mjs` is shipped). So this cell drives the GATE and asserts the
+  // answer; `censusUnboundTasks` is read here only as the corroborating "both rows really are
+  // live and unscoped-visible" half, called exactly the way every other caller calls it.
   const stranger = await rig.buildFirm("pf-1151-stranger");
   const { taskId: strangerTaskId, intentId: strangerIntentId } =
     await plantHeldWakeTask({ owner: stranger.owner, client: stranger.client, payload: { bank_account_id: randomUUID() } });
@@ -749,16 +757,8 @@ test("637.pf: #1151 — a firmIds scope excludes another firm's HELD wake task, 
       },
     );
 
-    // SCOPED to "own" alone: the stranger's row is gone from the census entirely, but the leg's own
-    // live task is still there — never FEWER than what this leg is actually responsible for.
-    const scoped = await censusUnboundTasks(query, { firmIds: [own.firm] });
-    assert.ok(!scoped.tasks.some((t) => t.id === strangerTaskId),
-      `firmIds-scoped to the leg's own firm must exclude another firm's held wake row; got ${JSON.stringify(scoped.tasks)}`);
-    assert.ok(scoped.tasks.some((t) => t.id === ownTaskId), "…and must still see the leg's OWN live task");
-    assert.equal(scoped.measured, true, "…and it still says it LOOKED — B1's lesson holds for the firm-narrowed half too");
-
-    // waitForQueueDrain ITSELF, scoped: it still throws, naming THIS leg's own live task and never
-    // the excluded one — the scope narrows WHAT counts, never WHETHER a leg's own live work counts.
+    // SCOPED to "own" alone: the gate still throws, naming THIS leg's own live task and never the
+    // excluded one — the scope narrows WHAT counts, never WHETHER a leg's own live work counts.
     await assert.rejects(
       () => waitForQueueDrain(rigLike, { deadlineMs: 400, firmIds: [own.firm] }),
       (err) => {
@@ -771,12 +771,29 @@ test("637.pf: #1151 — a firmIds scope excludes another firm's HELD wake task, 
 
     // Settle the leg's own task terminal — through its own recovery door in real life, a plain
     // cancel here — and the SAME scoped drain now resolves cleanly, DESPITE the stranger's row
-    // still being held, live, throughout.
+    // still being held, live, throughout. This is the half AC2 names and the half that could not
+    // pass before the narrowing existed.
     await rig.rootQuery("update clara.agent_tasks set status = 'cancelled' where id = $1", [ownTaskId]);
     const result = await waitForQueueDrain(rigLike, { deadlineMs: 3000, firmIds: [own.firm] });
     assert.ok(result.polls >= 1);
     const strangerStillHeld = await rig.rootQuery("select status from clara.agent_tasks where id=$1", [strangerTaskId]);
     assert.equal(strangerStillHeld.rows[0].status, "held", "the stranger's row was never touched by the scoped drain — excluded, not settled");
+
+    // …and `censusUnboundTasks` ITSELF is byte-for-byte the unscoped answer it always was: the
+    // narrowing changed the GATE, never the shipped census this module exports.
+    const after = await censusUnboundTasks(query, {});
+    assert.ok(after.tasks.some((t) => t.id === strangerTaskId),
+      "the shipped census still reports the stranger's row unscoped — #1151 added no scope to it");
+
+    // AN EMPTY firmIds ARRAY IS REFUSED BY NAME rather than answering "drained" over a full
+    // database — a caller that computed its own firms and got none back gets a loud refusal.
+    await assert.rejects(
+      () => waitForQueueDrain(rigLike, { deadlineMs: 400, firmIds: [] }),
+      (err) => {
+        assert.match(err.message, /EMPTY array/);
+        return true;
+      },
+    );
   } finally {
     await rig.rootQuery("update clara.agent_tasks set status = 'cancelled' where id = $1 and status <> 'cancelled'", [ownTaskId]);
     await retireWakeTask(strangerIntentId);

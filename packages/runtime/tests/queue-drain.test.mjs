@@ -129,39 +129,95 @@ test("waitForQueueDrain still resolves cleanly when no run has ever failed — t
   assert.ok(result.polls >= 2, `expected at least 2 polls, got ${result.polls}`);
 });
 
-// #1151 — `firmIds` IS THREADED THROUGH TO THE UNBOUND-TASK CENSUS, entirely at the wiring level:
-// `censusUnboundTasks` itself (the SQL filter, the real defence against another firm's stray row)
-// is proven against a real database in `rollback-preflight.test.mjs`'s own #1151 cell, which this
-// file's own header says is deliberately out of scope here (no database). What THIS file can prove
-// in-memory is narrower and just as load-bearing: that `waitForQueueDrain` actually PASSES its own
-// `opts.firmIds` down as the real `censusUnboundTasks`'s 4th bind parameter, and that omitting the
-// option changes nothing for every existing caller above.
-function paramCapturingRig(agentParamsSink) {
+// ==============================================================================================
+// #1151 — THE FIRM NARROWING, PROVEN BY WHAT THE GATE DOES, not by a bind parameter. The first
+// cut of this fix passed a fourth bind parameter down into the SHIPPED
+// `lib/rollback-preflight.mjs` and asserted on that parameter; the narrowing now lives in
+// `queue-drain.mjs` itself (SPEC-K3-03: #1151 is a test-only ticket), so these cells drive
+// `waitForQueueDrain` and assert the ANSWER — drained or timed out, and which rows the timeout
+// names. A fake rig answers the census queries and the one narrowing statement by SQL text.
+//
+// The scoped fake models a database carrying TWO live agent rows: one belonging to the firm this
+// leg built, one belonging to a stranger firm whose data no engine here will ever clear.
+// ==============================================================================================
+
+const OWN_FIRM = "11111111-1111-1111-1111-111111111111";
+const STRANGER_FIRM = "22222222-2222-2222-2222-222222222222";
+
+/** @param {{rows: Array<{id:string, firm:string}>}} db */
+function twoFirmRig(db) {
+  const narrowingCalls = [];
   return {
+    narrowingCalls,
     rootQuery: async (sql, params) => {
+      // The narrowing statement FIRST: it names agent_tasks too, and the census matcher below
+      // would otherwise swallow it.
+      if (/queue-drain firm scope/.test(sql)) {
+        narrowingCalls.push(params);
+        const [agentIds, , firmIds] = params;
+        const rows = db.rows
+          .filter((r) => agentIds.includes(r.id) && firmIds.includes(r.firm))
+          .map((r) => ({ tbl: "clara.agent_tasks", id: r.id }));
+        return { rows };
+      }
       if (/status = 'failed'/.test(sql)) return { rows: [] };
       if (/workflow_runs/.test(sql)) return { rows: [] };
       if (/agent_tasks/.test(sql)) {
-        agentParamsSink.push(params);
-        return { rows: [] };
+        return { rows: db.rows.map((r) => ({ id: r.id, kind: "wake", work_id: null, status: "held", source_class: null })) };
       }
       return { rows: [] };
     },
   };
 }
 
-test("waitForQueueDrain threads opts.firmIds through to the REAL censusUnboundTasks as its 4th bind parameter", async () => {
-  const seen = [];
-  const firmIds = ["11111111-1111-1111-1111-111111111111"];
-  const result = await waitForQueueDrain(paramCapturingRig(seen), { deadlineMs: 3000, firmIds });
-  assert.equal(result.polls, 1, "a clean (faked) database still needs exactly one poll");
-  assert.ok(seen.length >= 1, "the agent_tasks census ran at least once");
-  assert.deepEqual(seen[0][3], firmIds, "the 4th bind param on the agent_tasks census is exactly the caller's own firmIds");
+test("#1151 waitForQueueDrain scoped to the leg's OWN firms drains past a stranger firm's live row", async () => {
+  // The database carries exactly one live agent row, and it belongs to a firm this leg never
+  // built — the shape a rig clone of a used estate always has. Scoped, that row is not this leg's
+  // to drive, so the gate DRAINS instead of timing out on it.
+  const rig = twoFirmRig({ rows: [{ id: "stranger-task", firm: STRANGER_FIRM }] });
+  const result = await waitForQueueDrain(rig, { deadlineMs: 1500, firmIds: [OWN_FIRM] });
+  assert.ok(result.polls >= 1, "the scoped drain resolved rather than timing out on a row it does not own");
+  assert.ok(rig.narrowingCalls.length >= 1, "the narrowing statement was actually issued");
+  assert.deepEqual(rig.narrowingCalls[0][2], [OWN_FIRM], "…carrying exactly the firms the caller named");
 });
 
-test("waitForQueueDrain's default (no firmIds) leaves the census exactly as unscoped as every existing caller above", async () => {
-  const seen = [];
-  await waitForQueueDrain(paramCapturingRig(seen), { deadlineMs: 3000 });
-  assert.ok(seen.length >= 1, "the agent_tasks census ran at least once");
-  assert.equal(seen[0][3], null, "an omitted firmIds reaches the census as null — SQL's own 'no filter', unchanged from before #1151");
+test("#1151 the SAME database, UNSCOPED, times out naming the stranger's row — the narrowing is what changed the answer", async () => {
+  const rig = twoFirmRig({ rows: [{ id: "stranger-task", firm: STRANGER_FIRM }] });
+  await assert.rejects(
+    () => waitForQueueDrain(rig, { deadlineMs: 400 }),
+    (err) => {
+      assert.match(err.message, /TIMED OUT/);
+      assert.match(err.message, /stranger-task/, "an unscoped drain is held open by a firm it never built");
+      return true;
+    },
+  );
+  assert.equal(rig.narrowingCalls.length, 0,
+    "an omitted firmIds issues NO narrowing statement at all — every existing caller keeps its exact unscoped answer");
 });
+
+test("#1151 a scoped drain still FAILS, naming the leg's OWN live row, and never the excluded one", async () => {
+  const rig = twoFirmRig({ rows: [{ id: "own-task", firm: OWN_FIRM }, { id: "stranger-task", firm: STRANGER_FIRM }] });
+  await assert.rejects(
+    () => waitForQueueDrain(rig, { deadlineMs: 400, firmIds: [OWN_FIRM] }),
+    (err) => {
+      assert.match(err.message, /TIMED OUT/);
+      assert.match(err.message, /own-task/, "names THIS leg's own live task");
+      assert.doesNotMatch(err.message, /stranger-task/, "never blocked by, and never blaming, a firm this scope excluded");
+      return true;
+    },
+  );
+});
+
+test("#1151 an EMPTY firmIds array is refused BY NAME, never silently answered 'drained'", async () => {
+  const rig = twoFirmRig({ rows: [{ id: "own-task", firm: OWN_FIRM }] });
+  await assert.rejects(
+    () => waitForQueueDrain(rig, { deadlineMs: 400, firmIds: [] }),
+    (err) => {
+      assert.match(err.message, /EMPTY array/);
+      assert.doesNotMatch(err.message, /TIMED OUT/, "refused before any poll, not after a wait");
+      return true;
+    },
+  );
+  assert.equal(rig.narrowingCalls.length, 0, "nothing was asked of the database at all");
+});
+

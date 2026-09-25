@@ -98,25 +98,78 @@ async function censusFailedRuns(query) {
 }
 
 /**
- * #1151 — `firmIds`, SO A CALLER CAN NAME ITS OWN FIRMS. The header above already says why this
- * call must be the LAST thing a leg does with its own still-running engine; what it did not carry
- * is that on any database that already holds OTHER firms' client data (never true of a freshly
- * built `clara_intake_ci`, always true of a rig clone of a used estate), that other data can mint
- * its own live `clara.agent_tasks` rows — most measurably `held` wake tasks born from the
- * estate's OWN compliance/lint transitions while both `clara.wake_engine_sources` rows are
- * disabled (#1044's follow-up 2; `waveS-lane06-fix.md` / `-fix-2.md`) — that no engine this leg's
- * process runs will EVER clear, because they were never this leg's to drive. Unscoped, this call
- * cannot tell "the estate has unrelated live rows" from "this leg's own admitted work is still
- * live", and answers both the same way: TIMED OUT. Naming `firmIds` (the firm(s) this leg itself
- * built, e.g. `rig.buildFirm(...)`'s own `firm`) answers only the first question — every row this
- * leg's own engine is actually responsible for draining, and nothing a stranger's data left lying
- * on the same cluster. Omitted (the default), the census is exactly as unscoped as it always was:
- * this is a narrowing an explicit caller opts into, never a change to an existing caller's answer.
+ * #1151 — THE FIRM NARROWING, AND WHY IT LIVES IN THIS TEST MODULE RATHER THAN IN
+ * `lib/rollback-preflight.mjs`. #1151's "Out of scope" line is explicit — "Any migration, any
+ * door, any product code path... both are cell gaps" — and its Key interfaces name
+ * `tests/queue-drain.mjs`'s own `waitForQueueDrain(rig, opts)` as the seam that needs the scope.
+ * `lib/rollback-preflight.mjs` is SHIPPED (imported by `lib/runtime-contracts.mjs` and
+ * `scripts/rollback-preflight.mjs`, and present in `.output/server/index.mjs`), so the first cut
+ * of this fix — a fourth bind parameter on `censusUnboundTasks` — was product code changed by a
+ * test-only ticket (the closing wave's spec review, SPEC-K3-03). The narrowing is therefore done
+ * HERE, over the census's own answer: `censusUnboundTasks` is called exactly as every other
+ * caller calls it, byte for byte, and the rows it reports are then asked — in one statement —
+ * which of them belong to the firms this leg itself built.
+ *
+ * WHY A NARROWING IS NEEDED AT ALL. On any database that already holds OTHER firms' client data
+ * (never true of a freshly built `clara_intake_ci`, always true of a rig clone of a used estate),
+ * that other data can mint its own live `clara.agent_tasks` rows — most measurably `held` wake
+ * tasks born from the estate's OWN compliance/lint transitions while both
+ * `clara.wake_engine_sources` rows are disabled (#1044's follow-up 2; `waveS-lane06-fix.md` /
+ * `-fix-2.md`) — that no engine this leg's process runs will EVER clear, because they were never
+ * this leg's to drive. Unscoped, this call cannot tell "the estate has unrelated live rows" from
+ * "this leg's own admitted work is still live", and answers both the same way: TIMED OUT.
+ *
+ * AN OMITTED `firmIds` CHANGES NOTHING: the narrowing statement is not issued at all, and every
+ * existing caller keeps the exact unscoped answer it has always had. An EMPTY ARRAY is refused by
+ * name rather than silently meaning "nothing is live" — `firm_id = any` of an empty array matches
+ * no row, so a caller that computed its firms and got an empty list would otherwise see a drain
+ * that reports drained with every table full, which is the very failure mode #1151 exists to
+ * remove.
+ *
  * `censusNonTerminalRuns`/`censusFailedRuns` (`workflow.workflow_runs`) are deliberately NOT
- * scoped here — nothing in this ticket's own measurement named them, and a database this call
- * runs against has never had a body run against it before THIS leg's own process started one
- * (`clara_intake_ci` is always built fresh; a rig clone carries agent_tasks / document_processing_
- * tasks residue from an estate that was seeded, never actually WORKED by a live engine).
+ * narrowed — nothing in this ticket's own measurement named them, and a database this call runs
+ * against has never had a body run against it before THIS leg's own process started one
+ * (`clara_intake_ci` is always built fresh; a rig clone carries agent_tasks /
+ * document_processing_tasks residue from an estate that was seeded, never actually WORKED by a
+ * live engine).
+ *
+ * @param {(sql:string, params?:unknown[]) => Promise<{rows:Array<Record<string, unknown>>}>} query
+ * @param {ReadonlyArray<{table:string, id:string}>} tasks `censusUnboundTasks`'s own rows
+ * @param {ReadonlyArray<string>} firmIds
+ */
+async function narrowTasksToFirms(query, tasks, firmIds) {
+  if (tasks.length === 0) return tasks;
+  const agentIds = tasks.filter((t) => t.table === "clara.agent_tasks").map((t) => t.id);
+  const docIds = tasks.filter((t) => t.table === "clara.document_processing_tasks").map((t) => t.id);
+  // FAIL CLOSED on a table this module does not know how to scope: a future third census table
+  // must be narrowed deliberately, never silently kept (which would re-open the stranger's-row
+  // timeout) or silently dropped (which would hide this leg's OWN live work).
+  const unknown = tasks.filter(
+    (t) => t.table !== "clara.agent_tasks" && t.table !== "clara.document_processing_tasks");
+  if (unknown.length > 0) {
+    throw new Error(
+      `waitForQueueDrain: censusUnboundTasks reported a table this firm narrowing does not know how `
+        + `to scope (${JSON.stringify([...new Set(unknown.map((t) => t.table))])}) — narrow it here `
+        + `deliberately rather than letting a firmIds-scoped drain guess.`,
+    );
+  }
+  const r = await query(
+    `select 'clara.agent_tasks' as tbl, t.id::text as id   -- queue-drain firm scope
+       from clara.agent_tasks t
+      where t.id = any($1::uuid[]) and t.firm_id = any($3::uuid[])
+      union all
+     select 'clara.document_processing_tasks' as tbl, d.id::text as id
+       from clara.document_processing_tasks d
+      where d.id = any($2::uuid[]) and d.firm_id = any($3::uuid[])`,
+    [agentIds, docIds, [...firmIds]],
+  );
+  const keep = new Set(r.rows.map((row) => `${String(row.tbl)}:${String(row.id)}`));
+  return tasks.filter((t) => keep.has(`${t.table}:${t.id}`));
+}
+
+/**
+ * The queue-drain gate itself. `firmIds` narrows the UNBOUND-TASK census to the firms this leg
+ * built (see `narrowTasksToFirms` above); omitted, nothing changes for an existing caller.
  * @param {{rootQuery:(sql:string, params?:unknown[]) => Promise<{rows:Array<Record<string, unknown>>}>}} rig
  * @param {{deadlineMs?:number, log?:(m:string)=>void, firmIds?:ReadonlyArray<string>|null}} [opts]
  * @returns {Promise<{waitedMs:number, polls:number}>}
@@ -125,6 +178,13 @@ export async function waitForQueueDrain(rig, opts = {}) {
   const deadlineMs = opts.deadlineMs ?? DEFAULT_DEADLINE_MS;
   const log = opts.log ?? (() => {});
   const firmIds = opts.firmIds ?? null;
+  if (firmIds !== null && firmIds.length === 0) {
+    throw new Error(
+      "waitForQueueDrain: firmIds was given as an EMPTY array, which matches no row at all, so this "
+        + "call would report DRAINED with every table full — refused by name rather than silently "
+        + "answered. Omit firmIds for the unscoped census, or name the firms this leg built.",
+    );
+  }
   const query = (sql, params) => rig.rootQuery(sql, params);
   const startedAt = Date.now();
   const end = startedAt + deadlineMs;
@@ -134,11 +194,16 @@ export async function waitForQueueDrain(rig, opts = {}) {
   let failedBaseline = null;
   for (;;) {
     polls += 1;
-    const [runs, unbound, failedNow] = await Promise.all([
+    const [runs, unboundAll, failedNow] = await Promise.all([
       censusNonTerminalRuns(query),
-      censusUnboundTasks(query, { firmIds }),
+      censusUnboundTasks(query),
       censusFailedRuns(query),
     ]);
+    // #1151 — the narrowing rides OVER the census's own answer, so `censusUnboundTasks` is called
+    // exactly as every other caller calls it (see `narrowTasksToFirms` above).
+    const unbound = firmIds === null
+      ? unboundAll
+      : { ...unboundAll, tasks: await narrowTasksToFirms(query, unboundAll.tasks, firmIds) };
     if (failedBaseline === null) {
       failedBaseline = failedNow;
     } else {

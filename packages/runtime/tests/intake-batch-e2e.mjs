@@ -632,12 +632,29 @@ async function main() {
   // chance and reddened this leg once in nine rounds; here it is FORCED, on the one live child the
   // interruption loop below never touches (`live[live.length - 1]`, outside `live.slice(0, half)`),
   // so the census after the belt sweep is proven against the drift every round rather than by luck.
+  //
+  // THE DRIVE AND THE ASSERTION SHARE ONE CONDITION (SPEC-K3-06 / ADV-04). The first cut forced
+  // the drift only `if (spontaneousTask)` and swallowed the settle's own rejection
+  // (`.catch(() => {})`), while the census below asserted on the drift UNCONDITIONALLY: a child
+  // carrying no `current_task_id`, or a settle the door refused, left the belt cancelling that
+  // child normally and reddened the leg with a message blaming the BELT
+  // ("the spontaneous child settled WITHOUT a cancel receipt") rather than naming the real cause.
+  // That is the same diagnosis cost #1151 was filed to remove, so the drive now asserts its own
+  // precondition, lets the settle fail loudly, and proves the child is terminal BEFORE the belt.
+  const TERMINAL_WORK = new Set(["completed", "refused", "failed", "expired", "cancelled"]);
   const spontaneous = live[live.length - 1];
   const spontaneousTask = (await rig.rootQuery(
     "select current_task_id from clara.accounting_work where id=$1", [spontaneous.work_id])).rows[0].current_task_id;
-  if (spontaneousTask) {
-    await settleRun(spontaneousTask, "failed").catch(() => {});
-  }
+  assert.ok(spontaneousTask,
+    `the deliberate drift could not be DRIVEN: live child ${spontaneous.work_id} carries no current_task_id, `
+    + "so there is no run to settle. This is a precondition of the census below, not a belt defect.");
+  await settleRun(spontaneousTask, "failed");
+  const spontaneousAfterSettle = (await rig.rootQuery(
+    "select status from clara.accounting_work where id=$1", [spontaneous.work_id])).rows[0].status;
+  assert.ok(TERMINAL_WORK.has(String(spontaneousAfterSettle)),
+    `the deliberate drift did not take: live child ${spontaneous.work_id} reads `
+    + `${spontaneousAfterSettle} after its own run was settled 'failed', not a terminal status — `
+    + "the census below would then be asserting on a drift that never happened.");
 
   // THE INTERRUPTION: the first half of the fan-out runs, then the process "dies". Each child's
   // cancel is its OWN transaction, so this is exactly the durable state a SIGKILL leaves behind.
@@ -649,6 +666,24 @@ async function main() {
   }
   const midway = await batchState(cBatch);
   assert.equal(midway.state, "cancelling", "the parent is still stopping — nothing is terminal early");
+
+  // #1151 / ADV-05 — THE SNAPSHOT THAT BOUNDS THE TOLERANCE, taken IMMEDIATELY before the belt
+  // call and nowhere earlier. The first cut's census tolerated an UNBOUNDED number of children
+  // "settled on their own", so a belt sweep that cancelled NOTHING
+  // (`{"batchCancelOk":true,"batchCancelSettled":0,"batchCancelChildren":0}` — the exact symptom
+  // the ticket quotes) passed whenever every live child happened to be terminal. What the belt's
+  // own worklist (`clara._intake_batch_live_children`) offers is the children NON-TERMINAL at the
+  // instant it reads, so those — and only those — must carry a cancel receipt afterwards. The
+  // window between this read and the belt's own is one query round trip, against the whole
+  // decision-to-belt span (this leg's own half-fan-out of transactions) the old count was exposed
+  // to and reddened on at 3 of 7.
+  const preBelt = await rig.rootQuery(
+    "select id, status from clara.accounting_work where id = any($1::uuid[])",
+    [live.map((c) => c.work_id)]);
+  const statusBeforeBelt = new Map(preBelt.rows.map((r) => [String(r.id), String(r.status)]));
+  const liveAtBelt = live.filter((c) => !TERMINAL_WORK.has(statusBeforeBelt.get(c.work_id)));
+  assert.ok(!liveAtBelt.some((c) => c.work_id === spontaneous.work_id),
+    "the forced-drift child is terminal before the belt reads, so it is NOT on the worklist the belt owes a receipt for");
 
   // THE RESUME. The belt reads the worklist from the door, re-issues with the STORED decision.
   const beltOut = await withRuntime((c) => reconcileIntakeBatchCancellations(c, { withRuntime }));
@@ -668,10 +703,29 @@ async function main() {
     `select op_key from clara.op_receipts
       where fn='cancel_accounting_work' and op_key like $1`, [`${cKey}:%`]);
   const cancelledWorkIds = new Set(opReceipts.rows.map((r) => String(r.op_key).slice(`${cKey}:`.length)));
+  // NONE DECIDED TWICE — the observable the first cut's `Set` collapsed by construction
+  // (SPEC-K3-05). `clara.op_receipts`'s primary key is `(firm_id, fn, op_key)` and `childCancelKey`
+  // embeds the work id once, so a second row for one child is unreachable BY THE KEY; this line is
+  // the assertion that says so rather than a comment claiming it, and it is the line the deleted
+  // `count(*) == live.length` used to carry.
+  assert.equal(opReceipts.rows.length, cancelledWorkIds.size,
+    `one cancel receipt per child, never two: ${opReceipts.rows.length} receipt rows over `
+    + `${cancelledWorkIds.size} distinct work ids`);
   const liveStatuses = await rig.rootQuery(
     "select id, status from clara.accounting_work where id = any($1::uuid[])",
     [live.map((c) => c.work_id)]);
   const statusByWorkId = new Map(liveStatuses.rows.map((r) => [String(r.id), String(r.status)]));
+  // THE BOUND (ADV-05): every child the belt's worklist actually offered — non-terminal at the
+  // snapshot one query before the sweep — carries a receipt. A belt that cancelled nothing reds
+  // here, whatever the children happened to do afterwards; only a child already terminal when the
+  // belt read is lawfully receipt-less.
+  const owedButMissing = liveAtBelt.filter((child) => !cancelledWorkIds.has(child.work_id));
+  assert.equal(owedButMissing.length, 0,
+    `every child STILL LIVE when the belt read must carry a cancel receipt — `
+    + `${liveAtBelt.length} were live, ${owedButMissing.length} have none: `
+    + `${JSON.stringify(owedButMissing.map((c) => ({ work_id: c.work_id, before: statusBeforeBelt.get(c.work_id), now: statusByWorkId.get(c.work_id) })))}`);
+  // AND THE WIDER NET, unchanged: no live child of the decision is left with NEITHER a receipt
+  // NOR its own terminal settle, whenever it settled.
   const SETTLED_WITHOUT_CANCEL = new Set(["completed", "refused", "failed", "expired"]);
   const unexplained = live.filter((child) =>
     !cancelledWorkIds.has(child.work_id) && !SETTLED_WITHOUT_CANCEL.has(statusByWorkId.get(child.work_id)));
@@ -679,9 +733,11 @@ async function main() {
     `every live child is explained by a cancel receipt or its own terminal settle — unexplained: ` +
     `${JSON.stringify(unexplained.map((c) => ({ work_id: c.work_id, status: statusByWorkId.get(c.work_id) })))}`);
   assert.ok(cancelledWorkIds.has(spontaneous.work_id) === false,
-    "the spontaneous child settled WITHOUT a cancel receipt — the belt correctly never decided it");
-  console.log(`[p636] belt receipt census: ${cancelledWorkIds.size} cancelled by receipt, ` +
-    `${live.length - cancelledWorkIds.size} settled on their own (incl. the forced spontaneous child), 0 unexplained`);
+    "the spontaneous child — proven terminal above BEFORE the belt read — carries no cancel receipt: "
+    + "the belt's worklist correctly never offered it");
+  console.log(`[p636] belt receipt census: ${cancelledWorkIds.size} cancelled by receipt over `
+    + `${opReceipts.rows.length} receipt rows, ${liveAtBelt.length} live when the belt read (all with a receipt), `
+    + `${live.length - cancelledWorkIds.size} settled on their own (incl. the forced spontaneous child), 0 unexplained`);
 
   // Every already-committed child still answers `already_completed` with its receipt id.
   for (const workId of committedIds) {
