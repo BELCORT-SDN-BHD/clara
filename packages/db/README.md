@@ -7325,3 +7325,99 @@ inside a rolled-back transaction against the un-applied lane database, printed i
 notice and passed. Both branches then ran for real — the first apply through `pnpm db:migrate`,
 and the redo through `CLARA_MIGRATION_REDO=0330_plan_authority_wall_predicate` after the tail
 gained its reverse-substitution check.
+
+## 0331 — the accrual lane joins the one authority wall (#1080, riders sweep wave, lane 01)
+
+`0331_accrual_plan_authority_wall.sql` recuts `clara._accrual_plan_core` so that it calls
+`clara._assert_plan_authority` — the single predicate 0330 minted — instead of the hand-written
+authority block and inline `exists` probes it has carried since 0222. It mints no name, changes no
+grant and touches no other rule in that body.
+
+**This one is a behaviour fix, not a fold.** 0330 was a refactor that moved nothing. This file
+closes a live authority gap, and the gap is exactly the one #977 (0250) was written to close
+everywhere:
+
+```
+    -- clara._accrual_plan_core, before 0331
+    select exists (select 1 from clara.agent_tasks t
+                    where t.id = v_ref_id and t.firm_id = p_firm and t.client_id = p_client) into v_ok;
+```
+
+A bare existence test. It never read the named task's own `kind` or `created_by`, so a `wake` task
+(which carries no author at all) and an `autodraft` run (which carries the human it was started
+FOR, without being that human's instruction) both satisfied it. 0250 replaced exactly this probe in
+`clara.sign_depreciation_authority` and `clara.create_accounting_plan`, said in its own header
+(0250:63) that it was leaving this third copy alone, and pinned the surviving probe to exactly this
+one function in its tail (0250:604). 0330 named the same body as the third copy and gave the ticket
+number. This is that ticket.
+
+**Only one of the two accrual entrances was exposed, and it is the machine one.**
+`clara.create_accrual_adjustment` (human, `clara_authenticated`) nests
+`clara.create_accounting_plan`, so it has been behind the shared definition since 0250 and behind
+the shared predicate since 0330. `clara.create_accrual_adjustment_for` (`clara_runtime` only,
+actor taken from an argument because a runtime connection carries no JWT) nests
+`clara._accrual_plan_core`. So the open door was the on-behalf one: a wake task or an autodraft run
+could authorise an accrual adjustment plan on a connection with no human on it. Measured on the
+lane rig before the file was written, the runtime door ADMITTED a `wake` reference and wrote the
+plan, the revision, the occurrence, the accrual and the Work;
+`packages/db/tests/accrual-plan-authority-wall.test.mjs` is the cell that saw it.
+
+**Three things move, and all three are the accrual lane catching up with the estate.**
+
+| what | before 0331 | after 0331 |
+|---|---|---|
+| a `chat_task` naming a wake task or an autodraft run | ADMITTED | CLR10 `authority_ref_not_human_instruction` |
+| a `contract_confirmation` (#949, 0300) | CLR10 `authority_ref_invalid` / `kind` | admitted, resolved by `clara._authority_ref_refusal` under the same firm-and-client ladder |
+| the two sentences | "names an accounting_work or a chat_task"; "the instruction this **accrual** cites does not exist for this client" | the three-kind sentence; "the instruction this **plan** cites does not exist for this client" |
+
+The second row is a **parity fix, not a widening of the estate's authority vocabulary** (which the
+ticket puts out of scope, and which is unchanged at three kinds). The HUMAN accrual entrance has
+admitted a `contract_confirmation` since 0300, because it nests the human plan door; only the
+on-behalf one refused it, because its list was frozen at 0222's two kinds. Nothing new becomes
+authority: `clara.contract_plan_confirmations.confirmed_by` is NOT NULL, and its only two writers
+(`clara.confirm_tenancy_rent_plan`, `clara.confirm_tenancy_rent_plan_revision`) are granted to
+`clara_authenticated` alone, so a runtime connection cannot manufacture one.
+
+The third row changes a sentence a bookkeeper can see. It changes it TOWARDS what the human
+entrance already says: a person configuring an accrual through `clara.create_accrual_adjustment`
+has been told "the instruction this plan cites…" ever since that door started nesting the plan
+door. Every SQLSTATE and every `detail.reason` token is unchanged. What ends is one client getting
+two different sentences for one refusal depending on which entrance ran.
+
+**What is proved, and how.** The recut is static DDL — no `pg_get_functiondef` splice, no `execute`,
+no dynamic SQL of any kind — so **no new entry in `apps/web/tests/firm-scope-db-pins.corpus.ts` is
+owed**; `apps/web/tests/firm-scope-db-pins.test.ts` was run to confirm it. The installed body is the
+LIVE pre-image with exactly one block replaced by one `perform` and the three declarations that
+block alone used (`v_ref_kind`, `v_ref_id`, `v_ok`) dropped with it, and the tail proves that by
+**reverse substitution** (0318's idiom, 0330's own `T.8`): it reads the installed body, puts
+0222/0283's own authority block and those three declarations back, and requires the result to hash
+to the `sha256(prosrc)` the prestate pinned (`31adc6d4…`). That is the mechanical form of the
+ticket's "no change to the accrual plan's other validation rules" — the client rung, both inserts,
+the overlap warning, the preview and the audit row cannot have moved. The tail also re-reads the
+post-image (`89d2ac3a…`), the whole grant posture, `clara._assert_plan_authority` (`60f2c5d1…`) and
+`clara._authority_ref_refusal` (`55c20b20…`) unmoved and ungranted, and four censuses:
+
+* the wall's own sentence now lives in **exactly one** `clara` body, `_assert_plan_authority`;
+* the predicate is called by **exactly three**, `_accrual_plan_core`, `_obo_plan_core`,
+  `create_accounting_plan`;
+* #977's inline chat-lane existence test survives in **zero** — 0250's `T.4f` pinned it at one, and
+  this is the file that took it to none;
+* 0222's own "the instruction this accrual cites" sentence survives in **zero**.
+
+Each census compares against a literal roster built with `order by p.proname`, which is the
+catalog's own C ordering (`proname` is `name`, which never takes a database collation), so it is
+collation-proof by construction.
+
+**Redo-safe by construction (#957).** Every statement is `create or replace function`, `revoke` or
+`comment on`. The prestate is bimodal on the one body this file recuts and unconditional on the two
+definitions it joins, and it asserts STRUCTURALLY (never by sha) that both plan doors already call
+the predicate, so a later file of the same lane is not coupled to 0330's output bytes. The FIRST
+APPLY branch ran for real through `pnpm db:migrate` and printed its notice; the REDO branch was
+then exercised with `CLARA_MIGRATION_REDO=0331_accrual_plan_authority_wall`.
+
+**What it does NOT do.** It does not touch `clara._assert_plan_authority`,
+`clara._authority_ref_refusal`, `clara.create_accounting_plan` or `clara._obo_plan_core`; it does
+not widen or narrow the authority-reference vocabulary; and it does not touch any other accrual
+rule. If a later lane ever needs one plan lane to admit a NARROWER set than the other two, the
+parameter goes on `clara._assert_plan_authority` — there is now exactly one place for it, which is
+the point of 0330 and 0331 together.
