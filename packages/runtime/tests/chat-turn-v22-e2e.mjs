@@ -81,7 +81,6 @@ const serveScript = fileURLToPath(new URL("./chat-turn-v22-serve.mjs", import.me
 const FETCH_TIMEOUT_MS = 15000;
 /** The child's own probe lines, spelled here too — the two files cannot import each other (the
  *  bootstrap boots a server on import), so the literals are duplicated and asserted in both. */
-const DUPLICATE_QUESTION_LINE = "[v22-serve] THE LOOK-ALIKE CAME BACK AS A QUESTION";
 const SPLIT_REFUSED_LINE = "[v22-serve] THE UNCONFIRMED SPLIT WAS REFUSED";
 const CLAIM_ACCEPTED_LINE = "[v22-serve] THE CONFIRMED SPLIT WAS ACCEPTED";
 
@@ -121,7 +120,7 @@ function spawnServe(extra = {}) {
   const child = spawn(process.execPath, [serveScript], { env: childEnv(extra), stdio: ["ignore", "pipe", "pipe"] });
   const state = {
     exited: false, banner: null, serving: null,
-    duplicateQuestion: null, splitRefusal: null, claimAccepted: null,
+    splitRefusal: null, claimAccepted: null,
     stdout: "", stderr: "",
   };
   child.on("exit", () => {
@@ -138,7 +137,6 @@ function spawnServe(extra = {}) {
       if (serving) state.serving = serving[0];
     }
     for (const [marker, field] of [
-      [DUPLICATE_QUESTION_LINE, "duplicateQuestion"],
       [SPLIT_REFUSED_LINE, "splitRefusal"],
       [CLAIM_ACCEPTED_LINE, "claimAccepted"],
     ]) {
@@ -528,16 +526,27 @@ async function main() {
     assert.ok(TASK_TERMINAL.has(await settleTask(firstTask)), "turn one settled before turn two speaks");
     const againSession = await newSession("v22-again");
     const secondTask = await turnIn(againSession, `Record ${INVOICE_CUE}' March bill for RM1,060 including SST.`);
-    const end = Date.now() + 150000;
-    while (Date.now() < end && engine.state.duplicateQuestion === null) await sleep(250);
-    assert.ok(engine.state.duplicateQuestion,
-      `the model SAW a look-alike come back as a question`
-      + `\n--- child stdout (tail) ---\n${engine.state.stdout || "(none)"}`);
-    const asked = engine.state.duplicateQuestion;
-    assert.equal(asked.match_count, 1, "one look-alike, which is what this client actually holds");
-    assert.deepEqual(asked.references, ["ALPHA-2026-0042"], "…named by its own reference");
-    assert.match(String(asked.question), /Record this one anyway, or stop\?/,
-      "and the question asks rather than refuses — the owner's ruling, in the words the model reads");
+    // THE QUESTION IS READ OFF THE TRANSCRIPT, not off a line the scripted model printed, and the
+    // difference IS the fix: `stoppedOnDuplicateQuestionV22` ends the segment on the
+    // `duplicates_found` result, so the model is never called again in the turn that asked and
+    // cannot report anything. What a person sees is the sentence the segment appended, and that is
+    // what this leg reads — which is also what `withDuplicateQuestionTextV22` exists for: stopping
+    // the loop costs the model the step it would have narrated in, and without that text part the
+    // turn would end in silence with nothing to answer. (The serve child keeps the opposite arm as
+    // a wall: if the model IS asked again after a duplicates_found result it exits 97 rather than
+    // pass quietly.)
+    assert.ok(TASK_TERMINAL.has(await settleTask(secondTask)), "the question SETTLES the turn");
+    const askedRows = await rig.rootQuery(
+      `select parts from clara.chat_messages where session_id = $1 and role = 'assistant'
+        order by seq desc limit 1`, [againSession]);
+    const asked = (askedRows.rows[0]?.parts ?? [])
+      .filter((p) => p && p.type === "text").map((p) => String(p.text)).join(" ");
+    assert.match(asked, /Record this one anyway, or stop\?/,
+      "the question asks rather than refuses — the owner's ruling, in the words a person reads");
+    assert.match(asked, /ALPHA-2026-0042/,
+      "…and names the earlier document by its own reference, off the probe's own answer");
+    assert.doesNotMatch(asked, /and \d+ more/,
+      "…exactly ONE look-alike, which is what this client actually holds");
 
     // THE TURN IS OVER, AND NOTHING WAS WRITTEN (ADV-C1-02, the cut's fix round). Before
     // `stoppedOnDuplicateQuestionV22` joined the stop set, the loop continued and ONE model segment
@@ -545,7 +554,6 @@ async function main() {
     // `clara.record_trade_invoice_duplicate_ack` wrote a durable row asserting a person had been
     // warned. The only wall was prose in the prompt. This is that wall, measured: the turn settles
     // with the question on screen, no second invoice, and no acknowledgement.
-    assert.ok(TASK_TERMINAL.has(await settleTask(secondTask)), "the question SETTLES the turn");
     const stillOne = await rig.rootQuery(
       "select count(*)::int n from clara.trade_invoices where client_id = $1", [one.client]);
     assert.equal(stillOne.rows[0].n, 1,
@@ -554,16 +562,6 @@ async function main() {
       "select count(*)::int n from clara.trade_invoice_duplicate_acks where client_id = $1", [one.client]);
     assert.equal(acksAfterQuestion.rows[0].n, 0,
       "…and NO acknowledgement: a row saying a person was warned may not exist before they answered");
-    // AND THE QUESTION REACHED THE PERSON. Stopping the loop costs the model the step it would
-    // have narrated in, so the segment appends the door's own sentence as a text part — without it
-    // the turn would end in silence and there would be nothing to answer.
-    const said = await rig.rootQuery(
-      `select parts from clara.chat_messages where session_id = $1 and role = 'assistant'
-        order by seq desc limit 1`, [againSession]);
-    const saidText = (said.rows[0]?.parts ?? [])
-      .filter((p) => p && p.type === "text").map((p) => String(p.text)).join("\n");
-    assert.match(saidText, /Record this one anyway, or stop\?/,
-      "the question is on the transcript the person reads, not only in a tool result");
     console.log("[v22-e2e] PASS 2a: the look-alike ended the turn — question on the transcript, no invoice, no acknowledgement");
 
     // ---- 2b. THE PERSON COMES BACK AND SAYS GO AHEAD ---------------------

@@ -41,6 +41,31 @@ function chatUsage() {
 }
 
 /** Every text fragment of a prompt, concatenated — the run envelope lives in here verbatim. */
+/**
+ * THE PERSON'S OWN WORDS, and only those. `promptText` below reads EVERY message, the SYSTEM one
+ * included — and the system message carries the client context pack, which names this client's
+ * counterparties. So a cue like "Alpha Supplies" matched on the claim turn too, and the scripted
+ * model recorded an invoice on a turn that asked for a claim. Measured on this rig: the claim leg
+ * entered the invoice branch with `invoice_answers=0` and the turn stopped on a look-alike question
+ * that nobody had asked for.
+ *
+ * ONE ACT PER TURN IS SELECTED BY THE TURN'S OWN WORDS, which is what the parent's comment has
+ * always claimed; this is the function that makes it true.
+ */
+function userText(prompt) {
+  let out = "";
+  for (const message of prompt ?? []) {
+    if (message?.role !== "user") continue;
+    if (typeof message.content === "string") { out += `${message.content}
+`; continue; }
+    for (const part of message.content ?? []) {
+      if (part?.type === "text" && typeof part.text === "string") out += `${part.text}
+`;
+    }
+  }
+  return out;
+}
+
 function promptText(prompt) {
   let out = "";
   for (const message of prompt ?? []) {
@@ -142,10 +167,8 @@ function admittedBasis(text) {
 /** THE PROBES. Each one answers a question only the model can answer, and each is printed as ONE
  *  line the parent parses — the two files cannot import each other (this one boots a server on
  *  import), so the literals are duplicated and asserted in both. */
-const DUPLICATE_QUESTION_LINE = "[v22-serve] THE LOOK-ALIKE CAME BACK AS A QUESTION";
 const SPLIT_REFUSED_LINE = "[v22-serve] THE UNCONFIRMED SPLIT WAS REFUSED";
 const CLAIM_ACCEPTED_LINE = "[v22-serve] THE CONFIRMED SPLIT WAS ACCEPTED";
-let duplicateQuestionReported = false;
 let splitRefusalReported = false;
 let claimAcceptedReported = false;
 
@@ -234,9 +257,30 @@ const model = new MockLanguageModelV4({
 model.doStream = async (options) => {
   const prompt = options?.prompt ?? [];
   const used = toolsUsed(prompt);
-  const asked = promptText(prompt);
+  // THE TURN'S OWN WORDS, never the system message's (see `userText`).
+  const asked = userText(prompt);
   const wantsInvoice = INVOICE_CUE === null || asked.includes(INVOICE_CUE);
   const wantsClaim = CLAIM_CUE === null || asked.includes(CLAIM_CUE);
+
+  // THE PERSON CAME BACK AND SAID GO AHEAD. A turn of its own, after a human message — which is
+  // the only way `record_anyway` can now be set, and the reason the acknowledgement row means
+  // something when a reviewer reads it months later.
+  //
+  // CHECKED BEFORE THE INVOICE CUE, and the order is load-bearing rather than tidy: the go-ahead
+  // turn runs in the SAME session, so the person's own words still include the earlier turn's
+  // "Record Alpha Supplies' March bill" — and without this order the turn would re-enter the plain
+  // recording branch and be asked the same question again forever. Measured: that is exactly what
+  // the first run of this reshaped leg did.
+  if (INVOICE_INPUT !== null && GO_AHEAD_CUE !== null && asked.includes(GO_AHEAD_CUE)
+      && toolOutputs(prompt, "start_trade_invoice_work").length === 0) {
+    console.log("[v22-serve] chat call: the person said go ahead; recording with record_anyway");
+    return {
+      stream: simulateReadableStream({
+        chunks: toolChunks("v22i1", "start_trade_invoice_work", recordAnyway(INVOICE_INPUT)),
+        chunkDelayInMs: 2,
+      }),
+    };
+  }
 
   if (INVOICE_INPUT !== null && wantsInvoice) {
     const invoiceAnswers = toolOutputs(prompt, "start_trade_invoice_work");
@@ -262,40 +306,20 @@ model.doStream = async (options) => {
       };
     }
     const last = invoiceAnswers[invoiceAnswers.length - 1];
-    // THE BRANCH THAT IS THE WHOLE POINT. A look-alike is a QUESTION: the tool wrote nothing and
-    // gave back what this client already holds. The script REPORTS it and says nothing else — the
-    // turn is over, because `stoppedOnDuplicateQuestionV22` ends the segment on that result. A
-    // model that tried to answer here would be answering its own question, which is exactly the
-    // control the cut's fix round added (ADV-C1-02).
+    // A LOOK-ALIKE RESULT CAN NO LONGER REACH THIS SCRIPT AT ALL, and that absence is the control
+    // (ADV-C1-02). `stoppedOnDuplicateQuestionV22` ends the segment ON that tool result, so the
+    // model is not called again in the turn that asked — which is why the parent reads the question
+    // off the TRANSCRIPT (`clara.chat_messages`, the sentence
+    // `withDuplicateQuestionTextV22` appended) rather than off a line this file printed. The arm is
+    // kept as a wall: if it ever fires, the stop has stopped working, and saying so loudly beats a
+    // silent pass.
     if (last && last.ok === true && last.status === "duplicates_found") {
-      if (!duplicateQuestionReported) {
-        duplicateQuestionReported = true;
-        console.log(`${DUPLICATE_QUESTION_LINE} ${JSON.stringify({
-          match_count: last.match_count ?? null,
-          references: Array.isArray(last.matches) ? last.matches.map((m) => m.reference ?? null) : null,
-          question: typeof last.question === "string" ? last.question : null,
-        })}`);
-      }
-      return {
-        stream: simulateReadableStream({
-          chunks: textChunks("I have asked, and I am waiting."), chunkDelayInMs: 2,
-        }),
-      };
+      console.error(
+        "[v22-serve] FAULT — the model was asked again AFTER a duplicates_found result, so the "
+        + "segment did not stop on it. One segment could then answer its own question.",
+      );
+      process.exit(97);
     }
-  }
-
-  // THE PERSON CAME BACK AND SAID GO AHEAD. A turn of its own, after a human message — which is
-  // the only way `record_anyway` can now be set, and the reason the acknowledgement row means
-  // something when a reviewer reads it months later.
-  if (INVOICE_INPUT !== null && GO_AHEAD_CUE !== null && asked.includes(GO_AHEAD_CUE)
-      && toolOutputs(prompt, "start_trade_invoice_work").length === 0) {
-    console.log("[v22-serve] chat call: the person said go ahead; recording with record_anyway");
-    return {
-      stream: simulateReadableStream({
-        chunks: toolChunks("v22i1", "start_trade_invoice_work", recordAnyway(INVOICE_INPUT)),
-        chunkDelayInMs: 2,
-      }),
-    };
   }
 
   if (CLAIM_INPUT !== null && wantsClaim) {
