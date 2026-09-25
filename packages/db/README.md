@@ -10490,13 +10490,39 @@ floor is STRICTLY ABOVE the read's and a viewer-rank re-check could never fire.
 credential may be minted on her behalf.
 
 **§B adds one key and changes nothing else.** `plans_still_posting` is the count of this firm's
-LIVE (`status = 'active'`) plans whose `authority_ref` cites the instruction being withdrawn. It is
-taken AFTER the withdrawal stamp, inside the same transaction, so it reports the world the
-withdrawal leaves rather than the one it found; and the reference is compared as TEXT, never cast
-to `uuid`, because `authority_ref` is an open jsonb object (0193's only CHECK is that it IS an
-object) and a cast would turn a count into a `22P02` at the moment a firm is trying to withdraw.
-The body was taken from the LIVE catalog rather than retyped, and §0 refuses to apply over anything
-that is neither 0338 §G's pinned body nor one already carrying this file's own attribution.
+LIVE (`status = 'active'`) plans authorised by the firm's standing instruction of this kind. The
+reference is compared as TEXT, never cast to `uuid`, because `authority_ref` is an open jsonb
+object (0193's only CHECK is that it IS an object) and a cast would turn a count into a `22P02` at
+the moment a firm is trying to withdraw. The body was taken from the LIVE catalog rather than
+retyped, and §0 refuses to apply over anything that is neither 0338 §G's pinned body nor one
+already carrying this file's own attribution.
+
+**It counts the INSTRUCTION, not the row being withdrawn, and the fix round is why.** The first cut
+keyed on `authority_ref ->> 'id' = <the row being withdrawn>`. 0338's record door is
+VERSION-FORWARD: a restated reason — or simply recording the instruction again after a withdrawal —
+withdraws the live row as *superseded by a restated standing instruction* and inserts a fresh one
+with a new id, precisely so that a plan written while the old row stood keeps reading the basis it
+was written under. That plan goes on citing the SUPERSEDED id. So a firm that had ever restated its
+instruction was answered `0` and the settings card said, in words, that nothing kept posting while
+an amortisation schedule was still active — the exact false belief this key exists to remove
+(review findings SPEC-02 and ADV-01, driven through the estate's own doors on `clara_c01`). The
+predicate is now the whole `(firm_id, instruction_key)` family, live rows and superseded ones
+alike, because withdrawing *the instruction* is what the person did.
+`p1147.withdraw.counts_across_a_restatement` drives record → real `close_prep` plan → restate →
+withdraw and asserts `1`, with the plan re-read as root and still active.
+
+**And it is a SNAPSHOT, which the wording on screen now respects.** The count is taken AFTER the
+withdrawal stamp, inside the same transaction — a count taken before would be a prediction — but
+what it reports is that transaction's snapshot, not a promise about the world afterwards. The wake
+arm of `clara._prepayment_schedule_core` resolves the live instruction with a plain
+`select … limit 1` and takes NO share lock, and the withdraw door's own `for update` is on the
+instruction row, so nothing serialises the two: a `close_prep` run in flight at the moment of
+withdrawal commits an active plan the receipt has already counted as absent (review finding ADV-04,
+driven with two real connections). Serialising them means recutting a schedule core, which is
+outside this ticket and is recorded as a successor item. What this file owns is the sentence, and
+the `=0` arm of `standingWithdrawnPlans` now states what was measured at the moment it was measured
+— *"No schedule opened under it was running when you took it back."* — rather than promising that
+nothing keeps posting.
 
 **WHAT WITHDRAWAL DOES TO A PLAN DOES NOT CHANGE, AND THAT IS THE RULING THIS FILE RECORDS.** The
 plans an instruction already authorised keep posting under the member who authorised them — #940's
@@ -10535,6 +10561,12 @@ so a redo (#957) is admitted and real drift refuses BY NAME:
 |---|---|
 | `clara.withdraw_firm_standing_instruction(text,text,text)` | `c63c1fd09bc92713127a038b3565f399b8ee17fcbf27097272b7a919cbb7b6e5` |
 
+**Post-images** for the integrator's re-derivation, measured after the fix round:
+`clara.withdraw_firm_standing_instruction(text,text,text)` =
+`1d057b74827f665baef0aedf7266cebff7194238224e4a0d268fe75f94642df9`;
+`clara.wake_get_firm_standing_instruction(text)` =
+`f69794dae2da194d08561526aa09c33f57536095eb91768a624e0bb607e07e46`.
+
 **Deliberately NOT sha-pinned:** `clara._prepayment_schedule_core` and
 `clara._revenue_recognition_core`. A sha is the right instrument for a body no other lane of this
 wave writes; the schedule family is read here STRUCTURALLY (a closed lane set, off the live
@@ -10552,8 +10584,15 @@ redo that landed §B, then `REDO, REDO`.
 
 **Tail (8 assertions, all read off the live catalog):** the read door resolves at exactly one
 `pg_proc` row and is STABLE SECURITY DEFINER owned by `clara_fn_owner` with its `search_path`
-pinned; `clara_agent_ro` holds it and no other role does (read off the ACL, so a grant to a role
-this file never names is caught too); exactly one allowlist row and it is the `interactive` kind;
+pinned; `clara_agent_ro` holds it and **no other role does, asked as an ALLOWLIST** — every
+`clara\_%` role this cluster carries is read off `pg_roles`, PUBLIC is added, each is asked through
+`has_function_privilege`, and the reached set must be exactly `{clara_agent_ro}`. The first cut was
+a four-name DENYLIST under a comment claiming it caught a role the file never names; it did not
+(review finding ADV-05, measured: a grant to `clara_freeform_ro` passed both arms, and
+`clara_agent_chat_ro`, which the denylist named, is not a role this cluster carries). The new check
+was driven rather than argued: the grant was planted for real and the redo refused with
+*"clara_freeform_ro also reach(es) the read door"* before being revoked. Then: exactly one
+allowlist row and it is the `interactive` kind;
 the relation's own grants are unmoved (0338's tail assertion, re-read); both WRITE doors are still
 `clara_authenticated`'s alone across all five machine principals; the recut withdraw door still
 carries 0338's whole refusal vocabulary and its reservation pair; it names no plan-state verb; and
@@ -10614,13 +10653,34 @@ rather than a banner (`apps/web/components/documents/payroll-posting-section.tsx
 
 **What it projects, and what it leaves behind.** `sentence`, `verdict`, `rung`, `reason`,
 `completeness` — the brief's own list — plus `document_id`, which is the caller's own argument
-echoed back and carries no information they did not supply. It does **not** project `rung_vector`
-(the evaluator's internal ladder), nor `detail`, `plan`, `client_id`, `firm_id`, `filing_id`,
-`source_doc_sha256`, `extraction_id`, `existing_entry_id`, `period_month`, `posting_date` or
-`period_label`, which are internals of the posting lane that a page asking *why did this not post*
-has no act to spend on. `p1148.read.projection` reads BOTH sides — the internal as root, to
-establish that a ladder was there to project, and the door as a viewer — because a cell that looked
-only at the door would green just as happily against a verdict that never carried one.
+echoed back and carries no information they did not supply, and `duplicate_scope` (below). It does
+**not** project `rung_vector` (the evaluator's internal ladder), nor `detail` itself, `plan`,
+`client_id`, `firm_id`, `filing_id`, `source_doc_sha256`, `extraction_id`, `existing_entry_id`,
+`period_month`, `posting_date` or `period_label`, which are internals of the posting lane that a
+page asking *why did this not post* has no act to spend on. `p1148.read.projection` reads BOTH
+sides — the internal as root, to establish that a ladder was there to project, and the door as a
+viewer — because a cell that looked only at the door would green just as happily against a verdict
+that never carried one.
+
+**`duplicate_scope`, and the false sentence that forced it.** The verdict's tenth rung,
+`no_duplicate_entry`, stops a SECOND entry, and its FIRST scope is `same_document` — the payslip's
+own entry, found through `clara._document_posting_entry(client, document)`. So a payroll summary
+that posted **perfectly well** answers `blocked / no_duplicate_entry`, carrying 0343's sentence for
+a re-file attempt: *"… is already posted (…). This payslip was not posted again — open that entry
+to decide whether this is a correction or a re-upload."* The first cut of the document-page section
+rendered that verbatim for every payroll summary, on the accounting tab, directly under the entries
+list that already shows the very entry it names (review findings SPEC-01 and ADV-02, driven end to
+end on `clara_c01`). The fix is **not** a second sentence — one body owns the words and nothing
+above it may reword them. What the page could not work out for itself is WHOSE entry the verdict
+meant, and the verdict had already decided that, so the door projects that ONE token of `detail`
+(`detail.duplicate.scope`), null on every other rung and always present. It discloses strictly less
+than the sentence the same caller already reads, which names that entry's memo and posting date;
+the duplicate's `entry_id`, `status`, `memo` and `posting_date` stay behind.
+`blocksOnThisDocumentsOwnEntry` (`apps/web/lib/documents/payroll-posting-state.ts`) holds the rule,
+and the section renders nothing in that one state. Every other scope names somebody ELSE's entry —
+which IS the re-upload the sentence was written for — and a `ready` verdict still speaks, because
+*"ready to post but no entry exists yet"* is true and has nowhere else on the page to be shown.
+`p1148.read.posted` drives the real unattended posting path and reads the scope back off the door.
 
 **No core, and that is law 31 rather than an omission.** 0320, 0352 and 0353 each split a read into
 one ungranted core with two entrances because a HUMAN door and a MODEL door compute the same rows.
@@ -10628,11 +10688,15 @@ This read has one entrance today; the model-lane twin is a successor contract fo
 wave's (#1144's roster is closed), and a core minted now would be an ungranted body with exactly
 one caller.
 
-**It is STABLE, and that is a wall rather than a hint.** PostgreSQL refuses every INSERT, UPDATE
-and DELETE inside a non-volatile function, so a later edit that tried to make this read write would
-fail to create. The body it wraps is STABLE too (0297 SectionD: *"THE GATE WRITES NOTHING"*), so
-nothing is given up by saying so, and the tail re-derives `provolatile = 's'` from the catalog
-rather than trusting the declaration.
+**It is STABLE, and that is worth saying precisely.** PostgreSQL refuses a data-modifying
+STATEMENT written directly inside a non-volatile function, so a later edit that put an INSERT,
+UPDATE or DELETE in this body would fail to create. It does **not** stop a non-volatile body
+CALLING a volatile one that writes — measured on `clara_c01` inside a transaction that was rolled
+back, which is the same correction review finding ADV-03 forced on 0362's family census. So the
+declaration is a guard against a careless edit, not a proof of purity; the proof is the body
+itself, four statements long, whose text the tail pins by name. The body it wraps is STABLE too
+(0297 SectionD: *"THE GATE WRITES NOTHING"*), and the tail re-derives `provolatile = 's'` from the
+catalog rather than trusting the declaration.
 
 **Prestate pins**, measured on the lane rig (127.0.0.1:55742 / `clara_c01`, 338 files, max
 `0362_standing_instruction_agent_read` — #1147 landed first in this lane and recut nothing named
@@ -10653,8 +10717,8 @@ it, because a wrapper on top of a body the caller can already call is decoration
 `clara.documents` carries `id`, `firm_id` and `document_kind`; and `clara.document_capabilities`
 knows the `payroll_summary` kind, so this door's subject is not a string the file invented.
 
-**Post-image** for the integrator's re-derivation:
-`clara.get_payroll_posting_state(uuid)` = `bf304a34fcc5775bdf70fe607e1d3ba350ec74fa469e2c399789cdf6abdf2cb4`.
+**Post-image** for the integrator's re-derivation, re-measured after the fix round:
+`clara.get_payroll_posting_state(uuid)` = `c846456ffd80e51e23d02fbd652f1aebaeab822ac8ae012c961b2c03a3b1c26d`.
 
 **Redo-safe by construction** (#957): one `create or replace function`, one `revoke`, one `grant`,
 no table, no row, no backfill. Both prestate branches were exercised for real on this rig rather
