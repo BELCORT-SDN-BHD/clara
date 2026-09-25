@@ -3373,6 +3373,20 @@ export const SCHEDULE_TERM_CORRECTION_0317_COHORT = [
 ];
 // #941 END
 
+// #1046 [0348] — the two pre-session rate-wall evidence tables' retention sweep. Both verbs are
+// clara_runtime ONLY: each is SECURITY DEFINER, owned by clara_fn_owner, and disables/re-enables
+// its own table's append-only trigger for the one call — no human lane, no agent lane, no wake
+// lane ever needs to prune an evidence table directly, and a grant beyond clara_runtime here
+// would be a maintenance job with more reach than the thing it maintains. Declared here so any
+// wider grant FAILS the matrix.
+const RATE_WALL_ATTEMPTS_RETENTION_0348_RUNTIME_FNS = [
+  "prune_invite_preview_attempts", "prune_confirmation_attempts",
+];
+export const RATE_WALL_ATTEMPTS_RETENTION_0348_COHORT = [
+  ...RATE_WALL_ATTEMPTS_RETENTION_0348_RUNTIME_FNS,
+];
+// #1046 END
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -3972,6 +3986,10 @@ export const ALLOWED = {
     // clara.record_opening_targets_parsed sits in (WAVE_B_RUNTIME_FNS above). See the block
     // where the cohort is declared.
     ...OPENING_SOURCE_REREAD_0286_RUNTIME_FNS,
+    // [#1046, 0348] the rate-wall evidence tables' retention sweep — clara_runtime ONLY, called
+    // from packages/runtime/lib/reconciler.mjs pruneTraces() on the existing trace-prune belt.
+    // See the block where the cohort is declared.
+    ...RATE_WALL_ATTEMPTS_RETENTION_0348_RUNTIME_FNS,
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -4349,6 +4367,13 @@ export async function grantMatrixFailures() {
   if (correctionLive.length !== 0) {
     failures.push(...cohortFailures("#939 AC4 / #941 AC3 0317 schedule term correction",
       SCHEDULE_TERM_CORRECTION_0317_COHORT, liveNames));
+  }
+  // #1046 [0348] -- bimodal, same reasoning as 0317's above: wholly present once 0348 applies,
+  // wholly absent before it.
+  const rateWallRetentionLive = RATE_WALL_ATTEMPTS_RETENTION_0348_COHORT.filter((n) => liveNames.has(n));
+  if (rateWallRetentionLive.length !== 0) {
+    failures.push(...cohortFailures("#1046 0348 rate-wall attempts retention",
+      RATE_WALL_ATTEMPTS_RETENTION_0348_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));

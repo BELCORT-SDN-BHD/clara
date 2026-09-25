@@ -7390,3 +7390,131 @@ open, and cancelled), and the REDO through
 **Gate:** `tests/firm-setup-committed-tin-backfill.test.mjs`, frontier-gated on the stable stem
 `firm_setup_committed_tin_backfill$` with
 `tests/firm-setup-committed-tin-backfill-preintegration-gate.mjs`.
+
+## 0348 — the two pre-session rate-wall evidence tables gain a retention sweep (#1046, riders sweep wave, lane 07)
+
+**The question, in plain words.** `clara.invite_preview_attempts` (0309) and
+`clara.confirmation_attempts` (0163) each hold one row per call to their own signed-out rate wall.
+Both tables are append-only — the wall's own evidence must never be edited or deleted by an
+ordinary caller — and neither has ever been swept. Each wall only ever reads the trailing
+15-minute window it counts, so every row older than that is dead weight the wall will never read
+again, and nothing has ever removed it. The brief's own question ("check how
+`confirmation_attempts` is retained today, and if it is not swept either, sweep both in one
+ticket") is answered here: it is not, and this file sweeps both.
+
+**Why a background job could never do this.** `clara._tf_append_only()` raises `CLR08` for EVERY
+role that tries to `DELETE`, including the table's own owner (measured, in a rolled-back
+transaction, before this file was written: `set role clara_fn_owner; delete from
+clara.invite_preview_attempts where attempted_at < now()` raises `invite_preview_attempts is
+append-only`). `0309`'s own header (lines 170-177) states the consequence: "a retention lane must
+disable and re-enable that trigger inside its OWN migration … it cannot be written as a background
+job against the shipped surface." A retention sweep is not a one-time backfill, though — it has to
+run again every time the reconciler's belt turns, against whatever has aged past the margin by
+then, which is a population no migration can see at apply time. So this file mints two NAMED,
+IDEMPOTENT, REDO-SAFE verbs — `clara.prune_invite_preview_attempts(timestamptz,int)` and
+`clara.prune_confirmation_attempts(timestamptz,int)`, one per table, each `SECURITY DEFINER` owned
+by `clara_fn_owner` — that a caller can invoke repeatedly, each call disabling its table's
+append-only trigger, deleting its own bounded batch (oldest first, `LIMIT p_limit`), and
+re-enabling the trigger, **all inside one statement**. That is the sense in which "this migration"
+disables and re-enables the trigger: it mints the verb that does so, on every call, for as long as
+the estate exists. `clara_runtime` — the only role either verb is granted to — holds no `ALTER
+TABLE` on either relation and needs none: the DEFINER's privilege is what the disable/enable runs
+under, verified live (a `security definer` function owned by `clara_fn_owner`, called under `set
+role clara_runtime`, disabled the trigger, deleted zero rows and re-enabled it, with no privilege
+error).
+
+**The safe margin is a refusal, not a convention.** Both walls hardcode the same 15-minute window
+(`attempted_at > now() - interval '15 minutes'`, in `clara.preview_invite_by_token` and
+`clara.claim_confirmation_attempt`). Each new verb REFUSES (`CLR10`) a `p_before` inside that
+window — not because of a race (both a count query and a prune call take their own `now()` once
+per statement, and a threshold at or before the boundary can never outrun a count using the SAME
+boundary), but because a future caller mistake (a wrong retention constant, an off-by-one in a
+unit conversion) would otherwise corrupt an ACTIVE rate wall silently: the wall would simply admit
+calls it should have refused, with no error anywhere. `tests/rate-wall-attempts-retention.test.mjs`
+drives this floor directly for both verbs
+(`p1046.invite_preview.floor_refuses_in_window_threshold`,
+`p1046.confirmation.floor_refuses_in_window_threshold`), rather than reading it off the body text.
+
+**One verb per table, not one shared verb** — the two tables' column shapes differ
+(`token_hash`/`origin_digest` vs `email_digest`/`origin_digest`/`outcome`/`settled_at`), and a
+shared verb would need a table name passed as text: either dynamic SQL (a new barrier for
+`apps/web/tests/firm-scope-db-pins.corpus.ts` to review, for no real benefit) or a hardcoded
+`if/else` no simpler than two functions. `clara.prune_trace_spans` (0006) and
+`clara.prune_work_execution_traces` (0195) already established the "one prune verb per relation,
+both riding the same runtime belt" shape this file follows — including a NEW index this file adds
+for the same reason `ix_trace_spans_started` exists: neither evidence table had an index LED by
+`attempted_at` (both existing indexes are composite and led by the key column), so a plain
+`attempted_at < p_before` scan could not use either as a leading-column match. This file adds
+`ix_invite_preview_attempts_attempted_at` and `ix_confirmation_attempts_attempted_at`.
+
+**The existing cadence, and why this file adds no scheduler.**
+`packages/runtime/lib/reconciler.mjs`'s `pruneTraces()` already runs on the belt
+`runReconcilerSweep()` drives from `packages/runtime/lib/leader.mjs`, gated by
+`iteration % PRUNE_EVERY === 0` (leader-guarded: exactly one process sweeps at a time) — the same
+lane `prunedWorkTraces` (0195) rides beside `pruned` (trace spans) today. The accompanying runtime
+commit adds two more counters to that SAME function, `prunedInvitePreviewAttempts` and
+`prunedConfirmationAttempts`, calling the two verbs above the same batched-loop way
+`prune_trace_spans` and `prune_work_execution_traces` are already called, each guarded against
+`undefined_function` (42883) so the belt stays inert on any database that has not yet applied
+0348. No new `setInterval`, no new cron entry, no new belt. The retention margin is a runtime
+constant, in MINUTES rather than days (`CLARA_RATE_WALL_ATTEMPT_RETENTION_MINUTES`, default 60 —
+four times the 15-minute window, a safe margin over the exact boundary), with its own batch-size
+and max-batches overrides mirroring the trace-prune constants exactly.
+`packages/runtime/tests/reconcile.test.mjs`'s
+`"reconcile: rate-wall attempt prune rides the trace-prune lane, deletes past the margin, keeps
+the window"` drives `pruneTraces()` itself and reads both new counters back.
+
+**What this file does not change**, pinned in the prestate and re-hashed in the tail: neither
+`clara.preview_invite_by_token` nor `clara.claim_confirmation_attempt` is recut (both are
+"neighbour" pins this file relies on but never touches); neither table's columns, RLS policy or
+EXISTING triggers move (the append-only and no-truncate triggers on both tables are pinned by
+name and by `tgenabled` before and after); `clara._tf_append_only` / `clara._tf_no_truncate` are
+pinned by `sha256(prosrc)` — this file calls them (indirectly, via the triggers it disables and
+re-enables) but recuts neither. The wall's own window (15 minutes) and ceiling (5) are
+out of scope, per the ticket's own brief.
+
+**Redo-safe by construction (#957).** `create index if not exists` and `create or replace
+function`; the prestate decides FIRST vs REDO from the presence of the two verb names alone. The
+FIRST apply ran on the lane database with both tables at zero rows (measured and recorded in the
+prestate's own notice); the tail's own apply-time smoke call (a threshold two hours in the past,
+which can never trip the 15-minute floor) exercised the disable/delete/enable sequence for real,
+over whatever population the server held, rather than only type-checking it.
+
+**The vacuity control caught a real bug in the tail itself, not only in the verbs.** T.5 (the tail
+step that DRIVES the floor rather than reading it off the body text) originally raised its own
+"admitted a threshold inside the window" failure WITH `errcode='CLR10'` from *inside* the very
+`begin … exception when others …` block whose `sqlstate <> 'CLR10'` guard was supposed to catch a
+*wrong* refusal — so a floor that stopped firing entirely (the deliberate break: `and false`
+appended to the guard) raised no exception at all, execution reached that same raise, and the
+handler's own guard read FALSE and silently swallowed it: the tail reported "OK (REDO)" over a
+verb that had just admitted an in-window call and started deleting rows. Caught by exercising
+`CLARA_MIGRATION_REDO` over the deliberately broken file rather than trusting the tail's prose.
+Fixed with a boolean flag set only inside the handler and read only after the block ends (a raise
+inside the handler cannot short-circuit a read that happens after it), then the SAME break was
+re-applied over the FIXED tail and the redo genuinely failed this time
+(`migrate: FAIL — … #1046 tail T.5: prune_invite_preview_attempts admitted a threshold inside the
+window`, transaction rolled back, the database left exactly where the prior successful redo left
+it) — proof the fix closes the hole rather than moving it. The break was then reverted byte for
+byte and the file re-applied clean. **Every checksum below was measured, not assumed:** FIRST
+apply `1ef5a5d699b70ca83f0bea7db2e5f5f51ffd9f545be051123f25e42b339e36be`; the fixed-tail REDO (the
+current, live file) `5c4ada4f5ae8fb7ab47edfb9e194d72abae0b991c6008cda9d2762e1d7772b4b`, re-measured
+against `clara.schema_migrations` after the whole exercise, and `pnpm db:migrate` afterwards
+reports `0 new migration(s) applied · 311 total` with no drift.
+
+**Acceptance criteria, each with its own cell in `tests/rate-wall-attempts-retention.test.mjs`.**
+Rows inside the window are never removed and rows past the margin are —
+`p1046.invite_preview.prune_removes_past_margin_keeps_window_row`,
+`p1046.confirmation.prune_removes_past_margin_keeps_window_row`. The wall's own count is
+unchanged by a sweep that runs mid-window — five real calls through the real door reach the
+ceiling, a sweep with a safe margin runs between the fifth and the sixth, and the sixth is STILL
+correctly walled, which is only true if none of the five rows backing the count was removed:
+`p1046.wall.invite_preview_count_unaffected_by_mid_window_sweep`,
+`p1046.wall.confirmation_count_unaffected_by_mid_window_sweep`. The ACL — `clara_runtime` alone —
+is driven as `clara_authenticated` and refused with the ordinary Postgres insufficient-privilege
+SQLSTATE (`42501`), never `CLR10`:
+`p1046.invite_preview.only_clara_runtime_may_execute`,
+`p1046.confirmation.only_clara_runtime_may_execute`.
+
+**Gate:** `tests/rate-wall-attempts-retention.test.mjs`, frontier-gated on the stable stem
+`rate_wall_attempts_retention$` with
+`tests/rate-wall-attempts-retention-preintegration-gate.mjs`.
