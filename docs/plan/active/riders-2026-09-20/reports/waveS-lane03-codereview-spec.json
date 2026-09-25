@@ -1,0 +1,94 @@
+{
+  "axis": "spec",
+  "lane": "riders/wS-lane03 (wave S)",
+  "fixed_point": "7bc5a710f",
+  "diff": "git diff 7bc5a710f...HEAD",
+  "commits": 17,
+  "tickets": [1067, 1052, 1066, 1068, 1069],
+  "spec_source": "GitHub issues #1067, #1052, #1066, #1068, #1069 (gh issue view <n>); each has ZERO comments, so the Agent Brief in the issue body is the whole contract and no later brief or owner ruling overrides it. #1049 is re-parented to the mainline per the 2026-09-25 ruling and is correctly absent from the lane.",
+  "verdict": "accept-with-fixes",
+  "summary": "All five tickets are built and the branch is green (re-ran the four touched web test files at HEAD: 110 tests, 110 pass, 0 fail). Three findings matter. #1069 renders its allocation count on the Work DETAIL view, not on the Work list card the ticket names three times, so the stated value ('without opening the claim') is not delivered. #1068's empty-state focus target is the 'Add allocation' button, which the component disables whenever there are no candidates - exactly the state the ticket's own second cell drives - so a disabled control is asserted as the focus target under a harness stub that cannot tell the difference. #1066 had to silently override the preparer's chosen 'Advance account' field to make cross-account confirmation work at the door, which no acceptance criterion asked for and nothing on screen reconciles. The rest are residues the ticket reports already name.",
+  "findings": [
+    {
+      "id": "L03-SPEC-01",
+      "ticket": 1069,
+      "severity": "major",
+      "kind": "requirement implemented on the wrong surface",
+      "title": "#1069's allocation count renders on the Work DETAIL view, not on the Work list card",
+      "evidence": "Ticket #1069 AC2: 'The Work list card renders that count when it is greater than 1'. Its Desired behaviour: 'so the rendered card can say something like \"settles 2 advances\" when there is more than one, giving a reviewer that information WITHOUT OPENING THE CLAIM.' Key interfaces: 'Whatever web component renders the Work list card from that function's output.' The build renders it at apps/web/components/work/work-detail.tsx:861-868, inside PostedEntrySection of WorkDetailView - the Work DETAIL route (the only consumer of WorkDetailView is work-detail.tsx:161; apps/web/e2e/journal-work-walk.spec.ts:1090 calls it 'this route'). The Work LIST is apps/web/components/work/accounting-work-list.tsx, whose row label comes from workRowKindLabel (lines 170-177) off clara.list_accounting_work's own projection (claim_id / claimant_label), which carries no allocation count. A reviewer therefore still has to open the claim to learn it settles three advances - the one thing the ticket asked to avoid. reports/waveS-lane03-ticket1069.md (AC2) states the reasoning openly ('the Work LIST itself renders claim_id/claimant_label ... deliberately WITHOUT a second per-row call to this door'), but the issue carries 0 comments, so no re-brief or owner ruling accepts the substitution.",
+      "required_fix": "Either carry allocation_count into clara.list_accounting_work's own projection and render it on the list row, or obtain an explicit owner ruling that the detail view satisfies #1069 and record it on the issue before the ticket is closed."
+    },
+    {
+      "id": "L03-SPEC-02",
+      "ticket": 1068,
+      "severity": "major",
+      "kind": "requirement implemented but wrongly",
+      "title": "#1068's empty-state focus target is a DISABLED button whenever the claimant has no outstanding advance",
+      "evidence": "Ticket #1068 AC1: 'Emptying the allocation list and attempting to submit shows the \"advance required\" error focused/scrolled to a REAL, VISIBLE control, not a stale field id.' The fix puts row 0's field id on the add-a-row button (apps/web/components/registers/staff-advance-allocations-editor.tsx:143-144 and 231), but that button is rendered disabled whenever the candidate list is empty: line 232, disabled={candidates.length === 0 || Boolean(emptyStateProps.disabled)}. The lane's own second cell drives exactly that state - apps/web/components/accounting/staff-expense-claim-form.test.tsx:826-857, 'ticket 1068 the SAME empty-list focus holds when the claim never had an open advance to begin with', mounts with loadAdvances: async () => staffAdvanceSummary([]) then removes the one row - and asserts only that h.find(... id === focused) is non-null. It does NOT assert the node is enabled, unlike the sibling cell at line 820 (assert.equal(attrOf(node, 'disabled'), null, '...which is enabled, so the focus actually lands')), which shows the repo itself treats 'enabled' as part of the requirement. The unit harness cannot catch it: the ticket report's own section 10 records that enableDomInspection()'s .focus() stub (test/domInspect.ts:279-282) 'only ever sets document.activeElement', so a disabled button passes the cell while a real browser refuses focus on it and keeps it out of the tab order.",
+      "required_fix": "In the empty-list state, keep the add-a-row button focusable (or render a dedicated focusable empty-state element) when rowProps addresses it, and extend the zero-candidate cell with the same not-disabled assertion the one-candidate cell already makes."
+    },
+    {
+      "id": "L03-SPEC-03",
+      "ticket": 1066,
+      "severity": "major",
+      "kind": "behaviour not asked for",
+      "title": "#1066 silently overrides the preparer's chosen 'Advance account' when the head allocation sits on a second account",
+      "evidence": "Nothing in #1066's brief asks for the claim's own advance_account_code to change; its Key interfaces name only 'the claim form's advance-candidate filter'. The build makes the field follow the head allocation's real account: apps/web/lib/work/staff-expense-claim.ts:625-626, headAccount = advanceAccountCodes?.get(rows[0]?.advanceId ?? '') ?? draft.advanceAccountCode.trim(); out.advanceAccountCode = headAccount. The form meanwhile still renders and validates the preparer's own pick: apps/web/components/accounting/staff-expense-claim-form.tsx:727-732 (the advanceAccountCode AccountPicker bound to draft.advanceAccountCode, changed only by onPick) and validateClaimDraft still runs on the draft value (form lines 343-345). So a preparer who picks 1190 and then confirms a second-account advance as the first row files a claim whose stored clara.staff_expense_claims.advance_account_code is 1191, with the picker still reading 1190 and nothing on screen saying so. The override is necessary for AC1 to survive 0340's head-consistency rule (packages/db/migrations/0340_staff_expense_claim_label_case.sql:423-430); its silence is what is unasked. Partial mitigation: derivedLines now previews the credit on the real account (staff-expense-claim.ts:525-545). No cell asserts the preparer is told.",
+      "required_fix": "Make the override visible - derive the Advance-account field from the confirmed head (read-only, updating when the head changes), or render a line beside the picker naming the account the claim will actually credit - and add a mounted cell asserting it."
+    },
+    {
+      "id": "L03-SPEC-04",
+      "ticket": 1066,
+      "severity": "minor",
+      "kind": "requirement partial - never driven end to end",
+      "title": "#1066's AC1 'confirm through the form' is never driven through the real door in the cross-account HEAD shape",
+      "evidence": "Ticket #1066 AC1: 'A claimant with two dedicated advance accounts can select and CONFIRM advances from both accounts through the form, not only through the door or a future chat tool.' The wire shape toClaimWire now emits when the HEAD sits on the second account (bare head row, advanceAccountCode = the second account, the non-head row stating its own accountCode) is asserted only in a pure-function cell. The one db cell that posts a two-account claim, packages/db/tests/staff-expense-claim-allocations.test.mjs:304-355 ('p931.accounts'), builds the opposite shape: the head is on the claimant's own account (assertion at line 352-354, row.advance_account_code === SECHART.advance) and only the second row carries account_code (line 326). reports/waveS-lane03-ticket1066.md section 10 concedes it: 'I did not run a live probe against the actual PostgreSQL door ... with a hand-built cross-account payload'. The lane database is live at chain 0341 and the door is callable, so this was verifiable in the lane.",
+      "required_fix": "Add one db cell (or a tail probe on the next migration this family needs) that posts the exact toClaimWire shape with the head on a second enrolled account, and assert the two credit legs and the stored advance_account_code."
+    },
+    {
+      "id": "L03-SPEC-05",
+      "ticket": 1066,
+      "severity": "minor",
+      "kind": "requirement partial; 'already satisfied' claim is broader than the branch",
+      "title": "#1066's AC2 second branch is unbuilt: a label mismatch beyond case/whitespace is now silent rather than explained",
+      "evidence": "Ticket #1066 AC2: 'A lawful second-account allocation that fails only on label spelling is EITHER accepted (if the underlying accounting owner wants case/whitespace-tolerant matching) OR refused with a message that names the mismatch as a labeling issue, not a flat ownership refusal.' reports/waveS-lane03-ticket1066.md claims it is 'Already satisfied by #1052'. #1052 satisfies the accept branch for case and surrounding whitespace only (0340 lowers both sides). Beyond that the door still answers the flat ownership refusal - packages/db/migrations/0340_staff_expense_claim_label_case.sql:495-501, 'that advance was not issued to this claimant', reason advance_allocation_mismatch / not_this_claimant - and the new chooser filter (apps/web/components/accounting/staff-expense-claim-form.tsx:296-303) now simply omits such an advance with no message at all, so the preparer gets neither the advance nor the explanation. The AC's own parenthesis licenses the accept branch, so this is a residue rather than a miss, but the blanket 'already satisfied' overstates what is on the branch.",
+      "required_fix": "Either record on the issue that the accept branch was taken and that a non-case/whitespace label difference stays out of scope pending #1049, or add the preparer-facing signal beside the chooser."
+    },
+    {
+      "id": "L03-SPEC-06",
+      "ticket": 1067,
+      "severity": "note",
+      "kind": "behaviour beyond the brief (deliberate, recorded)",
+      "title": "#1067's new rule also changes the refusal a NON-advance settlement gets for an empty allocation list",
+      "evidence": "Ticket #1067 AC1 says 'regardless of the claim's total'; it says nothing about the settlement. The rule as built is unconditional on settlement - packages/db/migrations/0339_staff_expense_claim_empty_allocation.sql:335-342, raised before the 'if v_listed and v_settlement <> advance_application' rule at line 343 - so a reimbursement or already_settled claim carrying advance_allocations: [], which the ticket report measured as ADMITTED AND POSTED on the base branch, is now refused advance_allocation_mismatch / at_least_one instead of by the settlement rule. That is a net tightening consistent with AC1's 'regardless', but the door and the runtime now name different constraints for one payload (the runtime tests 'present' where the door tests 'non-empty'). reports/waveS-lane03-ticket1067.md section 10 follow-up 3 records it as a deliberate residue.",
+      "required_fix": "None required. Keep the residue named so a later runtime/door consistency pass can take it."
+    },
+    {
+      "id": "L03-SPEC-07",
+      "ticket": 1069,
+      "severity": "note",
+      "kind": "requirement implemented differently from its words",
+      "title": "#1069's 'defaulting to 1 for the pre-#931 single-advance shape' is a bare count(*), with no default",
+      "evidence": "Ticket #1069 Desired behaviour: 'how many advances a claim's allocation list discharges (for example an allocation_count, DEFAULTING TO 1 for the pre-#931 single-advance shape)'. Migration 0341 projects (select count(*)::int from clara.staff_expense_claim_allocations al where al.claim_id = sec.id) with no coalesce and no settlement branch; reports/waveS-lane03-ticket1069.md justifies it from 0301 section G's backfill plus #1067's new refusal. A claim row carrying no allocation row therefore reads 0, not 1. Harmless for the rendered card (the web guard is allocation_count > 1, work-detail.tsx:861) and honest for a reimbursement, but it rests on a backfill invariant rather than on the projection itself.",
+      "required_fix": "None required on this branch. If hosted holds a pre-0301 advance_application claim with no allocation row, the 1 belongs in the projection, not in the card."
+    },
+    {
+      "id": "L03-SPEC-08",
+      "ticket": 1052,
+      "severity": "note",
+      "kind": "acceptance criterion satisfied only by a later ticket in the lane",
+      "title": "#1052's AC2 'in the chooser' became true only once #1066 widened the candidate filter",
+      "evidence": "Ticket #1052 AC2: 'A web unit cell proves a label-matched advance renders its source enrolment IN THE CHOOSER and in the confirmed list; a directly enrolled one does not carry the extra line.' At #1052's own commits the claim form still filtered candidates to a.account_code === code, so no label-matched advance could reach the form's chooser; reports/waveS-lane03-ticket1052.md section 10 states this and drives the positive cell at the editor's seam plus an earlier-enrolment-generation case at the form. At HEAD the criterion IS met: apps/web/components/accounting/staff-expense-claim-form.tsx:296-303 admits the second-account row and line 768 passes sourceEnrolment={advanceSourceEnrolment}, which names any candidate whose enrolment_id differs from the claimant's (form lines 316-323). Verified by re-running the two files at HEAD (110 tests, 110 pass, 0 fail).",
+      "required_fix": "None. Recorded so the integrator does not read #1052's commits in isolation as satisfying its own AC2, and so a revert of #1066 is understood to take #1052's AC2 with it."
+    },
+    {
+      "id": "L03-SPEC-09",
+      "ticket": 1066,
+      "severity": "note",
+      "kind": "behaviour not asked for",
+      "title": "#1066 also changed what the advance-application preview credits for a list that does not add up",
+      "evidence": "Before this branch derivedLines always credited claimTotalCents(draft) on the single settlement leg. apps/web/lib/work/staff-expense-claim.ts:525-545 now sums the confirmed allocations per account and returns early for advance_application, so a draft whose confirmed list does not add up to the claim - a state the form still renders a preview for, and which validateClaimDraft flags separately - previews a credit total different from the claim total. Nothing in #1066's brief asks for this; it falls out of the per-account grouping and is arguably more honest (it previews what the door would post), but it is an unasked change on an existing surface and no cell pins the not-adding-up case.",
+      "required_fix": "None required. Worth one cell pinning the preview of a list that does not add up, so the intent is recorded rather than incidental."
+    }
+  ]
+}

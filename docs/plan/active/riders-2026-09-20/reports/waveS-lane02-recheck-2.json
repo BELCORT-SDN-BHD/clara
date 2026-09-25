@@ -1,0 +1,65 @@
+{
+  "lens": "recheck",
+  "round": 2,
+  "lane": "riders sweep wave, lane 02 (L2)",
+  "branch": "riders/wS-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "fixed_point": "7bc5a710f",
+  "head_checked": "3c48235afaee388e1ee4ba501f7399943b33defb",
+  "inputs_verified": [
+    "docs/plan/active/riders-2026-09-20/reports/waveS-lane02-recheck.json (round 1, 2 open findings: RECHECK-L02-01 major, RECHECK-L02-02 minor)",
+    "docs/plan/active/riders-2026-09-20/reports/waveS-lane02-fix.md (fix round 1)",
+    "docs/plan/active/riders-2026-09-20/reports/waveS-lane02-fix-2.md (fix round 2, independent verification of e792dc3ce and 3c48235af)"
+  ],
+  "database": "127.0.0.1:55745/clara_l05",
+  "commits_since_round1_recheck": [
+    "e792dc3ce fix(db): #1050 SSE asks the catalog which wall to use, in plain SQL (ADV-L02-01/02, wiki-dynamic-sql)",
+    "3c48235af fix(web): the panel cell names its ticket in words, not as a colour literal"
+  ],
+  "verdict": "accept",
+  "summary": "Both findings left open by round 1 (RECHECK-L02-01 major, RECHECK-L02-02 minor) are genuinely fixed at HEAD 3c48235af, re-verified directly against the code and the live rig database rather than taken from either fix report. RECHECK-L02-01: 0338's SS-E no longer contains the do $c0338_e$ ... execute $c0338_e_pre$/$c0338_e_post$ ... end dynamic function-creating block (grep confirms zero occurrences); SS-E is now one static create-or-replace function that branches at RUN TIME on to_regprocedure('clara._assert_plan_authority(...)'), a catalog fact read inside plpgsql, not a dynamically-executed DDL string. node scripts/check-wiki-dynamic-sql.mjs exits 0 with exactly 20 justified waivers (the same 20 the estate had before this lane; none added for _obo_plan_core), re-run directly in this session, not read from a report. RECHECK-L02-02: the two literals in apps/web/components/firm-admin/firm-settings-panel.test.tsx (:118 test title, :139 comment) were reworded from '#1050' to 'ticket 1050'; npx eslint on that file exits 0 in this session (re-run directly). Nothing else broke: the lane's full db battery (prepayment-close-standing-instruction + reservation-release-advice + prepayment-schedule-obo + revenue-recognition + prepayment-wake-reroute + prepayment-account-roster + prepayment-account-reservation + revenue-recognition-plan-op-key + refusal-errcode-partition) is 73/73 green with the full $GATES preintegration-gate chain, re-run in this session (matches fix-2.md's own count); operation-census + rig-isolation is 32 pass / 1 skip (T19 poison-role, the documented Windows/RIG.md-forbidden skip, not a new gap); the four touched apps/web unit files are 27/27 green; the firm-scope-db-pins corpus (apps/web/tests/firm-scope-db-pins.test.ts) is 22/22 green with no 0338 entry, which is correct now that the dynamic barrier that would have needed one is gone; pnpm typecheck is clean for both apps/web and packages/runtime; CI=true GITHUB_ACTIONS=true FREEZE_BASE_REF=7bc5a710f pnpm lint exits 0 for the WHOLE chain, re-run directly in this session. The plain CI=true GITHUB_ACTIONS=true pnpm lint (no base override) still fails at stage 1, but this is independently reconfirmed as pre-existing cut-phase drift against origin/main and not this lane's: FREEZE_BASE_REF=7bc5a710f node scripts/check-frozen-workflows.mjs reports OK (322 frozen files verified) and git diff --name-only 7bc5a710f...HEAD -- packages/runtime lists zero files, both re-measured in this session. pnpm --filter @clara/db migrate reports 0 new migration(s) applied, 314 total, no checksum drift. git status --short is empty at 3c48235af. Nothing above minor remains: L02-SPEC-06 (the two owner-scope questions round 1 left as minor/open) is recorded in fix-2.md as ruled by the coordinator under delegation (withdrawal door stays, admin floor is right) and is spot-checked in this round against the live migration file -- SS-G exists at 0338:471-473 with the admin floor comment and clara._human_ctx(clara.role_rank('admin')) at both the record and withdraw doors, matching the ruling as built, no code change implied. Fix-2.md's own follow-up item (three stale prose spots in 0338 SS-0's comments describing the abandoned apply-time-dispatch design) is cosmetic, non-load-bearing, correctly deferred to the next edit of 0338, and does not block accept.",
+  "findings": [],
+  "already_fixed_and_reverified": [
+    {
+      "id": "RECHECK-L02-01",
+      "ticket": 1050,
+      "severity_at_round1": "major",
+      "landed_at": "e792dc3ce",
+      "verification_this_round": "grep -n 'do \\$c0338_e\\$|c0338_e_pre|c0338_e_post' packages/db/migrations/0338_prepayment_close_standing_instruction.sql returns zero matches; the only to_regprocedure use relevant to SS-E is a plain plpgsql if/elsif branch at line 784 inside one static create-or-replace function. node scripts/check-wiki-dynamic-sql.mjs re-run directly in this session -> exit 0, '1536 clara function definition(s) ... 20 justified dynamic-SQL waiver(s)' -- the same 20 the estate had before this lane."
+    },
+    {
+      "id": "RECHECK-L02-02",
+      "ticket": 1050,
+      "severity_at_round1": "minor",
+      "landed_at": "3c48235af",
+      "verification_this_round": "grep on the file shows the test title (:118) now reads 'ticket 1050 added the sixth and the fourth' and the assertion message (:139) reads \"ticket 1050's standing instruction is its own relation\"; other in-file comments still say '#1050' but do not trip the rule. npx eslint components/firm-admin/firm-settings-panel.test.tsx re-run directly in this session -> exit 0, no output."
+    }
+  ],
+  "reruns": [
+    "packages/db (full $GATES chain, PGHOST=127.0.0.1 PGPORT=55745 PGUSER=postgres PGDATABASE=clara_l05): prepayment-close-standing-instruction + prepayment-schedule-obo + revenue-recognition + prepayment-wake-reroute + prepayment-account-roster + prepayment-account-reservation + revenue-recognition-plan-op-key -> 70 tests, 70 pass, 0 fail; refusal-errcode-partition.test.mjs -> 3 tests, 3 pass, 0 fail (73 total, 0 fail, matches fix-2.md's own count); reservation-release-advice.test.mjs included in the 70 above via battery run",
+    "packages/db: operation-census.test.mjs + rig-isolation.test.mjs (full $GATES chain) -> 33 tests, 32 pass, 0 fail, 1 skipped (T19 poison-role, needs CLARA_RIG_ALLOW_RESET, forbidden by RIG.md -- documented, not new)",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test components/firm-admin/firm-settings-panel.test.tsx components/firm-admin/standing-instructions-card.test.tsx components/firm-admin/firm-settings-a11y.test.tsx components/registers/prepayment-accounts-panel.test.tsx -> 27 tests, 27 pass, 0 fail",
+    "apps/web: node --import ./test/bootstrap.mjs --import tsx --test tests/firm-scope-db-pins.test.ts -> 22 tests, 22 pass, 0 fail, 3 suites",
+    "pnpm typecheck (root) -> exit 0, apps/web Done, packages/runtime Done",
+    "CI=true GITHUB_ACTIONS=true FREEZE_BASE_REF=7bc5a710f pnpm lint (root) -> exit 0, full chain including eslint for apps/web, packages/reporting-render",
+    "CI=true GITHUB_ACTIONS=true pnpm lint (root, no base override) -> exit 1 at stage 1 only (frozen-workflow check against origin/main); independently re-confirmed as pre-existing cut-phase drift: FREEZE_BASE_REF=7bc5a710f node scripts/check-frozen-workflows.mjs -> OK, 322 frozen files verified; git diff --name-only 7bc5a710f...HEAD -- packages/runtime -> 0 files",
+    "node scripts/check-wiki-dynamic-sql.mjs -> exit 0, 20 waivers, none added",
+    "pnpm --filter @clara/db migrate -> '0 new migration(s) applied · 314 total', no checksum drift",
+    "git status --short (worktree C:\\Users\\zhant\\Desktop\\clara-wt\\655) -> empty; git rev-parse HEAD -> 3c48235afaee388e1ee4ba501f7399943b33defb"
+  ],
+  "not_required_and_still_correctly_deferred": [
+    "ADV-L02-07 (hosted census before release) -- release act, not this lane's",
+    "ADV-L02-09 (hosted <key>:plan receipt count) -- release act, not this lane's",
+    "ADV-L02-11 (redo marker bare 4-digit substring) -- review's own text: no live path reaches it; filed for whoever next copies the idiom",
+    "L02-SPEC-03 (AC2 reinterpretation) -- a sentence to record on the ticket at close, not a code change; written up in fix.md verbatim for the closer",
+    "L02-SPEC-05 (from-scratch chain half of AC5) -- explicitly the integrator's job on a disposable cluster",
+    "L02-SPEC-06 (withdrawal door + admin floor questions) -- ruled by the coordinator under delegation per fix-2.md; spot-checked in this round: SS-G (withdrawal door) present at 0338:471 with the stated admin floor; clara._human_ctx(clara.role_rank('admin')) present at both the record door and the withdraw door; matches the ruling as built, no code change owed",
+    "L02-SPEC-07, L02-SPEC-08 (prepayment reservation visibility scope, :end namespace residue) -- recorded as follow-ups, no code implied"
+  ],
+  "new_issues_this_round": [],
+  "housekeeping": {
+    "worktree_state": "Clean at 3c48235afaee388e1ee4ba501f7399943b33defb before and after this recheck. No tracked file edited, nothing committed (read-only reviewer).",
+    "no_push_no_pr_no_other_worktree": "true",
+    "mid_task_message": "none arrived during this recheck round that was addressed to this reviewer."
+  }
+}

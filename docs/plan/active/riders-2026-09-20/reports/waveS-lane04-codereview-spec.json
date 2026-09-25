@@ -1,0 +1,96 @@
+{
+  "axis": "spec",
+  "lane": "riders wave S · lane 04",
+  "branch": "riders/wS-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\657",
+  "fixed_point": "7bc5a710f",
+  "diff": "git diff 7bc5a710f...HEAD",
+  "commits": 14,
+  "tickets": [1061, 1059, 1060, 1048],
+  "spec_source": "GitHub issue bodies (Agent Briefs). gh issue view <n> --json number,title,body,comments,labels for 1061/1059/1060/1048 — ALL FOUR have ZERO comments, so each body's Agent Brief is the whole contract; no later brief and no 2026-09-20 owner ruling exists to override any of them.",
+  "verdict": "accept-with-fixes",
+  "reruns": [
+    "packages/db tests/payroll-completeness-witness.test.mjs -> 13 tests, 13 pass, 0 fail, 0 skipped (re-run by the reviewer, not taken from the report)",
+    "packages/db tests/payroll-summary-posting.test.mjs + payroll-summary-facts.test.mjs + payroll-settlement.test.mjs + document-capability-registry.test.mjs -> 86 pass, 0 fail",
+    "packages/db tests/payroll-settlement.test.mjs alone -> 21 pass, incl. both new S8 cells",
+    "apps/web lib/firm/needs-you-payroll-completeness + needs-you-payroll-settlement + needs-you-tenancy-rent + lib/navigation/tree + components/bank/payroll-settlements-section -> 46 pass, 0 fail (incl. p1059.web.reverse, p1059.web.refusal)",
+    "apps/web tests/firm-scope-db-pins.test.ts -> 22 pass, 0 fail; sha256(0343) recomputed = 97acf5a3771005fd440a9da25a8de0c04a8de4cb365b4b929d4d114373b7873f, matches the corpus entry",
+    "live clara_l07: clara.document_capabilities payroll_summary rows -> heic/jpeg/pdf/png/tiff/webp all business_operation='supported', registry_version=7; csv/docx/ofx/tsv/xlsx/xml all 'stored_only'"
+  ],
+  "already_satisfied_or_stopped_claims_checked": "No ticket in this lane was reported 'already satisfied' or 'stopped'; all four are reported DONE. Each liveness claim was re-checked: #1061's stale registry state was confirmed against the live table and against 0296:2340-2347; #1060's missing tab was confirmed at the tree.ts pre-image; #1048's frozen v1 was confirmed at 0296:710 and the new v2 is a separate body; #1059's absence of any read that lists a settled run was confirmed (clara.get_payroll_settlement_candidates filters unsettled_cents > 0).",
+  "findings": [
+    {
+      "id": "L04-SPEC-01",
+      "ticket": 1059,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "#1059 AC1's reverse path only exists inside the mount that did the Accept — the ticket's own motivating scenario (realising later) is not covered",
+      "evidence": "Ticket line: \"A settled payroll run's entry is discoverable from the payroll settlements panel (or the document page) with a clear route to reverse it.\" and the desired behaviour: \"A person looking at a payroll net-pay settlement they now believe was accepted in error should have a clear, discoverable path to reverse it from the same surface where they accepted it.\" Built: apps/web/components/bank/payroll-settlements-section.tsx keeps the receipt in useState (const [justSettled, setJustSettled] = useState<JustSettled[]>([])), appended to only inside accept(). Nothing reads it back from the server. A reload, a tab change or a fresh visit leaves the card gone and the person back on the two general-purpose doors the ticket exists to replace. The ticket report (reports/waveS-lane04-ticket1059.md, AC1 'What was deliberately left') discloses this and justifies it as 'building that would need a new SQL read (a migration), which this ticket is expressly told not to add'. That justification does not hold on measurement: on clara_l07, clara_authenticated already holds column SELECT on clara.journal_entries.flags (information_schema.column_privileges) and table SELECT on clara.bank_matches, clara.bank_match_entry_members and clara.bank_match_line_members, and the settlement entry's flags carry payroll_settlement.{payroll_entry_id, document_id, period_month} (0298:463-465). A durable, reload-surviving list of this client's settled payroll runs and their match ids was therefore reachable through the same RLS-scoped table reads apps/web/lib/journals/api.ts already makes (listJournalEntries / listJournalLines), with NO migration and NO new door. ENTRY_SELECT (api.ts:63) simply does not request flags today.",
+      "required_fix": "Either (a) build the durable half with the existing grants — request flags on a narrow read (or a payroll-settlement-specific read in lib/bank/) and resolve the match through clara.bank_match_entry_members, so the reverse route survives a reload; or (b) record the session-only scope as an explicit narrowing on #1059 for the owner to accept, and keep the ticket open for the durable half. Do not close #1059 as fully delivered on the current build."
+    },
+    {
+      "id": "L04-SPEC-02",
+      "ticket": 1059,
+      "severity": "major",
+      "kind": "requirement-implemented-wrongly",
+      "title": "#1059: a reverse_entry failure after a successful unmatch leaves the ledger half-reversed and the panel's own retry is permanently refused",
+      "evidence": "Ticket line: \"Reversing restores the run to 'unsettled' (its net pay again offered against bank candidates) with the reversed entry and reversed match both correctly reflected in the ledger.\" confirmReverse (payroll-settlements-section.tsx) issues two independent door calls inside one part.act: await unmatchBankMatch(...) then await reverseEntry(...). They are two HTTP round trips, not one transaction. If the second refuses (a closed period, a checker rule, a transient error) the first has already committed: the bank line is freed and the settlement entry is still posted. part.act(fn, onOk) only runs onOk on success (apps/web/lib/parts/hooks.ts:121 and 231), so justSettled and reversingId are retained and the visible next step is to press Confirm again — which re-calls unmatchBankMatch FIRST. Measured on clara_l07: clara._unmatch_bank_match_core raises CLR10 'bank match % is already unmatched; re-matching writes a NEW group', detail reason already_unmatched. So the panel's route can never complete from that state, and the person is pushed back to the two general-purpose doors. The lane's own cell p1059.web.refusal proves the refusal RENDERS, not that the state is recoverable; the DB cell 'S8 · unmatch THEN reverse reopens the run' only drives the happy path.",
+      "required_fix": "Make the composed act resumable: track per-entry which half landed, or treat a CLR10 already_unmatched from the unmatch call as 'already done' and continue to reverseEntry. Add a cell that drives unmatch-ok / reverse-refused and then a successful retry. A composite SQL door is the alternative the ticket calls optional, not required."
+    },
+    {
+      "id": "L04-SPEC-03",
+      "ticket": 1048,
+      "severity": "major",
+      "kind": "requirement-not-reachable",
+      "title": "#1048: the two page-printed completeness witnesses can never fire in production — the frozen payrollFacts_v1 prompts do not ask for them",
+      "evidence": "Ticket desired behaviour: \"if the summary prints a completeness witness (a headcount equal to the lines read, a page count of one, or a total-employees figure the lines match), the deterministic evaluator's row-sum is the posting basis and the entry carries that basis by name\"; AC1: \"A cell posts a summary with no totals row but a printed headcount equal to its lines; the entry's basis names the row-sum and the witness.\" The database half is real and proven (clara.evaluate_payroll_run_state_v2 reads payroll.run.employee_count / payroll.run.page_count, 0343:623-646; battery cells W5, W4c and W6 all green on re-run). But the only channel that can supply those answers is packages/runtime/workflows/payrollFacts.v1.prompts.mjs, whose PAYROLL_RUN_FIELDS (lines 44-56) is a frozen 11-element array with neither key, pinned by frozen-workflows.json:1451. So in production every no-totals summary takes the parked-question path; witnesses 1 and 2 are exercised only by the lane's own battery. The worker was right not to edit the frozen family (WORK-ORDER rule 5) and delivered the successor contract as reports/waveS-lane04-ticket1048.md §9.1 (PAYROLL_WITNESS_FIELDS, the optional wire shape, the prompt stanza) — but the requirement is not live, and the report's own §11 says so.",
+      "required_fix": "File the payrollFacts_v2 ticket from §9.1 before #1048 is described as delivered, and do not let a release note or a ticket close claim that Clara posts from a printed headcount today. The parked-question half IS live and can be claimed."
+    },
+    {
+      "id": "L04-SPEC-04",
+      "ticket": 1059,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#1059: a high-stakes (awaiting_checker) settlement gets no reverse path at all",
+      "evidence": "The ticket names no stakes distinction: \"once a payroll net-pay settlement has been accepted against the wrong bank line, there is no dedicated path to undo it\". The build records the receipt only when receipt.match_id is non-null (payroll-settlements-section.tsx, 'if (receipt.match_id)'), so the high-stakes arm — which leaves a draft for a distinct checker, proved by the pre-existing cell 'S7 · a HIGH-STAKES settlement is left a draft for a distinct checker, not self-approved (ADV-04)' — surfaces nothing. The reasoning (no live match to unmatch, the entry is still a draft) is sound and is written at the line, but nobody narrowed the ticket to ordinary stakes.",
+      "required_fix": "Either surface a withdraw-draft route for that arm from the same panel, or record on #1059 that the high-stakes arm is out of scope and why."
+    },
+    {
+      "id": "L04-SPEC-05",
+      "ticket": 1048,
+      "severity": "minor",
+      "kind": "acceptance-unverified",
+      "title": "#1048 AC5's from-scratch half is not evidenced by this lane",
+      "evidence": "Ticket line: \"Migration applies from scratch and on a populated database; CI=true GITHUB_ACTIONS=true pnpm lint exit 0.\" The populated-database half is evidenced (first apply plus seven guarded CLARA_MIGRATION_REDO re-applies; 0343 present in the ledger; the battery green on re-run). The from-scratch half was NOT run — the rig forbids a second from-scratch chain on a lane cluster — and what stands in its place is the rolled-back first-apply rehearsal in reports/waveS-lane04-ticket1048.md §5 (seven pre-images restored byte for byte, prestate ran with no 'redo path' notice). That rehearsal is the right substitute under the wave-3 addendum, but AC5 as written is only half closed on this branch.",
+      "required_fix": "The integrator's disposable-cluster 0001→0343 chain closes AC5; do not mark AC5 done from the lane report alone."
+    },
+    {
+      "id": "L04-SPEC-06",
+      "ticket": 1048,
+      "severity": "note",
+      "kind": "scope-beyond-ask",
+      "title": "#1048 writes a posting_basis marker onto payroll entries the ticket did not scope (the printed-totals ones)",
+      "evidence": "The ticket asks only that the row-sum case be named: \"the deterministic evaluator's row-sum is the posting basis and the entry carries that basis by name\". The build emits flags->'payroll_run'->'posting_basis' on EVERY payroll entry, with kind='printed_totals' and row_sum_fields=[] for runs that post exactly as they did before #1048 (0343:1231 and 1860-1867; the battery's control cell W4b pins it), and the entry_post_receipts rationale changes for those runs too (0343:1986). Nothing regresses — payroll-summary-posting.test.mjs re-ran green inside the 86-test group — and the uniformity is defensible (an auditor can tell a stated figure from a computed one on any payroll entry). Recorded because it is a ledger-visible change on documents outside the ticket's stated case.",
+      "required_fix": "None required. Mention it in the release note for #1048 so nobody reads a new flags key on an otherwise unchanged entry as a defect."
+    },
+    {
+      "id": "L04-SPEC-07",
+      "ticket": 1060,
+      "severity": "note",
+      "kind": "narrowing-verified",
+      "title": "#1060's dormant second half is correctly dormant, and this lane did not accidentally mint the fourth FIFO instance",
+      "evidence": "AC1 is fully met and re-verified: apps/web/lib/navigation/tree.ts now carries tab: \"matching\" on the bank entry, and BOTH settlement rows repoint — needs-you-links.ts maps payroll_net_pay_unsettled and rent_payable_unsettled to /bank?tab=${BANK_MATCHING_TAB} (cells needs-you-payroll-settlement.test.ts:57 and needs-you-tenancy-rent.test.ts:80, both green on re-run). AC2/AC3 are conditional on a fourth FIFO-settlement-candidate instance and the ticket forbids forcing it early (\"Out of scope: Forcing the extraction to happen before a fourth instance actually exists\"); 0343 creates eight functions and none is a FIFO unsettled read (grep 'unsettled' over 0343 returns 2 hits, both prose), so three instances remain. No regression from the nav change either: resolveActive only branches on ?tab= for the registers segment (tree.ts:917-933), so a bare /bank still marks the bank row current, and the one other hard-coded /bank link (client-bank-summary.tsx:107) does not go through the registry.",
+      "required_fix": "None. Leave #1060's second half open and dormant rather than closing the ticket outright."
+    },
+    {
+      "id": "L04-SPEC-08",
+      "ticket": 1061,
+      "severity": "note",
+      "kind": "integration-watch",
+      "title": "#1061's 0342 hard-codes registry_version 7 with a prestate that refuses anything but 6",
+      "evidence": "AC3 (\"The registry's published version increments by exactly one and the row count is unchanged\") is met and re-verified live: 240 rows, one distinct registry_version, value 7; the six heic/jpeg/pdf/png/tiff/webp payroll pairs read business_operation='supported' and the six csv/docx/ofx/tsv/xlsx/xml pairs are untouched, which also closes AC1, AC2 and AC4 (document-capability-registry.test.mjs cell 9 re-run green). The form is 'set registry_version = 7 where registry_version <> 7' under a prestate that raises unless min(registry_version)=6 — deliberately redo-safe rather than '+ 1'. Consequence for integration only: if any other sweep lane also republishes clara.document_capabilities, whichever file lands second fails its own prestate. SWEEP-PLAN names no other lane touching that table, so this is a watch item, not a defect.",
+      "required_fix": "At integration, confirm 0342 is the only registry republication in the wave before running the chain."
+    }
+  ],
+  "summary": "SPEC axis, lane 04: 8 findings — 3 major, 2 minor, 3 notes. #1061 and #1060 are clean against their briefs, with every acceptance criterion re-driven rather than taken from the reports. #1048 delivers the whole ticket at the database and web seams — 13/13 battery green on re-run, both page witnesses, the contradiction refusal, the parked question, the named yes and no, the seventeenth row kind through all five sync points — but its page-printed witnesses cannot fire in production because the frozen payrollFacts_v1 prompts never ask for them, and AC5's from-scratch half is the integrator's to close. #1059 is the weakest against its brief: the reverse route exists only inside the mount that did the Accept, and the report's stated reason for that narrowing (a durable list would need a migration) is contradicted by the live grants — clara_authenticated already reads journal_entries.flags, bank_matches and bank_match_entry_members; and the two-call composition can strand a half-reversed ledger whose retry the unmatch door then refuses by name."
+}

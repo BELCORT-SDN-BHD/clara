@@ -1,0 +1,72 @@
+{
+  "lens": "recheck",
+  "lane": "riders/wS-lane01",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "database": "127.0.0.1:55744 / clara_l04",
+  "fixed_point": "7bc5a710f",
+  "head_at_recheck": "e2a61547d",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/waveS-lane01-fix.md",
+  "source_reviews": [
+    "waveS-lane01-codereview-spec.json",
+    "waveS-lane01-codereview-standards.json",
+    "waveS-lane01-review-adversarial.json"
+  ],
+  "verdict": "accept",
+  "reruns": [
+    { "what": "packages/db: plan-occurrence-reversal-door + accrual-plan-authority-wall + plan-authority-wall + plan-reversal-posted-basis + accrual-list-side-filter (full 130-flag gate chain, clara_l04)", "result": "25 tests, 25 pass, 0 fail — includes new cells p1073.refusals.payload_identity and p1073.history.refusal_record_diverges (ADV-L01-01/02)" },
+    { "what": "packages/db: accrual-adjustments + accrual-revenue-side + plan-overlap-template-arm-retired + authority-ref-human-instruction + accrual-correction + accrual-bill-conflict + accrual-period-amounts (full gate chain)", "result": "80 tests, 80 pass, 0 fail — matches fix report" },
+    { "what": "packages/db: accrual-plan-authority-wall alone, isolating the new cell", "result": "5 tests, 5 pass, 0 fail — p1080.accrual.confirmation_cannot_be_self_minted present and green (SPEC-01 measurement)" },
+    { "what": "packages/db: operation-census.test.mjs + rig-isolation.test.mjs (no reset flags)", "result": "33 tests, 32 pass, 0 fail, 1 skipped (known destructive-skip) — matches fix report" },
+    { "what": "apps/web: tests/firm-scope-db-pins.test.ts (sweep rule d)", "result": "22 tests, 22 pass, 0 fail" },
+    { "what": "apps/web: components/accruals/accrual-form.test.tsx", "result": "21 tests, 21 pass, 0 fail — the 652.form cell now throws/asserts 'the instruction this plan cites does not exist for this client' (ADV-L01-07/SPEC-07 fix verified by reading the file, not just the pass)" },
+    { "what": "apps/web whole unit suite (node scripts/run-tests.mjs)", "result": "5179 tests, 5177 pass, 0 fail, 2 skipped, exit 0 — matches fix report exactly" },
+    { "what": "pnpm typecheck (worktree root)", "result": "exit 0, apps/web and packages/runtime both Done" },
+    { "what": "CI=true GITHUB_ACTIONS=true FREEZE_BASE_REF=7bc5a710f pnpm lint", "result": "exit 0" },
+    { "what": "CI=true GITHUB_ACTIONS=true pnpm lint (no override)", "result": "still exit 1 at freeze-lint step, same 38-violation base-drift signature (chatTurn v22, claraWork v6, statementFacts v4, payrollFacts v1, agreementFacts v1) — confirmed by re-reading the output that every violation is REMOVED-VS-BASE/UNLOCKED-VS-BASE against origin/main, none inside this lane's diff; this is the pre-existing integration precondition (ADV-L01-04/SPEC-02), not a lane defect, and is unchanged by the fix round as expected" },
+    { "what": "git diff 7bc5a710f...HEAD -- CONTEXT.md", "result": "read in full: four disjoint hunks, all correcting sentences this lane's own tickets made stale (three-kind authority wall, the reversal posting the entry's own lines, the correction/posted-figure rule, and the third remedy's divergent history), plus the new fifth sentence this round adds in the same accrual_bill_conflict region; no term or heading minted, matches STD-01/SPEC-04's own description" },
+    { "what": "packages/db/README.md's 0332 and 0333 sections", "result": "read in full: 0332 section now names clara._record_journal_entry_core's own active-account check, CLR10/unknown_account and the prosrc-offset evidence (ADV-L01-03 fix present); 0333 section documents occurrence_recorded, the history divergence and the plan_not_found belt comment (ADV-L01-01/02/06 fixes present)" },
+    { "what": "packages/db/migrations/0333_plan_occurrence_reversal_door.sql (git diff of the fix commit)", "result": "read in full: v_durable/occurrence_recorded logic matches the mechanism described in the fix report and in ADV-L01-01's required_fix; client_inactive arm now has a driven cell (p1073.refusals.core, confirmed by grep); plan_not_found arm kept with an explicit 'BELT, not an arm a caller reaches' comment (ADV-L01-06 fix present); redone via the #867 from-scratch recipe (CLARA_MIGRATION_REDO does not apply, 0334 sits above 0333) — legitimate under the wave-2+ addendum since 0333 is this lane's own unmerged migration" },
+    { "what": "apps/web/lib/accruals/api.ts loadAccruals doc comment", "result": "read in full: names p_side, that this caller deliberately withholds it, why, and that AC2 is owed here — matches SPEC-03's fix" },
+    { "what": "apps/web/e2e/accrual-mock.mjs + grep -rn across apps/web for its three exported recorders", "result": "confirmed only the three definitions exist and nothing reads any of them, including reverseOpKeys — the ADV-L01-05 finding's premise (that a sibling recorder IS read) does not hold; the fix report's REFUTED disposition is correct, not merely asserted" },
+    { "what": "clara.schema_migrations census on clara_l04", "result": "count=314, max=0334_accrual_list_side_filter — matches fix report" },
+    { "what": "git diff 7bc5a710f...HEAD --stat scope check", "result": "packages/runtime: 0 files touched; docs/PRD.md, docs/ARCHITECTURE.md, frozen-workflows.json: 0 files touched — confirms scope discipline held through the fix round" },
+    { "what": "git status in the worktree", "result": "clean at e2a61547d" }
+  ],
+  "findings": [
+    {
+      "id": "RECHECK-01",
+      "ticket": 1080,
+      "severity": "minor",
+      "status": "open, by design",
+      "title": "SPEC-01 (contract_confirmation admitted on the accrual machine lane) is unchanged and still needs an explicit owner/integrator ruling before release",
+      "evidence": "The fix worker deliberately did not parameterise clara._assert_plan_authority, for reasons argued in waveS-lane01-fix.md and backed by a new closed-world cell, p1080.accrual.confirmation_cannot_be_self_minted (re-run green: 5/5 in accrual-plan-authority-wall.test.mjs). The measurement is real and verified above, but the underlying question the original review raised -- an authority wall on a machine-only door now admits a kind it refused before -- is a policy decision, not a code defect, and no ruling has been recorded anywhere in this lane's reports or SWEEP-PLAN.md.",
+      "required_fix": "Not a lane defect and not blocking accept: this is exactly the disposition the fix report itself asks for ('still owed and escalated'). Carry it to the integrator/owner as an explicit release-blocking checklist item, not as rework."
+    },
+    {
+      "id": "RECHECK-02",
+      "ticket": 1051,
+      "severity": "minor",
+      "status": "open, by design",
+      "title": "SPEC-02's second half (plain CI lint) remains red, and is still base drift, not a lane defect",
+      "evidence": "Re-ran CI=true GITHUB_ACTIONS=true pnpm lint without FREEZE_BASE_REF: still fails at freeze-lint with the same 38 violations, all REMOVED-VS-BASE/UNLOCKED-VS-BASE against origin/main (which is 62 commits ahead of this lane's 7bc5a710f base and carries the cut phase's frozen-workflow files this lane never touches). With FREEZE_BASE_REF=7bc5a710f the whole chain is exit 0, confirmed. The disposable-cluster from-scratch run that would fully close #1051 AC3 is still (correctly) deferred to the integrator, per RIG.md's ban on a second from-scratch chain on a lane cluster; this lane's own from-scratch rebuild (314/314, 0 new on a second migrate) is the strongest proof a lane worker can produce.",
+      "required_fix": "Integration-time action only, unchanged from the fix report's own description: merge main (or gate the merged head) before treating plain lint as a gate, and run the true from-scratch chain on a disposable cluster before closing #1051."
+    },
+    {
+      "id": "RECHECK-03",
+      "ticket": 1075,
+      "severity": "note",
+      "status": "open, by design",
+      "title": "SPEC-03's follow-up ticket for AC2/pagination is still not filed (a worker cannot write to GitHub)",
+      "evidence": "The obligation now lives in code (apps/web/lib/accruals/api.ts, verified above), which is the fix the review asked for as far as a worker can go. No GitHub issue exists yet naming the pagination follow-up; this was already flagged as owed to the integrator/owner in the fix report's own follow-ups list.",
+      "required_fix": "Integrator files the pagination follow-up and links it on #1075, or leaves #1075 open with AC2 explicitly unticked, per the original SPEC-03 required_fix."
+    }
+  ],
+  "newly_broken": [],
+  "notes_not_requiring_action": [
+    "SPEC-04/STD-01 (CONTEXT.md touched by L1 four times, five now counting this round's addition): kept deliberately, each hunk verified disjoint and each corrects a sentence this lane's own change made false; recommendation to record the exception in SWEEP-PLAN.md stands, unchanged since the fix round added no new deviation pattern (same four regions, one now carries a fifth sentence).",
+    "ADV-L01-04 (plain lint red from base drift): unchanged, expected, already covered under RECHECK-02 as the same underlying condition.",
+    "ADV-L01-05 (dead e2e-mock recorder): the fix worker's REFUTED-premise / KEPT-as-is disposition was independently re-verified by grep; correct, no action needed.",
+    "SPEC-05/SPEC-06/SPEC-08/STD-02: all notes in the original spec/standards reviews, explicitly left as owner-judgement or non-defects in the fix report; nothing regressed."
+  ],
+  "summary": "Re-ran every db and web test file the lane touched under the full gate chain (25 + 80 + 5-isolated + 33 + 22 + 21 db/web cells, plus the apps/web whole unit suite at 5179/5177/0-fail/2-skipped), pnpm typecheck (exit 0) and pnpm lint both with FREEZE_BASE_REF=7bc5a710f (exit 0) and without (still red, confirmed as pre-existing base drift unrelated to this lane's diff, same signature as before the fix round). Every one of the seven review findings marked FIXED in waveS-lane01-fix.md (ADV-L01-01, ADV-L01-02, ADV-L01-03, ADV-L01-06, ADV-L01-07, SPEC-03's code half, and SPEC-01's measurement) was independently re-driven or re-read at the current head and holds: the new occurrence_recorded/plan_not_found logic in 0333, the corrected README 0332/0333 sections, the corrected CONTEXT.md prose, the restated accrual-form fixture, the new p1073 and p1080 test cells, and the loadAccruals doc comment are all present, correct and green. The one REFUTED disposition (ADV-L01-05) was independently checked against the actual source and the refutation holds. Nothing broke: full db and web suites are unchanged in shape from the fix report's own numbers, typecheck is clean, and scope discipline held (zero packages/runtime, PRD, ARCHITECTURE or frozen-workflows files in the diff). Three items remain open, all by design and all already correctly framed in the fix report as integrator/owner actions rather than lane rework: SPEC-01's contract_confirmation ruling, SPEC-02's plain-lint base drift and disposable-cluster from-scratch run, and SPEC-03's pagination follow-up ticket. None is above minor, and none is new. Accept."
+}

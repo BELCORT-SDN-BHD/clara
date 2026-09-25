@@ -1,0 +1,180 @@
+{
+  "review": "riders sweep wave, lane 01 — ADVERSARIAL lens (an addition to /code-review, reported separately; never merged with the Standards or Spec axes)",
+  "branch": "riders/wS-lane01",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\651",
+  "fixed_point": "7bc5a710f",
+  "head": "f782b48a07c128d2cd462edf67c346bfadaf32cc",
+  "diff_command": "git diff 7bc5a710f...HEAD",
+  "commits_reviewed": 19,
+  "tickets": [1051, 1080, 1074, 1073, 1075, 1070, 1071],
+  "database_driven": "127.0.0.1:55744 / clara_l04, 314 files, max 0334_accrual_list_side_filter (309 base + this lane's five)",
+  "verdict": "accept-with-fixes",
+  "summary": "I tried to break the five new migrations and the web surfaces above them along every axis the lens names. Tenant isolation, rank floors, the existence-oracle test, a two-connection race, replay under a changed payload, integer cents, the Asia/Kuala_Lumpur due gate, lock order, migration safety on a database with rows, and the accounting treatment itself all HELD, and each is recorded below with the command that drove it. Seven findings; none is a blocker and none is a security or accounting defect. The sharpest is a dangling identifier in a typed refusal payload on the ONE new granted door: clara.reverse_plan_occurrence raises reversal_before_primary carrying an occurrence_id whose row its own rollback destroys, while the SAME key in its reversal_already_admitted refusal names a row that really exists — one key, two opposite meanings, with nothing to tell them apart. The rest are a documentation citation that names the wrong refusing body (driven and corrected below), an undocumented history divergence between the two remedies, dead fixture state on a shared e2e mock, an unreachable code arm, an undriven code arm, and one pre-existing stale test fixture that #1080 makes total.",
+  "findings": [
+    {
+      "id": "ADV-L01-01",
+      "ticket": 1073,
+      "severity": "minor",
+      "kind": "refusal-contract",
+      "title": "clara.reverse_plan_occurrence's reversal_before_primary refusal hands back an occurrence_id for a row its own rollback destroys",
+      "file": "packages/db/migrations/0333_plan_occurrence_reversal_door.sql:343-360",
+      "evidence": "clara._plan_admit_occurrence WRITES the occurrence row, stamps the refused outcome on it and RETURNS (0332:566-590, and the same shape at 543-553) — 'Recorded on the occurrence rather than raised, so it is legible in the history' are its own words. clara.reverse_plan_occurrence then RAISES, so that INSERT rolls back, but it forwards the core's answer verbatim: detail = (v_answer || jsonb_build_object(...)), and v_answer carries occurrence_id. DRIVEN on clara_l04: a monthly/last_day_of_month accrual whose oldest period never posted, reversed through the new door as BOB (bookkeeper) — refusal reason = reversal_before_primary, occurrence_id = f68c9701-5b5d-42a1-ab06-5b20ffe53065, primary_state = no_occurrence; then `select count(*) from clara.accounting_plan_occurrences where id = 'f68c9701-5b5d-42a1-ab06-5b20ffe53065'` AFTER the refusal = 0, and the plan holds exactly one occurrence row (the primary). The SAME key in the CLR13 reversal_already_admitted refusal — driven in the two-connection race below — names occurrence_id 96f25272-51f8-4672-b442-e31562dc8ba6, which DOES exist, because the winning session committed it. So one key means 'a row you can open' in one refusal of this door and 'a row that never existed' in another, and the payload gives a surface no way to tell.",
+      "failure_scenario": "A web or agent surface that stores or links the occurrence_id out of a governed refusal — the obvious reading of a key the estate uses everywhere else as a durable identity — links to nothing for reversal_before_primary and to a real row for reversal_already_admitted. Neither the door's comment nor packages/db/README.md's 0333 section says the id is conditional.",
+      "required_fix": "In clara.reverse_plan_occurrence's refusal branch, do not forward the core's row-identity keys for the answers whose row the rollback destroys: build the raised detail from the core's answer MINUS occurrence_id and outcome on every arm the core recorded-then-returned (reversal_before_primary, and the two *_period_line_missing arms if a later schedule shape ever reaches them), keeping them on reversal_already_admitted, whose row is committed. Alternatively keep the key and add an explicit occurrence_recorded: false beside it. Say which in the door's comment and in the README's 0333 section."
+    },
+    {
+      "id": "ADV-L01-02",
+      "ticket": 1073,
+      "severity": "minor",
+      "kind": "behaviour-divergence-undocumented",
+      "title": "A refusal the catch-up records in the plan's own history leaves no trace when the same refusal is reached through the new remedy",
+      "file": "packages/db/migrations/0333_plan_occurrence_reversal_door.sql:343-347",
+      "evidence": "DRIVEN on clara_l04, two identically built plans (a 3-month accrual whose oldest period never posted). Through clara.request_plan_catch_up over that period's reversal date: the answer reports reason reversal_before_primary, occurrence_id c3543096-8122-4664-9a0a-296b15ccd890, primary_state no_occurrence, AND the plan is left holding `reversal@2026-07-01: refused/reversal_before_primary | primary@2026-08-31: admitted`. Through clara.reverse_plan_occurrence on the same scene: CLR13 with the same reason, and the plan is left holding `primary@2026-08-31: admitted` and nothing else. 0333's header says 'Everything else is the admission core's answer and is passed through rather than re-decided ... and the ORPHAN WALL'; the answer is passed through, the RECORD is not. The battery's own assert.equal(await occurrenceCount(paused.plan_id), 1, '…and it wrote nothing') shows the rollback is deliberate (it is what frees the op key), but it is asserted on the plan_paused arm, which returns before any row is written — so no cell measures the arm where the core actually did write one.",
+      "failure_scenario": "A bookkeeper who tries 'Reverse this period only' too early gets a refusal on screen and the plan's own occurrence history records nothing; the same person doing the same thing through 'Reverse now' leaves a refused occurrence a colleague can read later and that becomes admissible once the accrual posts. #1073's AC2 speaks only of the ledger, so this is not an AC breach — but the two remedies now differ in what the firm's durable history says, and neither 0333, packages/db/README.md nor CONTEXT.md's accrual_bill_conflict paragraph names the difference.",
+      "required_fix": "State the divergence where the remedy is described — 0333's header, the README's 0333 section and CONTEXT.md's accrual_bill_conflict paragraph (which this lane already edited to say the three remedies 'differ as ACTS rather than as outcomes') — and add a cell that drives the ORPHAN arm through both doors and asserts the occurrence row survives one and not the other, so the choice is measured rather than incidental."
+    },
+    {
+      "id": "ADV-L01-03",
+      "ticket": 1074,
+      "severity": "minor",
+      "kind": "documentation-wrong-mechanism",
+      "title": "The deactivated-account consequence is asserted in packages/db/README.md naming the wrong refusing body, reason token and sentence",
+      "file": "packages/db/README.md:7517-7522",
+      "evidence": "The README (and 0332's own immutable header, lines 96-104, and the ticket report's 'What moves' table row 2) say the reversal 'REFUSES at posting time through clara._validate_entry_lines's existing \"line codes to a non-existent account\" floor'. DRIVEN on clara_l04: an accrual posted Dr 6100 300000 / Cr 2020 300000, then 6100 deactivated, then the reversal admitted through clara.request_plan_catch_up and posted — the refusal is CLR10, message 'line 1 codes to an account this client does not have active: 6100', detail {\"field\":\"lines[1].account_code\",\"reason\":\"unknown_account\",\"account_code\":\"6100\"}. A catalog census shows that sentence lives in clara._record_journal_entry_core (and the two _assert_*_account validators), NOT in clara._validate_entry_lines, whose own sentence ('codes to a non-existent account') carries no reason token at all and is never reached, because _record_journal_entry_core's check fires first. The SUBSTANCE of the claim is correct and I drove that half too: with the correction moving the accrual onto a second active expense account 6105, the reversal posts [[\"6100\",0,300000],[\"2020\",300000,0]] — the ORIGINAL pair — and 6100, 6105 and 2020 all net to 0.",
+      "failure_scenario": "A later lane, or a surface author mapping refusal reasons, reads the README and looks for the wrong body and the wrong token; clara._validate_entry_lines raises an untyped CLR10 with no reason, so a surface built on that citation would classify the real refusal (reason unknown_account) as unclassified.",
+      "required_fix": "Correct packages/db/README.md's 0332 section to name clara._record_journal_entry_core's own active-account check, its CLR10 unknown_account reason and its actual sentence. 0332 is applied and immutable, so the correction is stated in the README (the house idiom this lane itself used for 0308:870), and the ticket report's row 2 — which already labels the consequence 'unverified' — is updated to 'driven, and the cited floor was wrong'."
+    },
+    {
+      "id": "ADV-L01-04",
+      "ticket": null,
+      "severity": "note",
+      "kind": "integration-precondition",
+      "title": "pnpm lint is red on this branch without FREEZE_BASE_REF, because origin/main is 62 commits ahead with the cut phase's frozen workflows",
+      "file": "packages/db/package.json (no change owed here — the branch's base is the cause)",
+      "evidence": "REPRODUCED both ways from the worktree root. `CI=true GITHUB_ACTIONS=true pnpm lint` exits 1 at step 1, 'freeze-lint: FAIL', 38 violations, all REMOVED-VS-BASE / UNLOCKED-VS-BASE / REGISTRY-DOWNGRADE for chatTurn v22, claraWork v6, statementFacts v4 and payrollFacts v1 — files that exist on origin/main (3bf6aa94d) and not on the lane base. `git rev-list --count 7bc5a710f..origin/main` = 62; `git rev-list --count origin/main..7bc5a710f` = 0. `CI=true GITHUB_ACTIONS=true FREEZE_BASE_REF=7bc5a710f pnpm lint` exits 0, the whole chain. The lane touched no packages/runtime file (git diff 7bc5a710f...HEAD --stat lists none) and its ticket reports record the override and the reason.",
+      "failure_scenario": "An integrator who runs the runner-shaped lint on the lane branch as-is reads 38 frozen-workflow violations and attributes them to this lane. Worse, the first step fails, so eslint over the packages never runs at all and a real lint error in the lane's own files would be masked.",
+      "required_fix": "None in the lane. At integration, merge main into the lane (or run the check against the merged head) before treating lint as a gate; the frozen manifest resolves itself once the cut phase's files are present."
+    },
+    {
+      "id": "ADV-L01-05",
+      "ticket": 1073,
+      "severity": "note",
+      "kind": "dead-code",
+      "title": "Dead fixture state and a dead export on a shared e2e mock",
+      "file": "apps/web/e2e/accrual-mock.mjs:109-128",
+      "evidence": "state.periodReverseCalls is initialised, reset and pushed to in the reverse_plan_occurrence handler, and accrualPeriodReverseCalls() is exported to read it. `grep -rn accrualPeriodReverseCalls apps/web` returns exactly one hit — the export itself. accrual-walk.spec.ts's new accrual.walk.reversePeriod cell asserts the control, the sentence and the verbatim refusal, and never the recorded calls. The sibling reverseOpKeys recorder beside it IS read by the 'reverse now' cell, which is presumably where the shape was copied from.",
+      "failure_scenario": "Speculative Generality on a file rule 7 names as shared: a later lane reads the export as an existing contract and keeps it alive, or wires an assertion to it without noticing nothing ever checked it.",
+      "required_fix": "Either assert it (the natural claim is that the browser sent exactly {p_plan, p_due, p_op_key} and no window — the handler already records keys), or delete the state, the reset line and the export."
+    },
+    {
+      "id": "ADV-L01-06",
+      "ticket": 1073,
+      "severity": "note",
+      "kind": "dead-arm-and-coverage-gap",
+      "title": "One unreachable arm and one undriven arm in the new door's refusal-code map",
+      "file": "packages/db/migrations/0333_plan_occurrence_reversal_door.sql:348-358",
+      "evidence": "The `case v_reason` map carries `when 'plan_not_found' then 'CLR11'`. clara._plan_door_ctx has already resolved the plan under the caller's firm and raised CLR11 itself if it did not exist (its body: select * into pl from clara.accounting_plans where id = p_plan and firm_id = firm, then raise plan_not_found), and the door then locks that same row for update, so the core cannot answer plan_not_found through this entrance — I confirmed the CLR11 comes from _plan_door_ctx by driving a foreign plan and a nonexistent one (both 'accounting plan not found in your firm', detail {\"reason\":\"plan_not_found\"}). Separately, `when 'client_inactive' then 'CLR13'` is never driven: p1073.refusals.core covers not_yet_due, reversal_before_primary, plan_ended and plan_paused, and no cell deactivates the client.",
+      "failure_scenario": "Low. A wrong SQLSTATE on the client_inactive arm would ship unnoticed; the plan_not_found arm is simply unreachable code a reader has to rule out by hand.",
+      "required_fix": "Drive client_inactive in p1073.refusals.core (the sibling remedies' own scenes already deactivate a client), and either drop the plan_not_found arm or comment it as belt-only, naming _plan_door_ctx as the body that owns that answer."
+    },
+    {
+      "id": "ADV-L01-07",
+      "ticket": 1080,
+      "severity": "note",
+      "kind": "stale-test-fixture",
+      "title": "A web test fabricates a refusal sentence no body in the estate can now produce",
+      "file": "apps/web/components/accruals/accrual-form.test.tsx:339-350",
+      "evidence": "The cell throws refusal(\"CLR10\", \"authority_ref_unresolved\", \"the instruction this accrual cites does not exist for this client\") and asserts the form renders it verbatim. That sentence was clara._accrual_plan_core's alone; 0331 replaced it with the plan lane's own, and 0331's tail PINS that it now lives nowhere (c_accrual_sentence constant text := 'the instruction this accrual cites', asserted absent from every clara body — I re-ran that census against the live catalog and it holds). The form's own door is clara.create_accrual_adjustment, which nests clara.create_accounting_plan and has always said 'this plan cites', so the fixture was already fictional before this wave; #1080 makes it total. The cell is green because it fabricates both sides.",
+      "failure_scenario": "A reader takes the fixture for the door's real sentence. No runtime impact: the assertion is self-consistent and the web renders whatever the door sends.",
+      "required_fix": "Out of this lane's scope — file a follow-up to restate the fixture at the sentence the door actually raises ('the instruction this plan cites does not exist for this client'), or note it in the lane's follow-ups so it is not re-derived from the stale copy."
+    }
+  ],
+  "attacks_that_held": [
+    {
+      "axis": "tenant isolation and the existence oracle",
+      "target": "clara.reverse_plan_occurrence (#1073, the lane's ONE new granted door)",
+      "driven": "A bookkeeper of firm B (dave) against firm A's plan, and the same actor against a uuid naming nothing.",
+      "result": "Both answer identically: CLR11, 'accounting plan not found in your firm', detail {\"reason\":\"plan_not_found\"}. No oracle. The firm predicate is inside the lookup (clara._plan_door_ctx), and every later read (the for update on clara.accounting_plans, the live-revision select) is keyed on a plan id that lookup already bound to the caller's firm."
+    },
+    {
+      "axis": "rank floor and role reachability",
+      "target": "clara.reverse_plan_occurrence",
+      "driven": "A viewer of the owning firm (carol); a clara_runtime connection; a clara_agent_ro connection.",
+      "result": "Viewer gives CLR04 'reversing one period of a plan requires an active bookkeeper or above', detail {\"reason\":\"insufficient_role\"}. clara_runtime and clara_agent_ro give 42501 permission denied for function reverse_plan_occurrence. The live ACL is {clara_fn_owner, clara_authenticated} only; 0333 mints no OBO twin, no agent read and no wake wrapper, and rig-meta.mjs's ALLOWED gained exactly that one human name."
+    },
+    {
+      "axis": "a race between two real sessions",
+      "target": "clara.reverse_plan_occurrence, same plan and same period, DIFFERENT op keys",
+      "driven": "Two pooled connections through rig-txn.mjs's raceTwoHumanCalls: session A opens a transaction and admits; session B runs the same act on its own connection and is released when A commits.",
+      "result": "A admits (reversed: true). B is refused CLR13 'this period's reversal was not admitted (reversal_already_admitted)', converged: true, naming A's own work_id and occurrence_id. The plan is left with exactly two occurrences (primary + reversal) and the ledger unchanged. The serialisation is the plan ROW lock the door takes at RUNG 1 and the core re-takes as its own first statement — the same lock, same transaction, no inversion and no advisory rung in between."
+    },
+    {
+      "axis": "idempotency under replay with the same key and a different payload",
+      "target": "clara.reverse_plan_occurrence",
+      "driven": "Key K for (plan, due) then act; K again for (plan, due); K again for (plan, a DIFFERENT due).",
+      "result": "The replay returns the stored receipt (reversed: true) and reverses nothing twice; the changed payload is refused CLR10 'op_key reused with different args' from clara._reserve_op. That refusal is UNTYPED (no detail.reason) — and I checked before calling it a finding: neither clara.request_plan_catch_up nor clara.skip_plan_occurrence wraps it either, so the new door matches the two remedies #1073's AC3 tells it to match. Only clara.correct_accrual_adjustment wraps it, and that is its own idiom."
+    },
+    {
+      "axis": "a closed set, and injection through it",
+      "target": "clara.list_accrual_adjustments's new p_side (#1075)",
+      "driven": "p_side null, 'expense', 'EXPENSE', the empty string, and an injection-shaped value containing quotes and or '1'='1.",
+      "result": "null gives every side and the envelope echoes side: null. 'expense' filters and echoes side: 'expense'. The other three are refused CLR10 accrual_side_filter_unsupported with the offending value and the supported list, never a silent empty page. The predicate is a.side = p_side on a bound parameter (no dynamic SQL anywhere in the file), and clara.accrual_adjustments.side is NOT NULL with a CHECK to {expense,revenue}, so no row can be invisible under both filters. The side wall sits AFTER the client-in-your-firm refusal, so it cannot be used to probe clients."
+    },
+    {
+      "axis": "the accounting treatment the ticket names",
+      "target": "#1074, a correction landing between a posting and its reversal",
+      "driven": "Beyond the lane's own six cells (all re-run green), I drove the case the lane left unverified: a correction that MOVES the accrual onto a different active expense account after the period posted.",
+      "result": "The reversal posts to the ORIGINAL pair — [[\"6100\",0,300000],[\"2020\",300000,0]] — and 6100, 6105 and 2020 each net to 0 over clara.journal_lines. That is the honest treatment: the balance is cleared off the accounts that carry it. I also drove the deactivated-account case (see ADV-L01-03): it refuses rather than posting to an account carrying nothing."
+    },
+    {
+      "axis": "integer cents and the Kuala Lumpur calendar day",
+      "target": "the #1074 override path",
+      "driven": "Read of the value chain plus the posted lines of every scene above.",
+      "result": "bigint (clara.journal_lines) to jsonb number to ::numeric inside clara._plan_occurrence_basis to ::bigint inside clara._validate_entry_lines. jsonb numbers are exact numeric in PostgreSQL, so no float anywhere; every posted figure came back to the cent. The due gate is unchanged and still clara._book_today(), and the date the door derives is clara._plan_reversal_date (first day of the month after p_due) — one home, not the web's hand-mirrored copy."
+    },
+    {
+      "axis": "a splice anchor that could match twice or zero times",
+      "target": "0330, 0331 and 0332's reverse-substitution tails",
+      "driven": "Read of all three tails; none of the five migrations contains dynamic SQL at all (no execute, no pg_get_functiondef, no format()) — which is also why no apps/web/tests/firm-scope-db-pins.corpus.ts entry is owed, as the README's 0330 section states.",
+      "result": "They are replace() over the INSTALLED prosrc, compared to a sha of the pre-image. Both failure modes fail CLOSED: a pattern that matched twice would over-replace and miss the hash; one that matched zero times leaves the source unchanged and misses it too. Sweep rule (e) is respected everywhere — 0330's T.6 census orders by p.proname, which is name and takes no database collation, and 0332's resolver orders by the integer line_no."
+    },
+    {
+      "axis": "a migration that would fail or silently mis-apply on a database with real rows",
+      "target": "0330 to 0334",
+      "driven": "Statement census over the five files; pg_depend on the door 0334 drops; and the fact that all five are applied on clara_l04, which carries the seed plus every row this lane's batteries and my probes wrote.",
+      "result": "No DDL on a table, no INSERT/UPDATE/DELETE outside function bodies, no CHECK, no chart row, no grant change beyond 0333's one new door and 0334's re-grant after its drop-and-create. select count(*) from pg_depend joined to pg_proc for list_accrual_adjustments with deptype <> 'i' = 0, so 0334's drop function if exists on the three-argument signature has nothing to break, and the four-argument survivor carries the same {clara_fn_owner, clara_authenticated} ACL and a p_side text DEFAULT NULL, so every existing three-argument caller (the web's own PostgREST call among them) still resolves. Every prestate and tail arm reads only the catalog, so none has a data-dependent branch that the seeded rig entered and hosted would not."
+    },
+    {
+      "axis": "does #1080's narrowing break a live caller",
+      "target": "clara._accrual_plan_core's new refusal (authority_ref_not_human_instruction)",
+      "driven": "Catalog census of every body naming clara._accrual_plan_core( and every body naming create_accrual_adjustment_for(, plus a source read of the only client-side caller.",
+      "result": "Exactly one body reaches the core — clara.create_accrual_adjustment_for, granted to clara_runtime only — and it has exactly one caller in the repository, the FROZEN packages/runtime/workflows/chatTurn.v20.tools.ts, which always sends { kind: 'accounting_work', id: input.authority_work_id } (line 288). accounting_work resolution is byte-unchanged by #977/0250 (existence under the same firm-and-client ladder), so the new refusal is unreachable from the frozen tool and NO successor contract is owed. The HUMAN accrual entrance never touched this body: clara.create_accrual_adjustment nests clara.create_accounting_plan."
+    },
+    {
+      "axis": "the shared body's blast radius",
+      "target": "clara._plan_admit_occurrence, recut by 0332 for every plan kind",
+      "driven": "accounting-plan-occurrences, accrual-bill-conflict, accrual-correction, accrual-period-amounts, prepayment-occurrences, prepayment-schedule, revenue-recognition.",
+      "result": "97 tests, 97 pass, 0 fail, 0 skipped. The lane's own correction of the SWEEP-PLAN's framing is right and I re-derived it: ck_plan_revisions_auto_reverse ties auto_reverse to plan_kind='reversing_journal', so only a reversing journal has a reversal leg and the override can only ever fire there."
+    },
+    {
+      "axis": "house rosters a new granted body must join",
+      "target": "clara.reverse_plan_occurrence and clara._plan_posted_entry_lines",
+      "driven": "A catalog probe for a bare clock token in either body, then x42-s5-seam.test.mjs and x42-s5-residuals.test.mjs, then operation-census.test.mjs and rig-isolation.test.mjs.",
+      "result": "Neither body carries now(), clock_timestamp() or current_date, so the arm-(D) bare-token roster in x42-s5-helpers.mjs needs no entry: 11/11 green. operation-census plus rig-isolation: 33 tests, 32 pass, 0 fail, 1 skipped. clara.audit_log carries no closed verb set, so 0333's new audit verb needs none."
+    }
+  ],
+  "gates_rerun_by_this_review": [
+    { "gate": "the lane's five new db batteries (plan-authority-wall, accrual-plan-authority-wall, plan-reversal-posted-basis, plan-occurrence-reversal-door, accrual-list-side-filter)", "result": "22 tests, 22 pass, 0 fail" },
+    { "gate": "the db test files the lane EDITED (accrual-adjustments, accrual-revenue-side, plan-overlap-template-arm-retired, authority-ref-human-instruction, accounting-plans)", "result": "63 tests, 63 pass, 0 fail, 0 skipped" },
+    { "gate": "the shared-body consumers (7 files, see attacks_that_held)", "result": "97 tests, 97 pass, 0 fail, 0 skipped" },
+    { "gate": "operation-census.test.mjs plus rig-isolation.test.mjs (rule 8, packages/db/tests touched), run without the reset flags", "result": "33 tests, 32 pass, 0 fail, 1 skipped" },
+    { "gate": "x42-s5-seam.test.mjs plus x42-s5-residuals.test.mjs (clock-token roster)", "result": "11 tests, 11 pass, 0 fail" },
+    { "gate": "pnpm typecheck (worktree root)", "result": "exit 0" },
+    { "gate": "apps/web whole unit suite (node scripts/run-tests.mjs)", "result": "5179 tests, 5177 pass, 0 fail, 2 skipped, exit 0" },
+    { "gate": "CI=true GITHUB_ACTIONS=true FREEZE_BASE_REF=7bc5a710f pnpm lint", "result": "exit 0" },
+    { "gate": "CI=true GITHUB_ACTIONS=true pnpm lint (no override)", "result": "exit 1 at freeze-lint, 38 violations — see ADV-L01-04" },
+    { "gate": "pnpm --filter @clara/web e2e accrual-walk on the lane triple (3530/3531/3532)", "result": "21 passed, including accrual.walk.reversePeriod" },
+    { "gate": "live sha pins re-measured on clara_l04 against every pin the five migrations carry", "result": "all match: _assert_plan_authority 60f2c5d1…, _authority_ref_refusal 55c20b20…, create_accounting_plan 544cd88e…, _obo_plan_core 149b4a3d…, _accrual_plan_core 89d2ac3a…" }
+  ],
+  "status_requests_received_mid_task": "none"
+}

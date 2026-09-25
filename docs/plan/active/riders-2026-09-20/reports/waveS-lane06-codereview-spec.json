@@ -1,0 +1,146 @@
+{
+  "axis": "spec",
+  "lane": "waveS-lane06",
+  "branch": "riders/wS-lane06",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "fixed_point": "7bc5a710f",
+  "diff": "git diff 7bc5a710f...HEAD",
+  "commits": 14,
+  "tickets": [1044, 1128, 1129, 1131, 1126, 1124, 1127, 1141],
+  "spec_sources": [
+    "gh issue view <n> --json number,title,body,state,comments (the bodies are the Agent Briefs; #1127 carries the 2026-09-24 ruling comment, the only comment on any of the eight)",
+    "docs/plan/active/riders-2026-09-20/SWEEP-PLAN.md lines 56, 89, 187-190, 235-238, 266 (plan of record; it is what narrows #1131)"
+  ],
+  "cells_rerun_by_this_review": [
+    "packages/db/tests/ci-frontier-leg-contract.test.mjs -> 15 pass / 0 fail",
+    "packages/runtime/tests/rollback-preflight.test.mjs (lane DB env) -> 46 tests, 24 pass / 0 fail / 22 skip; the two #1129 cells (39, 40) both ok",
+    "packages/runtime/tests/intake-sidecar-race.test.mjs -> 20 pass / 0 fail",
+    "packages/runtime/tests/l9-pool-contract-lane-probe.test.mjs -> 27 pass / 0 fail",
+    "packages/runtime/tests/ready.test.mjs -> 26 pass / 0 fail, including '#1128 fault: CLARA_HEARTBEAT_STALE_MS set INSIDE the test body now takes effect'",
+    "node -e over lib/runtime-contracts.mjs + lib/rollback-preflight.mjs -> roster = intake_refusal_record_v1@0254, fa_parked_run_v1@0279; contractsMissingFrontierRule() = [] (the #1129 guard is non-vacuous: two real entries, both ruled)"
+  ],
+  "already_satisfied_claims_checked": [
+    {
+      "claim": "#1131 AC2 (the two-build drill already runs on a regular cadence) is already satisfied",
+      "verdict": "CONFIRMED",
+      "evidence": ".github/actions/db-live-gates/action.yml:488 runs 'node scripts/ci/world-gate.mjs tests/two-build-cutover-e2e.mjs' unconditionally inside the composite action; .github/workflows/ci.yml:281-283 gates the db-live-gates job only on needs.changes.outputs.code != 'false', so it runs on every non-docs-only pull request."
+    },
+    {
+      "claim": "#1126: no GITHUB_STEP_SUMMARY exists anywhere in the workflows today",
+      "verdict": "CONFIRMED at the base",
+      "evidence": "git show 7bc5a710f:.github/actions/frontier-leg/action.yml | grep -c GITHUB_STEP_SUMMARY = 0; on HEAD the only occurrences anywhere in .github/ are the three new writes in frontier-leg/action.yml."
+    },
+    {
+      "claim": "#1141: the production component already moves focus correctly, so only the cell is corrected",
+      "verdict": "CONSISTENT with the ticket's own branch ('if the component already does so, the cell is corrected'); no production file appears in the diff (only apps/web/e2e/work-question-walk.spec.ts and apps/web/e2e/README.md). Not independently re-driven by this review: no browser run was made.",
+      "evidence": "git diff 7bc5a710f...HEAD --stat"
+    },
+    {
+      "claim": "#1124: no existing note on stale node_modules anywhere in RIG.md",
+      "verdict": "CONFIRMED",
+      "evidence": "grep -i 'shadcn|frozen-lockfile|stale.*node_modules' over docs/plan/active/riders-2026-09-20/RIG.md at the base returns nothing; the new paragraph is the first."
+    }
+  ],
+  "findings": [
+    {
+      "id": "SPEC-1141-AC1",
+      "ticket": 1141,
+      "severity": "major",
+      "kind": "requirement-missing",
+      "title": "#1141 AC1 is not met: the red was never reproduced before the fix",
+      "evidence": "Ticket line: '- [ ] A bounded loop (ten runs under load, for example beside a parallel unit-suite run) reproduces the red before the fix and passes after.' The lane report (waveS-lane06-ticket1141.md, AC1) says: 'Attempted, not reproduced within this session's budget' - 6 CDP Emulation.setCPUThrottlingRate attempts (rate 6 x 5 runs, rate 20 x 1 run) against the OLD instant-read shape, '6 attempts, 0 catches, all read H2'; rate 50 crashed the renderer. The ticket's own suggested instrument (a ten-run loop beside a parallel unit-suite run) was never run. apps/web/e2e/README.md's new #1141 subsection repeats the same admission in the checked-in docs.",
+      "required_fix": "Either run the ticket's own instrument (the pre-fix B4 cell in a bounded ten-run loop beside a parallel 'node scripts/run-tests.mjs') and record pre-fix red / post-fix green, or obtain an explicit orchestrator/owner waiver that the vacuity control (dropping restoreFocusAfterRow's final landmark.focus() call) is accepted in AC1's place. Do not close #1141 on the current evidence without that waiver."
+    },
+    {
+      "id": "SPEC-1141-AC2",
+      "ticket": 1141,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "#1141 AC2 is not met: the whole browser suite was not run twice, only the one touched spec",
+      "evidence": "Ticket line: '- [ ] The whole browser suite green twice with no B4 red.' Report: 'The LITERAL whole browser suite is 54 spec files ... running it twice was outside this session's practical time budget'; what ran was work-question-walk.spec.ts alone, 14 cells, twice (1.7m and 1.4m). For this ticket the substitution is not equivalent: the ticket's own summary records B4 'red exactly once in each of three whole-suite runs ... green in every second run and in every isolated re-run (14 of 14, twice each time)', so an isolated green run is precisely the condition under which the defect has never shown, and two of them are not evidence against the load-sensitive race.",
+      "required_fix": "Run the full 54-spec browser suite twice on the integrator's rig (or in the gate) and record B4's result in both, before #1141 is closed; otherwise record the residual against the ticket instead of closing it as done."
+    },
+    {
+      "id": "SPEC-1044-AC3",
+      "ticket": 1044,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "#1044 AC3 is met for one leg of the db-live-gates intake chain only, and that leg went red twice on this branch",
+      "evidence": "Ticket line: '- [ ] The driver of .github/actions/db-live-gates green five consecutive times on a fresh database; CI=true GITHUB_ACTIONS=true pnpm lint exit 0; the runtime test file once under WSL as user runner.' Lint (exit 0) and the WSL run (20 pass / 0 fail) are met. The driver is not: the report runs only leg 3 (intake-batch-e2e.mjs) and states legs 1 and 2 (intake-e2e.mjs, intake-admission-e2e.mjs) 'cannot be run on this rig at all', because waitForQueueDrain censuses roughly 76 permanently unbindable tasks inherited from the clara_l08 template. Of the 9 branch rounds of leg 3, rounds 5 and 9 exited 1 at intake-batch-e2e.mjs:650 ('exactly one op receipt per live child (16 of 17)' and '(29 of 31)'). The 'FIVE CONSECUTIVE GREEN' that fills the FINAL5 row comes from an orchestrator addendum quoting the tail of background task b1v86pxjf, not from the implementer's own per-round table, and it is still leg 3 alone.",
+      "required_fix": "The integrator must run the whole db-live-gates driver (all three intake legs) on a genuinely fresh database or disposable cluster before #1044 is closed, and must act on the report's follow-up 3 (file intake-batch-e2e.mjs:650 as its own defect): db-live-gates is a required check, so a load-sensitive red there blocks the wave whatever its cause."
+    },
+    {
+      "id": "SPEC-1131-UNRUN",
+      "ticket": 1131,
+      "severity": "major",
+      "kind": "implemented-but-unproven",
+      "title": "#1131's entire deliverable has never been executed inside the drill it lives in, and that drill is a required per-PR gate",
+      "evidence": "Ticket AC1: 'The contract-refusal exit code is covered by some automated test that can run without a hand-maintained WDK World clone.' The coverage added is a 70-line block in packages/runtime/tests/two-build-cutover-e2e.mjs (noContracts / requiredContracts / cliC, after cliA). The lane report's own gate table reads 'New/touched test file, full execution | *not run this session*', and its Anything-unverified section states the block is proven only by a hand-run CLI against a clone and 'does not prove the new block is free of a scope/variable-naming mistake that only a real run inside main()'s actual execution context ... would catch'. That file runs inside db-live-gates (action.yml:488), which feeds the required 'ci' context on every code PR, so a wrong assertion reds the required gate for the whole repo. I re-read the block's inputs and they do resolve (preflight({query,supported,contracts,scope}) matches lib/rollback-preflight.mjs:779; violations carry requirement/contract per :203-204; preRuleBodies, requiredBodies, runPreflightCli, w1, w2, query are all in scope at lines 966-990), so this is a residual risk rather than a demonstrated defect - but the acceptance criterion is 'covered by an automated test', and no automated run of it exists.",
+      "required_fix": "Run packages/runtime/tests/two-build-cutover-e2e.mjs end to end once (integrator rig, or the first db-live-gates run) and record its '[tb-e2e] preflight CLI: --supported <body-complete roster>, no --supported-contracts, exits 1 ...' line before closing #1131."
+    },
+    {
+      "id": "SPEC-1127-CHANNEL",
+      "ticket": 1127,
+      "severity": "major",
+      "kind": "implemented-but-unproven",
+      "title": "#1127's notification channel is unproven, and if the grant is refused its own failure is invisible - the exact condition the ruling exists to end",
+      "evidence": "Ruling (issue #1127, comment of 2026-09-24): 'Yes: wire the weekly scheduled CI dispatch's failure to a visible notification.' The implementation is ci.yml's notify-schedule-failure job running 'gh issue comment 1127' under a job-level 'permissions: issues: write'. ci.yml carried no permissions block anywhere before this change, and it is the repo's ONLY workflow (ls .github/workflows/ -> ci.yml), so nothing here has ever exercised a write-scoped GITHUB_TOKEN. The lane report says so itself: 'Whether gh issue comment succeeds against the live default GITHUB_TOKEN with only the job's own issues: write grant (rather than ... being blocked by an org-level token-permission default narrower than what a job-level permissions block can widen) is unverified.' If the grant is refused the job fails on a scheduled run - and nobody reads scheduled runs, which is the ticket's own premise.",
+      "required_fix": "Before closing #1127: confirm the repository/organisation 'Workflow permissions' setting lets a job request write scopes, and watch a real scheduled (or deliberately failed dispatch) run actually post the comment. Until a comment lands on an issue, #1127 is wired but not proven."
+    },
+    {
+      "id": "SPEC-1127-TARGET",
+      "ticket": 1127,
+      "severity": "minor",
+      "kind": "implemented-questionably",
+      "title": "#1127 routes its notification to issue #1127 itself, which this wave closes",
+      "evidence": ".github/workflows/ci.yml:658 hardcodes 'gh issue comment 1127', and packages/db/tests/ci-schedule-notify.test.mjs's p1127.notify.channel pins that literal. #1127 is the ticket this lane delivers, so it is closed when the wave lands, and the standing channel for every future weekly red becomes a closed issue nobody has reason to reopen. The ruling does allow 'a GitHub issue comment', so this is inside its letter, and the lane report flags it as its own first follow-up.",
+      "required_fix": "Owner/orchestrator call: either keep #1127 open as the standing CI-health thread and say so in the issue, or mint a dedicated ci-health tracking issue and point both the workflow line and p1127.notify.channel at it in one follow-up."
+    },
+    {
+      "id": "SPEC-1126-SKIPSMAX",
+      "ticket": 1126,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#1126 measures the cells-floor against the corpus but leaves the skip bound hand-declared",
+      "evidence": "Ticket's Current behavior: 'the db-split-partition-total check confirms that each frontier leg declares both a cell-count floor and a skip-count bound, but it cannot check whether those declared numbers are still accurate'. The new cells p1126.floor.corpus and p1126.floor.roster re-derive only '#!cells-floor:' from static test( counts; '#!skips-max:', '#!skips-max-<slice>:' and '#!drill-skips-max:' are untouched and remain typed numbers nothing checks. The lane report names this as its own deliberate residual (follow-up 1) and argues the skip count is not statically derivable because it depends on which gates are granted at the frontier - a fair reason - but the ticket's Desired behavior says 'declared floors should be checkable', so this is partial rather than wrong.",
+      "required_fix": "File the skip-bound half as its own follow-up (the report already drafted it) so it is a recorded residual rather than an assumed one, or record an explicit ruling that the skip bound stays hand-declared."
+    },
+    {
+      "id": "SPEC-1124-SCOPE",
+      "ticket": 1124,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#1124's note lives in a wave-scoped RIG.md, so the next wave can rediscover the same gap",
+      "evidence": "Ticket AC2: 'The fix is documented once, in a single place other lanes' agents would naturally find it, rather than being independently rediscovered per lane.' The paragraph landed in docs/plan/active/riders-2026-09-20/RIG.md, the plan folder for THIS wave only. The lane report itself observes that three earlier waves each carry their own RIG.md with their own narrower install line (refresh-wave-2026-09-14/RIG.md:12, refresh-wave-2026-09-15/RIG.md:47, refresh-wave-2026-09-18/RIG.md:45) - which is exactly the mechanism by which the guidance went stale in the first place. SWEEP-PLAN.md's shared-files table does assign this file and only this file to #1124, so the worker followed the plan of record; the residual belongs to whoever cuts the next wave's rig.",
+      "required_fix": "When the next wave's RIG.md is cut, carry this paragraph forward, or promote it to a durable home (a repo-level rig/troubleshooting doc), so AC2's 'documented once' survives the wave boundary."
+    },
+    {
+      "id": "SPEC-1129-SINCE",
+      "ticket": 1129,
+      "severity": "note",
+      "kind": "deviation-documented",
+      "title": "#1129's guard matches by contract id, not by the roster entry's `since` migration as the brief words it",
+      "evidence": "Ticket Desired behavior: 'A cheap guard should exist that names every runtime-contract roster entry whose `since` migration either has a corresponding rule in FRONTIER_RULES, or is explicitly listed as declared ahead of its rule'. contractsMissingFrontierRule (packages/runtime/lib/rollback-preflight.mjs:262-268) compares c.id against the union of every rule's requiresContracts and ignores `since` entirely; its docblock states the reason: 'The check does not require the SAME migration number on both sides - only that some rule, at some frontier, will eventually refuse an image that does not carry the marker'. AC1's own wording ('no corresponding frontier rule') is satisfied by the id match, and today the two agree (intake_refusal_record_v1@0254 is ruled at 0254, fa_parked_run_v1@0279 at 0279). Recorded so the integrator sees the deviation was deliberate rather than missed.",
+      "required_fix": "None required. If the owner wants since-alignment too, it is a one-line addition to the same function plus one cell."
+    },
+    {
+      "id": "SPEC-1141-BODYASSERT",
+      "ticket": 1141,
+      "severity": "note",
+      "kind": "behaviour-change-not-asked-for",
+      "title": "#1141 deleted B4's named not.toBe(\"BODY\") assertion, the one carrying the cell's own title",
+      "evidence": "The diff removes both expect(focused.tag, 'focus was dumped onto the document body when the row disappeared').not.toBe('BODY') and the tag field from the evaluate payload, replacing them with expect.poll(...).toBe('H2'). toBe('H2') subsumes not-BODY, so no coverage is lost in substance; what is lost is the named failure message for the defect the cell's own title states ('the row leaves without dumping focus'), and the ticket asked for the cell to be corrected, not narrowed. Also recorded here: cellBudgetMs({ polls: 3 }) became { polls: 4 }, which is a budget rise - but it accompanies a genuinely added poll and is sized by cell-budget-census.test.ts (5 pass), so it is not the 'fix that only widens a timeout' the ticket refuses.",
+      "required_fix": "Optional: keep a not.toBe('BODY') message on the polled value, or fold that phrase into the poll's failure message, so a future red still names the defect in the cell's own words."
+    }
+  ],
+  "no_finding_recorded_for": [
+    "#1044: the { locked } option on atomicJson and the _sidecarLockCountForTest probe sit inside the brief's named Key interfaces and its Desired behavior ('the merge re-reads under the same per-sidecar exclusion the intake path uses'); the lock is per-path, so writeIntakeMeta's writes are unaffected except against themselves. Not scope creep.",
+    "#1128: both ACs met. Item 1 fixed in lib/lane-probe.mjs (await refreshOnce() in place of await inFlight) with a discriminating cell in l9-pool-contract-lane-probe.test.mjs; item 2 fixed by converting HEARTBEAT_STALE_MS to heartbeatStaleMs() with the 30000 default byte-identical, cell green. The ticket's Out of scope (production default values) is respected.",
+    "#1129: both ACs met and non-vacuous - the synthetic-roster cell names unruled_marker_v1 and only it.",
+    "#1126 AC1: met - three $GITHUB_STEP_SUMMARY writes in the three measured steps of .github/actions/frontier-leg/action.yml, an action used only by the schedule/dispatch-only db-slice-frontiers job (ci.yml:470-521), pinned by p1126.summary.list/roster/drill. The writes sit BEFORE the floor and skip checks, so a breached floor still records its counts.",
+    "#1124 AC1: met as the AC's own first alternative (a documented shortcut). The pnpm claim inside the new paragraph checks out: root package.json:7 pins pnpm@10.33.0, so install --dry-run is genuinely unavailable."
+  ],
+  "status_request_note": "No status-report request arrived during this review.",
+  "summary": "Eight tickets, ten findings, and none of them is a requirement implemented wrongly. #1128, #1129 and #1126 are clean on the spec axis and re-ran green here. The weight is all on evidence: #1141 misses BOTH of its evidence acceptance criteria (no reproduced red, no whole-suite run), #1044 proves one leg of the three-leg db-live-gates driver and that leg went red twice on this branch, #1131's whole deliverable has never executed inside the drill it lives in, and #1127's notification channel has never posted a comment. Each gap is disclosed in the lane's own reports; none of them is closable from this worktree.",
+  "verdict": "accept-with-fixes"
+}

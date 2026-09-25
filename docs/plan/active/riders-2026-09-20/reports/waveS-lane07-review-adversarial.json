@@ -1,0 +1,101 @@
+{
+  "lens": "ADVERSARIAL",
+  "lane": "L7 (riders/wS-lane07, clara-wt/659, clara_l09 @ 127.0.0.1:55749)",
+  "fixed_point": "7bc5a710f",
+  "diff": "git diff 7bc5a710f...HEAD  (21 commits, 32 files, +4573/-19)",
+  "tickets": ["1047", "1098", "1046", "1132", "1096", "1099", "1094", "1095", "1058"],
+  "verdict": "accept-with-fixes",
+  "summary": "Eight findings, four major. Two are new behaviour that leaks or stalls: #1095 turns the invite-preview rate wall into a third-party activity oracle on an anonymous page (proved: an attacker's FIRST request from a cold address is answered rate_limited/661s, a number derived wholly from another party's five loads of the same token, and the page now renders a notice where it used to render nothing); and #1046's prune verbs take ShareRowExclusive with no lock_timeout anywhere, so a queued ALTER freezes every pre-session confirmation and invite preview behind whatever transaction happens to hold RowExclusive (proved with three real connections: an unrelated wall write blocked to its own 3s lock_timeout). Two are deliverables that are wrong in their own terms: #1047's scanner is blind to the estate's array-literal verdict idiom, so the record it publishes as complete misses live pinned text-ordered sites (0220:960/965, 0132:1545/1549); and #1132's disclosure names an outcome the live body cannot write and omits a third success token. Everything else I tried held: 0347's scope predicate, idempotence and zero-row arithmetic; 0348's 15-minute floor and its window-vs-margin race; #1096's 29-February residual (both date consumers clamp with least(day, days_in_month)); #1099's op-key replay law; the en.json hunk (no duplicate key, depth balanced); the four collate-C census fixes. All new db cells re-run green on the lane database.",
+  "findings": [
+    {
+      "id": "ADV-L07-01",
+      "ticket": 1095,
+      "severity": "major",
+      "kind": "information-disclosure / oracle",
+      "title": "The new rate-limited notice publishes a wait that can belong entirely to ANOTHER party's loads of the same invite token, on an anonymous page that previously said nothing",
+      "evidence": "PROVED on clara_l09 inside a rolled-back transaction. Planted five clara.invite_preview_attempts rows for token T under the invitee's origin digest, 4 minutes old; then called clara.preview_invite_by_token('adv-oracle-token', sha256('attacker-ip')) as a FIRST-ever request from a cold address: returned {outcome: rate_limited, retry_after_seconds: 661} while the attacker's own origin held 0 rows in the table. The same attacker against an untouched token returned {outcome: not_previewable}. packages/db/migrations/0309_invite_preview_public_door.sql:461-499 computes each limb's wait independently and advertises the MAX, and its own comment withholds the scope field because 'naming them would tell a prober which of two budgets it exhausted' - #1095 now hands the anonymous surface the very number that comment protects. Before this diff apps/web/components/invite-accept-form.tsx rendered NOTHING for every non-ok signed-out outcome (the null arm this commit replaced at line 779), so rate_limited was indistinguishable from not_previewable; after it, lines 779-794 render a distinctive notice. What an attacker holding a leaked link learns from one request: that some other party has loaded this exact token at least 5 times inside the last 15 minutes, and the second-resolution timestamp of that party's 5th-oldest in-window load (900 - 661 = 239s ago). Secondary: the copy in apps/web/messages/en.json, 'We checked your invitation too many times just now', is a plain falsehood in exactly this case and in the shared-NAT case - the visitor checked once or never.",
+      "required_fix": "Do not print a wait an anonymous caller's own attempts cannot account for. Either (a) keep the pre-#1095 silence whenever the advertised wait is not attributable to the caller's own origin limb - which needs 0309 to return the origin-limb wait separately, a door change this lane cannot make - or (b) drop the number from the signed-out surface and render a wait-free notice, or (c) render the notice only once the visitor's own reload count makes the refusal self-explanatory. Whichever is chosen, re-word the message so it does not assert that THIS visitor made the attempts."
+    },
+    {
+      "id": "ADV-L07-02",
+      "ticket": 1046,
+      "severity": "major",
+      "kind": "availability / lock",
+      "title": "clara.prune_*_attempts takes ShareRowExclusive with no lock_timeout in the verb or the caller, so a queued prune closes the whole pre-session auth wall for as long as any other transaction holds RowExclusive",
+      "evidence": "Lock mode MEASURED: inside a transaction that called both verbs, pg_locks for that backend held AccessShareLock + RowExclusiveLock + ShareRowExclusiveLock on BOTH clara.invite_preview_attempts and clara.confirmation_attempts. Direct block PROVED with two connections: A opened a transaction, called clara.prune_invite_preview_attempts(now()-interval '2 hours', 1000) and stayed open; B drove the real public door clara.preview_invite_by_token(...) with lock_timeout=3s and failed 55P03 after 3007ms; after A rolled back the same call returned in 5ms. QUEUE AMPLIFICATION PROVED with three connections: A held an ordinary open INSERT into clara.confirmation_attempts (RowExclusive only); B called clara.prune_confirmation_attempts and queued for ShareRowExclusive; C then attempted an UNRELATED wall write (different email digest, different origin, no conflict with A at all) and was blocked 55P03 after 3024ms - blocked by B's queued lock request, not by A. Neither verb carries a lock_timeout SET clause (packages/db/migrations/0348_rate_wall_attempts_retention.sql:260-280 and 286-306; the file's own 'set local lock_timeout' at line 123 covers the apply transaction only), and neither packages/runtime/lib/reconciler.mjs nor packages/runtime/lib/leader.mjs sets one (grep: no match). reports/waveS-lane07-ticket1046.md:344-353 discloses the lock honestly but bounds the stall by 'as long as the batched delete takes' and by RATE_WALL_PRUNE_BATCH; the measurement above shows the real bound is the slowest concurrent RowExclusive holder, is unbounded, and that during the wait the table is shut to EVERY key rather than to the rows being deleted.",
+      "required_fix": "Give both verbs a bounded, self-cancelling wait - a lock_timeout SET clause on the function beside set search_path - so a sweep that cannot get the lock gives up and the belt retries next cycle instead of freezing sign-up confirmation and invite preview. Catch lock_not_available (55P03) in reconciler.mjs's two new loops the way 42883 is already caught, so a skipped sweep is a no-op rather than a belt error. Re-state the real bound in 0348's header and in the packages/db/README.md 0348 section."
+    },
+    {
+      "id": "ADV-L07-03",
+      "ticket": 1047,
+      "severity": "major",
+      "kind": "incomplete-guard / unsupported claim",
+      "title": "The collation scanner cannot see the estate's array-literal verdict idiom, so RECORDED_SITES is not the complete record packages/db/README.md says it is and the guard cell cannot refuse a new pin written that way",
+      "evidence": "packages/db/tests/collation-pin-scan.mjs's pinReason() recognises a verdict only when it is a single-quoted literal (its comparedWithLiteral regex requires the right-hand side to begin with a quote, E-quote or concatenation) or a digest. PROVED with a synthetic probe against the live module: string_agg(t.label, ',' order by t.label) compared with 'alpha,beta' is reported; the SAME aggregate compared with array['alpha','beta'] returns [] - no finding. Live examples the record therefore omits: packages/db/migrations/0220_firm_knowledge_defaults.sql:960 and :965 aggregate clara.knowledge_keys.knowledge_key (an ordinary text column - exactly the row of the README table that reads 'database default') ordered by itself and pin the result against array['accounting_basis','coa_seed_decision','default_currency','reporting_framework']; packages/db/migrations/0132_f_a5b_pr1_sandbox_export.sql:1545 and :1549 do the same against array['as_of','locale','policy_key','reason']. mod.scanSqlText() on both whole files returns []. A sweep of both corpora found 41 aggregate sites whose verdict is an array comparison, about twenty of which carry an order-by key the module itself would classify movable (m[1], g, fn_name, a coalesce expression, k.knowledge_key, scope_default, k). packages/db/README.md:445-450 nonetheless states that RECORDED_SITES holds 'every pinned, text-ordered site in migrations/ and tests/ as of #1047' and that the scan 'refuses a site the record does not hold'. tests/collation-pin-portability.test.mjs re-measures only RECORDED_SITES, so the live proof inherits the same gap.",
+      "required_fix": "Teach pinReason() the array-constructor verdict (an is-distinct-from / <> / = whose right-hand side is an array constructor is as much a pin as a quoted literal), re-derive RECORDED_SITES with the widened instrument, and record or fix every site it newly finds - starting with 0220:960/965 and 0132:1545/1549. Until that is done, narrow the README claim to what the instrument actually covers, because as written it is an unverified completeness claim about the estate."
+    },
+    {
+      "id": "ADV-L07-04",
+      "ticket": 1132,
+      "severity": "major",
+      "kind": "incorrect-documentation",
+      "title": "The #1132 disclosure - the whole deliverable of the ticket - names a sweep_run_items outcome the live body cannot write and omits a third successful outcome token",
+      "evidence": "MEASURED against the live prosrc of clara.admit_autodraft_task on clara_l09, line comments stripped. (a) The catalog comment and the packages/db/README.md 0349 section both name refused_budget among the arms that DO write a run-bound sweep_run_items row; the string refused_budget occurs ZERO times in the live body once comments are stripped (3 occurrences, all inside comments saying the 15-drafts/day cap that once wrote it was retired). The ten real 'insert into clara.sweep_run_items' statements in the body write exactly four outcomes: noop_existing, refused_attempts, skipped_lane, refused_concurrency. (b) The comment says a successful ('admitted' or 're_admitted') outcome writes no sweep_run_items row, and the README says the op_receipts result carries outcome one of admitted or re_admitted; the body's own success return at prosrc lines 505-507 is a CASE over THREE tokens - re_admitted_after_withdrawal, re_admitted, admitted. A reader who follows the disclosure to clara.op_receipts will not recognise the third, and the sentence as written does not cover it. (c) The returned outcomes skipped_direction and lane_changed DO write a sweep_run_items row, under the DIFFERENT label skipped_lane - precisely the 'the row can silently disagree with the decision' hazard the ticket exists to disclose, and the new comment does not say it.",
+      "required_fix": "Correct the catalog comment and the README section: drop refused_budget or say plainly that the CHECK still carries the member while this function no longer writes it; name all three success tokens including re_admitted_after_withdrawal; and state that a skipped_direction or lane_changed decision is recorded on the sweep row as skipped_lane. Re-point p1132.comment.* and p1132.readme.* at the corrected text."
+    },
+    {
+      "id": "ADV-L07-05",
+      "ticket": 1047,
+      "severity": "minor",
+      "kind": "misclassification",
+      "title": "classifyOrderKey hard-frees the bare aliases k, n, i, o and every %_id spelling, contradicting the module's own promise that an unresolvable alias is treated as movable",
+      "evidence": "packages/db/tests/collation-pin-scan.mjs:19 states that the scanner 'cannot resolve an alias (order by x) to the expression behind it, and it says so by classifying such a key unresolved - which is treated as movable, never as safe'. MEASURED against the live module: classifyOrderKey('k') returns domain integer, free true; ('x.k') integer/free; ('n') and ('t.n') integer/free; only ('x') returns unresolved/false. But k is this estate's own idiom for a jsonb_object_keys(...) TEXT alias - see 0132:1545, 'select array_agg(k order by k) into v_keys from jsonb_object_keys(v_refuse_direct) k', pinned against a literal array. classifyOrderKey('stripe_session_id') returns domain identifier, free true, although text ids exist in this estate. The blind spot compounds with ADV-L07-03: 0132's two sites are missed twice over.",
+      "required_fix": "Restrict INTEGER_KEY to names that cannot be a text alias (drop the bare single letters k, n, i, o, or resolve them against the FROM item they come from), and restrict IDENTIFIER_KEY to keys whose column is actually a uuid on the live catalog rather than to a %_id spelling. Then re-derive RECORDED_SITES."
+    },
+    {
+      "id": "ADV-L07-06",
+      "ticket": 1046,
+      "severity": "minor",
+      "kind": "silent-posture-change",
+      "title": "The prune verbs restore the DEFAULT trigger posture, not the posture they found: one call silently downgrades an ENABLE ALWAYS append-only trigger to ENABLE ORIGIN",
+      "evidence": "PROVED on clara_l09 inside a rolled-back transaction: tgenabled started at O; 'alter table clara.invite_preview_attempts enable always trigger t_invite_preview_attempts_append_only' set it to A; ONE call to clara.prune_invite_preview_attempts(now()-interval '2 hours', 10) left it back at O. 0348's verbs end with an unconditional 'enable trigger', which is ENABLE ORIGIN whatever they found. Impact today is nil - the estate ships O and nothing sets session_replication_role - but the prestate and tail pin tgenabled at apply time only, so a later operator hardening would be undone by the next belt turn with no error and no receipt.",
+      "required_fix": "Read tgenabled before the disable and restore the value found, or refuse (CLR10) when it is not O, and say in 0348's header and README section which posture the verb guarantees."
+    },
+    {
+      "id": "ADV-L07-07",
+      "ticket": 1094,
+      "severity": "minor",
+      "kind": "incorrect-documentation",
+      "title": "The rotation note says a half-rotated token sends all three routes into a 503; a bearer mismatch is answered 401, and 503 is only the unset-token case",
+      "evidence": "The new apps/web/README.md paragraph reads: 'an operator who rotates only the Worker's copy sends email confirmation, code resend and invite preview all into a 503 at once'. packages/runtime/src/invitePreviewRoutes.ts:91-100 and packages/runtime/src/authWallRoutes.ts return 503 {outcome: unavailable} ONLY when CLARA_AUTH_WALL_SERVICE_TOKEN is unset or blank on the runtime; a token that is set but does not match is answered 401 {error: unauthorized} by bearerMatches. apps/web maps that 401 to {kind: unavailable} for the confirm wall (confirmation-wall.ts:226) and to indefinite('transport') for the invite preview (invite-preview-public.ts:222), so the preview block is simply absent rather than an error. The 'three routes, one secret' half of the paragraph IS correct and verified: SERVICE_TOKEN_VAR = CLARA_AUTH_WALL_SERVICE_TOKEN at authWallRoutes.ts:61, shared by invitePreviewRoutes.ts:18, and the three paths are /api/auth-wall/confirm, /api/auth-wall/resend and /api/invite-preview.",
+      "required_fix": "Say 401 (or 'refused as unauthorized') and separate it from the unset-token 503, so an operator reading the runtime log during a botched rotation looks for the right line."
+    },
+    {
+      "id": "ADV-L07-08",
+      "ticket": 1095,
+      "severity": "note",
+      "kind": "edge-case-copy",
+      "title": "The rate-limited message has no zero branch, and the runtime route's own fallback to 0 is the one path that could reach it",
+      "evidence": "packages/runtime/src/invitePreviewRoutes.ts:142 coerces a non-integer or negative door value to retryAfterSeconds 0; waitSeconds(0, 900) returns {seconds: 0, atLeast: false} (apps/web/app/(entry)/auth/confirm/wait-seconds.ts falls back only for a non-number, non-finite or negative value, so 0 is carried through), and the en.json key rateLimitedNotice has =1 and other arms only, so it would render 'Wait 0 seconds, then reload this page to see it.' Not reachable today: 0309:472-491 takes ceil() of a strictly positive interval for a row that satisfies attempted_at > now() - interval '15 minutes', so a rate_limited answer always carries at least 1 - which is why this is a note rather than a defect.",
+      "required_fix": "None required. If the arm is kept, either give the message a =0 branch or make the route's fallback 1 rather than 0."
+    }
+  ],
+  "held_up_under_attack": [
+    "#1098 / 0347: the backfill's scope predicate is committed + firm-scope + tin + not retired + not exists, and it omits the seeder's applicability guard (_firm_setup_applicability not in inapplicable/undetermined) - harmless HERE and only here, because the live clara._firm_setup_applicability returns optional or required for tin on every path (#1032 Option A) and never the two excluded values. The insert's column list matches clara.seed_firm_setup_plan's exactly; clara.onboarding_plan_items has no ordering column, so a backfilled row is indistinguishable from a seeded one.",
+    "#1046 / 0348: the 15-minute floor holds (CLR10 at now(); p_before NULL and p_limit NULL or negative all delete 0 rows, via greatest(p_limit,0) and a NULL comparison). The window-vs-margin race cannot bite: a window start only moves forward, and the pruner's ShareRowExclusive serialises it against every wall write anyway. clara.settle_confirmation_attempt's CLR10 'unknown confirmation attempt' is NOT reachable through a pruned row, because claim -> verifyOtp -> settle happens inside one runtime request (authWallRoutes.ts, confirmation-wall.ts:1-30), never across the 60-minute margin. Both tables are owned by clara_fn_owner with forced RLS and a for-all owner policy, so the DEFINER delete is neither refused nor silently filtered.",
+    "#1096: 0318 really does accept month 2 / day 29 unconditionally, and the two consumers that build a date from the pair clamp it - 0056:1644-1648 and 0120:1243-1247 both use least(v_d, extract(day from month_end)) - so the pinned residual cannot raise on a non-leap year.",
+    "#1099: the new META cell uses the same prosrc-like idiom the existing G4 census uses at line 113, so it introduces no new laxity; the supplement drives both halves of the hash law (identical payload replays byte-for-byte, mutated payload refuses CLR10) through createClientRaw, the one path #1038 left reachable.",
+    "#1058 / 0350: the column comment's enumeration matches the live CHECK exactly - entry_post_receipts_via_wake_kind_check admits autodraft, interactive, bank_agent, payroll_facts, contract_facts and nothing else.",
+    "#1047's four census fixes are correct: collate C is attached to the movable key only (privilege_type, wake_kind), never to the name-typed neighbours that already carry C.",
+    "apps/web/messages/en.json: scanned independently of JSON.parse - 0 duplicate keys, brace depth balanced at EOF, two keys added at the sorted position inside the existing preview section."
+  ],
+  "cells_re_run_on_clara_l09": {
+    "packages/db/tests/firm-setup-committed-tin-backfill.test.mjs": "6 tests, 6 pass",
+    "packages/db/tests/rate-wall-attempts-retention.test.mjs": "20 tests, 20 pass",
+    "packages/db/tests/entry-post-receipts-via-wake-kind-disclosure.test.mjs": "3 tests, 3 pass",
+    "packages/db/tests/admit-autodraft-task-outcome-disclosure.test.mjs": "3 tests, 3 pass",
+    "packages/db/tests/collation-pin-scan.test.mjs": "12 tests, 12 pass (ticket #1098's report calls this file 22 cells; it holds 12)",
+    "packages/db/tests/collation-pin-portability.test.mjs": "5 tests, 5 pass",
+    "apps/web lib/firm/invite-preview-public.test.ts + components/invite-accept-signed-out-preview.test.tsx": "15 tests, 15 pass"
+  }
+}

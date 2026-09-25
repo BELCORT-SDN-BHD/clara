@@ -1,0 +1,114 @@
+{
+  "review": "riders sweep wave - lane 07 (riders/wS-lane07), AXIS: SPEC",
+  "fixed_point": "7bc5a710f",
+  "head": "865fefe1f3de2817ef2c913e4162e4449553c083",
+  "commits": 21,
+  "tickets": [1047, 1098, 1046, 1132, 1096, 1099, 1094, 1095, 1058],
+  "spec_sources": "GitHub issues #1047/#1098/#1046/#1132/#1096/#1099/#1094/#1095/#1058 (bodies fetched with `gh api repos/BELCORT-SDN-BHD/clara/issues/<n>`; only #1058 carries a comment, the owner-delegated NO-RENAME ruling of 2026-09-24), plus SWEEP-PLAN.md (plan of record, rule g) and the orchestrator's lane notes.",
+  "verdict": "accept-with-fixes",
+  "cells_rerun_by_this_reviewer": [
+    "packages/db tests/firm-setup-committed-tin-backfill.test.mjs - 6/6 pass (incl. p1098.residual.a_committed_plan_still_refuses_the_answer)",
+    "packages/db tests/rate-wall-attempts-retention.test.mjs - 8/8 pass",
+    "packages/db tests/collation-pin-scan.test.mjs + collation-pin-portability.test.mjs - 17/17 pass",
+    "packages/db tests/knowledge-onboarding-promotion.test.mjs - kp.15 pass",
+    "packages/db tests/wave-b/wb-g-opkeys.test.mjs - 4/4 pass (META/#1099 + G4 supplement)",
+    "packages/db tests/admit-autodraft-task-outcome-disclosure.test.mjs - 3/3 pass",
+    "packages/db tests/entry-post-receipts-via-wake-kind-disclosure.test.mjs - 3/3 pass",
+    "packages/db tests/operation-census.test.mjs + rig-isolation.test.mjs - 33 tests, 32 pass, 1 expected RIG.md skip",
+    "packages/runtime tests/reconcile.test.mjs - 11/11 pass",
+    "apps/web lib/firm/invite-preview-public.test.ts + components/invite-accept-signed-out-preview.test.tsx - 15/15 pass",
+    "apps/web tests/firm-scope-db-pins.test.ts - 22/22 pass",
+    "CI=true GITHUB_ACTIONS=true FREEZE_BASE_REF=7bc5a710f pnpm lint - exit 0",
+    "node scripts/check-frozen-workflows.mjs (FREEZE_BASE_REF=7bc5a710f) - OK, 322 frozen files; check-parts-parity.mjs - OK",
+    "clara_l09: 313 files applied, max 0350_via_wake_kind_lane_disclosure; sha256(prosrc) of clara.preview_invite_by_token matches #1046's recorded pin 5aafdea9..."
+  ],
+  "findings": [
+    {
+      "id": "SPEC-L07-1098-A",
+      "ticket": 1098,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "#1098 AC1's second half is not met: the backfilled TIN item cannot be answered, so the dead end the ticket exists to close is still open",
+      "spec_line": "\"[ ] Every existing, already-committed firm has a TIN firm-setup item **it can answer**, matching the applicability (required or optional) the current turnover answer implies.\" - and the Summary: \"there is still nowhere in the product to record a TIN, which is exactly the dead end #1032 was built to remove.\"",
+      "evidence": "0347 plants the row (clara._firm_setup_backfill_committed_tin, packages/db/migrations/0347_firm_setup_committed_tin_backfill.sql:304-328) and the marking is right (p1098.backfill.committed_plan_gains_tin_marked_by_turnover, rerun: pass). But the branch's own cell p1098.residual.a_committed_plan_still_refuses_the_answer (packages/db/tests/firm-setup-committed-tin-backfill.test.mjs) DRIVES clara.answer_firm_setup_item on the backfilled committed plan and asserts CLR10 / detail.reason='firm_setup_not_open' - rerun by this reviewer: pass, i.e. the refusal is real. The web checklist guards every write control behind !committed (apps/web/components/firm-setup/firm-setup-checklist.tsx:726,751,783). So for every already-committed firm the TIN question is now VISIBLE and still UNANSWERABLE: the sub-threshold firm that voluntarily registered for MyInvois still has nowhere to record its TIN. The ticket's alternative branch (\"if a backfill is judged too risky or out of scope ... the limitation should be explicitly documented and a follow-up filed\") is conditioned on NOT doing the backfill; here the backfill shipped and the usability half did not, which also sits against the standing \"beta: nothing dark\" ruling the ticket itself cites. The lane discloses this honestly (waveS-lane07-ticket1098.md, \"Second half ('it CAN ANSWER'): PARTIAL\"), in 0347's header and in the README ## 0347 section, and correctly refuses to widen the ticket (work-order rule 5) - so this is a wave-level gap, not a build error.",
+      "required_fix": "Do not re-open this in the lane. Before the wave closes: (a) file the follow-up the ticket's own alternative branch asks for - an owner question on whether a committed firm-setup plan gains a reopen door or a scoped answer path for a backfilled, never-answered item; (b) make sure the ticket is NOT closed as fully satisfied on the strength of the backfill alone, and that the closing comment quotes the residual cell. If the owner rules for a reopen/scoped-answer door, it is its own ticket with its own migration number, not a fix round here."
+    },
+    {
+      "id": "SPEC-L07-1099-A",
+      "ticket": 1099,
+      "severity": "major",
+      "kind": "requirement-implemented-wrongly",
+      "title": "#1099 AC2 (\"the fix generalizes\") is reported DONE but the mechanism cannot detect the next case - the registry is hand-maintained and nothing sweeps for an unregistered ungranted-but-reserving writer",
+      "spec_line": "\"[ ] The fix generalizes: a future writer whose grant is withdrawn while its idempotency logic stays in place should **not silently drop out** of this coverage the way `create_client` did.\"",
+      "evidence": "packages/db/tests/wave-b/wb-g-opkeys.test.mjs adds UNGRANTED_RESERVING_FNS (one entry, create_client) and a META cell that iterates Object.keys(UNGRANTED_RESERVING_FNS) and checks each entry's live prosrc still contains _reserve_op. That is a forward check over names SOMEONE REMEMBERED TO ADD. The failure mode AC2 names is the opposite direction: a writer that loses its grant and is never added. Nothing in the diff detects it, so the next #1038 drops out exactly as create_client did. The missing assertion is three lines and both sets are already computed inside the SAME test at lines 102-114: `writers` (the grant-derived inventory) and `reserving` (every WB-family fn whose prosrc calls _reserve_op); the reverse census is reserving MINUS writers MINUS RESERVE_LAW_EXEMPT, which must be a subset of UNGRANTED_RESERVING_FNS. WB_FN_FAMILY_RE (packages/db/tests/wave-b/wb-helpers.mjs:180-192) is a closed name list, so the reverse set is small and bounded - this is not the \"materially larger, speculative build\" the report declines under \"What AC2 does NOT do, deliberately\". AC1 is genuinely done and was reran green (\"G4/[R2-F8] supplement (#1099)\", pass).",
+      "required_fix": "Add the reverse census to the existing G4/[R2-F8] cell (or a sibling META cell): every WB-family fn whose live prosrc calls _reserve_op and that holds EXECUTE for neither clara_authenticated nor clara_runtime must appear in UNGRANTED_RESERVING_FNS or in RESERVE_LAW_EXEMPT, failing by name otherwise. No migration; test file only. Then re-state AC2's evidence in the ticket report."
+    },
+    {
+      "id": "SPEC-L07-1047-A",
+      "ticket": 1047,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#1047 AC2's named collation pair was never exercised: the portability battery falls back to an ICU collation, not glibc en_US.UTF-8",
+      "spec_line": "\"[ ] A cell proves the two collations (`C.UTF-8` and `en_US.UTF-8`, two databases on one cluster created with TEMPLATE=template0) yield the same digest at every re-pinned site.\"",
+      "evidence": "packages/db/tests/collation-pin-portability.test.mjs builds a comparator inside a rolled-back transaction and prefers the real glibc en_US.UTF-8 where the OS has the locale, but the lane rig's WSL cluster does not (create collation ... provider = libc, locale = 'en_US.UTF-8' fails with report_newlocale_failure), so on this branch the comparator is ICU en-US-u-ka-shifted. Rerun by this reviewer: 5/5 pass, and cell 1 (\"the comparator is a REAL second collation\") does prove it reorders 0295's own pair - so the battery is not vacuous. But ICU-shifted reproduces glibc's two primary-weight rules without being byte-identical at the tie-breaking levels, and the AC's two-database / TEMPLATE=template0 shape was not built at all. The lane records this under \"Anything unverified\" and argues CI will take the glibc leg.",
+      "required_fix": "Treat AC2 as proved only once the battery has run on a server whose locale is real glibc en_US.UTF-8 - i.e. on CI's postgres:17 leg or on the integrator's own cluster. The integrator should record that run's result against #1047 before the ticket is closed; if any recorded value set agrees under ICU-shifted and not under glibc, the battery names the site and the group."
+    },
+    {
+      "id": "SPEC-L07-1047-B",
+      "ticket": 1047,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "#1047 AC4's from-scratch chain on both collations was not run anywhere on this branch, and the lane's own reason for skipping it stopped being true once #1098/#1046/#1132/#1058 added four migrations",
+      "spec_line": "\"[ ] From-scratch chain green on both collations; `CI=true GITHUB_ACTIONS=true pnpm lint` exit 0.\"",
+      "evidence": "waveS-lane07-ticket1047.md records AC4's first half as NOT run, arguing \"no migration changed, so the chain is byte-identical to the base\". That was true when #1047 was the branch's only ticket; the branch as integrated now carries 0347, 0348, 0349 and 0350 (313 files applied on clara_l09, max 0350_via_wake_kind_lane_disclosure), and no later ticket re-ran a from-scratch chain on either collation either (each report cites the same RIG.md prohibition). The second half IS verified: this reviewer ran CI=true GITHUB_ACTIONS=true FREEZE_BASE_REF=7bc5a710f pnpm lint at the worktree root - exit 0.",
+      "required_fix": "The integrator's own from-scratch proof must cover this branch's four new migrations, and for #1047 specifically it must be taken (or repeated) on an en_US.UTF-8 cluster as well as a C.UTF-8 one. Record both legs against #1047 before closing it; no lane work is owed."
+    },
+    {
+      "id": "SPEC-L07-README-A",
+      "ticket": 1096,
+      "severity": "minor",
+      "kind": "plan-deviation",
+      "title": "#1096 and #1099 each edited an EXISTING packages/db/README.md section, which SWEEP-PLAN's shared-file rule forbids outright",
+      "spec_line": "SWEEP-PLAN.md, Shared files: \"`packages/db/README.md` | L1, L2, L3, L4, L5, L7, L8 | **Your own new `## NNNN` section only. Never edit an existing section**; applied migrations and their sections are immutable, and a correction goes in the new file's own section.\"",
+      "evidence": "git diff 7bc5a710f...HEAD -- packages/db/README.md has four hunks. Two are compliant (a new conventions section at line 412 for #1047; the four new ## 0347 / ## 0348 / ## 0349 / ## 0350 sections appended at 7353/7425/7553/7620). Two are not: @@ -7248,6 +7323 @@ appends a \"**Pinned by kp.15 (#1096 ...)**\" paragraph INSIDE the existing ## 0318 section, and @@ -860,6 +915 @@ appends a paragraph INSIDE the existing \"clara.create_client's human grant withdrawn (0316, #1038)\" section. Both tickets have no migration of their own and so no section to write, which makes the deviation understandable - but seven lanes edit this file this wave and the merger relies on the rule to resolve it.",
+      "required_fix": "No rewrite is needed if the merger is told. Flag both hunks to the integrator explicitly (they are pure appends at the end of their sections, so a three-way merge should hold), and for future waves either carve out \"a ticket with no migration appends to the section it pins\" in the plan's own shared-file rule, or give such tickets a named follow-ups block of their own."
+    },
+    {
+      "id": "SPEC-L07-1047-C",
+      "ticket": 1047,
+      "severity": "note",
+      "kind": "traceability",
+      "title": "#1047's record cannot be checked line-by-line against the audit table the ticket points at: 17 of the migration files the audit names appear nowhere in RECORDED_SITES and carry no per-file disposition",
+      "spec_line": "\"**Key interfaces:** the list in the wave-4 pre-step fix report ... the audit table\" and AC1 \"for each of the 68 sites in an applied migration, either prove the ordering cannot flip ... **and record it**, or add a forward migration\".",
+      "evidence": "wave4-prestep-chart-fix.md's audit row names p.proname (0149, 0154, 0225, 0227, 0236, 0243, 0248, 0250), p.oid::regprocedure::text (0020, 0151, 0156), conname/tgname (0110, 0196, 0243, 0270), grantee/privilege_type (0214, 0215, 0231, 0232, 0269, 0270, 0290) and column_name (0135, 0215). RECORDED_SITES (packages/db/tests/collation-pin-scan.mjs:399-470) holds 0020, 0038, 0041, 0057, 0103, 0106, 0150, 0152, 0162, 0190, 0215, 0218, 0219, 0269, 0270, 0295 - so 0110, 0135, 0149, 0151, 0154, 0156, 0196, 0214, 0225, 0227, 0231, 0232, 0236, 0243, 0248, 0250 and 0290 are absent with no line saying why. The re-derivation was ORDERED by the orchestrator (\"re-derive the list ... and record the count actually worked\") and the disposition IS sound and IS mechanically reproducible - classifyOrderKey proves name-typed keys (proname/conname/tgname/grantee/column_name) carry collation C by type, the README states the type table at packages/db/README.md:428-446, and the absence-cohort / def-use / temp-table-digest exclusions each carry their own scanner cell (all 12 reran green). So nothing is unproved; only the audit-to-record walk is not written down.",
+      "required_fix": "None owed in code. When #1047 is closed, put the audit-to-record mapping in the closing comment (which audited files fell out and under which of the four rules), so a future reader can check the ticket's own \"68 sites\" against the 66 keys actually recorded."
+    },
+    {
+      "id": "SPEC-L07-1095-A",
+      "ticket": 1095,
+      "severity": "note",
+      "kind": "edge-case",
+      "title": "#1095: a 429 carrying retryAfterSeconds = 0 renders \"Wait 0 seconds, then reload this page to see it\"",
+      "spec_line": "\"[ ] The invite landing page can render a wait time or 'try again' affordance when rate-limited, distinct from its other failure states.\"",
+      "evidence": "The door computes least(900, greatest(0, ceil(...))) (packages/db/migrations/0309_invite_preview_public_door.sql:484-495), so 0 is reachable at the window boundary; the runtime also substitutes 0 for any non-integer (packages/runtime/src/invitePreviewRoutes.ts:142). waitSeconds(0, 900) returns { seconds: 0, atLeast: false } because 0 is a finite number >= 0 (apps/web/app/(entry)/auth/confirm/wait-seconds.ts:34-41), and the ICU plural `other` arm then prints \"Wait 0 seconds\" (apps/web/messages/en.json, firm.invitePreview.rateLimitedNotice). Not false - it means reload now - but degenerate, and no cell covers it (the suite's three rate cells drive 47, an over-long wait, and a missing value; all reran green).",
+      "required_fix": "Optional, and only if the owner wants it: treat 0 like a missing value (fall through to the courier's DEFAULT_RATE_LIMITED_SECONDS) or add a third message for \"try again now\". Either way it is a one-cell change in apps/web and needs no migration; do not hold the lane for it."
+    },
+    {
+      "id": "SPEC-L07-1046-A",
+      "ticket": 1046,
+      "severity": "note",
+      "kind": "robustness",
+      "title": "#1046: a mis-set retention margin makes the new limb abort the WHOLE pruneTraces belt, dropping the trace-prune counters and skipping the confirmation-attempts sweep",
+      "spec_line": "\"[ ] ... the sweep runs on the existing cadence with no new scheduler.\" (AC3)",
+      "evidence": "AC1-AC3 are met and were reran green (8/8 db cells; the runtime cell \"reconcile: rate-wall attempt prune rides the trace-prune lane, deletes past the margin, keeps the window\" passes; packages/runtime/lib/leader.mjs is untouched, so the belt really is the existing one). But if CLARA_RATE_WALL_ATTEMPT_RETENTION_MINUTES is set below 15, clara.prune_invite_preview_attempts raises CLR10 (packages/db/migrations/0348_rate_wall_attempts_retention.sql:264-266); the catch in packages/runtime/lib/reconciler.mjs only swallows 42883, so the error propagates out of pruneTraces. The belt wrapper does contain it (packages/runtime/lib/reconciler.mjs:771-785 logs and returns the fallback), so the in-code claim \"it can only make the sweep call fail loudly\" is accurate - but the fallback is { pruned: 0 }, so the already-completed trace prune's counters are lost from the sweep receipt and the confirmation-attempts limb (which runs after) never executes at all.",
+      "required_fix": "Optional hardening, no migration: wrap each rate-wall limb in its own try/catch that records the CLR10 as a named belt error and lets the other limbs and the trace-prune counters through, or validate the margin against the 15-minute floor at module load. Worth a follow-up line rather than a fix round."
+    }
+  ],
+  "no_findings_on": {
+    "1132": "Ticket offers two paths and defers the choice; SWEEP-PLAN and the orchestrator's lane notes bind the DOCUMENTATION path. 0349 sets a catalog comment on clara.admit_autodraft_task naming both facts AC1 asks for (no sweep-run-item row on the admitted arm; read clara.op_receipts instead) and adds the README ## 0349 section. AC2's enum-widening arm is deliberately untaken and the CHECK is pinned and re-measured. Cells p1132.comment.*, p1132.readme.*, p1132.trap.* reran green.",
+    "1094": "Both ACs met. apps/web/README.md:557-566 names /api/auth-wall/confirm, /api/auth-wall/resend and /api/invite-preview verbatim; verified against source - CLARA_AUTH_WALL_SERVICE_TOKEN is read only by packages/runtime/src/authWallRoutes.ts (CONFIRM_PATH, RESEND_PATH) and packages/runtime/src/invitePreviewRoutes.ts, so three is the true count. The paragraph sits immediately under the Worker-secrets bullet list and above the `wrangler secret list` pre-deploy step, which is where an operator rotating the secret is already reading. The out-of-scope item (splitting the token) is untouched.",
+    "1058": "The ticket's own ACs ask for a rename; the owner-delegated ruling on the issue (2026-09-24) refuses it and specifies exactly what 0350 delivers - a comment-on migration plus a README section. The comment names both drift values (payroll_facts 0297/#946, contract_facts 0299/#948) and the three surviving wake kinds; the column, its type and entry_post_receipts_via_wake_kind_check are pinned and re-measured unmoved. Cells p1058.* reran green; check-frozen-workflows and check-parts-parity are clean.",
+    "1096": "The ticket's AC1 names 0310's header and README ## 0310, but the disclosure landed with #1031's own fix round in 0318 (packages/db/migrations/0318_knowledge_fye_pair_applicability.sql:56-67, its function comment, and packages/db/README.md:7315-7321) and applied migrations and their sections are immutable - so the lane correctly built only the missing half. kp.15 drives month 2 day 29 through committed-plan promotion and pins the ACCEPTED outcome; reran green. The README placement is the separate finding SPEC-L07-README-A.",
+    "scope_creep_check": "Nothing in the diff is unasked-for behaviour. 0348's two attempted_at indexes and the three CLARA_RATE_WALL_* env knobs support the sweep the ticket asks for; the four en.json/README additions are each the ticket's own deliverable; the four battery collate-C edits are minimal one-line hunks at exactly the four keys the scan proved movable (privilege_type x3, wake_kind x1) and deliberately leave the name-typed siblings and coa-template-pr-b's body quotation alone. Migration numbers 0347-0350 are the lane's assigned block; contingency 0351 is unused and returns to the orchestrator."
+  }
+}

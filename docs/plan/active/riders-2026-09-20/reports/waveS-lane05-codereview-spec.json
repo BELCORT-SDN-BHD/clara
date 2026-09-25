@@ -1,0 +1,120 @@
+{
+  "axis": "spec",
+  "lane": "waveS-lane05",
+  "branch": "riders/wS-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "fixed_point": "7bc5a710f",
+  "head": "8b4b5b9ab4947ec748b9d2de37949f459abb219a",
+  "diff_command": "git diff 7bc5a710f...HEAD",
+  "tickets": [1056, 1090, 1092, 1093],
+  "spec_source": "GitHub issue bodies (Agent Brief). gh api repos/BELCORT-SDN-BHD/clara/issues/<n>/comments returns [] for all four; no owner ruling comment exists. `gh issue view --comments` prints nothing on this host (exit 0) and was cross-checked with `gh ... --json comments`.",
+  "verdict": "accept-with-fixes",
+  "reruns": [
+    "packages/db tests/payroll-fact-revision.test.mjs with the full gate chain on clara_l03 -> 11/11 pass",
+    "packages/db tests/depreciation-policy-knowledge.test.mjs + tests/fa-retired-policy-agent-read.test.mjs with the full gate chain -> 10/10 pass",
+    "apps/web lib/registers/fa-particulars-proposal.test.ts -> 17/17 pass",
+    "apps/web components/work/work-question-proposal.test.tsx + components/documents/document-facts-table.test.tsx + components/documents/document-revision-dialog.test.tsx -> 36/36 pass"
+  ],
+  "findings": [
+    {
+      "id": "SPEC-1090-A",
+      "ticket": 1090,
+      "kind": "requirement-missing",
+      "severity": "major",
+      "title": "#1090 AC2 is not built: no input-loading step reads the new key, and the step now exists on main saying the key does not",
+      "evidence": "Ticket line: \"- [ ] The proposal derivation's input-loading step reads that knowledge and supplies it as the `client_knowledge` ground when one is recorded.\" and Key interfaces: \"The proposal-input-loading step (currently `loadFaProposalInputsStepV6` or its successor): needs to read the new knowledge key and map it onto `FaProposalKnowledgeNote`.\" The branch delivers migration 0345 (the catalog row) and a pure mapper `mapDepreciationKnowledgeRows` (packages/runtime/lib/fa-particulars-proposal.ts:527-550) plus the SQL as a comment (lines 494-495), but NO production code executes that SQL: a grep for `mapDepreciationKnowledgeRows` under packages/runtime matches only the module itself and its unit test. The report states this ('The STEP itself is not built - it cannot be, without creating or editing a frozen-workflow closure'). That justification was true of the lane's base but is no longer true of the tree this merges into: `loadFaProposalInputsStepV6` EXISTS on origin/main at packages/runtime/workflows/claraWork.v6.impl.ts:1323 (merged 2026-09-25 as PR #1140, 061a6992b), it is the live registry target (registry.ts:364, `claraWork: claraWork_v6`), and it ends with the comment 'knowledge / retiredPolicy: OMITTED on this frontier - `clara.knowledge_keys` catalogues no depreciation key yet' - a statement this lane makes false. Net effect at integration: the key is catalogued and read by nothing, so no proposal in production ever carries the ground, which is the exact gap the ticket was filed to close (and leaves a feature dark against the standing 'beta, nothing dark' ruling).",
+      "required_fix": "Before #1090 is closed, either wire the read into `loadFaProposalInputsStepV6` (packages/runtime/workflows/claraWork.v6.impl.ts is in origin/main's frozen-workflows.json at line 1309 and is NOT deploy-locked, so the orchestrator must rule whether this is an in-place fix to v6 or a successor), or keep the ticket open with the remaining half named. At minimum the now-false comment in claraWork.v6.impl.ts must be corrected in the same integration."
+    },
+    {
+      "id": "SPEC-1092-A",
+      "ticket": 1092,
+      "kind": "requirement-missing",
+      "severity": "major",
+      "title": "#1092 AC2 is not built: the retired-policy ground still never reaches the derivation, and v6 on main still says the relation is unreachable",
+      "evidence": "Ticket line: \"- [ ] The proposal derivation's input-loading step supplies the `retired_account_policy` ground when a retired policy exists for the asset's account.\" The branch delivers migration 0346 (grant + `p_fadp_agent`), an exported SQL constant `FA_RETIRED_ACCOUNT_POLICY_SQL` and `mapRetiredAccountPolicyRow` (packages/runtime/lib/fa-particulars-proposal.ts:640-680), all driven only from tests. As with SPEC-1090-A, the step exists on origin/main: claraWork.v6.impl.ts:1323-1396 builds `FaProposalInputs` with `siblings` only and comments 'the retired-policy relation is unreachable from this credential' - false once 0346 lands. The ticket's own title ('so the proposal's retired-policy ground can fire') is therefore not satisfied on the merged tree: the credential can read, but nothing reads.",
+      "required_fix": "Same as SPEC-1090-A: wire `FA_RETIRED_ACCOUNT_POLICY_SQL` + `mapRetiredAccountPolicyRow` into the v6 step (it needs the row's own `asset_account_code`, which v6's step (a) already selects), or keep the ticket open naming the remaining half. Correct the stale comment either way."
+    },
+    {
+      "id": "SPEC-1093-A",
+      "ticket": 1093,
+      "kind": "requirement-partial",
+      "severity": "major",
+      "title": "#1093 AC4: `particulars_complete` is now real code on main and is still the narrow two-condition form; the lane corrected only report prose",
+      "evidence": "Ticket line: \"- [ ] `particulars_complete` either matches the workflow's own existing predicate, or its documentation states why it is deliberately narrower.\" The lane satisfied neither branch of that either/or in anything executable: it wrote a corrected SQL block into docs/plan/active/riders-2026-09-20/reports/waveS-lane05-ticket1093.md and stated the narrowing is a defect, not deliberate. Meanwhile the predicate is now SHIPPED CODE, not a contract: origin/main packages/runtime/workflows/claraWork.v6.impl.ts:1337-1339 carries exactly the two-condition form `(fa.depreciation_start_date is not null and fa.depreciation_method is not null) as particulars_complete`, while `loadPendingFixedAssetStepV4` (claraWork.v4.impl.ts) and clara._fa_particulars_complete (0041:387-397) use the six-condition form. The report's own words for the consequence: 'the narrower form would silently skip the question for a row that genuinely still needs it'. The source of the miss is that #1093's report asserts 'the step this predicate lives in (`loadFaProposalInputsStepV6`) does not exist yet' after checking only the lane branch, although the same report notes origin/main had moved 59 commits and now carries claraWork_v6 files (work-order rule 3, 'verify the ticket is still live', is against what merges, not only against the lane base).",
+      "required_fix": "At integration, replace the two-condition predicate in claraWork.v6.impl.ts:1337-1339 with the six-condition form the lane's report spells out (and pin it with a cell), or - if the narrowing is to stand - record why in the code's own comment. A correction that lives only in a lane report is not where the next reader of that step will look."
+    },
+    {
+      "id": "SPEC-1092-B",
+      "ticket": 1092,
+      "kind": "scope-wider-than-asked",
+      "severity": "minor",
+      "title": "#1092 grants the runtime credential every depreciation-policy row, live ones included, not just retired ones",
+      "evidence": "Ticket title and AC1: \"The runtime read role can SELECT a client's RETIRED depreciation policy rows, scoped to its own firm, with no write access.\" Delivered: packages/db/migrations/0346_fa_retired_policy_agent_read.sql:211-213 - `create policy p_fadp_agent on clara.fa_account_depreciation_policies for select to clara_agent_ro using (firm_id = clara.wake_firm());` plus a table-level `grant select`. That admits LIVE policy rows (a client's current, binding per-account tax-depreciation defaults) to the agent read credential, not only retired ones. The report argues the widening is necessary and measures it (the read's `not exists (... q.active)` supersession guard would be vacuous under a retired-only wall - driven by fp.read arms (c)/(d), re-run here, 3/3 pass), and compares the exposure against `p_fixed_assets_agent`, which already exposes the same five drivers per asset. Defensible, but broader than the ticket's own subject, and the lane was flagged 'security, opus' for exactly this line.",
+      "required_fix": "Carry this to the orchestrator/owner as a knowing acceptance rather than an implementation detail: name in the integration record that `clara_agent_ro` now reads LIVE per-account depreciation policies for every client of the firm, SELECT-only. If that is not wanted, the alternative the report rejected (retired-only predicate) requires moving the supersession guard out of the agent-run statement."
+    },
+    {
+      "id": "SPEC-1056-A",
+      "ticket": 1056,
+      "kind": "implemented-wrongly",
+      "severity": "minor",
+      "title": "#1056's already-posted refusal fires on ANY live posted entry bound to the document, but its message asserts the entry is the payroll run",
+      "evidence": "Ticket line: \"The revision path is defined for both an unposted run ... and an already-posted run (revising after the payroll acquisition has booked the entry)\". The implementation asks `clara._document_live_posted_entry(p_document)` (0344:426-434), which is `clara._document_posting_entry(client, document)` (0182:578-590) per live filing - and that body answers with a LIVE `entry_evidence_links` row OR any approved, un-reversed `journal_entries` row bound to the document, with no payroll qualification at all. The raise at 0344:566 nonetheless says 'this payroll run is already posted as entry %; reverse that entry before revising the figures it was booked from', reason `payroll_run_already_posted`. Failure scenario: a payroll summary document cited as evidence on a manual journal (an ordinary evidence link) makes every payroll fact revision on that document refuse, naming an entry that is not the payroll acquisition and instructing the bookkeeper to reverse it. The battery drives only the payroll-entry case (S6, re-run here, 11/11 pass); no cell drives a non-payroll binding.",
+      "required_fix": "Either qualify the probe to the payroll acquisition (e.g. the entry whose `flags->'payroll_run'` is set, the same row clara._payroll_posting_verdict reckons with), or reword the refusal so it states what was actually found ('an entry is posted against this document') and let the detail's entry_id/memo carry the rest. Add the non-payroll-binding cell either way."
+    },
+    {
+      "id": "SPEC-1056-B",
+      "ticket": 1056,
+      "kind": "behaviour-not-asked-for",
+      "severity": "note",
+      "title": "#1056 AC1 built as a superset: every run-level payroll path gets the Revise control, not only the non-established ones",
+      "evidence": "Ticket line: \"A payroll fact path that is NOT ESTABLISHED (channel disagreement, totals mismatch, unbalanced row) shows a working Revise control on the document facts table.\" Delivered: apps/web/components/documents/document-revision-dialog.tsx:65-75 lists all eleven run-level paths, and document-facts-table.tsx:295-303 offers the control for any of them whenever `payrollFactsVersion > 0`; nothing reads the fact state. The report declares this and gives two reasons (the table's `EvidenceRegion` row shape carries no fact state, and the standing 'beta, nothing dark' ruling - a figure both channels misread is `established` and still wrong). Reported as a deliberate, declared superset rather than a defect.",
+      "required_fix": "No fix required; confirm the superset is what the owner wants when the ticket is closed."
+    },
+    {
+      "id": "SPEC-1056-C",
+      "ticket": 1056,
+      "kind": "behaviour-not-asked-for",
+      "severity": "note",
+      "title": "#1056 changes the existing facts-version note's number on payroll-only documents, which the ticket never mentions",
+      "evidence": "apps/web/components/documents/document-detail.tsx:274-282 adds `notedVersion(invoiceVersion) = invoiceVersion > 0 ? invoiceVersion : (payrollFactsVersion ?? invoiceVersion)` and feeds it to the pre-existing `factsVersionNote` string at line 364. The ticket's scope is the per-row Revise control and the correction door; it says nothing about the version note. The change is coherent with the two-chain model the lane introduces (a payroll summary would otherwise read 'source version 0' under a table of payroll figures), and commit 41a37f97f names it, but it is a behaviour change to an existing surface that no acceptance criterion asked for.",
+      "required_fix": "None needed; name it in the integration record so the change is not attributed to a criterion that never asked for it."
+    },
+    {
+      "id": "SPEC-1090-B",
+      "ticket": 1090,
+      "kind": "design-choice-unruled",
+      "severity": "note",
+      "title": "#1090's catalog choice puts the note behind an admin floor, above the bookkeeper floor of the binding policy door it advises on",
+      "evidence": "Ticket line: \"A depreciation-policy knowledge key exists in the catalog and CAN BE RECORDED AGAINST A CLIENT through the existing knowledge-recording door.\" Delivered as `kind='assertion', authority_bearing=true` (packages/db/migrations/0345_depreciation_policy_knowledge_key.sql:182-206), which makes `clara._knowledge_floor('depreciation_policy','client')` return `admin` (asserted by dk.01, re-run here, 7/7 pass). The neighbouring binding door - `clara.set_fa_depreciation_policy`, #932, which births future acquisitions complete with no question at all - floors at bookkeeper (0277:355,463). The lower-stakes advisory act therefore costs more authority than the higher-stakes binding one. The implementer names this in follow-up 2 and did not change it; the ticket takes no position, and the choice was forced by a measured constraint (a `policy`-kind key would have been unconditionally firm-eligible via clara._tf_knowledge_firm_eligibility, 0220:418-437).",
+      "required_fix": "None inside this ticket. Worth an owner line when #1090 closes: if bookkeepers are the people who record a client's depreciation note, the ground will rarely be fed."
+    },
+    {
+      "id": "SPEC-1093-B",
+      "ticket": 1093,
+      "kind": "evidence-wrong",
+      "severity": "note",
+      "title": "#1093's report states claraWork.v4.impl.ts is not frozen; it is",
+      "evidence": "waveS-lane05-ticket1093.md, AC4 section: \"`loadPendingFixedAssetStepV4` (`packages/runtime/workflows/claraWork.v4.impl.ts:691-717`, live on this branch, unchanged, UNFROZEN - `v4.impl.ts` itself is not in `frozen-workflows.json`)\". Checked on the lane branch: frozen-workflows.json:1199 carries `packages/runtime/workflows/claraWork.v4.impl.ts` with its sha and the wave-2026-09-15 closure note. #1092's own report states the opposite and is correct ('claraWork.v4.impl.ts IS in frozen-workflows.json (line 1199)'). No code depends on the wrong claim - the lane edited nothing there - but the two reports the integrator reads disagree on a freeze fact.",
+      "required_fix": "Correct the sentence in the ticket report so the integrator does not act on it."
+    },
+    {
+      "id": "SPEC-1092-C",
+      "ticket": 1092,
+      "kind": "shared-file-outside-allocation",
+      "severity": "note",
+      "title": "#1092 edits CONTEXT.md, which SWEEP-PLAN.md allocates to L3 alone",
+      "evidence": "SWEEP-PLAN.md shared-files table: \"`CONTEXT.md` | L3, only if #1049 stays in the wave\". The diff changes CONTEXT.md around line 1050 (the 'Depreciation particulars proposal' term and its `_Avoid_` list) to record the accounting rule the ticket decided - a retired policy grounds a proposal only while it is still the account's last word. The implementer flags the deviation in the report and argues the rule would otherwise live only in a SQL comment. The hunk is in a different term from any staff-person entry L3 would add, so a textual collision is unlikely, but the allocation was explicit.",
+      "required_fix": "Integrator merges the two CONTEXT.md hunks knowingly; no change needed on the branch."
+    }
+  ],
+  "checked_and_clean": [
+    "#1063 is correctly absent from the lane (ruling of 2026-09-25 re-parents it to the mainline): no commit in 7bc5a710f..HEAD names it.",
+    "No report claims 'already satisfied' or 'stopped'; all four claim DONE, and the pre-build liveness claims were re-verified against the base: clara._revisable_invoice_field was invoice-only, the facts table gated on isRevisableFieldPath, clara.fa_account_depreciation_policies carried only p_fadp_owner/p_fadp_human, and the client-side asset scan plus the missing kind check were both still present.",
+    "#1056 AC2 (unposted arm re-derives the verdict and posts nothing, posted arm refuses by name, a reversal re-opens the correction) and AC3 (a document_fact_revisions row with recorded_by / recorded_at / prior_value) are driven by cells S5, S6 and S4, re-run here: 11/11 pass.",
+    "#1056's invoice lane is untouched: every new branch in clara.revise_document_fact is guarded on `v_lane = 'payroll'` (0344:563, 591, 620, 653, 658, 689, 744).",
+    "#1090 AC3 (a knowledge-grounded proposal outranks a disagreeing account-siblings proposal, with the control in the same cell) and #1092 AC3 (the same reversal for the retired policy) both re-run green.",
+    "#1090's client-wide note is NOT dark: deriveFaParticularsProposal already carries a 'wide' tier for `assetAccount: null` (packages/runtime/lib/fa-particulars-proposal.ts:371-383), so a note captured with `applies_when = {}` still speaks for a row that has an account.",
+    "#1093 AC1/AC2: the server-side filter sends `source_ref->>asset_id` AND `source_ref->>kind=eq.fixed_asset`, and every #639/#933 question is minted with a top-level `kind: 'fixed_asset'` (proposalSourceRef, packages/runtime/lib/fa-particulars-proposal.ts:470-479; claraWork.v4.impl.ts:860), so the kind filter excludes no legitimate row.",
+    "#1093 AC3 renders in AcceptedAnswer, the one settled-record renderer WorkQuestionForm uses on every surface; 36/36 web cells re-run green, including the no-proposal and answered-exactly-as-proposed controls."
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "lens": "recheck",
+  "round": 2,
+  "lane": "waveS-lane06",
+  "branch": "riders/wS-lane06",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\658",
+  "fixed_point": "7bc5a710f",
+  "head_rechecked": "90aaa6326",
+  "fix_reports_rechecked": [
+    "docs/plan/active/riders-2026-09-20/reports/waveS-lane06-fix.md",
+    "docs/plan/active/riders-2026-09-20/reports/waveS-lane06-fix-2.md"
+  ],
+  "prior_reports_covered": [
+    "docs/plan/active/riders-2026-09-20/reports/waveS-lane06-review-adversarial.json (12 findings)",
+    "docs/plan/active/riders-2026-09-20/reports/waveS-lane06-codereview-spec.json (10 findings)",
+    "docs/plan/active/riders-2026-09-20/reports/waveS-lane06-codereview-standards.json (2 findings)",
+    "docs/plan/active/riders-2026-09-20/reports/waveS-lane06-recheck.json (round-1 recheck, verdict accept-with-fixes, 2 findings left open: SPEC-1141-AC1, SPEC-1044-AC3)"
+  ],
+  "status_request_note": "No status-report request arrived during this recheck.",
+  "methodology": [
+    "git status --porcelain in the worktree: clean before and after every experiment and every restore.",
+    "git log --oneline 7bc5a710f..HEAD: 24 commits, head 90aaa6326 matches fix-2.md exactly; git diff 5c086b8f2..90aaa6326 --stat: exactly one file, apps/web/e2e/README.md (+69/-20) -- fix round 2 touched documentation only, no source/test/migration/workflow changed, so the 22 findings round-1 already independently reproduced through RED/GREEN controls are unchanged and not re-litigated here.",
+    "Re-ran, from clean, on this lane's own database (clara_l08, port 55748): packages/db full gate chain (ci-frontier-leg-contract + ci-schedule-notify + operation-census + rig-isolation) -- 57 tests, 56 pass/0 fail/1 skip, exact match to both prior reports; packages/runtime intake-sidecar-race.test.mjs + l9-pool-contract-lane-probe.test.mjs -- 50 tests, 50 pass/0 fail; packages/runtime ready.test.mjs + rollback-preflight.test.mjs -- 73 tests, 51 pass/0 fail/22 skip; apps/web e2e/cell-budget-census.test.ts -- 5 pass/0 fail; packages/db rig-isolation.test.mjs alone -- 22 pass/0 fail/1 skip. All match or are consistent with both fix reports' own counts; nothing newly broken.",
+    "pnpm typecheck: exit 0. CI=true GITHUB_ACTIONS=true FREEZE_BASE_REF=7bc5a710f pnpm lint: exit 0. FREEZE_BASE_REF=7bc5a710f node scripts/check-frozen-workflows.mjs: OK, 322 frozen files, no manifest diff. node packages/runtime/scripts/check-parts-parity.mjs: OK.",
+    "SPEC-1141-AC1 (round-1 recheck's open finding) -- INDEPENDENTLY REPRODUCED, not just re-read. Verified the runtime bundle (packages/runtime/.output/server/index.mjs) still carries the #1044 fix (grep -c sidecarLocks -> 4). Confirmed apps/web/e2e/README.md's #1141 section (lines ~130-230) now documents the measured window, the three load shapes that do not reproduce it, and the PAINT-load reproduction with its exact injection snippet. Independently applied that EXACT snippet (byte-identical to the README) as a temporary, uncommitted edit to apps/web/e2e/work-question-walk.spec.ts immediately before the submit click, then ran the bounded loop myself on this lane's own Playwright triple (3570/3571/3572), --no-build against the existing build: (a) the COMMITTED fixed cell (expect.poll over {tag,text,tabindex}) under the paint load, --repeat-each=3 -> 3 passed, 0 failed; (b) swapped in the PRE-FIX assertion body (verbatim from git show 7bc5a710f, the single unwaited page.evaluate) under the SAME paint load, --repeat-each=3 -> 3 failed / 0 passed, every failure at the exact assertion and with the exact message the fix report and README claim: 'Error: focus was dumped onto the document body when the row disappeared'. Restored the spec file with `git checkout HEAD -- apps/web/e2e/work-question-walk.spec.ts` and confirmed sha256 de353810dc67becda7b9e5d8d77f0be45c6390ab4f8866eede7d7d7eef7ab011 -- byte-identical to the committed cell, and git status clean. This is a genuine, independently-produced reproduction on this recheck's own host and triple, not a re-reading of the fix report's account: AC1's literal text ('a bounded loop reproduces the red before the fix and passes after') is satisfied.",
+    "SPEC-1044-AC3 (round-1 recheck's other open finding) -- INDEPENDENTLY REPRODUCED on a genuinely fresh database, not just re-read. Confirmed the disposable cluster rigl06ac3 (WSL, port 55710) that fix-2 built and left running is still up (wsl -u runner pg_lsclusters), and that clara_pristine still reads 309 migrations / max 0318_knowledge_fye_pair_applicability with 0 clara.agent_tasks / 0 clara.wake_intents / 2 clara.firms (a genuinely untouched estate, matching fix-2's own table). Built my own fresh round independently: dropped and recreated clara_intake_ci as `CREATE DATABASE ... TEMPLATE clara_pristine` (a file-level copy, mints no role, does not collide with migration 0154's cluster-wide role pin per RIG.md), bootstrapped the WDK World on it (pnpm --filter @clara/runtime exec bootstrap), then ran all three intake legs in the action's own order via scripts/ci/world-gate.mjs exactly as .github/actions/db-live-gates/action.yml invokes them: intake-e2e.mjs -> exit 0, printed 'INTAKE E2E: PASS ...'; intake-admission-e2e.mjs -> exit 0, terminal #967 drain completed in 4 polls/790ms (confirming round 1's diagnosis that the drain only stalls on a USED estate's own compliance/lint wake tasks, not on a fresh one), printed 'INTAKE ADMISSION E2E: PASS (8 legs ...)'; intake-batch-e2e.mjs -> exit 0, printed '[p636] intake-batch-e2e: ALL LEGS PASSED' (the round-1 cell gap at :650 did not fire, consistent with fix-2's own ten-round account). All three legs exit 0 on a database this recheck built itself from the untouched clara_pristine template, independently corroborating fix-2's ten-consecutive-green claim rather than trusting it. clara_pristine confirmed still untouched afterwards (0 clara.agent_tasks). This lane's own cluster (127.0.0.1:55748) confirmed to carry only clara_l08 throughout, per rig hygiene.",
+    "Diff-stat and commit-message hygiene: git diff 7bc5a710f...HEAD --stat -- 21 files, +1683/-87 (matches fix-2.md's own count); every commit's message ends with the required Co-Authored-By line (spot-checked via git log --format).",
+    "Sweep rules checked: (b)/(d) no migration file appears anywhere in git diff --name-only 7bc5a710f..HEAD, so no migration number was drawn and apps/web/tests/firm-scope-db-pins.corpus.ts correctly stays out of scope; (e) no digest pinned over text-ordered row content in the touched files; (f) no status-report request arrived during this recheck."
+  ],
+  "findings_confirmed_fixed_or_closed_this_round": [
+    "SPEC-1141-AC1 (#1141, major) -- CLOSED. Was the round-1 recheck's open finding (ticket's own instrument did not reproduce). Fix round 2 measured the window and identified paint (not host CPU) as the reproducing load; this recheck independently re-ran that exact reproduction on its own host/triple and got 3/3 red pre-fix, 3/3 green post-fix, with the exact claimed error message. AC1 is now genuinely satisfied, not merely argued for.",
+    "SPEC-1044-AC3 (#1044, major) -- CLOSED. Was the round-1 recheck's other open finding (driver never run green as a whole on a fresh database). Fix round 2 built a disposable pristine cluster and ran the whole three-leg driver ten consecutive times green; this recheck independently built its own fresh clone from the same untouched clara_pristine template and ran all three legs itself, all exit 0, corroborating the claim rather than trusting it.",
+    "All 22 findings the round-1 recheck (waveS-lane06-recheck.json) already confirmed fixed remain fixed and unchanged, since fix round 2 touched only apps/web/e2e/README.md (documentation) -- verified via git diff 5c086b8f2..90aaa6326 --stat showing exactly that one file, and via re-running the same gate chains this recheck's own methodology covers, all green."
+  ],
+  "findings": [],
+  "newly_broken": [],
+  "gates_rerun_by_this_recheck": {
+    "pnpm typecheck": "exit 0",
+    "CI=true GITHUB_ACTIONS=true FREEZE_BASE_REF=7bc5a710f pnpm lint": "exit 0",
+    "FREEZE_BASE_REF=7bc5a710f node scripts/check-frozen-workflows.mjs": "OK -- 322 frozen files, no manifest diff",
+    "node packages/runtime/scripts/check-parts-parity.mjs": "OK",
+    "packages/db full gate chain (ci-frontier-leg-contract + ci-schedule-notify + operation-census + rig-isolation)": "57 tests, 56 pass / 0 fail / 1 skip",
+    "packages/db rig-isolation.test.mjs alone (post-experiment hygiene check)": "23 tests, 22 pass / 0 fail / 1 skip",
+    "packages/runtime intake-sidecar-race.test.mjs + l9-pool-contract-lane-probe.test.mjs": "50 tests, 50 pass / 0 fail",
+    "packages/runtime ready.test.mjs + rollback-preflight.test.mjs": "73 tests, 51 pass / 0 fail / 22 skip",
+    "apps/web e2e/cell-budget-census.test.ts": "5 pass / 0 fail",
+    "SPEC-1141-AC1 bounded-loop reproduction, independently run (paint load, --repeat-each=3 each arm)": "pre-fix: 3 failed / 0 passed (exact claimed error); fixed: 3 passed / 0 failed",
+    "SPEC-1044-AC3 whole intake driver, independently run on a freshly-templated clara_intake_ci": "3 of 3 legs exit 0 (intake-e2e, intake-admission-e2e, intake-batch-e2e), each with its own terminal PASS line",
+    "git status --porcelain (worktree)": "clean throughout, including after every experiment and every restore"
+  },
+  "verdict": "accept",
+  "summary": "Second-round recheck on head 90aaa6326. Fix round 2 changed exactly one file (apps/web/e2e/README.md, documentation only) to close the two major evidence gaps the round-1 recheck left open -- SPEC-1141-AC1 and SPEC-1044-AC3 -- and this recheck independently reproduced both rather than trusting the fix report's account: the #1141 bounded loop was re-run on this recheck's own host/triple under the claimed paint load (3/3 red pre-fix, 3/3 green post-fix, exact error message), and the #1044 db-live-gates driver was re-run on a freshly-templated database built by this recheck from the same untouched clara_pristine estate fix-2 left running (all three intake legs exit 0). Every gate chain the lane's touched files require -- typecheck, lint under CI env vars, the packages/db full gate chain, the touched packages/runtime unit files, frozen-workflow and parts-parity checks, apps/web's cell-budget census -- was re-run from clean and matches or is consistent with both fix reports' own counts, with nothing newly broken. The worktree is clean throughout and after every experiment this recheck ran, including its own temporary, byte-for-byte-restored edits. No finding above minor remains open; the two majors carried from round 1 are both closed with independently-produced evidence. Accept."
+}

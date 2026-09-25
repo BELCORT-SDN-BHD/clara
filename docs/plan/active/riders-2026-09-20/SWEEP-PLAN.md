@@ -324,3 +324,10 @@ contingency migration at one.
 - **Rulings owed before a lane starts.** L2 cannot admit #1078's rider until it is ruled; L3's and
   L5's tails (#1049, #1063) and L6's rider (#1127) each need a one-line ruling; L8 cannot build the
   tenancy confirmations until #1137's half is ruled. None of these blocks a lane from starting.
+
+## Overflow ledger (assigned by the orchestrator during the run)
+
+| number | lane | purpose | assigned |
+|---|---|---|---|
+| 0360 | L5 fix round | #1056: the truthful ready sentence after a fact correction (ADV-L05-01) and the already-posted refusal message (SPEC-1056-A) | 2026-09-25 |
+| 0361 (`0361_reservation_release_advice`) | L2 fix round | L02-SPEC-01 (clara._draft_opening_item_core reports a prepayment claim with a remedy that can release it), STD-1 (one shared clara._reservation_release_advice map), ADV-L02-10 (deterministic order by on the claim census read) | 2026-09-25 |

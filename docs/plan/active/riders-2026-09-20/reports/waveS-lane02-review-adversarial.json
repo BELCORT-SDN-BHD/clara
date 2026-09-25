@@ -1,0 +1,135 @@
+{
+  "lens": "adversarial",
+  "lane": "L2 (riders sweep wave)",
+  "branch": "riders/wS-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\655",
+  "fixed_point": "7bc5a710f",
+  "diff": "git diff 7bc5a710f...HEAD  —  26 files, +6943/-34 (packages/db: 4 migrations 0335–0338, 11 test/fixture/gate files, README, package.json, rig-meta, rig-helpers, work-journal-fixtures; apps/web: en.json + 2 assertions)",
+  "commits": "28, all carrying the wave trailer; worktree clean at 873488f4e",
+  "tickets": [1114, 1077, 1079, 1078, 1050],
+  "database_driven": "clara_l05 @ 127.0.0.1:55745, ledger 313 files / max 0338_prepayment_close_standing_instruction. Every behavioural finding below was driven through the estate's own doors on real connections; the two membership mutations were restored and re-read.",
+  "verdict": "accept-with-fixes",
+  "reruns": [
+    "node --test --test-concurrency=1 $GATES tests/prepayment-close-standing-instruction.test.mjs tests/refusal-errcode-partition.test.mjs tests/revenue-recognition-plan-op-key.test.mjs tests/prepayment-account-reservation.test.mjs  ->  25 tests, 25 pass, 0 fail, 0 skipped (the four new files; every claim they carry re-measured)",
+    "node --test --test-concurrency=1 $GATES tests/prepayment-account-roster.test.mjs tests/prepayment-schedule-obo.test.mjs tests/revenue-recognition.test.mjs tests/operation-census.test.mjs tests/rig-isolation.test.mjs tests/authority-ref-human-instruction.test.mjs tests/accounting-plans.test.mjs  ->  89 tests, 88 pass, 0 fail, 1 skipped (T19 poison-role, which refuses without CLARA_RIG_ALLOW_RESET)",
+    "Byte-fidelity of 0338's three recuts, checked independently of the reports: the body text extracted from 0308 for clara._obo_plan_core hashes to 2049c1c4404e47102b375d506271938f5f3e03405fd7a25b8d303118c13a6b4a and from 0317 for clara._prepayment_schedule_core to 87fc7e25d9e872e593d7c1c1e6fd6afb2a6373a25b868d711c62f99d73fef79a — exactly 0338's pins; replaying 0300's own $p949arm$ splice against 0250's body reproduces 55c20b2008d51cc58cd4dc29b3f434965ead8450a846a73eb9f01f62d53cc208, also exactly 0338 §D's pin. All three diffs against §D/§E/§F are purely additive. The 'VERBATIM except' claims hold.",
+    "No migration in this lane uses a splice: grep for pg_get_functiondef / execute format / bare execute over 0335–0338 returns 0 in each."
+  ],
+  "findings": [
+    {
+      "id": "ADV-L02-01",
+      "ticket": 1050,
+      "severity": "blocker",
+      "kind": "integration / migration refuses to apply on the integrated chain",
+      "title": "0338 cannot apply behind lane L1's 0330: two of its pins are 0308's pre-images of bodies 0330 recuts, and two of its tail assertions are false once 0330 has run",
+      "evidence": "0338 §0 pins clara._obo_plan_core(text,uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb) at 2049c1c4404e47102b375d506271938f5f3e03405fd7a25b8d303118c13a6b4a (packages/db/migrations/0338_prepayment_close_standing_instruction.sql:73-75) and KEEPs clara.create_accounting_plan(...) at a7c108d5dd4febbae9f98a87b42b69468aec31f1731336b2185c8e91b1b0951c (:96-98). Lane L1's 0330_plan_authority_wall_predicate.sql moves both: reports/waveS-lane01-ticket1051.md:125-126 records create_accounting_plan a7c108d5 -> 544cd88ecaa5b5237969aff36b1bd0d8a5cdf41aacea234e6415d3df54b523ea and _obo_plan_core 2049c1c4 -> 149b4a3d0ff1b22b3dd8d11eabcfb7b0b8c113054cd7df76194355c2b976b61d. 0330 < 0338 in migration order, so on the integrated chain 0330 applies first and 0338's §0 item 4 raises '0338 prestate: clara._obo_plan_core(...) is neither its pinned pre-image nor this file's own recut' (the redo branch cannot save it: it tests position('0338' in prosrc) and L1's body carries no such string), and §0 item 5 raises '0338 prestate: clara.create_accounting_plan(...) moved'. Both roll the whole chain back. Two TAIL items fail as well even if the pins are patched: item 6 (:1553-1562) requires create_accounting_plan.prosrc to still contain the literal \"p_authority_kind is distinct from 'explicit_instruction' then\", which after 0330 lives in clara._assert_plan_authority instead; item 7 (:1566-1573) requires exactly three readers of clara._authority_ref_refusal, which is false after 0330 and again after L1's #1080 (reports/waveS-lane01-ticket1080.md:200-201 records the predicate's own census as _accrual_plan_core, _obo_plan_core, create_accounting_plan).",
+      "required_fix": "Before merging L2 behind L1, re-derive 0338 §D and §E against 0330's (and #1080's) post-images, re-measure BOTH pin tables on a database that already carries them, and re-derive tail items 6 and 7. The lane's own report names the §E carry (reports/waveS-lane02-ticket1050.md, 'Integration seam') but not the create_accounting_plan KEEP pin or the two tail items; all four must move together."
+    },
+    {
+      "id": "ADV-L02-02",
+      "ticket": 1050,
+      "severity": "blocker",
+      "kind": "authority wall / the declared integration carry is a behaviour change, not a copy",
+      "title": "Folding §E's second authority kind into #1051's shared predicate would admit standing_instruction at the human plan door and at the accrual door, which the ruling forbids and 0338's own tail asserts against",
+      "evidence": "L1 #1051 extracts ONE wall, clara._assert_plan_authority(text, jsonb, uuid, uuid) returns void, with no kind-set parameter, and recuts both plan doors to 'perform' it (reports/waveS-lane01-ticket1051.md:135-147); L1 #1080 adds clara._accrual_plan_core as a third caller (reports/waveS-lane01-ticket1080.md:71, :200-201). #1050's ruling requires the opposite asymmetry: the second kind goes to the unattended lane ALONE, and 0338 asserts it — tail item 6 refuses if clara.create_accounting_plan's body ever contains 'standing_instruction' (0338:1553-1562), and p1050.authority.paired drives the human door to confirm it still answers invalid_authority_kind. reports/waveS-lane02-ticket1050.md calls the carry 'a mechanical carry, not a re-decision' and says 'folding it into #1051's extracted predicate is a copy' — it is not: one shared predicate cannot admit two different kind sets.",
+      "required_fix": "Decide the shape before the carry. Either give clara._assert_plan_authority an admitted-kinds argument (lane L1's own #1080 report anticipates exactly this at reports/waveS-lane01-ticket1080.md:368 — 'the parameter goes on clara._assert_plan_authority and nothing else moves'), or keep the OBO twin's standing-instruction branch outside the predicate and say so in 0338's README section. Re-run p1051.wall.one_definition, #1080's census cell, p1050.authority.paired, p915.obo.refusals_match and p941.obo.authority after whichever is chosen."
+    },
+    {
+      "id": "ADV-L02-03",
+      "ticket": 1050,
+      "severity": "major",
+      "kind": "rank floor / incomplete configuration-time authority check",
+      "title": "The wake arm checks the directing member's membership STATUS but not their ROLE RANK, so a demoted member's standing instruction still configures plans that can never post a single occurrence",
+      "evidence": "0338 §F's lapse branch is 'if not exists (select 1 from clara.firm_memberships m where m.firm_id = p_firm and m.user_id = v_directing and m.status = 'active')' (packages/db/migrations/0338_prepayment_close_standing_instruction.sql:845-847) — status only. clara._admit_accounting_work_core, which every occurrence goes through, additionally requires clara.role_rank(v_role) >= clara.role_rank('bookkeeper') and raises CLR04 'recording a journal entry requires a bookkeeper or above'. DRIVEN on clara_l05: a scene recorded its instruction as the owner, the owner was then demoted to 'viewer' (still status='active', a second owner promoted first past _tf_guard_last_owner), and the clocked lane CONFIGURED schedule bc572eab-1e97-451c-97b5-5c5f6733d6ee / plan 47a78680-a96c-4de1-aacd-d56d57cf0b2a with authority_kind='standing_instruction' and authorised_by = the viewer; clara._plan_admit_occurrence then answered {admitted:false, code:'CLR04', reason:'insufficient_role'} for BOTH 2025-02-28 and 2025-03-31. Memberships restored and re-read. This is exactly the state §F's own comment says the lapse branch exists to prevent: 'A plan is admitted every month AS this person ... configuring something that can never run is worse than refusing'. p1050.wake.lapsed only drives status='removed'.",
+      "required_fix": "Extend §F's lapse test to the rank clara._admit_accounting_work_core requires (active membership AND role_rank >= bookkeeper), keep the wake_authority_lapsed token, and add a cell that demotes rather than removes."
+    },
+    {
+      "id": "ADV-L02-04",
+      "ticket": 1050,
+      "severity": "major",
+      "kind": "idempotency under replay / the authority wall sits in front of the reservation",
+      "title": "A replay of a clocked wake that ALREADY SUCCEEDED stops returning its own receipt once the instruction is withdrawn, and is told the schedule was never configured",
+      "evidence": "0338 §F answers the standing-instruction wall before clara._reserve_op ('AND IT IS STILL ANSWERED FIRST, before the purpose wall and before the reservation', packages/db/migrations/0338_prepayment_close_standing_instruction.sql:808-810). DRIVEN on clara_l05: a firm recorded its instruction; wake12 on task c72c1ffd configured schedule 028cb6ac-3d9c-4fe8-9d9c-62ca754a26b4; an immediate replay of the same task returned the SAME schedule from the receipt; the firm then withdrew the instruction through clara.withdraw_firm_standing_instruction; the same task replayed answered CLR03 wake_authority_absent, 'an unattended close_prep wake names no directing human, so it cannot authorise an amortisation plan' — while clara.op_receipts still holds create_prepayment_schedule / op_key 882ea076... with a non-null result and the client still holds 1 schedule. The body's own law for the duplicate check ('A REPLAY OF THE SAME DECISION MUST WIN OVER \"THAT PREPAYMENT ALREADY HAS A SCHEDULE\" ... a lost response turned into a second refusal') applies verbatim to this wall and is not honoured. The same hole exists for wake_authority_lapsed. It is NEW with this ticket: before 0338 the wake lane always refused, so there was never a successful receipt to replay.",
+      "required_fix": "Take the reservation before the standing-instruction wall (or consult the receipt first and short-circuit on a completed one), so a replayed task gets its own answer back; then drive the sequence success -> withdraw -> replay in a cell."
+    },
+    {
+      "id": "ADV-L02-05",
+      "ticket": 1050,
+      "severity": "major",
+      "kind": "race between two sessions / untyped refusal leaks a raw SQLSTATE",
+      "title": "Two admins recording the firm's standing instruction at once leak a raw 23505 unique_violation instead of a typed CLR refusal",
+      "evidence": "clara.record_firm_standing_instruction takes its replay reservation under its own op key, then 'select ... where firm_id=$1 and instruction_key=$2 and withdrawn_at is null limit 1 for update' (packages/db/migrations/0338_prepayment_close_standing_instruction.sql:337-341) — when no live row exists FOR UPDATE locks nothing, and both sessions insert. PROVEN deterministically with two real clara_authenticated connections on clara_l05: session A recorded (instruction 3b512f7c-fa74-4dbb-84de-71d3fe8b2568) and held its transaction open; session B recorded the same key under a DIFFERENT op key, parked on the index, and on A's commit answered code 23505, constraint uq_firm_standing_instructions_live, message 'duplicate key value violates unique constraint \"uq_firm_standing_instructions_live\"', with no CLR code and no detail.reason. The firm ended with one row, so nothing is corrupted — but the surface contract the ticket's own report publishes (reports/waveS-lane02-ticket1050.md, 'Refusal mapping') has no row for it, and a web handler keyed on detail.reason falls through to a generic error.",
+      "required_fix": "Serialise the recording act (an advisory lock on (firm, instruction_key), or catch unique_violation and re-read) and answer with the estate's own typed refusal — CLR13 operation_in_flight is already in the door's vocabulary. Add a two-connection cell."
+    },
+    {
+      "id": "ADV-L02-06",
+      "ticket": 1050,
+      "severity": "major",
+      "kind": "ships dark / standing owner ruling 'beta: nothing dark'",
+      "title": "Neither standing-instruction door has any surface, and the refusal a firm would actually see names a SQL function as its remedy",
+      "evidence": "grep over apps/web and packages/runtime for firm_standing_instruction, record_firm_standing_instruction, withdraw_firm_standing_instruction, standing_remedy, wake_authority_absent and wake_authority_lapsed returns no production hit (only unrelated prose in accrual fixtures). So a firm cannot record or withdraw the instruction from the product, and the wake refusal it would meet carries remedy='clara.create_prepayment_schedule' and standing_remedy='clara.record_firm_standing_instruction' — two function names no person can act on. The standing owner ruling of 2026-09-20 is that a beta feature is usable and testable, not dark. The lane's own report files this as follow-up 1 and hands a complete web successor contract, which is the right instinct; it is recorded here because it is the state the branch delivers.",
+      "required_fix": "Either land the web surface from the report's successor contract in this wave, or get an explicit owner ruling that #1050's database half may merge ahead of its surface, and file the surface ticket before the merge."
+    },
+    {
+      "id": "ADV-L02-07",
+      "ticket": 1078,
+      "severity": "minor",
+      "kind": "migration behaviour on a database with real rows",
+      "title": "0337 changes what already-bound states may do and inspects no row: a code that was roster-enrolled BEFORE it was FA-profiled or bank-bound now makes fixed-asset doors refuse, with a remedy that would strand a running amortisation",
+      "evidence": "Before 0337 clara._acct_role_reserved did not see the roster, so the order 'enrol the code on the prepayment roster, then clara.upsert_fa_account_profile / clara.add_bank_account on the same code' was admitted (the reverse order was and still is refused by the posting wall, which sees the fa/staff_advance domains). After 0337 §A those same live states make clara._fa_assert_code_unreserved, clara.upsert_fa_account_profile and — through clara._fa_role_claim_conflict, which 0337 deliberately does NOT filter — clara._fa_reversal_blocked refuse, each naming clara.retire_prepayment_account as the release door. Retiring that enrolment does not stop a schedule already running (owner decision 5 of #940, restated in 0337 §A's own comment and in reports/waveS-lane02-ticket1078.md follow-up 2), so the named remedy leaves a machine posting monthly against a code the FA register has just claimed. 0337 reads no row, backfills nothing and its tail is entirely over pg_proc, so no pre-existing double claim is enumerated anywhere; hosted has rows the rig does not.",
+      "required_fix": "Before the hosted release, census hosted for accounts that carry both a live prepayment_account_enrolments row and a fixed-asset profile or bank binding, and decide per row. If the population is empty, say so in the release evidence; if not, the remedy sentence needs the running-schedule caveat."
+    },
+    {
+      "id": "ADV-L02-08",
+      "ticket": 1079,
+      "severity": "minor",
+      "kind": "copy consistency inside one panel",
+      "title": "The heading now names both purposes while the rest of the same i18n namespace still names only prepayments, so the enrol dialog contradicts the title above it",
+      "evidence": "apps/web/messages/en.json PrepaymentAccounts now reads heading='Prepayment and deferred-revenue accounts', but in the same object empty='No account is enrolled as a prepayment account for this client yet. Until one is, no prepayment here can be amortised.', enrolTitle='Enrol an account as a prepayment account', reasonLabel='Why this account holds prepayments', retireTitle='Retire this prepayment account', loading='Reading the prepayment roster…'. A firm enrolling a customer-advance liability (the purposeDeferredRevenue arm the panel has offered since #941) reads a dialog that calls it a prepayment account under a heading that says otherwise. #1079's own Out of scope covers layout, rows and the enrol/retire flows, so the single-purpose copy is arguably outside it — but the heading change is what makes the contradiction visible on one screen.",
+      "required_fix": "File a follow-up (or widen this ticket by the owner's leave) to bring empty, enrolTitle, reasonLabel, retireTitle and loading into the same two-purpose voice; nothing else about the panel needs to move."
+    },
+    {
+      "id": "ADV-L02-09",
+      "ticket": 1077,
+      "severity": "note",
+      "kind": "pre-migration data residue",
+      "title": "The <key>:plan receipts the deferred-revenue lane wrote before 0336 stay in place, so the old collision survives one-sidedly in data",
+      "evidence": "0336 backfills nothing (deliberately, and for a good reason the README states). A NEW prepayment schedule using an operation key an OLD deferred-revenue schedule already spent still meets that receipt under fn create_accounting_plan and is answered CLR10 'op_key reused with different args' with no detail — the exact untyped refusal #1077 exists to remove. Declared by the lane as reports/waveS-lane02-ticket1077.md follow-up 3, and the hosted population was not counted there or here.",
+      "required_fix": "Count the hosted <key>:plan receipts under fn create_accounting_plan whose op key was spent by clara.create_revenue_recognition_schedule before the release, and record the number in the release evidence. No code change is implied."
+    },
+    {
+      "id": "ADV-L02-10",
+      "ticket": 1078,
+      "severity": "note",
+      "kind": "non-determinism in a refusal's wording",
+      "title": "The reservation census is read with limit 1 and no order by, so which register a refusal names is arbitrary when a code carries two claims",
+      "evidence": "clara._fa_role_claim_conflict selects 'from clara._acct_role_reserved(p_client, p_code) rr where (rr.domain is distinct from 'fa' or rr.role is distinct from p_want_role) limit 1' with no ORDER BY, and 0337 §C/§D/§E branch on the single v_res_domain it returns. One code enrolled under BOTH roster purposes yields two domain='prepayment' rows (nothing refuses the second purpose: the posting wall skips the prepayment domain by 0337 §B), and a legacy code held by two domains would name an arbitrary register and an arbitrary release door. Harmless today because both roster rows carry the same domain; it becomes a wrong-remedy bug the moment a code legitimately carries two domains.",
+      "required_fix": "Add a deterministic ORDER BY (domain, role) to the census read inside clara._fa_role_claim_conflict when that body is next recut; not this ticket's to change, so file it."
+    },
+    {
+      "id": "ADV-L02-11",
+      "ticket": 1114,
+      "severity": "note",
+      "kind": "redo marker is a bare four-digit substring",
+      "title": "All four migrations admit the redo branch on position('03NN' in prosrc) > 0, which any later body that merely mentions the number satisfies",
+      "evidence": "0335:111, 0336:120, 0337:205 and 0338:143 all read 'elsif position('03NN' in v_src) > 0 then ... REDO'. Nothing anchors it to the attribution form the files actually write ('#1114 [0335]', '#1050 (0338 §E)'). Migration headers in this family routinely name their predecessors — 0338's own header says 'current cut 0317 §A, unmoved by 0335, 0336 and 0337' — so the next recut of any of these bodies will carry a string that satisfies an earlier file's redo test. The exposure is bounded (CLARA_MIGRATION_REDO only ever targets the highest applied version, and a from-scratch chain never reaches the branch), which is why this is a note and not a defect: no live path takes the false positive today.",
+      "required_fix": "When this idiom is next copied, match the file's own attribution marker (e.g. position('[0335]' in v_src) or '#1114 [0335]') rather than the bare number."
+    }
+  ],
+  "walls_that_held": [
+    "Rank floor, both new doors (#1050): driven as a real viewer and a real bookkeeper through clara_authenticated — CLR04 'insufficient role' at clara.record_firm_standing_instruction AND clara.withdraw_firm_standing_instruction; an owner clears both.",
+    "Tenant isolation (#1050): the owner of firm B reads 0 rows of clara.firm_standing_instructions while firm A's own owner reads 1 (forced RLS + p_fsi_human on firm_id = clara.jwt_firm()), and firm B's owner withdrawing firm A's instruction is answered CLR11 firm_standing_instruction_absent — no existence oracle. clara._authority_ref_refusal answers authority_ref_unresolved for another firm's id, for an unknown id and for a WITHDRAWN row (p1050.authority.resolve, re-run green).",
+    "Machine lanes (#1050): clara_runtime, clara_agent_ro, clara_wake_interactive and clara_wake_proactive all get 42501 permission denied on the recording door; proacl on both doors is exactly {clara_fn_owner=X/clara_fn_owner,clara_authenticated=X/clara_fn_owner}.",
+    "Replay with a different payload (#1050): the same op key with a restated reason is refused CLR10 'op_key reused with different args' by clara._reserve_op, as it should be.",
+    "Byte fidelity (#1050): all three of 0338's recut bodies reproduce their pinned pre-images exactly when the added arms are removed — including §D, whose pre-image only exists as 0300's dynamic splice and had to be reconstructed to check (it hashes to 55c20b20… on the nose).",
+    "No splice anchors anywhere in 0335–0338 (static create or replace only), so the match-twice / match-zero failure mode does not arise in this lane.",
+    "Web blast radius of the widened authority_kind (#1050): apps/web reads it as an opaque string (lib/plans/api.ts:68,111,260) and plan-detail.tsx:248 prints authority_ref.kind for every non-accounting_work kind already, so 'firm_standing_instruction' renders the way 'chat_task' and 'contract_confirmation' do — pre-existing shape, not a new break.",
+    "The posting wall really is blind to the new domain (#1078): clara._adj_line_eligibility_breach filters 'r.domain is distinct from \\'prepayment\\'' before its limit 1, so the amortisation lane still admits its own enrolled accounts; p1078.wall.unmoved and the whole roster/obo pair re-run green.",
+    "Namespace disjointness (#1077): p1077.namespace.census re-run green over the live catalog — the deferred-revenue lane's :rrplan/:rrend belong to its two bodies and to nothing else, the prepayment siblings keep :plan/:end, and no body derives from both."
+  ],
+  "housekeeping": {
+    "database_mutations_made_and_undone": "Two committed firm_memberships mutations were needed to drive ADV-L02-03 (a scene owner demoted to viewer, a second owner promoted past clara._tf_guard_last_owner). Both were restored and re-read; the lane database now holds no membership in a state this review put it in. Everything else created is ordinary rig-world scene data of the kind every run of these batteries creates.",
+    "no_tracked_file_edited": "true — this reviewer wrote only this report file in the main checkout; the worktree C:\\Users\\zhant\\Desktop\\clara-wt\\655 is clean at 873488f4e and nothing was committed, pushed or sent to GitHub.",
+    "mid_task_message": "none arrived."
+  }
+}

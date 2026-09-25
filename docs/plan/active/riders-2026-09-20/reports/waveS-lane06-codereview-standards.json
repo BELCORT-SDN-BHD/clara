@@ -1,0 +1,63 @@
+{
+  "axis": "standards",
+  "lane": "waveS-lane06",
+  "fixed_point": "7bc5a710f",
+  "head": "a6343dd794aefbf9c21edbc87da2aab6cabb88e2",
+  "tickets_in_scope": ["#1044", "#1128", "#1129", "#1131", "#1126", "#1124", "#1127", "#1141"],
+  "sources_read": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    "docs/plan/active/riders-2026-09-20/SWEEP-PLAN.md",
+    "packages/runtime/README.md",
+    "packages/db/tests/README.md",
+    "apps/web/e2e/README.md",
+    "reports/waveS-lane06-ticket1044.md",
+    "reports/waveS-lane06-ticket1128.md",
+    "reports/waveS-lane06-ticket1129.md",
+    "reports/waveS-lane06-ticket1131.md",
+    "gh issue view 1127 (body + comments, owner ruling)"
+  ],
+  "verification_performed": [
+    "git diff 7bc5a710f...HEAD --stat and per-file diffs for every changed file",
+    "git log --oneline 7bc5a710f..HEAD --stat, confirmed every commit mixes test+implementation (no horizontal-slicing battery of red tests before code)",
+    "confirmed every commit message ends with the required Co-Authored-By line",
+    "re-ran node --test tests/intake-sidecar-race.test.mjs (packages/runtime): 20/20 pass",
+    "re-ran node --test tests/l9-pool-contract-lane-probe.test.mjs: 27/27 pass",
+    "re-ran node --test tests/ready.test.mjs (with PG env): 26/26 pass",
+    "re-ran node --test tests/rollback-preflight.test.mjs (with PG env): 24 pass / 0 fail / 22 skip (pre-existing WDK-World-gated skips)",
+    "re-ran node --test tests/ci-frontier-leg-contract.test.mjs (packages/db): 15/15 pass, including the two new p1126.floor cells actually re-deriving cell counts from disk (not vacuous)",
+    "re-ran node --test tests/ci-schedule-notify.test.mjs: 6/6 pass",
+    "re-ran FREEZE_BASE_REF=7bc5a710f node scripts/check-frozen-workflows.mjs: OK, 322 frozen files, no manifest diff",
+    "re-ran node packages/runtime/scripts/check-parts-parity.mjs: OK",
+    "re-ran eslint directly on every touched runtime/db/web file: clean, no findings",
+    "parsed .github/workflows/ci.yml and .github/actions/frontier-leg/action.yml with a YAML parser: both well-formed",
+    "manually traced withSidecarLock/mergeTaskMeta/atomicJson in spool.mjs for reentrancy/deadlock risk: none found (readTaskMeta takes no lock, the lock map get/set has no await between them)",
+    "manually traced refreshOnce/_waitForLaneProbeSettleForTest in lane-probe.mjs for double-probe or stale-inFlight risk: none found",
+    "checked lane-probe.mjs for leftover cruft from the superseded first design (settle-generation counter, keepalive timer): none found, clean supersession",
+    "confirmed CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE / contractsMissingFrontierRule variable scoping in two-build-cutover-e2e.mjs's new #1131 block (preRuleBodies, requiredBodies, w1, w2, query, frontierVersion) all defined earlier in the same function scope"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "This lane's diff (0 migrations, 19 files, runtime/db/web CI+test infrastructure only) is unusually high quality against the house standards: every commit is a genuine TDD vertical slice (mixed test+implementation, never a battery of red tests before code), every ticket's report documents a public-seam test, a non-vacuity control, and — for #1044/#1128/#1129/#1141 — an actual red/green/restore cycle against the real committed cell, which I independently re-ran and confirmed. Docs (module READMEs, CONTEXT.md house term/_Avoid_ shape) are updated in the same commits as the code they describe and are accurate against what is on disk. The one real standards gap is #1131's vacuity control, which was performed against a hand-reconstructed equivalent of the new cell rather than the committed cell itself inside its real file — a real, but self-disclosed and substantially mitigated, deviation from WORK-ORDER.md's rule 4 vacuity-control requirement. One minor Duplicated Code smell (judgement call, matches a pre-existing pattern in the same file) is also noted.",
+  "findings": [
+    {
+      "id": "STD-1",
+      "ticket": 1131,
+      "severity": "minor",
+      "category": "test-quality",
+      "title": "Vacuity control for #1131's new CLI-exit-code cell was performed on a hand-reconstructed equivalent, not on the committed cell inside two-build-cutover-e2e.mjs",
+      "evidence": "reports/waveS-lane06-ticket1131.md, 'Red/green, proven WITHOUT running the full two-build drill' and 'Anything unverified': the report states plainly that packages/runtime/tests/two-build-cutover-e2e.mjs 'was not executed end to end in this session.' In its place the implementer manually built a disposable WDK World clone and drove scripts/rollback-preflight.mjs's CLI directly (the same preflight()/frontierRuleViolations() call chain the new cell's runPreflightCli helper spawns), then broke and restored packages/runtime/lib/rollback-preflight.mjs's FRONTIER_RULES table by hand to see red/green. WORK-ORDER.md's addendum for wave 3, rule 4's last bullet, is explicit: 'A ticket whose whole deliverable is a test or a lint still needs the vacuity control: show the new cell FAILING against a deliberately broken subject once, then restore the subject byte for byte.' The literal committed cell (the new block at packages/runtime/tests/two-build-cutover-e2e.mjs:990-1057) was never itself run, red or green, inside its real execution context (main()'s real w1/w2/frontierVersion/preRuleBodies/requiredBodies values from a real two-build cycle) in this session.",
+      "required_fix": "Either the integrator or CI's own db-live-gates run should be treated as this cell's FIRST real execution (as the report itself flags), or a follow-up should run packages/runtime/tests/two-build-cutover-e2e.mjs end-to-end once before merge to close the gap. Mitigating: I independently re-verified the new block's variable scoping (preRuleBodies, requiredBodies, w1, w2, query, frontierVersion are all defined earlier in the same function) and re-ran eslint/tsc clean on the file, which substantially reduces (but does not eliminate) the risk of a scope or naming mistake the report's own 'Anything unverified' section names as the residual risk."
+    },
+    {
+      "id": "STD-2",
+      "ticket": 1126,
+      "severity": "note",
+      "category": "duplicated-code",
+      "title": "Three near-identical $GITHUB_STEP_SUMMARY-writing shell blocks in .github/actions/frontier-leg/action.yml",
+      "evidence": ".github/actions/frontier-leg/action.yml gains the same 7-line `{ echo ...; } >> \"$GITHUB_STEP_SUMMARY\"` Markdown-table block three times (the slice-list step, the cross-slice contract-roster step, the isolated-drill step), differing only in the header text and in FLOOR/SKIPMAX vs DFLOOR/DSKIPMAX variable names. A Fowler 'Duplicated Code' smell by the letter.",
+      "required_fix": "Judgement call, not a blocker: the file's existing FLOOR/SKIPMAX check blocks were already duplicated three times before this ticket (one per step), so this change follows the file's own established convention rather than introducing a new one. Fix, if a future touch to this file is worth it, would be a small shared shell function (or a `scripts/ci/write-step-summary.sh` sourced by each step) taking the header and the six values as arguments — GitHub composite-action steps cannot share in-process state, so the extraction is a script-file extraction, not a plain function-in-scope one."
+    }
+  ]
+}

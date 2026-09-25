@@ -1,0 +1,42 @@
+{
+  "lens": "recheck",
+  "lane": "waveS-lane05",
+  "branch": "riders/wS-lane05",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\642",
+  "fixed_point": "7bc5a710f",
+  "reviewed_head": "8b4b5b9ab",
+  "fix_head_claimed": "9d59899ff",
+  "fix_head_verified": "9d59899ff",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/waveS-lane05-fix.md",
+  "diff_reviewed": "git diff 7bc5a710f...HEAD (36 files, +5482/-52, 23 commits)",
+  "verdict": "accept",
+  "reruns_performed": [
+    "packages/db/tests/payroll-correction-sentence.test.mjs -> 4/4 pass (verified live)",
+    "packages/db/tests/payroll-fact-revision.test.mjs -> 11/11 pass",
+    "packages/db/tests/depreciation-policy-knowledge.test.mjs -> 9/9 pass (dk.08, dk.09 present and green)",
+    "packages/db/tests/fa-particulars-proposal.test.mjs -> 5/5 pass (p933.read.by_asset now drives asset_id-alone, the two-path pair, AND the wrong-kind control)",
+    "packages/db/tests/fa-retired-policy-agent-read.test.mjs -> 3/3 pass",
+    "packages/db operation-census.test.mjs + rig-isolation.test.mjs -> 33 tests, 32 pass, 1 skipped (destructive), 0 fail",
+    "packages/runtime/tests/fa-particulars-proposal-unit.test.mjs -> 35/35 pass",
+    "node scripts/check-frozen-workflows.mjs -> 38 violations, all REMOVED-VS-BASE / UNLOCKED-VS-BASE / REGISTRY-DOWNGRADE against files this lane never touches (confirmed via git diff 7bc5a710f...HEAD --name-only against origin/main's frozen manifest: none of the 36 changed files is a frozen entry) -- pre-existing base staleness, not introduced here",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK",
+    "apps/web node scripts/run-tests.mjs (whole unit suite) -> 5188 tests, 5186 pass, 2 skipped, 0 fail, 142 suites (includes fa-particulars-proposal.test.ts, firm-scope-db-pins.test.ts, document-facts-table.test.tsx, document-revision-dialog.test.tsx, work-question-proposal.test.tsx)",
+    "pnpm typecheck (apps/web + packages/runtime) -> green",
+    "CI=true GITHUB_ACTIONS=true pnpm lint, run step by step past the known freeze-lint staleness short-circuit -> all 15 selftests/checks green, eslint scripts eslint.config.mjs green, pnpm -r --if-present lint green (apps/web's own extensive selftest suite included), packages/reporting-render lint green",
+    "sha256 of packages/runtime/lib/fa-particulars-proposal.ts -> 49d583fc...07cd51c3, matches origin/main's frozen-workflows.json pin exactly; git diff origin/main -- that file is empty",
+    "git show 7bc5a710f:packages/runtime/workflows/claraWork.v6.impl.ts -> does not exist at lane base; git show origin/main:frozen-workflows.json -> claraWork.v6.impl.ts entry carries \"deployed\": true (independently confirms the fix report's refutation of SPEC-1090-A/1092-A/1093-A: the target file is both absent from this lane's base AND deploy-locked on the tree this merges into, so an in-place edit was never available to this lane)",
+    "live re-measurement on clara_l03: select count(*) from pg_policies where 'clara_agent_ro' = any(roles) grouped by qual -> 53 total, 37/7/6/1/1/1, matching packages/db/README.md's \"0346, corrections\" section exactly (ADV-L05-04)",
+    "live re-measurement: clara.schema_migrations carries 0360_payroll_correction_sentences as the applied head; clara._payroll_posting_verdict's prosrc contains 'Book this month by hand from the corrected figures'",
+    "live re-measurement of the v6/v4 particulars_complete predicates on origin/main confirms the successor contract's SPEC-1093-A claim: v6 (claraWork.v6.impl.ts:1337-1339) is exactly the two-condition form, v4 (claraWork.v4.impl.ts:707-714) is exactly the six-condition form",
+    "confirmed packages/db/.verify-scratch/ (the earlier worker's scratch dir, flagged in the adversarial report's housekeeping note) no longer exists; git status is clean"
+  ],
+  "findings": [],
+  "notes": [
+    "All three major/blocker-adjacent findings that asked for wiring into loadFaProposalInputsStepV6 (SPEC-1090-A, SPEC-1092-A, SPEC-1093-A) were refuted as lane work rather than fixed in place, on grounds independently reverified here: the target file did not exist at this lane's base, is deploy-locked (deployed:true) on the tree the lane merges into, is explicitly reserved to L8 by SWEEP-PLAN.md's shared-files table ('frozen-workflows.json | L8 only ... L8 adds its tools into them, after the cut merges'), and WORK-ORDER.md rule 5 forbids editing a frozen workflow body, directing a 'successor contract' instead. The fix report's successor contract (packages/runtime/lib/fa-proposal-grounds.ts plus the written contract in the fix report) is precise, cites exact line numbers on origin/main, and both cited predicates were independently re-read and match. This is accepted as the correct resolution, not an open item.",
+    "ADV-L05-01's required_fix offered two options; the fix round took the documented option (correct both sentences, name the remedy honestly, leave posting a corrected run as a named owner question) rather than the option that would post the run automatically. That is a full, legitimate resolution of the finding as written, not a partial one -- re-driven end to end (S3c cells) and the sentence now states what the follow-up section says is true.",
+    "The untouched frozen-workflow file 'the runtime is frozen-locked while a fix report writes commentary about it' pattern was checked for scope creep: git diff 8b4b5b9ab..HEAD touches exactly the 16 files the fix report lists (plus the new fa-proposal-grounds.ts and its test, already counted) -- no unrelated file moved.",
+    "SPEC-1092-C (CONTEXT.md shared-file allocation) and the five 'RECORDED, not changed' notes (SPEC-1090-B, SPEC-1056-B, SPEC-1056-C, ADV-L05-06, ADV-L05-08) needed no code change per their own review reports and were correctly left as documentation-only; all are legible in packages/db/README.md's fix-round sections or the fix report itself, so the integrator will find them.",
+    "Nothing broke: every touched test file, typecheck and the full lint gate chain (run past the known pre-existing base-staleness short-circuit in check-frozen-workflows.mjs, itself independently reproduced at the same 38-violation count) are green on the current head."
+  ],
+  "summary": "Every finding across the three review reports (SPEC, STANDARDS, ADVERSARIAL) is accounted for on the current head (9d59899ff): the three majors needing an in-place frozen-workflow edit were correctly refused as lane work and answered with a verified successor contract instead of being falsely marked fixed; every other major and minor was fixed and its fix independently re-driven green (payroll correction sentences via new migration 0360, the depreciation-knowledge effective-window read, the jsonb-filter belt, the rig-meta cohort completeness, and two README factual corrections re-measured live against clara_l03 byte for byte); every note was either fixed or correctly left as a recorded, non-actionable acceptance. No new defect was introduced: the full touched-file gate chain, typecheck and lint are green, and the only lint failure (check-frozen-workflows.mjs) is pre-existing base staleness identical in count and content to what the standards review already found and excluded, confirmed here not to include any file this lane's 36-file diff touches. Housekeeping (the earlier worker's scratch directory) is cleared and the worktree is clean. Accept."
+}
