@@ -27,10 +27,11 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  buildWorkWorld, endPool, printLaneNotes, printSkipCount, rootQuery,
+  buildWorkWorld, endPool, printLaneNotes, printSkipCount, opk, rootQuery,
   freshAccrualClient, accrual, createAccrualAdjustment, listAccrualAdjustments, instructionRef,
   CLR, assertPair, todayInPlanZone, shiftMonths,
 } from "./accrual-adjustments-fixtures.mjs";
+import { upsertAccountClassed } from "./s6-helpers.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 
 const STEM = "accrual_register_pagination$";
@@ -92,6 +93,42 @@ async function span(monthsBack) {
     from: monthStart(await shiftMonths(today, -monthsBack)),
     to: await monthEndBack(Math.max(monthsBack - 1, 0)),
   };
+}
+
+// The revenue-side chart `freshAccrualClient`'s expense-only one does not carry — the SAME two
+// codes/classes `accrual-list-side-filter.test.mjs` mints for its own `freshTwoSideClient`, and
+// for the same reason: a cell that claims a side-filtered PAGE "never admits a row of the other
+// side" has to have a row of the other side for it to admit (the closing wave's adversarial
+// round, ADV-03 — without one the assertion is true of a door with no `p_side` predicate at all).
+const RCHART = { income: "4000", asset: "1320" };
+
+async function freshTwoSideClient(tag) {
+  const client = await freshAccrualClient(ALICE(), tag);
+  await upsertAccountClassed(ALICE(), {
+    client, code: RCHART.income, name: "Sales / Fees Income", type: "income", accountClass: null,
+    opKey: opk("p1152-coa"),
+  });
+  await upsertAccountClassed(ALICE(), {
+    client, code: RCHART.asset, name: "Unbilled Receivables (Work-in-Progress)", type: "asset",
+    accountClass: null, opKey: opk("p1152-coa"),
+  });
+  return client;
+}
+
+async function configureRevenue({ client, ref, window, tag }) {
+  const answer = await createAccrualAdjustment(BOB(), {
+    client, purpose: `#1152 ${tag}`, authorityRef: ref,
+    accrual: {
+      ...accrual({
+        expenseAccount: RCHART.income, liabilityAccount: RCHART.asset,
+        servicePeriodStart: window.from, servicePeriodEnd: window.to, memo: `#1152 ${tag}`,
+      }),
+      side: "revenue",
+    },
+    frequency: "monthly", dayRule: "last_day_of_month",
+    effectiveFrom: window.from, effectiveTo: window.to,
+  });
+  return answer.accrual_id;
 }
 
 async function configureExpense({ client, ref, window, tag }) {
@@ -182,14 +219,31 @@ test("p1152.page.omitted — no cursor and no limit answers EVERY accrual of the
     "an omitted p_side/p_cursor/p_limit answers every row, in the raw table's own order");
   assert.equal(threeArg.side, null, "an omitted p_side is echoed as null, unchanged from 0334");
 
-  // EXPLICIT NULLS, the six-argument shape — byte-identical to the three-argument call, proving
-  // the new parameters' defaults are truly null and not some other value that happens to render
-  // the same today.
-  const sixArgExplicitNull = await listAccrualAdjustments(BOB(), { client, side: null, cursor: null, limit: null });
+  // EXPLICIT NULLS, THE FULL SIX-ARGUMENT SHAPE — `explicitNulls` because the fixture otherwise
+  // DROPS every null argument it is handed, which would render this call as the SAME three
+  // arguments as the one above and make the assertion vacuous (the closing wave's adversarial
+  // round, ADV-02: "not a six-argument call"). With it, the door really is reached at
+  // `(p_client, p_from, p_to, p_side, p_cursor, p_limit)` with three explicit NULLs.
+  const sixArgExplicitNull = await listAccrualAdjustments(BOB(), {
+    client, side: null, cursor: null, limit: null, explicitNulls: true,
+  });
   assert.deepEqual(sixArgExplicitNull.accruals.map((r) => r.accrual_id), expected,
-    "an explicit null p_cursor/p_limit answers identically to the omitted call");
+    "an EXPLICIT null p_side/p_cursor/p_limit answers identically to the omitted call");
   assert.equal(sixArgExplicitNull.next_cursor, null,
     "next_cursor is null on the unbounded (no-limit) read: there is no 'next page' of an answer that was never paginated");
+
+  // …AND THE DEFAULTS THEMSELVES ARE NULL, read off the catalog. The two calls above agreeing
+  // proves an explicit null behaves like an omission; it does NOT prove what the OMITTED call
+  // actually substituted — a door whose `p_limit` defaulted to 50 would still answer every one of
+  // these four rows. This is the corroborating half (the same root-level carve-out
+  // `p1152.catalog.posture` states), and it is the assertion that would red on a default of 50.
+  const defaults = await rootQuery(
+    `select pg_get_expr(p.proargdefaults, 0) as defaults, p.pronargdefaults as n
+       from pg_proc p
+      where p.oid = 'clara.list_accrual_adjustments(uuid,date,date,text,jsonb,integer)'::regprocedure`);
+  assert.equal(defaults.rows[0].n, 3, "exactly three of the six parameters carry a default (p_side, p_cursor, p_limit)");
+  assert.equal(defaults.rows[0].defaults, "NULL::text, NULL::jsonb, NULL::integer",
+    "…and every one of those three defaults is NULL — no silent 50-row page size for a caller that never asked to paginate");
 });
 
 // ===========================================================================================
@@ -200,25 +254,26 @@ test("p1152.page.omitted — no cursor and no limit answers EVERY accrual of the
 test("p1152.page.composes_with_side — a page-limited, side-filtered walk never admits a row of the other side", async (t) => {
   if (await gate1152(t)) return;
 
-  const client = await freshAccrualClient(ALICE(), "compose");
+  // A GENUINELY TWO-SIDED CLIENT, and the revenue row INTERLEAVED into the unfiltered order
+  // rather than parked at the end: expense at months 1, 3 and 4 back, revenue at month 2 back.
+  // The door's own order is (effective_from desc), so the UNFILTERED first page at a limit of 2
+  // is [expense m1, revenue m2] — a build that lost `and (p_side is null or a.side = p_side)`
+  // from the paged path would put the revenue row on the expense walk's very first page, and the
+  // assertions below would red. Before this fix the cell created no revenue row at all, so it was
+  // true of every implementation (ADV-03).
+  const client = await freshTwoSideClient("compose");
   const ref = await instructionRef({ client, author: BOB() });
   const expenseIds = [];
-  for (let m = 1; m <= 3; m++) {
+  for (const m of [1, 3, 4]) {
     expenseIds.push(await configureExpense({ client, ref, window: await span(m), tag: `compose-expense-m${m}` }));
   }
-  // ONE revenue-side accrual, same client, a window none of the expense ones use (m=4) — the
-  // BOTH-sides Client accrual-list-side-filter.test.mjs's own `freshTwoSideClient` needs a second
-  // chart; this cell only needs to prove a REVENUE row is excluded, so it reads the chart
-  // freshAccrualClient already ensures (ACHART, expense-only) plus the standard chart's own asset
-  // account is not required here — the composition claim is "the side predicate still applies
-  // under a LIMIT", which a refused-if-wrong count already proves without a second chart.
-  //
-  // (No revenue accrual is created in this cell: freshAccrualClient's chart carries no income
-  // account, and minting one only to prove a predicate accrual-list-side-filter.test.mjs already
-  // drives at the door would be re-proving that ticket's own claim rather than this one's. This
-  // cell's claim is narrower: p_side composes with p_cursor/p_limit without EITHER predicate
-  // losing the other — proved by the page never exceeding the limit AND never excluding a
-  // same-side row across the walk.)
+  const revenueId = await configureRevenue({ client, ref, window: await span(2), tag: "compose-revenue-m2" });
+
+  // THE CONTROL: unfiltered, the revenue row IS on the first page — so the exclusion asserted
+  // below is the side predicate doing work, not the window or the page size hiding the row.
+  const unfiltered = await listAccrualAdjustments(BOB(), { client, cursor: null, limit: 2 });
+  assert.deepEqual(unfiltered.accruals.map((r) => r.side), ["expense", "revenue"],
+    "unfiltered, the first page of two carries the month-1 expense row and then the month-2 revenue row");
 
   const page1 = await listAccrualAdjustments(BOB(), { client, side: "expense", cursor: null, limit: 2 });
   assert.equal(page1.side, "expense");
@@ -227,9 +282,18 @@ test("p1152.page.composes_with_side — a page-limited, side-filtered walk never
 
   const page2 = await listAccrualAdjustments(BOB(), { client, side: "expense", cursor: page1.next_cursor, limit: 2 });
   assert.equal(page2.accruals.length, 1, "the second page carries the one remaining expense accrual");
-  const walked = [...page1.accruals, ...page2.accruals].map((r) => r.accrual_id).sort();
-  assert.deepEqual(walked, [...expenseIds].sort(),
+  const walked = [...page1.accruals, ...page2.accruals].map((r) => r.accrual_id);
+  assert.deepEqual([...walked].sort(), [...expenseIds].sort(),
     "the side-filtered walk visits every expense accrual exactly once, across both pages");
+  assert.ok(!walked.includes(revenueId),
+    "…and the revenue accrual, which the UNFILTERED first page above proves sorts INSIDE this walk, never appears on any page of it");
+
+  // AC3's other side, driven the same way: the revenue row is the ONLY thing a revenue-filtered
+  // page carries, and none of the three expense rows reaches it.
+  const revenuePage = await listAccrualAdjustments(BOB(), { client, side: "revenue", cursor: null, limit: 2 });
+  assert.deepEqual(revenuePage.accruals.map((r) => r.accrual_id), [revenueId],
+    "a revenue-filtered page carries the revenue accrual and nothing else");
+  assert.equal(revenuePage.side, "revenue");
 });
 
 // ===========================================================================================
@@ -247,6 +311,19 @@ test("p1152.cursor.malformed — a cursor that is not this door's own {tuple:[..
     ["tuple not an array", { tuple: "banana" }],
     ["wrong tuple length", { tuple: ["2026-01-01", "2026-01-01T00:00:00.000000", "not-enough"].slice(0, 2) }],
     ["a tuple element that does not cast", { tuple: ["not-a-date", "2026-01-01T00:00:00.000000", "11111111-1111-4111-8111-111111111111"] }],
+    // A JSON `null` ELEMENT IS MALFORMED, not "no cursor". `jsonb_array_elements_text` renders a
+    // JSON null as a SQL NULL, and `NULL::date` / `NULL::timestamptz` / `NULL::uuid` all cast
+    // without raising — so a cast probe alone admits this shape. What the door then does with it
+    // is worse than a refusal: `array[...]::text[] < array[null,null,null]::text[]` is TRUE (not
+    // NULL) under `array_cmp`, so an all-null tuple re-admits EVERY row and the walk silently
+    // restarts at page one; a tuple with ONE null element sorts GREATER than any text in that
+    // position, so it re-admits the boundary row and the SAME row comes back on more than one
+    // page. Both break AC1's "each row exactly once" and both are exactly what this door's own
+    // committed comment refuses by name rather than "silently treated as start over at page one".
+    ["every tuple element JSON null", { tuple: [null, null, null] }],
+    ["the effective_from element JSON null", { tuple: [null, "2026-01-01T00:00:00.000000", "11111111-1111-4111-8111-111111111111"] }],
+    ["the created_at element JSON null", { tuple: ["2026-01-01", null, "11111111-1111-4111-8111-111111111111"] }],
+    ["the id element JSON null", { tuple: ["2026-01-01", "2026-01-01T00:00:00.000000", null] }],
   ];
   for (const [label, cursor] of cases) {
     await assertPair(CLR.badRequest, "accrual_cursor_malformed",

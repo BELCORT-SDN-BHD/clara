@@ -10494,6 +10494,21 @@ silently NOT fire and `{}` would pass as "no cursor" instead of being refused as
 with `IS DISTINCT FROM` throughout, which never returns NULL. `p1152.cursor.malformed`'s "no tuple
 key" case is exactly this regression, caught on the first test run against the first draft.
 
+**A SECOND NULL trap in the same guard, found by the closing wave's adversarial round (ADV-01).**
+`jsonb_array_elements_text` renders a JSON `null` element as a SQL NULL, and `NULL::date`,
+`NULL::timestamptz` and `NULL::uuid` every one of them cast WITHOUT raising — so the cast probe
+alone admitted `{"tuple":[null,null,null]}` and every partially-nulled sibling. The door then
+treated such a cursor as no cursor at all, because `array[...]::text[] <
+array[null,null,null]::text[]` is TRUE, not NULL, under `array_cmp` (a NULL element sorts GREATER
+than any text): an all-null tuple re-admitted EVERY row (page one again, byte for byte) and a
+tuple with ONE null element re-admitted the boundary row, so the SAME row came back on more than
+one page — measured at the real door, five pages at `p_limit=2` returning three rows twice. Both
+break this file's own "each row exactly once" and both are exactly the "silently treated as start
+over at page one" the guard's committed comment refuses BY NAME. Fixed with an explicit
+`v_cursor[1] is null or v_cursor[2] is null or v_cursor[3] is null` refusal placed BEFORE the cast
+probe, pinned by a tail assertion, and covered by four new `p1152.cursor.malformed` cases (all
+three null, then one null in each position).
+
 **The web half** (same commit): `apps/web/lib/accruals/api.ts`'s `loadAccruals` gains a `page`
 argument (`side`/`cursor`/`limit`) and now returns the door's own envelope (`AccrualsPage`, with
 `next_cursor`) rather than a bare row array — `components/plans/plan-revise-form.tsx`'s existing
@@ -10508,8 +10523,8 @@ for a register with no write half) sends `side` to the door and exposes `loadMor
 **Driven, not asserted.** `accrual-register-pagination.test.mjs` walks a five-accrual client at a
 page size of 2 and checks every row arrives exactly once, in the door's own order; compares an
 omitted-cursor-and-limit read against an INDEPENDENT raw table read (never a re-derivation of the
-door's own logic); proves the side filter still composes with a limited page; drives five shapes
-of malformed cursor through the real door; and reads the catalog for the unchanged owner/grants/
+door's own logic); proves the side filter still composes with a limited page; drives nine shapes
+of malformed cursor through the real door (five structural, four carrying a JSON `null` element); and reads the catalog for the unchanged owner/grants/
 posture. `accrual-adjustments.test.mjs`'s own `p652.acl.grants` cell (gated on 0222 alone, so the
 `db-slice-frontiers` matrix runs it against a chain where neither 0334 nor 0365 has applied) now
 picks its probed signature off the live catalog for THREE shapes, not two.
@@ -10519,6 +10534,8 @@ no-op on a redo, where it is already gone) followed by `create or replace` on th
 (idempotent either way) — the same shape 0334 itself uses. The prestate admits exactly two starting
 shapes — the four-argument door's live sha, or a six-argument body already carrying this file's own
 `p_cursor`/`accrual_cursor_malformed`/`next_cursor` marks — and refuses anything else. This file was
-itself redone once, on this lane's own rig, to fix the NULL-propagation trap above; the redo ran
-under `CLARA_MIGRATION_REDO=0365_accrual_register_pagination` and the prestate correctly took the
-"my own body is already live" branch.
+itself redone TWICE, on this lane's own rig — once to fix the `IS DISTINCT FROM` trap above, once
+in the fix round to add the JSON-null element refusal; both redos ran under
+`CLARA_MIGRATION_REDO=0365_accrual_register_pagination` and the prestate correctly took the
+"my own body is already live" branch each time (second redo checksum
+`4983f44a3e27e6997fd1a82c5cb181eadd148ec0c17b3cf362937c8ab86bb8a4`).

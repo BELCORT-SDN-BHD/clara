@@ -266,7 +266,7 @@ export async function createAccrualAdjustmentFor({
 }
 
 export async function listAccrualAdjustments(sub, {
-  client, from = null, to = null, side = null, cursor = null, limit = null,
+  client, from = null, to = null, side = null, cursor = null, limit = null, explicitNulls = false,
 } = {}) {
   // #1075 (0334) added p_side FOURTH; #1152 (0365) added p_cursor FIFTH and p_limit SIXTH, both
   // server-side. Every new argument is sent to the door ONLY when a caller actually asks for it:
@@ -275,19 +275,27 @@ export async function listAccrualAdjustments(sub, {
   // calls) keeps sending exactly the arguments it always has, so none of them becomes an unstated
   // dependency on 0365 having applied. Named-argument calls (`namedCall`'s own `name => value`
   // shape) admit any subset in any order, so `cursor` can be sent without `side` and vice versa.
+  //
+  // `explicitNulls` — THE ONE CALLER THAT MUST NOT BENEFIT FROM THAT OMISSION. #1152's AC2 half
+  // that proves "an EXPLICIT null p_side/p_cursor/p_limit answers identically to the omitted
+  // call" is vacuous if the fixture quietly drops every null it was handed: both halves would
+  // render the SAME three-argument SQL and the cell would pass against any door at all (the
+  // closing wave's adversarial round, ADV-02). With `explicitNulls: true` every optional
+  // parameter is emitted whatever its value, so the door really is reached at its full
+  // six-argument shape with three explicit NULLs.
   const specs = [
     { name: "p_client", cast: "uuid" }, { name: "p_from", cast: "date" }, { name: "p_to", cast: "date" },
   ];
   const params = [client, from, to];
-  if (side !== null) {
+  if (side !== null || explicitNulls) {
     specs.push({ name: "p_side", cast: "text" });
     params.push(side);
   }
-  if (cursor !== null) {
+  if (cursor !== null || explicitNulls) {
     specs.push({ name: "p_cursor", cast: "jsonb" });
-    params.push(JSON.stringify(cursor));
+    params.push(cursor === null ? null : JSON.stringify(cursor));
   }
-  if (limit !== null) {
+  if (limit !== null || explicitNulls) {
     specs.push({ name: "p_limit", cast: "int" });
     params.push(limit);
   }

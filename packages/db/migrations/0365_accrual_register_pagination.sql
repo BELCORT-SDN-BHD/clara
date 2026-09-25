@@ -329,6 +329,22 @@ begin
     end if;
     select array_agg(value order by ord) into v_cursor
       from jsonb_array_elements_text(p_cursor -> 'tuple') with ordinality x(value, ord);
+    -- A JSON `null` ELEMENT IS MALFORMED, AND THE CAST PROBE BELOW CANNOT SEE IT.
+    -- `jsonb_array_elements_text` renders a JSON null as a SQL NULL, and `NULL::date`,
+    -- `NULL::timestamptz` and `NULL::uuid` every one of them cast WITHOUT raising -- so the probe
+    -- below admits `{"tuple":[null,null,null]}` and every partially-nulled sibling. What the
+    -- paged query then does with such a tuple is worse than a mere restart: `array[...]::text[] <
+    -- array[null,null,null]::text[]` is TRUE, not NULL, under `array_cmp` (a NULL element sorts
+    -- GREATER than any text), so an ALL-null tuple re-admits EVERY row -- page one again, byte
+    -- for byte -- and a tuple with ONE null element re-admits the boundary row, so the SAME row
+    -- comes back on more than one page. Both break this ticket's own "each row exactly once"
+    -- (AC1) and both are precisely the "silently treated as start over at page one" this guard's
+    -- own comment above refuses BY NAME. Refused here, before the probe, so the probe never has
+    -- to reason about NULL at all.
+    if v_cursor[1] is null or v_cursor[2] is null or v_cursor[3] is null then
+      raise exception 'the accrual register cursor is malformed' using errcode='CLR10',
+        detail='{"reason":"accrual_cursor_malformed","field":"cursor"}';
+    end if;
     begin
       perform v_cursor[1]::date; perform v_cursor[2]::timestamptz; perform v_cursor[3]::uuid;
     exception when others then
@@ -508,6 +524,9 @@ begin
   -- 3 · THE CURSOR AND THE PAGE ARE BOTH THERE.
   if position('"reason":"accrual_cursor_malformed"' in v_src) = 0 then
     raise exception '#1152 tail: the committed body does not raise accrual_cursor_malformed by name' using errcode='CLR10';
+  end if;
+  if position('if v_cursor[1] is null or v_cursor[2] is null or v_cursor[3] is null then' in v_src) = 0 then
+    raise exception '#1152 tail: the committed body is missing the JSON-null cursor-element guard -- without it a {"tuple":[null,null,null]} cursor is ADMITTED and the walk silently restarts at page one' using errcode='CLR10';
   end if;
   if position('where v_cursor is null or s.sort_tuple < v_cursor' in v_src) = 0 then
     raise exception '#1152 tail: the committed body is missing the descending keyset cursor predicate' using errcode='CLR10';
