@@ -68,6 +68,7 @@ function row(n: number): WorkListRow {
     intent_key: `w623:journal_entry:${n}`,
     claim_id: null,
     claimant_label: null,
+    allocation_count: null,
     memo: n % 2 === 0 ? `Office rent ${n}` : null,
     posting_date: "2026-09-01",
     currency: "MYR",

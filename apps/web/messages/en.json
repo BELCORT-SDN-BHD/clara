@@ -2312,6 +2312,7 @@
     "untitledWork": "Untitled work",
     "unknownClient": "Unknown client",
     "claimLabel": "Staff expense claim — {claimant}",
+    "claimLabelWithCount": "Staff expense claim — {claimant} (settles {count, plural, one {# advance} other {# advances}})",
     "postingDate": "Posting date {date}",
     "noPostingDate": "No posting date recorded",
     "rowMenuLabel": "More actions for this work",
