@@ -760,7 +760,12 @@ end $c0338_obo$;
 --   · nine locals, declared (five for the authority this arm binds, four for the lapse it names);
 --   · the authority the plan step is given, defaulted once and rebound only on the wake arm;
 --   · the wake arm itself -- resolve the firm's LIVE standing instruction, refuse by name when
---     there is none or its author has left the firm, otherwise bind the directing human.
+--     there is none or its author no longer carries the authority a monthly occurrence spends,
+--     otherwise bind the directing human. It sits directly BELOW the reservation's replay
+--     short-circuit and above every wall that reads the entry, the roster or the accounts: the
+--     instruction is mutable world state, so a task that already succeeded gets its own receipt
+--     back rather than being told it has no authority (reserve-before-mutable-validation, 0305 §B
+--     / 0306 §B; `p1050.wake.replay_after_withdrawal`).
 --
 -- THE RESERVATION, THE DUPLICATE CHECK, THE TERM PROVENANCE, THE ROSTER, THE ACCOUNT WALLS, THE
 -- EVALUATOR, THE ALLOCATION, THE SCHEDULE ROW, THE AUDIT AND THE ANSWER ARE UNTOUCHED, including
@@ -805,6 +810,42 @@ begin
   v_auth_kind   := 'explicit_instruction';
   v_auth_ref    := p_authority_ref;
 
+  if p_purpose is null or btrim(p_purpose) = '' then
+    raise exception 'a prepayment schedule needs a purpose' using errcode='CLR10',
+      detail='{"reason":"invalid_purpose","constraint":"nonempty"}';
+  end if;
+
+  -- ---- THE RESERVATION, TAKEN BEFORE THE DUPLICATE CHECK, AND THE ORDER IS MEASURED. ----
+  --
+  -- A REPLAY OF THE SAME DECISION MUST WIN OVER "THAT PREPAYMENT ALREADY HAS A SCHEDULE". The
+  -- first cut asked the duplicate question first and the two answers collided: a caller whose
+  -- response was lost retried with the SAME op key and got CLR13 `prepayment_schedule_exists`
+  -- instead of the schedule it had already created -- a lost response turned into a second
+  -- question, which is the exact defect `_reserve_op` exists to prevent. Measured by
+  -- `p653.schedule.one_per_entry` before this order was written.
+  --
+  -- THE PAYLOAD HASH IS OVER THE CALLER'S OWN ARGUMENTS ONLY, never over the derived allocation:
+  -- the key identifies the DECISION a human made, and the term, the period count and the
+  -- allocation are OUTPUTS of that decision. Hashing an output would make the same decision
+  -- collide with itself whenever the document's term was corrected in between.
+  --
+  -- A REFUSAL BELOW COSTS NOTHING. Every raise from here on aborts the statement's transaction and
+  -- takes this reservation row with it, so the caller may fix the input and retry under the SAME
+  -- key. That is why validating after reserving is safe here even though 0193's own doors validate
+  -- first -- and it is stated rather than left to be inferred.
+  v_dedupe := clara._reserve_op(p_firm, 'create_prepayment_schedule', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'source_entry', p_source_entry,
+      'expense_account', nullif(btrim(coalesce(p_expense_account,'')),''),
+      'expense_basis', nullif(btrim(coalesce(p_expense_basis,'')),''),
+      'purpose', btrim(p_purpose), 'authority', p_authority_ref)));
+  if v_dedupe is not null then
+    if v_dedupe ? 'pending' then
+      raise exception 'this prepayment-schedule key is held by an in-flight sibling'
+        using errcode='CLR13', detail='{"reason":"operation_in_flight"}';
+    end if;
+    return v_dedupe;
+  end if;
+
   -- #1050 (0338 §F) -- THE WAKE LANE RE-OPENS, AND IT RE-OPENS WITH A NAMED HUMAN.
   --
   -- WHAT #1036's FIX ROUND GOT RIGHT, and this file keeps. An amortisation schedule is a PLAN, and
@@ -838,8 +879,29 @@ begin
   -- one body rather than a second door", and every reason this door can refuse stays readable in
   -- one place.
   --
-  -- AND IT IS STILL ANSWERED FIRST, before the purpose wall and before the reservation: a clocked
-  -- run whose firm has instructed nothing must never be told to fix its expense account.
+  -- AND IT IS ANSWERED AFTER THE REPLAY SHORT-CIRCUIT, WHICH IS WHERE IT BELONGS. The first cut
+  -- of this arm answered FIRST, ahead of the purpose wall and the reservation, on the reasoning
+  -- that a clocked run whose firm has instructed nothing must never be told to fix its expense
+  -- account. That reasoning survives -- every wall that reads the ENTRY, the roster, the accounts
+  -- or the term still sits below this point, so a firm that instructed nothing is still told about
+  -- the instruction and nothing else -- but the placement did not, because the standing
+  -- instruction is MUTABLE WORLD STATE and this body's own law is reserve-before-mutable-
+  -- validation (0305 §B / 0306 §B, and the reservation block directly above states it for the
+  -- duplicate check in so many words).
+  --
+  -- WHAT THE FIRST CUT COST, measured rather than reasoned: a clocked task that had ALREADY
+  -- SUCCEEDED, whose reply the belt lost, asked again after the firm withdrew the instruction --
+  -- and was told `wake_authority_absent`, that no directing human exists, while its schedule, its
+  -- plan and its completed `clara.op_receipts` row all sat there. "A lost response turned into a
+  -- second refusal" is the exact defect `clara._reserve_op` exists to prevent, and the paragraph
+  -- above spells it out for the duplicate check; it applies to this wall verbatim.
+  -- `p1050.wake.replay_after_withdrawal` drives success -> withdraw -> replay and was red at
+  -- exactly that point.
+  --
+  -- A FIRST call that is refused here still costs nothing: the raise aborts the statement and
+  -- takes the reservation row with it, which is the same guarantee every wall below this line
+  -- already relies on (`p1050.wake.absent` and `p1050.wake.lapsed` both re-measure the whole
+  -- footprint, reservations included).
   if p_lane = 'wake' then
     select fsi.id, fsi.recorded_by into v_si_id, v_directing
       from clara.firm_standing_instructions fsi
@@ -925,42 +987,6 @@ begin
     v_auth_ref    := jsonb_build_object('kind', 'firm_standing_instruction', 'id', v_si_id,
       'instruction_key', 'prepayment_schedule_at_close',
       'wake_kind', p_authority_ref ->> 'wake_kind', 'task_id', p_authority_ref ->> 'task_id');
-  end if;
-
-  if p_purpose is null or btrim(p_purpose) = '' then
-    raise exception 'a prepayment schedule needs a purpose' using errcode='CLR10',
-      detail='{"reason":"invalid_purpose","constraint":"nonempty"}';
-  end if;
-
-  -- ---- THE RESERVATION, TAKEN BEFORE THE DUPLICATE CHECK, AND THE ORDER IS MEASURED. ----
-  --
-  -- A REPLAY OF THE SAME DECISION MUST WIN OVER "THAT PREPAYMENT ALREADY HAS A SCHEDULE". The
-  -- first cut asked the duplicate question first and the two answers collided: a caller whose
-  -- response was lost retried with the SAME op key and got CLR13 `prepayment_schedule_exists`
-  -- instead of the schedule it had already created -- a lost response turned into a second
-  -- question, which is the exact defect `_reserve_op` exists to prevent. Measured by
-  -- `p653.schedule.one_per_entry` before this order was written.
-  --
-  -- THE PAYLOAD HASH IS OVER THE CALLER'S OWN ARGUMENTS ONLY, never over the derived allocation:
-  -- the key identifies the DECISION a human made, and the term, the period count and the
-  -- allocation are OUTPUTS of that decision. Hashing an output would make the same decision
-  -- collide with itself whenever the document's term was corrected in between.
-  --
-  -- A REFUSAL BELOW COSTS NOTHING. Every raise from here on aborts the statement's transaction and
-  -- takes this reservation row with it, so the caller may fix the input and retry under the SAME
-  -- key. That is why validating after reserving is safe here even though 0193's own doors validate
-  -- first -- and it is stated rather than left to be inferred.
-  v_dedupe := clara._reserve_op(p_firm, 'create_prepayment_schedule', p_op_key,
-    clara._hash(jsonb_build_object('client', p_client, 'source_entry', p_source_entry,
-      'expense_account', nullif(btrim(coalesce(p_expense_account,'')),''),
-      'expense_basis', nullif(btrim(coalesce(p_expense_basis,'')),''),
-      'purpose', btrim(p_purpose), 'authority', p_authority_ref)));
-  if v_dedupe is not null then
-    if v_dedupe ? 'pending' then
-      raise exception 'this prepayment-schedule key is held by an in-flight sibling'
-        using errcode='CLR13', detail='{"reason":"operation_in_flight"}';
-    end if;
-    return v_dedupe;
   end if;
 
   -- ONE SCHEDULE PER RECOGNITION ENTRY. `uq_prepayment_schedules_source` is the structural

@@ -7703,6 +7703,16 @@ resolves the firm's live instruction itself and hands the citation to the twin.
 
 ### What the wake lane does now
 
+0. The arm sits directly BELOW the reservation's replay short-circuit and above every wall that
+   reads the entry, the roster or the accounts. The standing instruction is MUTABLE WORLD STATE, so
+   reserve-before-mutable-validation ([0305](migrations/0305_prepayment_stated_term.sql) §B /
+   [0306](migrations/0306_prepayment_account_roster.sql) §B) governs it: the first cut answered
+   FIRST, and a clocked task that had ALREADY SUCCEEDED and lost its reply was told
+   `wake_authority_absent` after the firm withdrew the instruction — while its schedule, its plan
+   and its completed `clara.op_receipts` row all stood. "A lost response turned into a second
+   refusal" is what `clara._reserve_op` exists to prevent. Driven by
+   `p1050.wake.replay_after_withdrawal`. A FIRST call refused here still costs nothing: the raise
+   takes its reservation row with it, which `p1050.wake.absent` and `p1050.wake.lapsed` re-measure.
 1. Resolve the firm's LIVE `prepayment_schedule_at_close` instruction. None → `CLR03
    wake_authority_absent`, the same token, lane, quoted wake kind and task and the same `remedy`
    (`clara.create_prepayment_schedule`) #1036's refusal carried, plus `standing_remedy` and

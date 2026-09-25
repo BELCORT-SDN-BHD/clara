@@ -559,6 +559,37 @@ async (t) => {
   assert.deepEqual(await footprint(sc), before, "the refused wake left something durable behind");
 });
 
+test("p1050.wake.replay_after_withdrawal -- a clocked task that ALREADY SUCCEEDED gets its own "
+  + "receipt back when it asks again, even though the firm has withdrawn the instruction in "
+  + "between: a lost response must never turn into a refusal that says the schedule was never "
+  + "configured, which is the very defect `clara._reserve_op` exists to prevent",
+async (t) => {
+  if (await standingGate(t)) return;
+  const sc = await prepaidScene("p1050replay");
+  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
+  await record(sc.alice, { opKey: opk("p1050-replay-rec") });
+
+  // THE WAKE SUCCEEDS. This is the state that did not exist before this ticket: until #1050 the
+  // clocked lane always refused, so there was never a completed receipt to replay.
+  const first = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.ok(first.schedule_id, `the clocked lane refused under a live instruction: ${JSON.stringify(first)}`);
+
+  // THE FIRM TAKES THE INSTRUCTION BACK, between the write and the reply the caller lost.
+  await withdraw(sc.alice, { opKey: opk("p1050-replay-wd") });
+  assert.equal(await liveRow(sc.firm), null, "the withdrawal did not close the instruction");
+
+  // THE SAME TASK ASKS AGAIN. `clara.wake_establish_prepayment_schedule` derives its key from
+  // (task, verb, subject), so this is the production belt's own replay, not a key this cell chose.
+  const again = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(again.schedule_id, first.schedule_id,
+    "the replayed task was not given back the schedule it had already configured");
+  assert.equal(again.plan_id, first.plan_id);
+
+  const n = await rootQuery(
+    "select count(*)::int as n from clara.prepayment_schedules where client_id = $1", [sc.client]);
+  assert.equal(n.rows[0].n, 1, "the replay configured a SECOND schedule");
+});
+
 test("p1050.wake.demoted -- a member who is still ACTIVE but no longer ranks as a bookkeeper has "
   + "lost the authority the plan needs every month, so the clocked lane refuses at configuration "
   + "time rather than writing a plan whose every occurrence would answer CLR04 insufficient_role",
