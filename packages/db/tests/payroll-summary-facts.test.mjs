@@ -936,14 +936,17 @@ test("S6 · the registry re-publishes at ONE new version, and nobody else's row 
     )
   ).rows[0];
   assert.equal(r.versions, 1, "the registry publishes exactly one version — a re-derivation is whole or it is drift");
-  // RE-BASED BY #948, THEN BY #1061, IN LATER LANES (fix round, finding SPEC-01, and the sweep
-  // wave after it). #945 raised the published registry to 5; #948's 0299 re-derived it again for
+  // RE-BASED BY #948, THEN TWICE IN THE SWEEP WAVE'S LANE 04 (fix round, finding SPEC-01, then
+  // #1061 and #1048). #945 raised the published registry to 5; #948's 0299 re-derived it again for
   // the agreement pairs and raised it to 6; #1061's 0342 re-derived it a third time for the SAME
   // six payroll pairs this file's own S6 battery covers (business_operation, stored_only ->
-  // supported) and raised it to 7. The SINGLE SOURCE for the number is
+  // supported) and raised it to 7; #1048's 0343 then corrected the sentence 0342 had just
+  // published — a page with no run totals parks a question rather than falling through, and a
+  // row-sum entry books gross, the four employee deductions and the net and nothing else — and
+  // raised it to 8. The SINGLE SOURCE for the number is
   // document-capability-registry.test.mjs's PUBLISHED_REGISTRY_VERSION; a wave that republishes
   // re-bases BOTH, and this comment is here so the next one finds the second site.
-  assert.equal(r.v, 7, "…and it is 7 (0228 raised to 2, #782's 0245 to 3, a wave-2 file to 4, #945 to 5, #948 to 6, #1061 to 7)");
+  assert.equal(r.v, 8, "…and it is 8 (0228 raised to 2, #782's 0245 to 3, a wave-2 file to 4, #945 to 5, #948 to 6, #1061 to 7, #1048 to 8)");
   assert.equal(r.rows, 240, "#945 inserts and deletes no registry row");
 
   const drift = (
