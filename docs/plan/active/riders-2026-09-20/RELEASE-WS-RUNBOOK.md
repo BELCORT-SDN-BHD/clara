@@ -83,14 +83,29 @@ new secret and sets none.
   them.
 - The **release-preparation worker** dry-ran the preflight both ways against those two databases.
   The table is in § "The preflight, dry run" below and in `reports/waveS-release-prep.md`.
-- The **gate workers'** results belong in the PR body and in § RESULTS; nothing in this runbook
-  assumes them.
+- **Gate A PASS** (`reports/waveS-gates-A.md`): the chain from 0001 on an empty cluster,
+  **337 new applied / 337 total** in 2 min 02 s, all twenty-five of the wave's files on their
+  FIRST-apply branch with ZERO REDO and zero prestate refusals, no `ERROR:` or `FATAL:` in 1409 log
+  lines, the role census reaching 20 by the chain alone, and a second `migrate` reporting 0 new. It
+  then crossed that from-scratch database against `clara_intS6` in SEVEN censuses (1540 function
+  bodies by `sha256(prosrc)`, 4070 columns, 3122 constraints, 957 indexes, 663 policies, 1884
+  grant-and-posture rows, and the 337-row ledger) and **every one diffs 0**. Every lane's db
+  batteries under the full 152-gate chain: 598 / 598.
+- **Gate C PASS** (`reports/waveS-gates-C.md`): it PROVISIONED the Workflow DevKit schema, which is
+  what the merge could not do, and closed both gaps the merge left open. The 22 lane-L6 cells that
+  skipped at integration all RAN and all passed (lane L6's four batteries alone: 123 / 123 / 0 / 0,
+  against the merge's 123 / 101 / 22 skipped); the whole runtime suite read 3181 tests / 3162 pass /
+  2 fail / 17 skipped, both fails being RIG.md's standing Windows reds; the two-build cutover drill
+  passed ALL THREE legs in 84 s with #1131's contract-rule assertions driven at frontier `0361`; and
+  the rollback preflight was driven FIVE ways, which is what step 9 below now records rather than
+  predicts.
 
-**What is NOT rehearsed, and it is the same shape as every prior wave:** no rig on this host carries
-a bootstrapped Workflow DevKit World, so `workflow.workflow_runs` answers `42P01` on every one of
-them and the boot census cannot be computed off a rig. The preflight fails CLOSED on that rather
-than reporting zero. It also means the 22 runtime cells `reports/waveS-merge.md` §16.1 names are
-unverified at integration and are the deploy ceremony's own ground.
+**What is NOT rehearsed:** the preflight's own body census still cannot be computed against the
+lane rigs, because none of them carries a provisioned Workflow DevKit World and
+`workflow.workflow_runs` answers `42P01` there. The preflight fails CLOSED on that rather than
+reporting zero, which is why its two rig STOPs are structural. Gate C shows the fix is one command
+(`pnpm --filter @clara/runtime exec bootstrap`, recorded in `RIG.md`), so this is a gap in the
+DRY RUN rather than in the wave.
 
 A rehearsal on a seeded cluster proves DDL and guard logic, **not** the row-shaped hazards. This
 wave has four of those and they are named in step 3c: 0338's CHECK swap over live plan rows, 0342
@@ -645,22 +660,76 @@ own.** Three gates, and the runbook must say which is demonstrated: (a) `FRONTIE
 rules; (b) `FRONTIER_RULES`' door-contract rules; (c) the stranded-body census. Exit 0 = ALLOWED,
 1 = REFUSED, 2 = could not answer, **and 2 is never read as either of the others.**
 
-**What to expect, and why all three gates should pass.**
+**THE EXPECTED VERDICT IS `ALLOWED`, AND IT IS A MEASUREMENT RATHER THAN A PREDICTION.** The cut's
+step 9 expected, and got, a REFUSED the moment a run existed on one of its three successor bodies.
+This wave repoints no pin, and gate C drove the preflight FIVE WAYS at frontier `0361` on a fresh
+cluster to settle what that means (`reports/waveS-gates-C.md` §4).
+
+| # | target | non-terminal runs | verdict | exit |
+|---|---|---|---|---|
+| **A** | the built artifact (`--target-bundle`, 60 bodies, 2 contracts) | `chatTurn_v22`, `claraWork_v6`, `statementFacts_v4` | **ALLOWED** | 0 |
+| **B** | the same roster typed in (`--supported` + `--supported-contracts`, the operator path) | the same three | **ALLOWED** | 0 |
+| **C** | that roster **minus `claraWork_v6`** (59), the negative control | the same three | **REFUSED (unsupported_body)**, naming `claraWork_v6` | 1 |
+| **D** | the built artifact (60) | `chatTurn_v21`, `claraWork_v5`, `statementFacts_v3` | **ALLOWED** | 0 |
+| **E** | the body-complete roster with **no contracts declared**, the pre-#1035 image | the same three | **REFUSED (frontier_requires_contract)**, naming both rules | 1 |
+
+**Reading A is the one this step must record, and it is quoted verbatim so the window compares
+against text rather than against a summary:**
+
+```
+rollback-preflight: target supports 60 body(ies) and declares 2 door contract(s) — from bundle packages/runtime/.output/server/index.mjs
+  GLOBAL (the whole database — this is what the exit code follows)
+    non-terminal workflow runs: 3 across 3 name(s)
+      ok 1x chatTurn_v22  (workflow//./workflows/chatTurn.v22//chatTurn_v22)
+      ok 1x claraWork_v6  (workflow//./workflows/claraWork.v6//claraWork_v6)
+      ok 1x statementFacts_v4  (workflow//./workflows/statementFacts.v4//statementFacts_v4)
+    live tasks bound to NO run: 0
+    verdict: ALLOWED
+  THE DATABASE'S OWN RULES (frontier vs the target's bodies AND its door contracts — global, no scope clears them)
+    clara.schema_migrations frontier: 0361_reservation_release_advice
+    rules checked: 0195_work_egress_purpose_and_execution_trace, 0254_intake_refusal_record, 0279_fa_closed_year_arrears
+    contracts the target declares: fa_parked_run_v1, intake_refusal_record_v1
+      ok  the target satisfies every rule the applied schema carries
+rollback-preflight: ALLOWED — every in-flight body is carried by the target image.
+```
+
+Reading C exists so that reading A is not vacuous: drop ONE body from the same roster and the same
+database at the same frontier answers `REFUSED (global)` with one refusal line naming `claraWork_v6`.
+Reading B carries the CLI's own `*** UNVERIFIED SET ***` banner, which is correct and is why A rather
+than B is the reading quoted. **Gate C's own conclusion is that `CUT-PLAN` §2.9's obligation does not
+bind this wave**: that obligation says the previous image is a legal rollback target only until the
+first non-terminal run of a newly pinned body exists, and no pin moves here. Step 9 is still run and
+still recorded as a timestamped snapshot; what changes is that the snapshot is a standing reading
+rather than one that degrades.
+
+**The code block above is machine output and is reproduced byte for byte**, including its own
+punctuation, because its whole purpose is that the window compares text against text.
+
+**Why all three gates pass, each with the measurement behind it.**
 
 - **Gate (c), the stranded-body census, cannot refuse.** `refresh-061a6992` exports the same 60
-  bodies this image exports, because `registry.ts` is byte-unchanged. Whatever body a live run is
-  parked on, both images carry it. **This is the first release in the programme whose step-9
-  snapshot does NOT expire**: the cut's degraded within minutes of serving, because its three
-  successor bodies could take a run at any moment; this one has no successor body at all. The
-  preflight prints the census and the count is the evidence.
-- **Gate (a), the frontier body rules, should pass.** `FRONTIER_RULES` is a three-row table
+  bodies this image exports, because `registry.ts` is byte-unchanged. Gate C measured that four ways
+  rather than reading the diff once (`waveS-gates-C.md` §4.0): the workflows directory and
+  `runtime-contracts.mjs` diff EMPTY from `3bf6aa94d` to `d812c2124` AND from `061a6992b` to
+  `3bf6aa94d`, so the hosted image's own commit carries the same roster too; `registry.ts` is
+  byte-identical across the three; and the built artifact declares 60 bodies and 2 contracts.
+  Whatever body a live run is parked on, both images carry it. **This is the first release in the
+  programme whose step-9 snapshot does NOT expire**: the cut's degraded within minutes of serving,
+  because its three successor bodies could take a run at any moment; this one has no successor body
+  at all.
+- **Gate (a), the frontier body rules, passes.** `FRONTIER_RULES` is a three-row table
   (`0195` requires `claraWork_v3`; `0254` requires the `intake_refusal_record_v1` contract; `0279`
-  requires `fa_parked_run_v1`) and **this wave adds no row to it**: checked, the only change to
+  requires `fa_parked_run_v1`) and **this wave adds no row to it**: the only change to
   `packages/runtime/lib/rollback-preflight.mjs` is a single additive hunk after line 227 carrying
-  #1129's two lint-shaped helpers and an empty exception list.
-- **Gate (b), the door-contract rules, should pass.** `refresh-061a6992` is built from the cut's
+  #1129's two lint-shaped helpers and an empty `CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE`. Reading A
+  prints the three rules by name and answers "the target satisfies every rule the applied schema
+  carries".
+- **Gate (b), the door-contract rules, passes.** `refresh-061a6992` is built from the cut's
   RELEASE_SHA, which declares both `intake_refusal_record_v1` and `fa_parked_run_v1` in
-  `lib/runtime-contracts.mjs`, and this wave does not touch that file.
+  `lib/runtime-contracts.mjs`, and this wave does not touch that file. Reading E is the control for
+  it: strip the declarations from an otherwise body-complete roster and the same database at the
+  same frontier refuses, naming both rules, and the CLI says in its own words that a door-contract
+  refusal is NOT drainable.
 - **The DATABASE is the part that does not roll back.** Nothing in this wave drafts a below-frontier
   rollback, and the only route is the step-3f dump, which returns no Storage bytes, no managed Auth
   config and no engine state. This matters more here than in the cut, because this wave's twenty-five
@@ -828,6 +897,12 @@ The wave adds **101 structural keys** and no reference relation. Both were taken
 database at the hosted frontier by the SAME script and the SAME tree, and the two above are the
 release-preparation worker's dry-run artefacts, not the gate worker's.
 
+**The POST fingerprint is not an artefact of the merger's four replays**, and that is gate A's doing
+rather than this worker's: `waveS-gates-A.md` §3 crossed `clara_intS6` against a from-scratch 337-file
+chain on its own cluster in seven censuses, including 1540 function bodies by `sha256(prosrc)`, and
+every one diffs 0. So the database this fingerprint was taken from is the same database a fresh
+apply produces.
+
 ### Negative controls
 
 | # | what was changed | result |
@@ -859,9 +934,11 @@ Control 5 is the one worth reading twice: it is the integration merge's own find
   so the check has only ever returned `superuser=true`. The cut's window answered the
   `clara_fn_owner` half for hosted; whether the hosted migrating role can `set_config('role',
   'clara_authenticated')` is unread until step 3, and it is what 0341's §TAIL needs.
-- **The body census on any rig.** No rig database on this host carries a bootstrapped WDK World, so
-  `workflow.workflow_runs` is absent on all seven and the census's first lines have never returned a
-  row against a rig. The SQL is the runtime's own, mirrored rather than imported.
+- **The body census against a LANE rig.** None of the lane databases carries a provisioned Workflow
+  DevKit World, so `workflow.workflow_runs` is absent on all seven and the preflight's census fails
+  closed there. The SQL is the runtime's own, mirrored rather than imported. Gate C did provision the
+  schema on its own cluster and drove the preflight five ways against it, so the SHAPE is exercised;
+  what remains unexercised is this script's own census statements against a database carrying rows.
 - **The backfill's hosted size.** `D-BACKFILL-ONBOARDING-PLAN-ITEMS` reads 0 on the template because
   no rig carries a committed firm-scope plan. Hosted may carry several, and the number is unread
   until step 3.
@@ -874,9 +951,12 @@ Control 5 is the one worth reading twice: it is the integration merge's own find
 - **The web `next build`.** Green typecheck, a green 5249-test unit suite and five green browser
   walks at the integration head, but no full `apps/web` build (`reports/waveS-merge.md` §18 item 3).
   Step 5 is the first one.
-- **The two-build cutover drill** (`tests/two-build-cutover-e2e.mjs`), which lane L6's #1131 adds
-  assertions to and which no run at integration exercised. It is the gate worker's.
 - **Whether Supabase PITR is enabled**, asked in the 2026-09-14 runbook, still unanswered.
+
+Two items this draft carried as owed are now MEASURED and are struck rather than left standing: the
+two-build cutover drill, which gate C ran ALL PASS across three legs in 84 s with #1131's new
+contract-rule assertions driven, and the 22 lane-L6 runtime cells, which gate C ran green on a
+provisioned Workflow DevKit schema.
 
 ---
 

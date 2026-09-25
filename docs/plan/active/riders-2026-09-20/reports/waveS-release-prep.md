@@ -227,11 +227,17 @@ that fires before a window rather than inside one.
 5. **Blueprint pin drift, unchanged and now four cuts old.** `docs/ARCHITECTURE.md:171`, `:183`,
    `:207`, `:445` say "chatTurn -> chatTurn_v19, claraWork -> claraWork_v3". Per `AGENTS.md` rule 4 a
    blueprint edit belongs to a wayfinder session; every wave has recorded it and so does this one.
-6. **The 22 runtime cells of `waveS-merge.md` §16.1 are this ceremony's ground, not the merge's.**
-   They skip because no rig carries a provisioned Workflow DevKit schema
-   (`workflow.workflow_runs`), which no migration in this repository creates and no script in
-   `packages/runtime` provisions. They are lane L6's own #1044 and #1129 ground and the largest gap
-   the merge report carries.
+6. **The 22 runtime cells of `waveS-merge.md` §16.1 are CLOSED, and the command that closes them
+   belongs in a durable place.** Gate C provisioned the Workflow DevKit schema and ran all 22 green
+   (`waveS-gates-C.md` §1c, §2a, §2b: lane L6's four batteries alone 123 / 123 / 0 / 0, against the
+   merge's 123 / 101 / 22 skipped). The merge's conclusion that "no script in `packages/runtime`
+   provisions it" is exact about npm scripts and wrong about the command: it exists as a dependency
+   bin, `pnpm --filter @clara/runtime exec bootstrap`, resolving to
+   `@workflow/world-postgres/bin/setup.js`. Gate C's F5 names the cost of that line being absent as
+   measurable, because a whole lane's cells went unverified through an integration merge for want of
+   it. **It is now recorded in `RIG.md`'s rig rules** on this branch. F5's own preference, and
+   #1124's ruling, is that the durable home is the repository's `README.md` under "Develop"; that is
+   a follow-up this worker cannot file, because it needs a GitHub write.
 
 ---
 
@@ -386,10 +392,12 @@ worker re-reviewed the recut bodies**.
   check has only ever returned `superuser=true`. The cut's window answered the `clara_fn_owner` half
   for hosted; whether the hosted migrating role can `set_config('role','clara_authenticated')` is
   unread until step 3, and it is what 0341's §TAIL needs.
-- **The body census on any rig.** `workflow.workflow_runs` is absent on every rig database on this
-  host, so the census's first lines have never returned a row against one. The SQL mirrors
+- **The body census against a LANE rig.** `workflow.workflow_runs` is absent on every lane database
+  on this host, so this script's census statements have never returned a row. The SQL mirrors
   `lib/rollback-preflight.mjs`'s own (same table, same terminal statuses, same `bodyIdentifierOf`
-  derivation) but is not imported from it, and its shape is unexercised.
+  derivation) but is not imported from it. Gate C provisioned the schema on its own cluster and drove
+  the preflight five ways against it, so the shape of the question is exercised; what is unexercised
+  is THIS script asking it of a database that carries rows.
 - **The backfill's hosted size and the two evidence tables' hosted row counts.** All three read 0 on
   the pristine template, because no rig carries a committed firm-scope plan and no rig has served an
   auth wall. Hosted's own numbers are the only ones that mean anything and they are unread until
@@ -404,8 +412,8 @@ worker re-reviewed the recut bodies**.
   walks at the integration head, and no full `apps/web` build anywhere
   (`reports/waveS-merge.md` §18 item 3). Step 5 is the first one, and this wave's web diff is
   substantial: sixty changed files under `apps/web/components`, `app` and `lib`.
-- **The two-build cutover drill** (`tests/two-build-cutover-e2e.mjs`), which lane L6's #1131 adds
-  assertions to and which no run at integration exercised. It is the gate worker's.
+- ~~The two-build cutover drill~~ **CLOSED by gate C**: ALL PASS, three legs, 84 s, with #1131's new
+  contract-rule assertions driven at frontier `0361` (`waveS-gates-C.md` §3, §3a).
 - **`reads-wS.mjs` inherits about 1,700 lines from `ceremony-wC/reads-wC.mjs` unchanged.** Those
   parsers were exercised by wave 4's fifteen negative controls and the cut's thirteen; they were not
   re-derived here. The blocks this worker wrote are the header, the pin parser (`declaredSigNames`,
