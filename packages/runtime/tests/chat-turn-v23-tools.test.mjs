@@ -32,7 +32,14 @@ const { register } = await import("tsx/esm/api");
 register();
 
 const v22Tools = await import("../workflows/chatTurn.v22.tools.ts");
+const v22Prompt = await import("../workflows/chatTurn.v22.prompt.ts");
 const v23Reads = await import("../workflows/chatTurn.v23.reads.ts");
+const v23Tenancy = await import("../workflows/chatTurn.v23.tenancy.ts");
+const v23Tools = await import("../workflows/chatTurn.v23.tools.ts");
+const v23Prompt = await import("../workflows/chatTurn.v23.prompt.ts");
+const v23Impl = await import("../workflows/chatTurn.v23.impl.ts");
+const v23Usage = await import("../workflows/chatTurn.v23.usage.ts");
+const registry = await import("../workflows/registry.ts");
 
 const CTX = {
   firmId: "22222222-2222-4222-8222-222222222222",
@@ -41,6 +48,7 @@ const CTX = {
   taskId: "77777777-7777-4777-8777-777777777777",
 };
 const DOC = "66666666-6666-4666-8666-666666666666";
+const MODEL = "gpt-5.6-terra";
 
 /** The file's CODE with its comments removed — v22's own reader, carried for the same reason: a
  *  source pin that reads comments is not a source pin, and a header is precisely where a defect
@@ -259,4 +267,113 @@ test("v23.agreement_terms: the banked PAIR is both channels, and its absence is 
     v23Reads.AGREEMENT_TERMS_REFUSALS.client_not_found,
     "I cannot find that client under your firm.",
   );
+});
+
+// ---------------------------------------------------------------------------
+// 4 · the roster — the ruling v22's own cell recorded, unwound HERE and nowhere else
+// ---------------------------------------------------------------------------
+
+test("v23.roster: v23 is v22's forty-five plus EXACTLY the seven the last cut deferred", () => {
+  const v22 = Object.keys(v22Tools.buildToolsV22(CTX, MODEL, 0)).sort();
+  const v23 = Object.keys(v23Tools.buildToolsV23(CTX, MODEL, 0)).sort();
+  // THE ONE PLACE THIS CUT'S ROSTER IS ENUMERATED, and the seven are named one by one: they are
+  // exactly the names `chat-turn-v22-tools.test.mjs`'s deferral cell asserts absent from v22.
+  assert.deepEqual(v23.filter((n) => !v22.includes(n)), [
+    "confirm_tenancy_rent_plan",
+    "confirm_tenancy_rent_plan_revision",
+    "read_agreement_terms",
+    "read_payroll_posting_state",
+    "read_payroll_settlement_state",
+    "read_rent_settlement_candidates",
+    "read_tenancy_terms",
+  ].sort());
+  assert.deepEqual(v22.filter((n) => !v23.includes(n)), [], "nothing v22 could do stops being possible");
+  // ENUMERATED RATHER THAN ASSUMED, v22's own cell's rule: the counts are measured by BUILDING
+  // the maps, never read off a header comment.
+  assert.equal(v22.length, 45, "v22's measured roster");
+  assert.equal(v23.length, 52, "v22's forty-five plus seven");
+  // and this cut REPLACES nothing: every one of the seven is a new name.
+  for (const name of v23.filter((n) => !v22.includes(n))) assert.ok(!v22.includes(name));
+});
+
+test("v23.roster: the two prohibitions v22 carried forward are STILL absent, and that is still a ruling", () => {
+  const built = Object.keys(v23Tools.buildToolsV23(CTX, MODEL, 0));
+  for (const absent of [
+    // #940/#939's prohibitions: enrolling an account and stating a service period are a person's
+    // judgements, and the doors hold no agent grant by owner default.
+    "enrol_prepayment_account",
+    "record_prepayment_stated_term",
+    // carried forward from v21's and v22's own absence lists, unchanged by this cut
+    "open_intake_batch",
+    "record_counterparty_alias",
+    // #1136 and #1137's own "what the cut must NOT do": no settle tool for either family, and no
+    // record-terms tool.
+    "settle_payroll_net_pay",
+    "settle_rent_payable",
+    "record_contract_terms",
+  ]) {
+    assert.ok(!built.includes(absent), `${absent} is NOT in v23 — its absence is a ruling, not an oversight`);
+  }
+});
+
+test("v23.roster: every tool name reaches the map from the module that DECLARES its literal", () => {
+  // `check-parts-parity.mjs` resolves a computed key by dereferencing the identifier through its
+  // import chain and refuses a chain whose next hop is a RE-EXPORT rather than a binding. v22's
+  // header records that this rule has been paid for three times; it is not paid for a fourth here.
+  const src = codeOf(new URL("../workflows/chatTurn.v23.tools.ts", import.meta.url));
+  assert.match(src, /import \{[\s\S]*?READ_PAYROLL_POSTING_STATE_TOOL[\s\S]*?\} from "\.\/chatTurn\.v23\.reads\.js";/);
+  assert.match(src, /import \{[\s\S]*?CONFIRM_TENANCY_RENT_PLAN_TOOL[\s\S]*?\} from "\.\/chatTurn\.v23\.tenancy\.js";/);
+  // and the names are the DECLARED constants rather than string literals in the map
+  assert.match(src, /\[READ_PAYROLL_POSTING_STATE_TOOL\]: tool\(\{/);
+  assert.match(src, /\[CONFIRM_TENANCY_RENT_PLAN_REVISION_TOOL\]: tool\(\{/);
+});
+
+// ---------------------------------------------------------------------------
+// 5 · the prompt — one stanza per tool, and every prior word byte-identical
+// ---------------------------------------------------------------------------
+
+test("v23.prompt: SYSTEM_PROMPT_V23 is v22's text plus this cut's OWN stanzas, byte for byte", () => {
+  assert.ok(v23Prompt.SYSTEM_PROMPT_V23.startsWith(v22Prompt.SYSTEM_PROMPT_V22),
+    "every prior word stays byte-identical — v22's eight stanzas included");
+  const added = v23Prompt.SYSTEM_PROMPT_V23.slice(v22Prompt.SYSTEM_PROMPT_V22.length);
+  assert.match(added, /WHY A PAYROLL RUN DID NOT POST/);                      // #946
+  assert.match(added, /WHETHER A PAYROLL RUN'S NET PAY HAS LEFT THE BANK/);   // #947
+  assert.match(added, /Eleven terms are recorded/);                            // #948
+  assert.match(added, /When someone asks what a tenancy says/);                // #949 item 1
+  assert.match(added, /A month of rent stays open until the payment appears/); // #949 item 4
+  assert.match(added, /A recurring rent plan never starts because you read a contract/); // item 2
+  assert.match(added, /A rent review changes nothing by itself/);              // item 3
+});
+
+test("v23.prompt: the stanzas are the reports' own words on the three clauses that decide behaviour", () => {
+  const p = v23Prompt.SYSTEM_PROMPT_V23;
+  // the database's sentence is reported VERBATIM and never reworded
+  assert.match(p, /report the sentence it\nreturns VERBATIM/);
+  // never picking a candidate, even when only one exists — #947 AC4 and #949 item 4
+  assert.match(p, /never picking one for the person, even\nwhen only one candidate exists/);
+  // the awaiting_checker trap, carried from wave4-lane01-fix.md §8 into BOTH settlement stanzas
+  assert.equal((p.match(/awaiting_checker, which is a draft waiting for a second pair of eyes/g) ?? []).length, 2);
+  // the act is recorded as the PERSON, and only on their word in this conversation
+  assert.match(p, /the act is recorded as the person you are working for, not as you/);
+});
+
+// ---------------------------------------------------------------------------
+// 6 · the identity — the stamp, the pin, the roster, and policy (c)
+// ---------------------------------------------------------------------------
+
+test("v23.identity: the engine stamp is `chatturn-v23` and the registry pins v23", () => {
+  // `scripts/check-workflow-bundle.mjs` DERIVES the expected stamp from whatever version the
+  // registry pins and refuses a built bundle that does not carry it, so a metering ledger can
+  // never attribute a v23 turn to the v22 body.
+  assert.equal(v23Usage.chatEngineId("gpt-5.6-terra"), "llm-openai:gpt-5.6-terra:chatturn-v23");
+  assert.equal(registry.workflowPins.chatTurn, "chatTurn_v23");
+  assert.equal(registry.workflows.chatTurn, registry.chatTurn_v23);
+  assert.ok(registry.workflowBodies.includes("chatTurn_v23"));
+  // POLICY (c): every superseded body stays imported, exported and rostered. Removing one strands
+  // parked runs and refuses World startup database-wide.
+  for (let n = 2; n <= 22; n += 1) {
+    assert.ok(registry.workflowBodies.includes(`chatTurn_v${n}`), `chatTurn_v${n} is still rostered`);
+  }
+  // the bundle gate's other hard name
+  assert.equal(typeof v23Impl.runModelSegmentStepV23, "function");
 });

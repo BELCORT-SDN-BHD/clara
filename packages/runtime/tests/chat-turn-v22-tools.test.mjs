@@ -361,6 +361,12 @@ test("v22.roster: the contracts this cut DEFERRED are absent BY NAME, and that i
     // `clara_authenticated` ALONE, and neither pooled chat credential carries JWT claims — so a
     // tool over one could only ever answer a grant refusal, which is not a capability. Deferred
     // to their own tickets by ruling, with a migration each.
+    //
+    // THE RULING WAS UNWOUND BY THE CLOSING WAVE (#1144, 2026-09-26), AND THIS CELL STILL STANDS.
+    // The riders sweep wave built the machine-lane halves (0352, 0353, hosted 2026-09-25) and
+    // `chatTurn_v23` carries all seven. What this cell asserts is unchanged and still true: v22
+    // does not carry them, because a version's tool map is fixed at its cut. The roster that now
+    // holds them is enumerated in `tests/chat-turn-v23-tools.test.mjs`.
     "read_payroll_posting_state",
     "read_payroll_settlement_state",
     "read_agreement_terms",
@@ -464,8 +470,14 @@ test("v22.prompt: the stanza says she may report ONLY what the read returned —
 test("v22.identity: the engine stamp is this closure's, and the registry pins the body", () => {
   assert.equal(v22Usage.chatEngineId(MODEL), `llm-openai:${MODEL}:chatturn-v22`,
     "check-workflow-bundle derives the expected stamp from the registry and refuses a built bundle without it");
-  assert.equal(registry.workflowPins.chatTurn, "chatTurn_v22");
-  assert.equal(registry.workflows.chatTurn, registry.chatTurn_v22);
+  // THE TRAP THIS CELL'S OWN COMMENTS NAME, SPRUNG ON ITSELF. Below, this cell warns twice that a
+  // pin literal goes stale the moment a sibling cut lands — and the 2026-09-26 closing wave
+  // (#1144) has now cut `chatTurn_v23` and repointed the class. What #985's cell can still say
+  // honestly is what it owns: v22's OWN stamp, and v22 still exported and rostered for parked
+  // runs under policy (c). The chatTurn PIN's assertion moved to
+  // `tests/chat-turn-v23-tools.test.mjs`, which is the cut that owns it.
+  assert.equal(registry.workflowPins.chatTurn, "chatTurn_v23", "the closing wave's #1144 repointed the class");
+  assert.equal(typeof registry.chatTurn_v22, "function", "policy (c): v22 is the rollback target and stays exported");
   assert.ok(registry.workflowBodies.includes("chatTurn_v22"));
   // policy (c): every superseded body stays exported. The ladder starts at v2 — #810 RETIRED v1.
   assert.equal(registry.chatTurn_v1, undefined);

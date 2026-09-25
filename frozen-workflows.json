@@ -941,6 +941,38 @@
       "note": "#985 - chatTurn_v22's engine stamp, chatturn-v22. The recorder stays v15's and is reached by import; only the label moves, and check-workflow-bundle.mjs refuses a built bundle that does not carry it. NOT deploy-locked yet.",
       "deployed": true
     },
+    "packages/runtime/workflows/chatTurn.v23.impl.ts": {
+      "sha256": "5477f436064f4a4f83ce0d127bd301b0333da402b24b506640ac5d75b80c260b",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v23.prompt.ts": {
+      "sha256": "ca42bf815d0622af646b4ec10627e1d34dc40af94a00164090be5d8023bcaa33",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v23.reads.ts": {
+      "sha256": "a8ef28f2469e6f064e60ce470cd85db2b606e143726ae1b4bd57cdb58ce2b18d",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v23.refusals.ts": {
+      "sha256": "96e2466c8f2045a2c51e24c268478547b3379f7ac7a6a07042c09c9f73cf2cff",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v23.tenancy.ts": {
+      "sha256": "923ff1665335cef0589720f972eee81aa654c135b09b1fa971ec8e4f76cdabfa",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v23.tools.ts": {
+      "sha256": "58b8273f7f95760e2a19dfbcc0e13679236602990cb16ffcdc77edc9a016f245",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v23.ts": {
+      "sha256": "191f6ff54a3e7c6ca5217d9c31d77b18f2dcf366534973d7ef32afe19a6a4e95",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v23.usage.ts": {
+      "sha256": "bb024a5e86938be95d90fe1a5e81311b6ae651868897e7f86541299948089409",
+      "note": ""
+    },
     "packages/runtime/workflows/chatTurn.v3.errors.ts": {
       "sha256": "ab2b374a20443976058c5b90ee601d6e7c25226c8191ac36d8959372a85628cb",
       "note": "",

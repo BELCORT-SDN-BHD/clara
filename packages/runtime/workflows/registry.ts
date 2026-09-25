@@ -31,6 +31,7 @@ import { chatTurn_v19 } from "./chatTurn.v19.js";
 import { chatTurn_v20 } from "./chatTurn.v20.js";
 import { chatTurn_v21 } from "./chatTurn.v21.js";
 import { chatTurn_v22 } from "./chatTurn.v22.js";
+import { chatTurn_v23 } from "./chatTurn.v23.js";
 import { claraWork_v1 } from "./claraWork.v1.js";
 import { claraWork_v2 } from "./claraWork.v2.js";
 import { claraWork_v3 } from "./claraWork.v3.js";
@@ -235,7 +236,27 @@ export const workflows = {
   // ROLLBACK TO v21 stops offering the tool and changes no database state: opening targets
   // already recorded are rows on a basis a person still has to approve, authored by the
   // database's own re-derivation rather than by this image.
-  chatTurn: chatTurn_v22,
+  //
+  // THE CLOSING WAVE (2026-09-26, #1144): REPOINTED v22 -> v23. v22's own roster cell asserts
+  // seven tool names absent BY NAME and records that the absence "is a ruling, not an oversight":
+  // at that cut every door behind them was `clara_authenticated`-only, and neither pooled chat
+  // credential carries JWT claims, so a tool over one could only ever answer a grant refusal. The
+  // riders sweep wave built the machine-lane halves and hosted them on 2026-09-25, so v23 is v22's
+  // forty-five tools plus exactly those seven: `read_payroll_posting_state`,
+  // `read_payroll_settlement_state` and `read_agreement_terms` over 0352's doors;
+  // `read_tenancy_terms`, `read_rent_settlement_candidates`, `confirm_tenancy_rent_plan` and
+  // `confirm_tenancy_rent_plan_revision` over 0353's.
+  //
+  // NO COUPLED MIGRATION. Every door the seven touch has been live since 0352 and 0353, hosted on
+  // 2026-09-25 at frontier `0361_reservation_release_advice`. Against a database missing one, the
+  // tool answers a typed refusal and the TURN SURVIVES — the chat lane's own asymmetry. v22's
+  // obligations (and v21's 0225/0227/0230) are inherited unchanged.
+  //
+  // ROLLBACK TO v22 stops offering the seven. The five reads change no database state. The two
+  // CONFIRMATIONS do: a rent plan confirmed through this image is a plan on the books, and a v22
+  // image cannot confirm another one from the conversation — the human door still can, and a plan
+  // already recorded stays as it is, authored by the person named on it.
+  chatTurn: chatTurn_v23,
   // #623 — A NEW CLASS, never a repoint. `accounting_work` tasks are dispatched here by
   // src/workRoutes.ts's post-commit enqueue and by the reconciler's own `accounting_work`
   // re-enqueue arm (lib/reconciler-work.mjs); both resolve the body through THIS object, which
@@ -992,6 +1013,11 @@ export { chatTurn_v21 };
 // at cutover — and the pinned v22 body is exported too so the rollback preflight can use the same
 // uniform census for every version.
 export { chatTurn_v22 };
+// #1144 (the 2026-09-26 closing wave) repointed `chatTurn:` v22 -> v23. v22 remains exported by
+// policy (c) — it is the rollback target and the body any run parked on a v22 clarify hook resumes
+// into at cutover — and the pinned v23 body is exported too so the rollback preflight can use the
+// same uniform census for every version.
+export { chatTurn_v23 };
 // #629 repointed `claraWork:` v1 -> v2. v1 remains exported by policy (c) — it is the rollback
 // target and the body any Work parked on a v1 clarify hook resumes into at cutover — and the
 // pinned v2 body is exported too so the rollback preflight can use the same uniform census for
@@ -1095,6 +1121,7 @@ export const workflowBodies: readonly string[] = Object.freeze([
   "chatTurn_v20",
   "chatTurn_v21",
   "chatTurn_v22",
+  "chatTurn_v23",
   "claraWork_v1",
   "claraWork_v2",
   "claraWork_v3",
@@ -1141,7 +1168,7 @@ export const workflowBodies: readonly string[] = Object.freeze([
  *  preflight has to enumerate. */
 export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
   closeExample: "closeExampleV1",
-  chatTurn: "chatTurn_v22",
+  chatTurn: "chatTurn_v23",
   claraWork: "claraWork_v6",
   documentIngest: "documentIngest_v2",
   invoiceFacts: "invoiceFacts_v1",
