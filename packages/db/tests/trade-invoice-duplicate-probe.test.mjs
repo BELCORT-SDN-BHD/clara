@@ -302,7 +302,15 @@ test("p1007.probe.is_a_read the probe writes nothing and holds no row lock -- pr
        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname='clara' and p.proname in ('probe_trade_invoice_duplicates',
         '_trade_invoice_probe_core','_trade_invoice_duplicate_matches')
-      order by p.oid::regprocedure::text`)).rows;
+      order by p.oid::regprocedure::text collate "C"`)).rows;
+  // `collate "C"` IS LOAD-BEARING, and the cut paid a CI red for its absence. `regprocedure::text`
+  // is TEXT, so the readback is ordered by the DATABASE's default collation, and the four
+  // signatures differ exactly where a leading underscore does: under `C` the underscore (0x5F)
+  // sorts before `p` (0x70) and the three `_trade_invoice_%` bodies come first, while under glibc
+  // `en_US.UTF-8` -- which is what CI's postgres:17 service container initdb's with -- punctuation
+  // is ignored at the primary level, so `probe_trade_invoice_duplicates` sorts first instead. The
+  // literal below then means two different things on two hosts. Pinned at the ORDER rather than
+  // loosened at the assertion, exactly as `knowledge-fye-day`'s fd.12 was in wave 4.
   // FOUR BODIES UNDER THREE NAMES since 0323 (#1135's cut-phase fix round): the narrowing core
   // `clara._trade_invoice_probe_core(uuid,text,jsonb,text)` is a SIBLING of the three-argument one,
   // so this count moved from three to four and every posture assertion below simply covers it too.
