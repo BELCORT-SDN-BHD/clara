@@ -55,7 +55,7 @@ import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts,
 import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
 import { addBankAccount, enterStatement } from "./x38-match-fixtures.mjs";
 import { deactivateMember } from "./work-cancel-fixtures.mjs";
-import { reactivateMember } from "./accounting-plans-fixtures.mjs";
+import { reactivateMember, setClientStatus } from "./accounting-plans-fixtures.mjs";
 
 const STEM = "tenancy_agent_twins_obo_confirmations$";
 
@@ -769,7 +769,27 @@ test("p1137.obo.refusals_match — every shared refusal answers the SAME sqlstat
     { code: "CLR10", reason: "payable_account_in_use" });
   assert.equal(detailOf(shared).payable_account_code, PAYABLE_ACCOUNT);
 
-  // 8 — A CLIENT OUTSIDE THE FIRM, driven on the OBO lane alone because the human lane's caller
+  // 8 — THE CLIENT'S OWN STATUS. The human lane's plan step is clara.create_accounting_plan,
+  //     which refuses a client that is not active; the OBO lane's plan step is this file's own
+  //     clara._tenancy_plan_core. `clients_status_check_0017` admits active | archived |
+  //     onboarding, and the door's token for either non-active value is `client_inactive`, so BOTH
+  //     are driven — `onboarding` is the live case, because that is the state a tenancy is filed
+  //     in during setup. LAST in this cell's scene order, on a DEDICATED tenancy, because it
+  //     disables the client for everything else.
+  //     (prepayment-schedule-obo.test.mjs:372-377 drives the same pair on 0307's twin.)
+  const dormant = await tenancyFor(ALICE(), { framework: "MPERS" });
+  await recordProposed(ALICE(), dormant.client, dormant.doc.documentId);
+  for (const status of ["archived", "onboarding"]) {
+    await setClientStatus(dormant.client, status);
+    const inactive = await bothRefuse(`client_inactive (${status})`,
+      { client: dormant.client, document: dormant.doc.documentId }, {},
+      { code: "CLR10", reason: "client_inactive" });
+    assert.match(inactive.message, /client is not active -- no new accounting plan/,
+      `client_inactive (${status}): the sentence is not clara.create_accounting_plan's own`);
+  }
+  await setClientStatus(dormant.client, "active");
+
+  // 9 — A CLIENT OUTSIDE THE FIRM, driven on the OBO lane alone because the human lane's caller
   //     cannot even reach it: the two answers are compared in p1137.obo.authority below.
   const theirs = await freshClient(DAVE());
   const foreign = await caught(() => confirmFor({

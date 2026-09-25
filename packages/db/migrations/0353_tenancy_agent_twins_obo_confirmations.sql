@@ -1381,6 +1381,9 @@ end $t1137_revise_human$;
 -- as a literal, never an argument.
 --
 -- WHAT IT COPIES FROM 0193'S DOOR, and why each line is here rather than skipped:
+--   · the CLIENT'S OWN STATUS wall (fix round, ADV-L08-01) — the human lane's plan step refuses a
+--     client that is not `active` and this one must answer the same sentence, or "the twin's
+--     refusals match the human door's" is false on the one status a tenancy is normally filed in;
 --   · the authority SHAPE ladder (rule / kind / object / ref-kind / ref-id) — the OBO lane must
 --     answer the same `authority_ref_invalid` constraints the human lane answers, or "the twin's
 --     refusal vocabulary matches the human door's" is false at the first argument a chat tool gets
@@ -1394,8 +1397,10 @@ end $t1137_revise_human$;
 --   · the self-exclusion by IDENTITY in the overlap warning (#929 ADV-L05-03).
 --
 -- WHAT IT DOES NOT COPY: the op-key reservation and the `clara._finish_op` stamp, the `_human_ctx`
--- ladder, the client firm/status ladder (the confirmation core resolved all three above it), and
--- the `plan_kind_unsupported` wall (the kind is a literal here, not an argument).
+-- ladder, the client's FIRM ladder (the confirmation core resolved the firm and the actor above
+-- it — but NOT the status, which is why the status wall is copied and not skipped: see
+-- ADV-L08-01 above), and the `plan_kind_unsupported` wall (the kind is a literal here, not an
+-- argument).
 -- =====================================================================================
 create or replace function clara._tenancy_plan_core(
     p_firm uuid, p_client uuid, p_author uuid, p_purpose text, p_authority_kind text,
@@ -1405,8 +1410,36 @@ create or replace function clara._tenancy_plan_core(
   as $t1137_plan_core$
 declare
   v_plan uuid; v_rev uuid; v_digest text; v_ref_kind text; v_ref_id uuid; v_reason text;
-  v_warning jsonb; v_next jsonb;
+  v_warning jsonb; v_next jsonb; v_client_status text;
 begin
+  -- THE CLIENT'S OWN STATUS, verbatim from clara.create_accounting_plan, and at that door's own
+  -- position in the ladder -- the FIRST thing it checks after it has resolved who is calling.
+  -- [fix round, ADV-L08-01] The first cut left this out on a premise that was not true: the
+  -- confirmation core above resolves the client's FIRM and the caller's identity, but it never
+  -- reads clara.clients.status, and the human lane gets that wall from clara.create_accounting_plan
+  -- itself. Without it the OBO entrance confirmed a rent plan for an `archived` or `onboarding`
+  -- client that the Contract page refuses -- driven on the rig, both statuses, same arguments --
+  -- and `onboarding` is the live case, because that is the state a tenancy is filed in during
+  -- setup. Nothing posts either way (clara._plan_admit_occurrence and
+  -- clara.wake_due_plan_occurrences both re-read the status), but the rows written would hold the
+  -- `rent_plan_already_confirmed` and `payable_account_in_use` walls against the person's own
+  -- legitimate confirmation once the client IS activated.
+  --
+  -- WHY HERE AND NOT IN THE `_for` ENTRANCE, where 0307 puts its own copy: 0307's core is SHARED
+  -- by both of its entrances, so its twin is the only place left. THIS body is not shared -- it is
+  -- the OBO lane's stand-in for clara.create_accounting_plan and nothing else calls it -- so the
+  -- faithful position is the one that door uses. Putting it in clara.confirm_tenancy_rent_plan_for
+  -- would raise it ABOVE clara._reserve_op and above every draft wall, which would answer
+  -- `client_inactive` where the human door answers `terms_incomplete`, and would refuse the REPLAY
+  -- of a confirmation the person already made. Both orders are driven in
+  -- tests/tenancy-agent-twins.test.mjs (p1137.obo.refusals_match case 8 and
+  -- p1137.obo.plan_step_parity).
+  select c.status into v_client_status from clara.clients c where c.id = p_client;
+  if v_client_status <> 'active' then
+    raise exception 'client is not active -- no new accounting plan' using errcode='CLR10',
+      detail='{"reason":"client_inactive"}';
+  end if;
+
   -- THE AUTHORITY SHAPE, verbatim from clara.create_accounting_plan.
   if p_authority_kind = 'authority_rule' then
     raise exception 'an authority rule cannot yet authorise a plan; record the explicit instruction instead'
