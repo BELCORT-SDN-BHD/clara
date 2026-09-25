@@ -35,13 +35,13 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { endPool, humanQuery, opk, rootQuery } from "./rig-fixtures.mjs";
+import { assertRaises, endPool, humanQuery, opk, rootQuery } from "./rig-fixtures.mjs";
 
 const STEM = "firm_setup_committed_tin_backfill$";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 1;
+const EXPECTED_CELLS = 6;
 
 /** True iff a migration whose version matches the stem is recorded applied. Catalog-probed
  *  against `clara.schema_migrations`, never inferred from a file listing. */
@@ -212,4 +212,193 @@ cell("p1098.backfill.committed_plan_gains_tin_marked_by_turnover", async () => {
     "below the threshold: a sub-threshold turnover marks tin optional");
   assert.equal(itemOf(belowEnv, "tin").required, false);
   assert.equal(itemOf(belowEnv, "tin").answer, null);
+});
+
+// =============================================================================================
+// AC2 — the backfill alters no other firm-setup item, and re-signs no plan.
+// =============================================================================================
+
+/** Every column of every item on one plan, plus the plan row's own mutable identity. Ordered by
+ *  the surrogate `id`, a uuid, so the comparison cannot turn on the server's collation. */
+const planFingerprint = (plan) =>
+  rootQuery(
+    `select coalesce(
+        (select string_agg(i.id::text || '|' || i.item_kind || '|' || i.item_key || '|' ||
+            coalesce(i.question,'<null>') || '|' || coalesce(i.answer::text,'<null>') || '|' ||
+            i.state || '|' || i.required_for_commit::text || '|' ||
+            coalesce(i.answered_by::text,'<null>') || '|' || coalesce(i.answered_at::text,'<null>') || '|' ||
+            i.created_at::text || '|' || i.updated_at::text, '~' order by i.id)
+           from clara.onboarding_plan_items i where i.plan_id = p.id), '<no items>')
+        || ' || ' ||
+        p.state || '|' || p.revision_token::text || '|' || p.revision_n::text || '|' ||
+        coalesce(p.committed_at::text,'<null>') || '|' || coalesce(p.committed_by::text,'<null>') || '|' ||
+        p.updated_at::text as fp,
+        (select count(*)::int from clara.onboarding_plan_revisions r where r.plan_id = p.id) as revisions
+       from clara.onboarding_plans p where p.id = $1`, [plan])
+    .then((r) => r.rows[0]);
+
+cell("p1098.backfill.no_other_item_and_no_plan_row_moves", async () => {
+  // One firm that finished setup before 0311 (no tin row), and one that finished it after, with
+  // its TIN already recorded. Both are committed; neither may be edited by the backfill beyond
+  // the one row the first is missing.
+  const missing = await committedPlanWithoutTin("ac2m", "<RM1M");
+  const already = await firmWorld("ac2a");
+  await seed(already.admin);
+  const env = await answerRequired(already, "RM1M-5M", true);
+  await commitPlan(already.admin, { plan: already.plan, revision: env.revision_token });
+
+  const beforeMissing = await planFingerprint(missing.plan);
+  const beforeAlready = await planFingerprint(already.plan);
+
+  await backfill();
+
+  const afterAlready = await planFingerprint(already.plan);
+  assert.deepEqual(afterAlready, beforeAlready,
+    "a committed plan that already carries its TIN answer is not touched at all");
+
+  const afterMissing = await planFingerprint(missing.plan);
+  assert.notEqual(afterMissing.fp, beforeMissing.fp, "the plan that was missing tin did gain a row");
+  assert.equal(afterMissing.revisions, beforeMissing.revisions,
+    "planting a never-asked question writes no new plan revision");
+  // Everything the fingerprint held BEFORE is still in it, byte for byte: the backfill only ever
+  // appended the tin segment. Comparing the item segments one by one says which row moved.
+  const itemsOf = (fp) => fp.fp.split(" || ")[0].split("~");
+  const planOf = (fp) => fp.fp.split(" || ")[1];
+  assert.equal(planOf(afterMissing), planOf(beforeMissing),
+    "the committed plan row itself -- state, CAS token, revision number, attestation, updated_at -- is unmoved");
+  const before = itemsOf(beforeMissing);
+  const after = itemsOf(afterMissing);
+  assert.equal(after.length, before.length + 1, `the backfill added ${after.length - before.length} rows, expected exactly one`);
+  for (const row of before) {
+    assert.ok(after.includes(row), `an item that existed before the backfill moved or vanished: ${row}`);
+  }
+  const added = after.filter((r) => !before.includes(r));
+  assert.equal(added.length, 1);
+  assert.match(added[0], /\|tin\|/, "the one row the backfill added is the tin item");
+  assert.match(added[0], /\|pending\|/, "the row it added is pending");
+});
+
+// =============================================================================================
+// SCOPE — an OPEN plan belongs to the reconciling door, a CANCELLED plan to nobody.
+// =============================================================================================
+
+const tinRowCount = (plan) =>
+  rootQuery("select count(*)::int as n from clara.onboarding_plan_items where plan_id = $1 and item_key = 'tin'",
+    [plan]).then((r) => r.rows[0].n);
+
+cell("p1098.backfill.open_and_cancelled_plans_are_not_touched", async () => {
+  // An OPEN plan in the pre-0311 shape. Its admin can still reconcile it, so it is not a dead end.
+  const still = await firmWorld("open");
+  await seed(still.admin);
+  await rootQuery("delete from clara.onboarding_plan_items where plan_id = $1 and item_key = 'tin'", [still.plan]);
+
+  // A CANCELLED plan in the same shape. Nothing reads it as a live checklist.
+  const gone = await firmWorld("canc");
+  await seed(gone.admin);
+  await rootQuery("delete from clara.onboarding_plan_items where plan_id = $1 and item_key = 'tin'", [gone.plan]);
+  await rootQuery(
+    `update clara.onboarding_plans set state='cancelled', cancelled_at=now(), cancelled_by=$2,
+       cancel_reason='p1098 cell: a cancelled firm plan is out of the backfill''s scope'
+     where id = $1`, [gone.plan, gone.admin]);
+
+  await backfill();
+
+  assert.equal(await tinRowCount(still.plan), 0,
+    "an OPEN plan is not backfilled: clara.seed_firm_setup_plan owns it, and bumps the plan revision when it seeds");
+  assert.equal(await tinRowCount(gone.plan), 0, "a CANCELLED plan is not backfilled");
+
+  // …and the open one is genuinely not a dead end: its own door plants the row, driven here rather
+  // than asserted, and the plan's revision moves with it (#895) the way the backfill's never does.
+  const beforeSeed = await readSetup(still.admin);
+  await seed(still.admin);
+  const afterSeed = await readSetup(still.admin);
+  assert.equal(await tinRowCount(still.plan), 1,
+    "the reconciling door plants tin on the open plan the backfill left alone");
+  assert.equal(itemOf(afterSeed, "tin").state, "pending");
+  assert.equal(afterSeed.revision_n, beforeSeed.revision_n + 1,
+    "the door's own seed bumps the plan revision; the backfill deliberately does not");
+});
+
+// =============================================================================================
+// REDO — a second run is a no-op, which is what makes the migration safe to re-apply (#957).
+// =============================================================================================
+
+const tinRow = (plan) =>
+  rootQuery(
+    `select id::text, state, answer::text, created_at::text, updated_at::text
+       from clara.onboarding_plan_items where plan_id = $1 and item_key = 'tin'`, [plan])
+    .then((r) => r.rows[0] ?? null);
+
+cell("p1098.backfill.a_second_run_is_a_no_op", async () => {
+  const w = await committedPlanWithoutTin("redo", "<RM1M");
+  const first = await backfill();
+  assert.ok(first >= 1, `the first run planted ${first} rows, expected at least this plan's`);
+  const planted = await tinRow(w.plan);
+  assert.ok(planted, "the first run planted the row");
+
+  const second = await backfill();
+  assert.equal(second, 0, "a second run plants nothing: the guard is `where not exists`");
+  assert.deepEqual(await tinRow(w.plan), planted,
+    "the row the first run planted is not rewritten by the second -- same id, state, answer and timestamps");
+});
+
+// =============================================================================================
+// AC1's RESIDUAL — the row now EXISTS on a committed plan, and the firm still cannot answer it.
+// This cell DRIVES the refusal rather than describing it, so the limitation 0347's header and
+// packages/db/README.md disclose is a measured fact on this branch. It pins today's behaviour, not
+// an outcome anybody is happy with: the open question is whether a committed checklist may still be
+// COMPLETED for a question it was never asked (see the README section for 0347).
+// =============================================================================================
+
+const reasonOf = (err) => {
+  try { return JSON.parse(err.detail ?? "{}").reason ?? null; } catch { return null; }
+};
+
+cell("p1098.residual.a_committed_plan_still_refuses_the_answer", async () => {
+  const w = await committedPlanWithoutTin("resid", "RM1M-5M");
+  await backfill();
+
+  const env = await readSetup(w.admin);
+  assert.equal(env.state, "committed");
+  assert.equal(itemOf(env, "tin").state, "pending", "the question is on the checklist now");
+  assert.equal(itemOf(env, "tin").applicability, "required");
+
+  const err = await assertRaises("CLR10", () => answer(w.admin, {
+    plan: w.plan, revision: env.revision_token, itemKey: "tin", answer: "IG5678901234",
+  }), "answering a backfilled tin item on a committed plan");
+  assert.equal(reasonOf(err), "firm_setup_not_open",
+    "the answer door still refuses every item on a committed plan -- the backfill does not reopen it");
+
+  // The row is still exactly as the backfill left it: nothing was half-written by the refusal.
+  assert.equal(itemOf(await readSetup(w.admin), "tin").state, "pending");
+  // …and the required counter keeps naming it, which is how the residual is visible rather than
+  // silent: the committed checklist reports one outstanding required fact it cannot collect.
+  const after = await readSetup(w.admin);
+  assert.ok(after.required_outstanding.includes("tin"),
+    "a committed plan above the MyInvois threshold names tin as outstanding and cannot answer it");
+});
+
+// =============================================================================================
+// THE ONE-SHOT'S OWN EFFECT — the invariant 0347 establishes over the WHOLE database, which is
+// what the migration's single run is for. Stated as a census rather than as a claim about the two
+// plans this file happens to have planted: the ticket asks about EVERY firm.
+// =============================================================================================
+
+cell("p1098.census.no_committed_firm_plan_lacks_tin", async () => {
+  const r = await rootQuery(
+    `select count(*)::int as n,
+            coalesce(string_agg(p.id::text, ', ' order by p.id), '') as which
+       from clara.onboarding_plans p
+      where p.scope_kind = 'firm' and p.state = 'committed'
+        and not exists (select 1 from clara.onboarding_plan_items i
+                         where i.plan_id = p.id and i.item_key = 'tin')`);
+  assert.equal(r.rows[0].n, 0,
+    `committed firm-scope plan(s) still carry no tin item: ${r.rows[0].which}`);
+
+  // The census is not vacuous: this database really does hold committed firm-scope plans, and
+  // every one of them carries the row.
+  const held = await rootQuery(
+    "select count(*)::int as n from clara.onboarding_plans where scope_kind='firm' and state='committed'");
+  assert.ok(held.rows[0].n > 0,
+    "no committed firm-scope plan exists at all -- the census above would be vacuous");
 });
