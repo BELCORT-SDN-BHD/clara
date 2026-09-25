@@ -425,9 +425,30 @@ group role no client credential is a member of. The block renders above the cont
 the link, with the firm, the role and the masked address; an unknown, expired, revoked or
 already-accepted token gets ONE identical refusal, and the signed-out surface renders NOTHING for
 it — no verdict, no second place that blocks an invitation, the sign-in step unchanged. The read
-is rate-walled (fifteen minutes, five per token and five per address) and a walled read simply
-leaves the block out. The credential never reaches the browser: this app holds only
-`CLARA_AUTH_WALL_SERVICE_TOKEN` and the runtime holds the DSN.
+is rate-walled (fifteen minutes, five per token and five per address). The credential never
+reaches the browser: this app holds only `CLARA_AUTH_WALL_SERVICE_TOKEN` and the runtime holds
+the DSN.
+
+CORRECTED (ticket 1095, 2026-09-25) — "a walled read simply leaves the block out" no longer
+describes the rate-limited case. It is now the ONE indefinite reason the confirm stage renders
+something for: a short notice saying the link has been looked up too many times just now and to
+reload in a little while, distinct from the firm/role/email block (which still needs an `ok: true`
+read) and from the two OTHER indefinite reasons, `transport` and `unreadable`, which still render
+nothing at all — there is nothing for the visitor to do about either. The invitation itself stays
+untouched — this is still a courtesy, never a second admission gate.
+
+**The notice publishes no wait, and that is a decision, not an omission** (ticket 1095, fix round).
+`clara.preview_invite_by_token` walls on TWO limbs — five loads per token and five per origin in
+fifteen minutes — computes each limb's wait independently and advertises the MAXIMUM, with no
+`scope` field, because "naming them would tell a prober which of two budgets it exhausted"
+(`0309_invite_preview_public_door.sql`:461-499, its own comment). On an anonymous page that
+maximum is an activity oracle for a third party: measured on the lane rig, a first-ever request
+from a cold address against a token somebody else had loaded five times four minutes earlier came
+back `rate_limited, 660` with zero rows of the caller's own — and 900 − 660 dates that party's
+fifth-oldest load to the second. So the wait stops at the runtime's `Retry-After` header, where a
+machine reads it; `lib/firm/invite-preview-public.ts`'s outcome type carries no number at all, and
+the copy does not tell this visitor they did the checking (behind a shared NAT, or when the real
+invitee is the one reloading, that was untrue).
 
 CLOSED (ticket 872, migration 0269): a fifth, READ-TIME-ONLY effective status, `issuer_lapsed`,
 now covers exactly the gap the paragraph below used to describe. When a still-`pending`
@@ -541,6 +562,28 @@ See [Cloudflare MCP](https://github.com/cloudflare/mcp) and
 - `RESEND_API_KEY`
 - `STRIPE_SECRET_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
+
+`CLARA_AUTH_WALL_SERVICE_TOKEN` gates three pre-session runtime routes, not one: the confirm wall
+(`/api/auth-wall/confirm`), the resend wall (`/api/auth-wall/resend`, #621) and the signed-out
+invite preview (`/api/invite-preview`, #871). Sharing one value is deliberate — one secret for the
+operator to rotate instead of three — but that means rotating it stops all three at the same time.
+The runtime compares each request's bearer token against the identical `CLARA_AUTH_WALL_SERVICE_TOKEN`
+it holds as its own Fly secret on `clara-runtime` (`packages/runtime/src/authWallRoutes.ts`,
+`packages/runtime/src/invitePreviewRoutes.ts`), so rotate this Worker secret and the matching Fly
+secret together, in the same change: an operator who rotates only one side breaks email
+confirmation, code resend and invite preview all at once, not just the route they meant to touch.
+
+**What a half-rotation looks like in the log**, because the two halves fail differently and an
+operator who greps for the wrong status loses an hour:
+
+| what is wrong | runtime answers | what the runtime log says | what the visitor sees |
+|---|---|---|---|
+| the two copies DISAGREE (this Worker rotated, Fly not, or the other way round) | **401** `{"error":"unauthorized"}` | nothing — a bearer mismatch is a normal refusal, so it is not logged | the confirm wall renders its honest "we couldn't check" (`{kind:"unavailable"}`), and the invite preview block is simply absent (`indefinite("transport")`) |
+| the runtime's copy is UNSET or blank | **503** `{"outcome":"unavailable"}` / `{"error":…}` | `[clara-runtime] … REFUSED: CLARA_AUTH_WALL_SERVICE_TOKEN is not configured` | the same two surfaces, identically |
+
+Both halves are answered above every other probe on purpose: the lane-DSN checks sit BELOW the
+bearer so an anonymous caller cannot read which lane is wired. Nothing the visitor sees
+distinguishes the two cases, which is why the runtime log is the only place to tell them apart.
 
 Build the Cloudflare bundle in Linux with a Linux-native `pnpm install`; it provisions this
 package's Node runtime. Do not reuse this Windows checkout's `node_modules` from WSL because

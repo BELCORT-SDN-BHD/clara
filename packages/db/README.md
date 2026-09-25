@@ -409,6 +409,101 @@ afterward and probe every configured runtime lane. Existing platform roles can a
 with historical migration census assertions. A green local chain does not prove that a live
 cluster can be replayed without a target-specific preflight.
 
+## Collation and pinned order (#1047)
+
+**The house rule.** A value that is **pinned** — compared against a literal, or digested and
+compared against a digest literal — and that was produced by an aggregate **ordered by a text
+expression** must spell `collate "C"` on that ORDER BY. Without it the pin records the server's
+`lc_collate`, not the data.
+
+Under glibc's `en_US.UTF-8` — CI's `postgres:17` container and hosted Supabase — punctuation
+carries no primary weight and case is not a primary weight either, so `taxation` sorts **before**
+`tax_liabilities` and `clara_x` before `PUBLIC`; under `C`, which is defined by code point, both
+sort the other way round. 0295's first cut pinned a digest over rows ordered that way, was green on
+every `C.UTF-8` rig, and stopped the chain on CI (run 35954298990). Its own section below records
+that fix; this section is the rule the estate follows from now on.
+
+**Most ORDER BYs do not need it, and the reason is the TYPE, not luck.** PostgreSQL's `name` type
+carries collation `C` in the type itself, so a census ordered by a catalog identifier —
+`proname`, `relname`, `conname`, `tgname`, `polname`, `rolname`, `attname`, and
+`information_schema`'s `grantee` / `table_name` / `column_name`, which ARE `name` — sorts by code
+point on every server. So does an expression that merely *contains* one: a `name` cast to `text`
+keeps `C`, and in `proname || '=' || <text>` the `name`'s non-default collation wins over the
+default (0020:2304's ACL pin has always been portable for exactly this reason).
+
+These do NOT keep it, and are the shapes to look at:
+
+| shape | collation | why |
+|---|---|---|
+| `oid::regprocedure::text`, `::regrole::text`, `::regclass::text` | database default | `reg*` carries no collation, so the cast takes the default |
+| `privilege_type` | database default | `information_schema.character_data` is a domain over `character varying`, not over `name` |
+| `aclitem::text` | database default | same |
+| any ordinary `text` / `varchar` column (`family_key`, `account_code`, `wake_kind`, …) | database default | |
+
+`select pg_collation_for(<expr>)` answers this on the live server for any expression; it is what
+`tests/collation-pin-portability.test.mjs` measures rather than asserting from memory.
+
+**Two verdict shapes, not one.** The estate writes a set verdict either as a joined literal
+(`v_txt <> 'a,b'`) or as an **array constructor** (`v_keys is distinct from array['a','b']`).
+Both pin the ORDER equally hard, because an array is ordered; 0132:1545/1549, 0220:960/965,
+0038's six token censuses and thirty more sites use the second shape.
+
+**The record and the guard.** `tests/collation-pin-scan.mjs` holds `RECORDED_SITES`: every pinned,
+text-ordered site the scanner finds in `migrations/` and `tests/` — **99 movable keys over 56
+files, of which 61 keys in 34 applied migrations**, each with the reason it cannot flip. Applied
+migrations are never edited, so for those the entry is the proof.
+`tests/collation-pin-scan.test.mjs` scans the corpus on every run and refuses a site the record
+does not hold, naming the file and saying what to write; it needs no database, so it runs on every
+leg. A NEW site is fixed with `collate "C"`, never added to the record.
+
+The record is only as complete as the instrument, and #1047's own adversarial round proved that
+twice over. Its first cut read **66 keys over 37 files**: it recognised a verdict only when the
+right-hand side began with a quote (so every array verdict was invisible), and it hard-freed the
+bare aliases `k`, `n`, `i`, `o` and every `%_id` spelling (so a `jsonb_object_keys(...) k` TEXT
+alias looked like an integer, and `stripe_session_id` / `trace_id` / `run_id` — about forty TEXT
+`%_id` columns in `clara` — looked like uuids). Both blind spots are closed, and the free `%_id`
+list is now a short closed list that
+`collation-pin-portability.test.mjs` re-measures against the live catalog.
+
+**The live proof, taken on BOTH collations.** `tests/collation-pin-portability.test.mjs`
+re-measures, on whatever server the suite runs on: it builds a comparator (the real glibc
+`en_US.UTF-8` where the OS has the locale, otherwise an ICU `ka-shifted` collation), makes it prove
+it reorders 0295's own pair, and then orders each recorded site's live value set under both `C` and
+that comparator. Where a site's
+subject no longer exists at the head of the chain — 0038's four document CHECK censuses were
+renamed by a later migration, and a tail runs against the schema at its OWN point in the chain —
+the battery instead re-orders the **array verdict the migration carries in its own text**, read
+back out of the file by the scanner rather than hand-copied. 33 such verdicts are proved today.
+
+Both legs have now been run, which is what #1047's own AC2 and AC4 ask for and what the estate had
+never had:
+
+| leg | cluster | result |
+|---|---|---|
+| `C.UTF-8` | the lane rig, rebuilt from scratch by the #867 recipe | 313/313 applied `0001` → `0350`; a second `migrate` reports 0 new and no drift; the batteries green with an ICU `ka-shifted` comparator |
+| **glibc `en_US.UTF-8`** | a disposable cluster stood up for the purpose (`pg_createcluster … --locale=en_US.UTF-8`), used and dropped | **313/313 applied from scratch**, then `collation-pin-portability` + `collation-pin-scan` 21/21 green with the REAL `provider = libc, locale = 'en_US.UTF-8'` comparator — measured: it creates, and it reorders 0295's pair (`taxation` before `tax_liabilities`) while `C` does not |
+
+The second row is the stronger of the two, and not only because the locale is the named one. On
+that cluster the DATABASE default IS `en_US.UTF-8`, so the battery's "this server's default
+ordering already differs from C" control was itself taken under glibc and still passed at every
+recorded site — i.e. every ordering the estate pins is identical under `C` and under the collation
+CI and hosted Supabase actually run. A rig whose default is `C.UTF-8` cannot say that.
+
+**Portable today, fragile by construction.** The orderings the estate pins do not move — but the
+name space they draw on does. Measured on the lane rig at 309 migrations:
+`clara.bank_accounts`' index names already sort differently under the two collations
+(`uq_bank_accounts_id_firm_client` against `uq_bank_accounts_identity_active`, because `_` sorts
+before `e` under `C` and carries no primary weight under the other). Nothing pins that relation's
+index names today. One new `clara._x` landing beside an unprefixed `clara.x_y` does the same to a
+function census, which is why the rule is a rule and not a case-by-case judgement.
+
+The same measurement, widened in the fix round, shows how close the hazard sits to what IS pinned.
+Take the quoted tokens of **every** `clara` CHECK constraint and sort them under both collations
+and they DO move — `cancel_requested` against `cancelled` in `agent_tasks_status_check`, `op_key`
+against `open` in `clara._abandon_close_core`'s own body. The sets the estate actually pins escape
+only because none of them happens to hold such a pair. That is luck with a guard around it, not
+safety, and it is why a new census writes `collate "C"` instead of being reasoned about.
+
 ## Member doors: the lock order other migrations depend on
 
 `clara.set_member_role`, `clara.remove_member` and `clara.revoke_invite` take `clara.firms` (or a
@@ -9579,6 +9674,446 @@ grant exists anywhere in this estate to copy. This is a knowing acceptance and b
 integration record as one, not as an implementation detail: it is a runtime credential reaching a
 client's tax-depreciation judgements. `FA_RETIRED_ACCOUNT_POLICY_SQL` stays the statement's one
 home so no later reader starts selecting the commentary columns by accident.
+## 0347 — the TIN item reaches the firms that had already committed their setup (#1098, riders sweep wave, lane 07)
+
+**The population 0311 left behind, closed as far as a data migration can close it.** Before 0311,
+`clara._firm_setup_applicability(plan,'tin')` read `'inapplicable'` for a firm whose turnover band
+was `<RM1M`, and 0257's seed guard skipped the row, so such a firm committed its checklist with no
+`tin` plan item at all. 0311 fixed the rule for every plan seeded from then on but backfilled
+nothing, and `clara.seed_firm_setup_plan` refuses a plan that is not open (`CLR10
+firm_setup_not_open`, 0218 §E.1) — so on an already-committed plan the row could never arrive
+through any door. That is the gap [#1098](https://github.com/BELCORT-SDN-BHD/clara/issues/1098)
+names, and the section above ("The population 0311 does NOT reach") is the record of it being
+found.
+
+**The backfill is a named verb, not an inline statement.**
+`clara._firm_setup_backfill_committed_tin()` plants one `pending`, unanswered, catalogue-shaped
+`tin` item on every COMMITTED firm-scope plan that has none and returns how many rows that was;
+0347 mints it and then calls it once. A one-shot statement inside an applied migration can only
+ever be observed against the rows that server held at apply time — zero on a from-scratch chain —
+which would make #1098's own third acceptance criterion ("a test drives an already-committed plan,
+seeded and committed BEFORE the backfill, and asserts it gains a TIN item after the backfill runs")
+vacuous everywhere but one lane database on one afternoon. A verb can be driven on any database
+against a world the cell planted itself. It is `insert … where not exists`, so it is idempotent and
+redo-safe by construction (the 0301 §G precedent), and it is EXECUTE-granted to NOBODY: it writes
+into every firm's plan at once, so it belongs to a migration or to an operator holding
+`clara_fn_owner`, never to `clara_authenticated`, `clara_runtime` or `clara_agent_ro`. The tail
+re-reads that posture rather than trusting the absence of a `grant` line. No GRANTED name is
+minted, so — like 0311 itself and `rig-meta.mjs`'s own #979 precedent — **no `rig-meta.mjs` cohort
+is owed**.
+
+**What it refuses to touch.** COMMITTED plans only: an OPEN plan is not a dead end (its admin
+reconciles it through `clara.seed_firm_setup_plan`, which has seeded `tin` since 0311 and bumps the
+plan revision while doing it, #895), and a CANCELLED plan is abandoned. No existing plan item is
+touched at all — `not exists`, never `on conflict do update` — and no plan row moves: no
+`revision_token`, no `revision_n`, no `updated_at`, and no new `clara.onboarding_plan_revisions`
+row. A committed plan's attestation is a receipt, and planting a question the firm was never asked
+is not a new revision of the document it signed. The tail proves each of those by digesting every
+`clara.onboarding_plan_items` and `clara.onboarding_plans` row in the prestate, carrying both
+digests in the temp table `_p1098_pre` (the 0295/0289/0291/0261 idiom), and re-reading them after
+the run; rows this transaction created are separated from the rest by `created_at >= now()`, since
+`now()` is the transaction timestamp and every earlier row is strictly before it. Both digests are
+ordered by the surrogate `id`, a uuid, which orders by its own type rather than by the server's
+`lc_collate` ("Collation and pinned order" above).
+
+**THE RESIDUAL, STATED RATHER THAN HIDDEN: the row exists, and the firm still cannot answer it.**
+`clara.answer_firm_setup_item` refuses every item on a plan that is not open (0218 §E.2, `CLR10
+firm_setup_not_open`), and the web checklist guards every write control behind `!committed`. So
+after 0347 a committed plan's TIN row reads `pending`, correctly marked `required` above the
+MyInvois threshold and `optional` below it, and a value still cannot be recorded into it. That wall
+is not specific to `tin`: a committed firm-setup plan has always been closed to every item, and the
+catalogue carries no reopen door. Opening one — **may a committed checklist still be COMPLETED for
+a question it was never asked, while never being AMENDED for a fact it attested to?** — changes
+what a commit means, which is a product decision for the owner and not a data migration's to take.
+`tests/firm-setup-committed-tin-backfill.test.mjs`'s cell
+`p1098.residual.a_committed_plan_still_refuses_the_answer` DRIVES that refusal rather than
+asserting it, so the residual is a measured fact and not a sentence. Against the standing beta
+ruling ("nothing is dark") the gap is narrower after 0347 than before it — the question is on the
+checklist, marked correctly, for every firm — but it is not closed, and it wants the owner's ruling
+on that one question.
+
+**Redo-safe by construction (#957).** `create or replace function` and a backfill that is
+`insert … where not exists`; the prestate decides FIRST vs REDO from the ONE marker only this file
+writes (the verb's own name in the catalog) and the tail's arithmetic holds on both branches,
+because on a redo the prestate's committed-without-tin count and the run's row count are both zero.
+Both branches were exercised on the lane database: the FIRST APPLY through `pnpm db:migrate`,
+against a rig where five firm-setup plans had deliberately been driven into the pre-0311 shape
+first (committed above the threshold, committed below it, committed with `tin` already answered,
+open, and cancelled), and the REDO through
+`CLARA_MIGRATION_REDO=0347_firm_setup_committed_tin_backfill`.
+
+**Gate:** `tests/firm-setup-committed-tin-backfill.test.mjs`, frontier-gated on the stable stem
+`firm_setup_committed_tin_backfill$` with
+`tests/firm-setup-committed-tin-backfill-preintegration-gate.mjs`.
+
+## 0348 — the two pre-session rate-wall evidence tables gain a retention sweep (#1046, riders sweep wave, lane 07)
+
+**The question, in plain words.** `clara.invite_preview_attempts` (0309) and
+`clara.confirmation_attempts` (0163) each hold one row per call to their own signed-out rate wall.
+Both tables are append-only — the wall's own evidence must never be edited or deleted by an
+ordinary caller — and neither has ever been swept. Each wall only ever reads the trailing
+15-minute window it counts, so every row older than that is dead weight the wall will never read
+again, and nothing has ever removed it. The brief's own question ("check how
+`confirmation_attempts` is retained today, and if it is not swept either, sweep both in one
+ticket") is answered here: it is not, and this file sweeps both.
+
+**Why a background job could never do this.** `clara._tf_append_only()` raises `CLR08` for EVERY
+role that tries to `DELETE`, including the table's own owner (measured, in a rolled-back
+transaction, before this file was written: `set role clara_fn_owner; delete from
+clara.invite_preview_attempts where attempted_at < now()` raises `invite_preview_attempts is
+append-only`). `0309`'s own header (lines 170-177) states the consequence: "a retention lane must
+disable and re-enable that trigger inside its OWN migration … it cannot be written as a background
+job against the shipped surface." A retention sweep is not a one-time backfill, though — it has to
+run again every time the reconciler's belt turns, against whatever has aged past the margin by
+then, which is a population no migration can see at apply time. So this file mints two NAMED,
+IDEMPOTENT, REDO-SAFE verbs — `clara.prune_invite_preview_attempts(timestamptz,int)` and
+`clara.prune_confirmation_attempts(timestamptz,int)`, one per table, each `SECURITY DEFINER` owned
+by `clara_fn_owner` — that a caller can invoke repeatedly, each call disabling its table's
+append-only trigger, deleting its own bounded batch (oldest first, `LIMIT p_limit`), and
+restoring the trigger, **all inside one statement**. That is the sense in which "this migration"
+disables and re-enables the trigger: it mints the verb that does so, on every call, for as long as
+the estate exists. `clara_runtime` — the only role either verb is granted to — holds no `ALTER
+TABLE` on either relation and needs none: the DEFINER's privilege is what the disable/enable runs
+under, verified live (a `security definer` function owned by `clara_fn_owner`, called under `set
+role clara_runtime`, disabled the trigger, deleted zero rows and re-enabled it, with no privilege
+error).
+
+**What the sweep costs the wall, and why both verbs carry `lock_timeout`** (fix round,
+ADV-L07-02). `alter table … disable trigger` takes `ShareRowExclusive` on the WHOLE table, which
+conflicts with the `RowExclusive` every wall write holds — so while the sweep runs, the table is
+shut to every key, not only to the rows being deleted. That much was disclosed from the start. What
+was not is the real bound: it is **not** "as long as the batched delete takes", it is the slowest
+OTHER transaction holding `RowExclusive`, and a QUEUED request amplifies it. Measured on the lane
+rig with three connections: A held an ordinary open INSERT into `clara.confirmation_attempts`; B
+called the prune verb and queued for `ShareRowExclusive`; C then attempted a completely unrelated
+wall write — different digest, different origin, no row conflict with A — and was refused `55P03`
+after 3003 ms, blocked by **B's queued request**, not by A. Without a `lock_timeout` of its own, C
+would have waited as long as A lived.
+
+Both verbs therefore carry `set lock_timeout = '3s'` as a function SET clause (not a caller
+setting: the bound has to hold for every caller, including an operator holding `clara_fn_owner`).
+An uncontended call measures 5 ms, so three seconds is slack rather than a budget, and a sweep that
+cannot get the lock gives up. `packages/runtime/lib/reconciler.mjs` catches the resulting `55P03`
+exactly the way it already catches a missing function: that cycle's limb is a no-op, the belt turns
+again next cycle, and nothing is logged. The tables are swept a little later instead of the
+pre-session auth wall being shut a lot longer.
+
+**Neither verb ever changes the trigger's posture** (fix round, ADV-L07-06). The first cut ended
+with a bare `enable trigger`, which is `ENABLE ORIGIN` whatever it found. Measured inside a
+rolled-back transaction: `tgenabled` `'O'` → `enable always` → `'A'` → one call to the verb → back
+to `'O'`. Impact today is nil (the estate ships `'O'` and nothing sets `session_replication_role`),
+but an operator who hardened these tables to `ENABLE ALWAYS` would have had it silently undone by
+the next belt turn, with no error and no receipt. Each verb now reads `tgenabled` first and puts
+back exactly what it found — including `'D'`, because a guard an operator deliberately turned off
+is not this verb's to turn back on — and returns that posture as `trigger_posture` on its own
+result. If the trigger is absent altogether the verb refuses (`CLR10`) rather than deleting from a
+table whose append-only guard has moved.
+
+**The safe margin is a refusal, not a convention.** Both walls hardcode the same 15-minute window
+(`attempted_at > now() - interval '15 minutes'`, in `clara.preview_invite_by_token` and
+`clara.claim_confirmation_attempt`). Each new verb REFUSES (`CLR10`) a `p_before` inside that
+window — not because of a race (both a count query and a prune call take their own `now()` once
+per statement, and a threshold at or before the boundary can never outrun a count using the SAME
+boundary), but because a future caller mistake (a wrong retention constant, an off-by-one in a
+unit conversion) would otherwise corrupt an ACTIVE rate wall silently: the wall would simply admit
+calls it should have refused, with no error anywhere. `tests/rate-wall-attempts-retention.test.mjs`
+drives this floor directly for both verbs
+(`p1046.invite_preview.floor_refuses_in_window_threshold`,
+`p1046.confirmation.floor_refuses_in_window_threshold`), rather than reading it off the body text.
+
+**One verb per table, not one shared verb** — the two tables' column shapes differ
+(`token_hash`/`origin_digest` vs `email_digest`/`origin_digest`/`outcome`/`settled_at`), and a
+shared verb would need a table name passed as text: either dynamic SQL (a new barrier for
+`apps/web/tests/firm-scope-db-pins.corpus.ts` to review, for no real benefit) or a hardcoded
+`if/else` no simpler than two functions. `clara.prune_trace_spans` (0006) and
+`clara.prune_work_execution_traces` (0195) already established the "one prune verb per relation,
+both riding the same runtime belt" shape this file follows — including a NEW index this file adds
+for the same reason `ix_trace_spans_started` exists: neither evidence table had an index LED by
+`attempted_at` (both existing indexes are composite and led by the key column), so a plain
+`attempted_at < p_before` scan could not use either as a leading-column match. This file adds
+`ix_invite_preview_attempts_attempted_at` and `ix_confirmation_attempts_attempted_at`.
+
+**The existing cadence, and why this file adds no scheduler.**
+`packages/runtime/lib/reconciler.mjs`'s `pruneTraces()` already runs on the belt
+`runReconcilerSweep()` drives from `packages/runtime/lib/leader.mjs`, gated by
+`iteration % PRUNE_EVERY === 0` (leader-guarded: exactly one process sweeps at a time) — the same
+lane `prunedWorkTraces` (0195) rides beside `pruned` (trace spans) today. The accompanying runtime
+commit adds two more counters to that SAME function, `prunedInvitePreviewAttempts` and
+`prunedConfirmationAttempts`, calling the two verbs above the same batched-loop way
+`prune_trace_spans` and `prune_work_execution_traces` are already called, each guarded against
+`undefined_function` (42883) so the belt stays inert on any database that has not yet applied
+0348. No new `setInterval`, no new cron entry, no new belt. The retention margin is a runtime
+constant, in MINUTES rather than days (`CLARA_RATE_WALL_ATTEMPT_RETENTION_MINUTES`, default 60 —
+four times the 15-minute window, a safe margin over the exact boundary), with its own batch-size
+and max-batches overrides mirroring the trace-prune constants exactly.
+`packages/runtime/tests/reconcile.test.mjs`'s
+`"reconcile: rate-wall attempt prune rides the trace-prune lane, deletes past the margin, keeps
+the window"` drives `pruneTraces()` itself and reads both new counters back.
+
+**What this file does not change**, pinned in the prestate and re-hashed in the tail: neither
+`clara.preview_invite_by_token` nor `clara.claim_confirmation_attempt` is recut (both are
+"neighbour" pins this file relies on but never touches); neither table's columns, RLS policy or
+EXISTING triggers move (the append-only and no-truncate triggers on both tables are pinned by
+name and by `tgenabled` before and after); `clara._tf_append_only` / `clara._tf_no_truncate` are
+pinned by `sha256(prosrc)` — this file calls them (indirectly, via the triggers it disables and
+re-enables) but recuts neither. The wall's own window (15 minutes) and ceiling (5) are
+out of scope, per the ticket's own brief.
+
+**Redo-safe by construction (#957).** `create index if not exists` and `create or replace
+function`; the prestate decides FIRST vs REDO from the presence of the two verb names alone. The
+FIRST apply ran on the lane database with both tables at zero rows (measured and recorded in the
+prestate's own notice); the tail's own apply-time smoke call (a threshold two hours in the past,
+which can never trip the 15-minute floor) exercised the disable/delete/enable sequence for real,
+over whatever population the server held, rather than only type-checking it.
+
+**The vacuity control caught a real bug in the tail itself, not only in the verbs.** T.5 (the tail
+step that DRIVES the floor rather than reading it off the body text) originally raised its own
+"admitted a threshold inside the window" failure WITH `errcode='CLR10'` from *inside* the very
+`begin … exception when others …` block whose `sqlstate <> 'CLR10'` guard was supposed to catch a
+*wrong* refusal — so a floor that stopped firing entirely (the deliberate break: `and false`
+appended to the guard) raised no exception at all, execution reached that same raise, and the
+handler's own guard read FALSE and silently swallowed it: the tail reported "OK (REDO)" over a
+verb that had just admitted an in-window call and started deleting rows. Caught by exercising
+`CLARA_MIGRATION_REDO` over the deliberately broken file rather than trusting the tail's prose.
+Fixed with a boolean flag set only inside the handler and read only after the block ends (a raise
+inside the handler cannot short-circuit a read that happens after it), then the SAME break was
+re-applied over the FIXED tail and the redo genuinely failed this time
+(`migrate: FAIL — … #1046 tail T.5: prune_invite_preview_attempts admitted a threshold inside the
+window`, transaction rolled back, the database left exactly where the prior successful redo left
+it) — proof the fix closes the hole rather than moving it. The break was then reverted byte for
+byte and the file re-applied clean. **Every checksum below was measured, not assumed:** FIRST
+apply `1ef5a5d699b70ca83f0bea7db2e5f5f51ffd9f545be051123f25e42b339e36be`; the fixed-tail REDO (the
+current, live file) `5c4ada4f5ae8fb7ab47edfb9e194d72abae0b991c6008cda9d2762e1d7772b4b`, re-measured
+against `clara.schema_migrations` after the whole exercise, and `pnpm db:migrate` afterwards
+reports `0 new migration(s) applied · 311 total` with no drift.
+
+**Acceptance criteria, each with its own cell in `tests/rate-wall-attempts-retention.test.mjs`.**
+Rows inside the window are never removed and rows past the margin are —
+`p1046.invite_preview.prune_removes_past_margin_keeps_window_row`,
+`p1046.confirmation.prune_removes_past_margin_keeps_window_row`. The wall's own count is
+unchanged by a sweep that runs mid-window — five real calls through the real door reach the
+ceiling, a sweep with a safe margin runs between the fifth and the sixth, and the sixth is STILL
+correctly walled, which is only true if none of the five rows backing the count was removed:
+`p1046.wall.invite_preview_count_unaffected_by_mid_window_sweep`,
+`p1046.wall.confirmation_count_unaffected_by_mid_window_sweep`. The ACL — `clara_runtime` alone —
+is driven as `clara_authenticated` and refused with the ordinary Postgres insufficient-privilege
+SQLSTATE (`42501`), never `CLR10`:
+`p1046.invite_preview.only_clara_runtime_may_execute`,
+`p1046.confirmation.only_clara_runtime_may_execute`.
+
+**Gate:** `tests/rate-wall-attempts-retention.test.mjs`, frontier-gated on the stable stem
+`rate_wall_attempts_retention$` with
+`tests/rate-wall-attempts-retention-preintegration-gate.mjs`.
+
+## 0349 — a successful admission writes no sweep-run-item row, disclosed rather than fixed (#1132, riders sweep wave, lane 07)
+
+**The trap, in plain words.** `clara.sweep_run_items.outcome`'s CHECK constraint has no `admitted`
+member, and `clara.admit_autodraft_task`'s own successful path writes no `clara.sweep_run_items`
+row at all — only `clara.op_receipts`, through `clara._finish_op`
+(`packages/db/migrations/0036_wave_c0_deferred_belts.sql:1468-1470`). Every OTHER return arm the
+same function carries DOES write a run-bound `sweep_run_items` row when `p_run_id` is not null —
+ten inserts in all (0036:1182, 1190, 1232, 1240, 1251, 1337, 1367, 1400, 1411, and the
+`unique_violation` handler's own noop at 1476). A reader who assumes every admission outcome is
+visible on `sweep_run_items` therefore reads NOTHING for a genuinely successful one, and if they
+instead read whatever a LATER settlement wrote for that filing, they read what the task's own
+posting attempt decided, which can silently disagree with what admission itself decided (a task
+`admitted` now can settle `failed` later for an unrelated reason during its own posting attempt).
+
+**What those ten inserts actually write** — re-measured on the live `prosrc` with line comments
+stripped, because the first cut of this section and of the catalog comment got it wrong in two
+directions at once (fix round, ADV-L07-04):
+
+| the row's `outcome` | how many inserts | which returned outcomes reach it |
+|---|---|---|
+| `noop_existing` | 4 | `noop_existing`, and **`already_done`** |
+| `refused_attempts` | 2 | `refused_attempts` |
+| `skipped_lane` | 3 | **`skipped_direction`** (twice: sales mis-route, sales backlog held) and **`lane_changed`** |
+| `refused_concurrency` | 1 | `refused_concurrency` |
+
+`refused_budget` is **not** one of them. It occurs three times in the body and every occurrence is
+inside a comment recording that the 15-drafts/day cap which once wrote it was retired; the token
+survives in the column's own CHECK, which this file deliberately does not touch, and nowhere else.
+
+And the second half of the table is the sharp edge of the trap this file exists to disclose: the
+sweep row's label is **coarser than the decision**. Three distinct returned outcomes —
+`already_done`, `skipped_direction`, `lane_changed` — are recorded under two labels, so a reader of
+`sweep_run_items` alone cannot tell a filing that was already done from one that was a no-op, nor a
+sales mis-route from a lane change. The refusal token in the same row carries the finer reason
+(`sales_direction`, `sales_backlog_held`, `lane_changed`), but the `outcome` column does not.
+
+**Two candidate fixes, and why this file takes the documentation one.** #1132's own Agent Brief
+names two paths: document the trap and name the correct read, or widen
+`clara.sweep_run_items.outcome` with a new `admitted` member. The lane's owner ruling takes the
+documentation path only — this file adds a catalog `comment on function` to
+`clara.admit_autodraft_task(uuid,text,uuid,text,bigint)` and this README section; it never recuts
+the function body and never touches `sweep_run_items_outcome_check`, both pinned in the prestate
+and re-measured byte-for-byte in the tail.
+
+**Where to actually read a successful admission's outcome.** `clara.op_receipts` where
+`fn='admit_autodraft_task'` and `op_key='autodraft:'||filing_id||':'||origin` — the `result`
+column carries `{outcome, task_id, reserved_tokens}`, and `outcome` is one of **three** tokens,
+not two: the success return is a CASE over `re_admitted_after_withdrawal`, `re_admitted` and
+`admitted` (0036:1468-1470). A reader who follows this disclosure and then only recognises two of
+them is back in a trap of the same shape, which is why the third is named here and in the catalog
+comment. This is the same read `tests/x34-autodraft-retry-door.test.mjs`'s own `receiptFor()`
+fixture already uses.
+
+**Grounded, not only read off the body text** (wave-3 addendum: "a door's behaviour is asserted
+only after it was driven"). `tests/admit-autodraft-task-outcome-disclosure.test.mjs`'s
+`p1132.trap` cell drives a real admission on this lane's own database: a genuine `admitted`
+outcome leaves ZERO `sweep_run_items` rows for that filing on that run and DOES leave a real
+`op_receipts` row; an immediate re-admission of the SAME filing on a SECOND run answers
+`noop_existing` and DOES write one `sweep_run_items` row — the contrast that proves the
+"zero rows" assertion discriminates a real difference rather than being vacuously true of an
+always-empty query. The same cell re-confirms `sweep_run_items_outcome_check` still carries no
+`admitted` member. The catalog comment and this section are driven by
+`tests/admit-autodraft-task-outcome-disclosure.test.mjs`'s two other cells,
+`p1132.comment.discloses_no_sweep_item_and_names_op_receipts` and
+`p1132.readme.section_discloses_no_sweep_item_and_names_op_receipts`, which read
+`obj_description()` and this file's own bytes respectively.
+
+**What this file does not change**, pinned in the prestate and re-measured in the tail:
+`clara.admit_autodraft_task`'s body (`prosrc`) is byte-identical before and after — a catalog
+comment only, never a `create or replace function`; `sweep_run_items_outcome_check` is
+byte-identical before and after — no `admitted` member is added. This file mints no new function,
+table or other catalog name, so it owes no `packages/db/tests/rig-meta.mjs` cohort entry.
+
+**Redo-safe by construction (#957).** `comment on function ... is '...'` always sets the comment
+fresh, so the prestate's only two sane states are "no comment yet" (FIRST) or "already carries
+exactly this file's own comment, verbatim" (REDO) — any OTHER non-null comment is a foreign
+comment this file refuses to clobber, CLR10.
+
+**Acceptance criteria, each with its own cell in
+`tests/admit-autodraft-task-outcome-disclosure.test.mjs`.** AC1 (the chosen path) — the catalog
+comment names both `sweep_run_items` and `op_receipts` and states plainly that a successful
+admission writes no sweep-run-item row:
+`p1132.comment.discloses_no_sweep_item_and_names_op_receipts`; the same fact restated in this
+README section: `p1132.readme.section_discloses_no_sweep_item_and_names_op_receipts`. AC2 (the
+NOT-chosen path, confirmed still not taken) is folded into the grounding cell itself:
+`p1132.trap.admitted_writes_no_sweep_item_noop_does_and_the_enum_still_lacks_admitted`.
+
+**Gate:** `tests/admit-autodraft-task-outcome-disclosure.test.mjs`, frontier-gated on the stable
+stem `admit_autodraft_task_outcome_disclosure$` with
+`tests/admit-autodraft-task-outcome-disclosure-preintegration-gate.mjs`.
+
+## 0350 — `via_wake_kind` is NOT renamed; the posting-lane widening is disclosed instead (#1058, riders sweep wave, lane 07)
+
+**The naming drift, in plain words.** `clara.entry_post_receipts.via_wake_kind` was minted by F-A2
+(`packages/db/migrations/0106_f_a2_posting_core.sql:494-517`) admitting only two values,
+`autodraft` and `interactive` — both genuine wake-credential kinds. `0121_f_a3_pr1b_agent_limb.sql`
+later widened the same CHECK to admit a third, `bank_agent`, alongside `wake_credentials`' own two
+CHECKs gaining the identical disjunct in the same file — still a wake-credential kind, not a
+naming drift. The drift is in the two widenings after that:
+`0297_payroll_summary_posting.sql:870-873` (#946) added `payroll_facts` and
+`0299_agreement_contract_acquisition.sql:2626-2629` (#948) added `contract_facts` — and NEITHER
+names a wake credential at all. Each names the POSTING LANE that authorised the receipt: a payroll
+run and an agreement acquisition each wake no model and hold no wake credential, yet the column
+that records "which wake authorised this post" now also carries their lane names. A reader who
+trusts the column's own name reads it as an exhaustive list of wake kinds and misses that two of
+its five live values are something else entirely.
+
+**Two candidate fixes, and why this file takes the disclosure one.** #1058's own Agent Brief asks
+for a rename: the column (and every reader/writer across the codebase) renamed to a name that does
+not imply "wake kind only". The owner's ruling on the ticket (2026-09-24, "Ruling applied under
+the owner's delegation of 2026-09-23 (riders sweep wave, SWEEP-PLAN.md)") refuses the rename and
+this lane's own scan agrees (SWEEP-PLAN.md, the #1058 row of "Owner questions, with a recommended
+ruling"): `via_wake_kind` appears across roughly 118 source files and in nine frozen workflow files
+under `packages/runtime/workflows/` (`autoDraft.v9.usage.ts`, `bankAgent.v1.usage.ts`,
+`chatTurn.v13.post.ts`, `chatTurn.v13.usage.ts`, `chatTurn.v14.usage.ts`,
+`chatTurn.v15.freeform.ts`, `chatTurn.v15.infra.ts`, `chatTurn.v15.usage.ts`,
+`closePrep.v1.usage.ts`). THREE of those nine carry PROSE about this exact column
+(`chatTurn.v13.post.ts:22-23`, `chatTurn.v15.freeform.ts:203`, `chatTurn.v15.infra.ts:106`) that a
+rename would strand as a description of a column that no longer exists under that name — a frozen
+workflow body is never edited (`node scripts/check-frozen-workflows.mjs` must show no manifest
+diff). TWO more (`bankAgent.v1.usage.ts:120`, `closePrep.v1.usage.ts:91`) build SQL naming a
+DIFFERENT door's own parameter, `p_via_wake_kind` on `clara.record_agent_usage_event`
+(`0110_f_a9_llm_usage_reshape.sql:365-370`), which must keep its own spelling for the same reason.
+This file adds a catalog `comment on column` to `clara.entry_post_receipts.via_wake_kind` and this
+README section; it never renames the column, its CHECK constraint or any reader or writer, both
+pinned in the prestate and re-measured byte-for-byte in the tail.
+
+**Where the live vocabulary actually comes from.** `entry_post_receipts_via_wake_kind_check`
+admits `autodraft`, `interactive`, `bank_agent`, `payroll_facts`, `contract_facts` — the first
+three are genuine wake-credential kinds, the last two (`payroll_facts`, `contract_facts`) are
+posting-lane names, not wake credentials at all. The catalog comment this file adds names both.
+
+**What this file does not change**, pinned in the prestate and re-measured in the tail:
+`clara.entry_post_receipts.via_wake_kind` keeps its name, its type (`text`) and its ordinal
+position; `entry_post_receipts_via_wake_kind_check` is byte-identical before and after — no new
+admitted value, none removed; the table's Annex E.1 column count stays 14. This file mints no new
+function, table or other catalog name, so it owes no `packages/db/tests/rig-meta.mjs` cohort
+entry.
+
+**Redo-safe by construction (#957).** `comment on column ... is '...'` always sets the comment
+fresh, so the prestate's only two sane states are "no comment yet" (FIRST) or "already carries
+exactly this file's own comment, verbatim" (REDO) — any OTHER non-null comment is a foreign
+comment this file refuses to clobber, CLR10.
+
+**Acceptance criteria, each with its own cell in
+`tests/entry-post-receipts-via-wake-kind-disclosure.test.mjs`.** The chosen path (comment +
+README, naming the widening and refusing the rename):
+`p1058.comment.discloses_the_lane_widening_and_the_no_rename_ruling` and
+`p1058.readme.section_discloses_the_lane_widening_and_the_no_rename_ruling`. The ticket's own
+AC3 ("existing data and its meaning are unchanged; this is [documentation], not a schema or
+behaviour change"), driven against the live catalog rather than read off this file's own prose:
+`p1058.catalog.column_not_renamed_and_check_enumeration_unchanged`.
+
+**Gate:** `tests/entry-post-receipts-via-wake-kind-disclosure.test.mjs`, frontier-gated on the
+stable stem `via_wake_kind_lane_disclosure$` with
+`tests/entry-post-receipts-via-wake-kind-disclosure-preintegration-gate.mjs`.
+
+## Two sweep-wave pins with no migration of their own (#1096, #1099, riders sweep wave, lane 07)
+
+Both tickets below add a TEST over behaviour that already shipped, so neither owns a `## NNNN`
+section of its own. The sweep wave's shared-file rule is that a lane writes its own new section
+and never edits an existing one — seven lanes edit this file at once and the merger relies on
+it — so the two notes live here, beside each other, rather than appended inside the sections of
+the applied migrations they pin (0316 and 0318). Each names the section it belongs to.
+
+### #1099 — the op-key idempotence law's own coverage for `clara.create_client` (belongs with "0316 — clara.create_client's human grant withdrawn")
+
+**Restored by #1099 — the op-key idempotence law's own test coverage for `create_client`, dropped
+by 0316’s grant withdrawal and repointed rather than left gone.**
+[`wb-g-opkeys.test.mjs`](tests/wave-b/wb-g-opkeys.test.mjs)'s G4/[R2-F8] census (the shared
+op-key-idempotence battery every other 0017-family writer sits in) derives its writer inventory
+from a live `EXECUTE` grant, by construction — a fn 0316 ungrants can never appear in
+that inventory again, and when #1038 landed, `create_client`'s row in the census's per-writer
+fixture table was simply deleted rather than repointed, so nothing any longer drove its
+`_reserve_op` call at all. #1099 restores it, off the census: a new
+`UNGRANTED_RESERVING_FNS` registry in `wb-g-opkeys.test.mjs` names `create_client` alongside the
+migration that ungranted it and where its coverage now lives, a META cell re-measures that its
+live `prosrc` still calls `_reserve_op` (the same "a writer must never silently drop the
+discipline" law the grant-derived census enforces for every writer it CAN still see), and a
+dedicated `G4/[R2-F8] supplement` cell drives the law itself through
+`createClientRaw` — `rig-fixtures.mjs`'s root+jwt idiom, the one path this migration left
+reachable (0316 left exactly one) — proving both halves: an identical-payload replay returns the cached receipt
+byte-for-byte with no second `clara.clients` row, and a mutated-payload replay with the same
+`op_key` refuses `CLR10`. The pattern generalises: any future writer that loses its grant while
+keeping `_reserve_op` belongs in `UNGRANTED_RESERVING_FNS` with its own dedicated cell, not
+nowhere.
+
+The fix round added the half a registry cannot supply. A hand-maintained list detects only the
+names somebody remembered to write down, while AC2 asks for the opposite: the NEXT writer to lose
+its grant while keeping `_reserve_op` must not drop out silently either. The G4 cell now takes
+the REVERSE census from the two sets it already computes — every WB-family fn whose live
+`prosrc` calls `_reserve_op`, minus the grant-derived writer inventory, minus
+`RESERVE_LAW_EXEMPT` — and requires that difference to be a subset of `UNGRANTED_RESERVING_FNS`,
+naming anything else by name. Measured at 313 migrations the difference is exactly
+`{create_client}`: a live, non-empty census rather than an empty-set tautology, and the cell
+asserts that floor too.
+
+### #1096 — the 29-February year-end pair is ACCEPTED, pinned (belongs with "0318 — the year-end pair rule…")
+
+**Pinned by kp.15 (#1096, riders sweep wave, lane 07).** The 29-February disclosure landed with 0318 — its header at 57-64, its function comment and the “## 0318” section above;
+no cell anywhere drove month 2 day 29 and asserted the accepted outcome until #1096. `kp.15` in
+`knowledge-onboarding-promotion.test.mjs` commits a plan with `fye => 2, fye_day => 29` beside an
+unrelated key and asserts ALL THREE keys promote — nothing withheld, day 29 live in Knowledge at
+the value captured — the mirror image of `kp.14`'s day-31 refusal. Vacuity control run on the lane
+database: the calendar check's `v_day > 29` bumped to `v_day >= 29` (deliberately refusing day 29
+too), `kp.15` seen RED for the right reason (`financial_year_end_day` withheld with CLR37) while
+every other cell in the file stayed green, then the body restored byte-for-byte from this file's
+own §A text and the restore verified by `sha256(prosrc)` equality with the pre-break measurement.
+No migration: the ticket adds a pinning test over already-disclosed, already-shipped behaviour.
 ## 0360 — the two sentences a payroll correction leaves behind (#1056 fix round, riders sweep wave, lane 05)
 
 `0360_payroll_correction_sentences.sql` changes no wall, no verdict, no rung, no grant, no table

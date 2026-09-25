@@ -445,7 +445,7 @@ test("p1036.containment-closed -- clara._propose_adjustment_template_core has NO
   assert.equal(wrapper.rowCount, 1, "0140's prepayment wrapper resolves at exactly one signature");
   assert.match(wrapper.rows[0].acl, /clara_wake_interactive=X\/clara_fn_owner/);
   const allowKinds = (await rootQuery(
-    `select coalesce(array_agg(wake_kind order by wake_kind), '{}'::text[]) as kinds
+    `select coalesce(array_agg(wake_kind order by wake_kind collate "C"), '{}'::text[]) as kinds
        from clara.wake_fn_allowlist
       where function_name = 'wake_establish_prepayment_schedule'`)).rows[0].kinds;
   assert.deepEqual(allowKinds, ["close_prep"]);

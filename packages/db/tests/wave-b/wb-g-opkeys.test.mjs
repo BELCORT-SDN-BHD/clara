@@ -16,6 +16,7 @@ import {
   completeSeedingBatch, cancelSeedingBatch,
   updatePlan, resolvePlanItem, commitOnboarding, cancelOnboarding,
   filedDocument, setDocumentKind, keyedRes, recordOpeningKeyedResolution, pageRow,
+  createClientRaw, // [#1099] the ONE surviving path to clara.create_client's _reserve_op law
 } from "./wb-fixtures.mjs";
 
 let live = false;
@@ -45,6 +46,41 @@ const EXEMPT = {
   tick_seeding_proposal: "#1012 (0288) RETIRED — one typed refusal, no reservation; proven in seeding-lane-retired.test.mjs",
   decline_seeding_proposal: "#1012 (0288) RETIRED — one typed refusal, no reservation; proven in seeding-lane-retired.test.mjs",
 };
+
+/** [#1099] UNGRANTED-BUT-RESERVING WRITERS — the GRANT-DERIVED inventory below (`writers`,
+ *  the G4 census) can only ever see a currently-granted fn, by construction (its own catalog
+ *  query filters on `aclexplode` EXECUTE to `clara_authenticated`/`clara_runtime`). A writer
+ *  whose human grant is withdrawn while its `_reserve_op` call stays in its body therefore drops
+ *  out of `writers`, out of `derived`, and so out of `table`/`EXEMPT` too — silently, with no
+ *  assertion anywhere noticing, because the census that would normally catch a vanishing writer
+ *  (the `droppedReservation` sweep, scoped to `writers`) never sees it either. #1038 (0316) hit
+ *  exactly this for `create_client`, and its coverage was simply deleted rather than repointed —
+ *  the defect this ticket exists to close.
+ *
+ *  CONVENTION going forward: when a fn's human grant is withdrawn while it KEEPS calling
+ *  `_reserve_op`, add it here (name -> "which migration withdrew the grant; where the dedicated
+ *  cell that now drives it lives") instead of letting it fall out of every census with no trace.
+ *  The meta test below makes the registry self-checking: an entry whose live body drops
+ *  `_reserve_op` fails loudly, the same law `droppedReservation` enforces for granted writers. */
+const UNGRANTED_RESERVING_FNS = {
+  create_client: "clara_authenticated withdrawn by #1038 (0316_create_client_human_grant_withdrawn.sql); "
+    + "driven through rig-fixtures.mjs's createClientRaw (the root+jwt idiom) in the dedicated "
+    + "G4-supplement cell below (#1099)",
+};
+
+test("META/#1099: every UNGRANTED_RESERVING_FNS entry still calls _reserve_op in its live body — a grant "
+  + "withdrawal must never silently take the reservation discipline with it", async () => {
+  fail0017(live);
+  const names = Object.keys(UNGRANTED_RESERVING_FNS);
+  assert.ok(names.length >= 1, "the registry is non-empty (create_client at minimum)");
+  const reserving = new Set((await rootQuery(
+    `select distinct p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='clara' and p.proname = any($1) and p.prosrc like '%\\_reserve\\_op%'`,
+    [names])).rows.map((x) => x.proname));
+  const dropped = names.filter((fn) => !reserving.has(fn));
+  assert.equal(dropped.length, 0,
+    `UNGRANTED_RESERVING_FNS entries whose live body no longer calls _reserve_op (the vanishing-coverage hazard, now for an UNGRANTED writer): ${dropped.join(",")}`);
+});
 
 before(async () => {
   live = await wbEnsureReady();
@@ -96,6 +132,37 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
   const droppedReservation = writers.filter((fn) => !RESERVE_LAW_EXEMPT.has(fn) && !reserving.has(fn));
   assert.equal(droppedReservation.length, 0,
     `granted writers whose bodies no longer invoke _reserve_op (the vanishing-coverage hazard): ${droppedReservation.join(",")}`);
+
+  // ---- THE REVERSE CENSUS [#1099 AC2, fix round] ---------------------------
+  // The sweep above asks "a writer I can SEE — did it drop the discipline?". AC2 asks the
+  // opposite question, and it is the one #1038 actually answered wrongly: a fn that KEEPS the
+  // discipline and loses the GRANT drops out of `writers` entirely, so nothing above ever looks
+  // at it again. `UNGRANTED_RESERVING_FNS` above is a hand-maintained registry, and a registry
+  // alone cannot detect the case it exists for — someone has to remember to add the name. This
+  // is the detector: every WB-family fn whose live body calls `_reserve_op` and that holds
+  // EXECUTE for NEITHER clara_authenticated NOR clara_runtime must be registered (or carry an
+  // audited reserve-law exemption), and is NAMED here otherwise. Both sets are already computed
+  // above, so the detector costs one set difference rather than a second catalog pass.
+  //
+  // Measured on the lane rig at 313 migrations: the set is exactly {create_client}, i.e. the
+  // #1038 case itself and nothing else — so this assertion is a live, non-empty census, not an
+  // empty-set tautology. Vacuity control: with `create_client` removed from
+  // UNGRANTED_RESERVING_FNS the cell fails naming it, and with it restored the cell is green.
+  const ungrantedReserving = [...reserving].filter((fn) => !writers.includes(fn)).sort();
+  assert.ok(
+    ungrantedReserving.length >= 1,
+    "the reverse census reads a non-empty set — create_client at minimum, since #1038 withdrew its human grant " +
+      "while leaving its _reserve_op call in place. An empty set here means the instrument stopped working, " +
+      "not that the hazard went away.",
+  );
+  const unregistered = ungrantedReserving.filter((fn) => !(fn in UNGRANTED_RESERVING_FNS) && !RESERVE_LAW_EXEMPT.has(fn));
+  assert.deepEqual(unregistered, [],
+    `UNGRANTED-BUT-RESERVING writers that no census covers any more: ${unregistered.join(",")}. `
+    + "Each lost its EXECUTE grant to clara_authenticated/clara_runtime while keeping its _reserve_op call, so the "
+    + "grant-derived inventory above can no longer see it and its op-key idempotence is now proved by nothing. "
+    + "This is exactly what #1038 did to create_client and what #1099 exists to stop happening silently: add the "
+    + "name to UNGRANTED_RESERVING_FNS with a DEDICATED cell that drives its hash law (see the G4 supplement "
+    + "below), or to RESERVE_LAW_EXEMPT with the law that replaces it.");
   const derived = writers;
   // ---- fixtures ------------------------------------------------------------
   const oSeed = await onboardingClient(w.users.hana);
@@ -211,7 +278,10 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
       client: (v === "a" ? cx1 : cx2).client, plan: (v === "a" ? cx1 : cx2).plan, reason: "g4", opKey: k }),
     // [#1038] create_client dropped out of `table` on purpose: its clara_authenticated grant is
     // withdrawn (0316), so it also drops out of `derived` (the GRANT-DERIVED inventory above) --
-    // an entry here for it would fail the `stale` assertion below, not merely go unused.
+    // an entry here for it would fail the `stale` assertion below, not merely go unused. [#1099]
+    // its _reserve_op hash law is NOT left uncovered by that exclusion: see UNGRANTED_RESERVING_FNS
+    // above and the dedicated G4-supplement test at the end of this file, both driven through
+    // createClientRaw (rig-fixtures.mjs's root+jwt idiom, the one path #1038 left reachable).
     bootstrap_client_plan: (k, v) => humanQuery(w.users.hana,
       "select clara.bootstrap_client_plan(p_client => $1, p_op_key => $2) as r", [v === "a" ? preA : preB, k]),
   };
@@ -230,4 +300,39 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
     await assertRaises(CLR.badRequest, () => call(key, "b"),
       `${name}: same op_key + mutated payload must refuse (the _reserve_op hash law)`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// [#1099] G4-supplement — clara.create_client, UNGRANTED since #1038 (0316), driven through the
+// ONE path #1038 itself left reachable (createClientRaw's root+jwt idiom, rig-fixtures.mjs),
+// never through the grant-derived census above (create_client cannot appear there by
+// construction — see UNGRANTED_RESERVING_FNS). Proves BOTH halves of the _reserve_op law the
+// census proves for every granted writer: (a) same key + IDENTICAL payload replays the cached
+// receipt byte-for-byte, no second insert; (b) same key + MUTATED payload refuses CLR10.
+// ---------------------------------------------------------------------------
+
+test("G4/[R2-F8] supplement (#1099): clara.create_client's _reserve_op hash law, driven through "
+  + "createClientRaw since the grant-derived census can no longer reach it", async () => {
+  fail0017(live);
+  const sub = w.users.hana; // admin on firm A — create_client floors at role_rank('admin')
+  const key = opk("g4cc");
+  const nameA = `wb_g4cc_a_${key.slice(-6)}`;
+  const nameB = `wb_g4cc_b_${key.slice(-6)}`;
+
+  // (a) fresh reservation, then an EXACT replay (same key, same name) must return the SAME
+  // receipt byte-for-byte — the _reserve_op cache hit, not a second client.
+  const first = await createClientRaw(sub, { name: nameA, opKey: key });
+  assert.ok(first && typeof first.client_id === "string" && first.client_id.length > 0,
+    "the fresh reservation returns a real client_id");
+  const replay = await createClientRaw(sub, { name: nameA, opKey: key });
+  assert.deepEqual(replay, first,
+    "create_client: same op_key + identical payload must replay the cached receipt byte-for-byte");
+  const rows = await rootQuery("select count(*)::int as n from clara.clients where id = $1", [first.client_id]);
+  assert.equal(rows.rows[0].n, 1, "the replay must not have inserted a second clara.clients row");
+
+  // (b) same key, MUTATED payload (the name — the one field clara._hash covers, 0017:2538-2539)
+  // must refuse CLR10, exactly the law the census asserts for every GRANTED writer.
+  await assertRaises(CLR.badRequest, () => createClientRaw(sub, { name: nameB, opKey: key }),
+    "create_client: same op_key + mutated payload must refuse (the _reserve_op hash law) even "
+    + "through the ungranted root+jwt path");
 });

@@ -104,6 +104,47 @@ test("p871.web.preview: every OTHER failure is INDEFINITE -- a reader that could
   }
 });
 
+// #1095 FIX ROUND (ADV-L07-01) -- THE WAIT DOES NOT CROSS THIS SEAM, AND THAT IS THE POINT.
+// The first cut of #1095 carried the door's `retryAfterSeconds` through to the page. Proved on
+// clara_l09 inside a rolled-back transaction: plant five loads of one token under the INVITEE's
+// origin digest, then call `clara.preview_invite_by_token` as a first-ever request from a cold
+// address, and the door answers `{outcome: rate_limited, retry_after_seconds: 660}` while the
+// caller's own origin holds ZERO rows. 0309:461-499 computes each limb's wait independently and
+// advertises the MAXIMUM, so the number an anonymous caller would have been shown can belong
+// entirely to somebody else's reloads of the same link -- and 900 minus that number is the
+// second-resolution timestamp of that party's fifth-oldest load. 0309's own comment withholds the
+// `scope` field for exactly this reason ("naming them would tell a prober which of two budgets it
+// exhausted"); the wait is the same disclosure by arithmetic.
+//
+// So the courier keeps the rate refusal as its OWN reason -- the page still renders a distinct
+// affordance for it, which is what the ticket asks for -- and carries no number at all. The
+// absence is enforced HERE, by type and by this cell, rather than left to whoever next edits the
+// component.
+test("p871.web.preview: a rate refusal is its own reason and carries NO wait, whatever the door said", async () => {
+  for (const body of [
+    { outcome: "rate_limited", retryAfterSeconds: 47 },
+    { outcome: "rate_limited", retryAfterSeconds: 3600 },
+    { outcome: "rate_limited" },
+  ]) {
+    const { impl } = stubFetch({ status: 429, body });
+    const outcome = await readPublicInvitePreview(
+      { token: "t", clientIp: "203.0.113.7" },
+      { fetchImpl: impl, env: ENV },
+    );
+    assert.deepEqual(
+      outcome,
+      { ok: false, kind: "indefinite", reason: "rate_limited" },
+      "the rate refusal is distinguishable from transport/unreadable, and carries nothing a prober could read a "
+        + "third party's activity out of",
+    );
+    assert.equal(
+      JSON.stringify(outcome).includes("47") || JSON.stringify(outcome).includes("3600"),
+      false,
+      "no number from the door reaches this seam at all -- not clamped, not flagged, not present",
+    );
+  }
+});
+
 test("p871.web.preview: an unknown role or status is UNREADABLE, never rendered -- this app denies rather than guessing", async () => {
   for (const bad of [
     { ...PREVIEW, role: "auditor" },
