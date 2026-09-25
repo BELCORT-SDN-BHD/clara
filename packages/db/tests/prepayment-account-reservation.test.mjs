@@ -16,12 +16,11 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  endPool, rootQuery, CLR, CLR37, assertPair, assertRaises,
-  statedTermScene, account, opk, CONTROL_ASSET_CODE,
-  enrolPrepaymentAccount, retirePrepaymentAccount, liveEnrolmentCount,
+  endPool, rootQuery, CLR, CLR37, assertPair,
+  statedTermScene, account, CONTROL_ASSET_CODE,
+  enrolPrepaymentAccount, retirePrepaymentAccount,
   plainAssetRecognition, createPrepaymentSchedule, scheduleCountFor,
-  reserveAsFixedAssetCost, bindBankAccount,
-  ROSTER_PURPOSE, ROSTER_REASON, ROSTER_AXIS,
+  reserveAsFixedAssetCost, bindBankAccount, ROSTER_PURPOSE,
   RESERVATION_STEM, RESERVATION_GATE, reservationApplied,
   RESERVED_DOMAIN, RESERVED_ROLE, BANK_BELT_REASON, ADV_REMEDY_PREPAYMENT,
   RESERVATION_RECUTS, reservedRolesFor, eligibilityBreach, enrolStaffAdvanceAccount,
