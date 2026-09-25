@@ -130,7 +130,7 @@ test("p940.panel.empty — an empty roster says no prepayment on this client can
   try {
     const text = h.text();
     assert.match(text, /Prepayment and deferred-revenue accounts/,
-      "#1079: the heading must name both purposes this panel administers, not only the first");
+      "ticket 1079: the heading must name both purposes this panel administers, not only the first");
     assert.match(text, /no prepayment here can be amortised/i,
       "the empty state names the CONSEQUENCE, which is what a firm needs to read");
     assert.equal(findAll(h.container as never, (n) => String(reactProps(n)["data-testid"] ?? "") === "prepayment-account-row").length, 0);
