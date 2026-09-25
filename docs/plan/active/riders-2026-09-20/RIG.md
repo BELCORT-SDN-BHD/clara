@@ -32,6 +32,16 @@ Database env for every db command or test (Bash form):
 - Runtime World legs: set `WORKFLOW_POSTGRES_URL=postgres://postgres@127.0.0.1:<port>/<db>` beside the
   PG env. Bootstrapping a World on your database makes `rig-isolation.test.mjs` T10b red afterwards
   (#866); clone a sibling database first if you need both.
+- **The `workflow` schema is PROVISIONED, not migrated, and one command does it:**
+  `pnpm --filter @clara/runtime exec bootstrap`, once, with `WORKFLOW_POSTGRES_URL` set. No migration
+  in this repository creates `workflow.workflow_runs`, and setting the variable alone does not either.
+  It is not an npm script but a dependency bin (`packages/runtime/node_modules/.bin/bootstrap`
+  resolving to `@workflow/world-postgres/bin/setup.js`) and it creates `workflow.workflow_runs` and
+  five sibling tables. The cost of this line being absent is measured rather than supposed: the sweep
+  wave's integration merge recorded three dead ends and left **22 lane-L6 runtime cells unverified**
+  for want of it (`reports/waveS-merge.md` §16.1, §18 item 1), and gate C then ran the same 22 green
+  on a bootstrapped database (`reports/waveS-gates-C.md` §1c, §2b, F5). **The durable home for this is
+  the repository's own `README.md` under "Develop"**, per the paragraph below; this is the wave's copy.
 - db tests: from `packages/db`, `node --test --test-concurrency=1 $GATES tests/<file>.test.mjs` where
   `$GATES` is the exact list of `--import ./tests/*-preintegration-gate.mjs` flags in
   `packages/db/package.json`'s `"test"` script.
