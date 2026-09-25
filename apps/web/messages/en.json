@@ -7273,7 +7273,7 @@
       "refusalNotEnrolledLink": "Open the Registers page"
     },
     "PrepaymentAccounts": {
-      "heading": "Prepayment accounts",
+      "heading": "Prepayment and deferred-revenue accounts",
       "subheading": "Only an account enrolled here can be amortised. Enrolling is a judgement about this client's chart, so it is recorded with the reason a person gave.",
       "empty": "No account is enrolled as a prepayment account for this client yet. Until one is, no prepayment here can be amortised.",
       "loading": "Reading the prepayment roster\u2026",
