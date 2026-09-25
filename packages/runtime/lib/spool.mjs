@@ -135,18 +135,69 @@ async function renameIntoPlace(from, to) {
  * human reading a spool directory whose leftover a temp file is. Both still end in `.tmp`, so
  * `SPOOL_REAPABLE` and `listJsonEntries` ignore them exactly as before.
  */
-async function atomicJson(path, value) {
+/**
+ * ONE SIDECAR, ONE MUTATION AT A TIME (#1044) — the "real locking" `mergeTaskMeta`'s header below
+ * says a hard guarantee needs, and now has.
+ *
+ * WHAT #1043 LEFT BEHIND. Unique temp files stopped two writers SPLICING one body; they did not
+ * stop the LOST UPDATE. `mergeTaskMeta` reads its base, computes, and renames — and a write that
+ * lands in between is simply erased, because the merge's body was computed from a base that no
+ * longer exists. On the ordinary document path that erases the transport fields
+ * (`storageKey`/`sha256`/`mime`/`format`): `lib/reconciler-documents.mjs`'s per-sweep merge carries
+ * the DB task row, which has none of them, while `lib/intake.mjs:439` carries all of them. Nothing
+ * restores them — the runtime holds no SELECT on `clara.documents` (PIN-AB-6) — so the belt then
+ * refuses to dispatch the run, or `documentIngest_v2` manufactures a `storage_error` on a run that
+ * is already enqueued. Measured against the pre-fix code at 100 rounds of the two real writer
+ * shapes: 95 of 100 lost the key on this Windows rig, 97 of 100 under WSL, the runner's platform
+ * (`tests/intake-sidecar-race.test.mjs`, `p1044.lost_update` and `p1044.rounds`).
+ *
+ * THE SCOPE OF THE LOCK IS THE RENAME, NOT THE WHOLE WRITE, and that is deliberate. A mutation is
+ * only observable when its rename lands, so serialising the renames of ONE path is all the
+ * exclusion a read-modify-write needs — and it leaves the two temp writes running in parallel, so
+ * the order two plain `writeTaskMeta` calls settle in is still decided by the filesystem rather
+ * than by which call was made first (`p1043.collide`'s own non-vacuity control depends on that).
+ * `mergeTaskMeta` holds the SAME lock across its read AND its rename, which is what closes #1044.
+ *
+ * THE RESIDUAL, STATED. This is an in-process lock, so it is a hard guarantee exactly as far as
+ * "one spool directory belongs to one runtime process" holds — which is how the spool is deployed
+ * (a Fly volume is attached to one machine, and `CLARA_SPOOL_DIR` defaults to that volume). Two
+ * processes sharing one directory would still need an on-disk compare-and-swap or an advisory
+ * file lock; nothing here pretends otherwise.
+ */
+const sidecarLocks = new Map();
+
+function withSidecarLock(path, fn) {
+  const tail = sidecarLocks.get(path) ?? Promise.resolve();
+  const mine = tail.then(fn);
+  // The QUEUE's tail never carries a rejection: a mutation that threw must not reject the next
+  // caller's turn, and a rejected tail that nobody awaits is an unhandled rejection. The caller's
+  // own promise (`mine`) keeps the rejection, unchanged.
+  const settled = mine.then(() => {}, () => {});
+  sidecarLocks.set(path, settled);
+  settled.then(() => {
+    // Only the LAST holder clears the entry, so an idle spool leaves no map behind.
+    if (sidecarLocks.get(path) === settled) sidecarLocks.delete(path);
+  });
+  return mine;
+}
+
+async function atomicJson(path, value, { locked = false } = {}) {
   await ensureSpoolDir();
   const next = `${path}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(next, `${JSON.stringify(value)}\n`, { encoding: "utf8", mode: 0o600 });
-  try {
-    await renameIntoPlace(next, path);
-  } catch (err) {
-    // The temp file is ours and nobody else will ever collect it. Leaving it behind would turn a
-    // transient write failure into unbounded spool growth (and a `.tmp` the TTL sweep ignores).
-    await rm(next, { force: true }).catch(() => {});
-    throw err;
-  }
+  const place = async () => {
+    try {
+      await renameIntoPlace(next, path);
+    } catch (err) {
+      // The temp file is ours and nobody else will ever collect it. Leaving it behind would turn a
+      // transient write failure into unbounded spool growth (and a `.tmp` the TTL sweep ignores).
+      await rm(next, { force: true }).catch(() => {});
+      throw err;
+    }
+  };
+  // `locked` is for a caller that ALREADY holds this path's lock (`mergeTaskMeta`): taking it again
+  // here would wait for a turn that can never come.
+  return locked ? place() : withSidecarLock(path, place);
 }
 
 export async function writeIntakeMeta(id, value) {
@@ -197,25 +248,29 @@ export async function readTaskMeta(id) {
  * merge there would silently CREATE a phantom sidecar file for a workflow that is
  * supposed to never have one).
  *
- * THE RACE THIS NARROWS (documentIngest task #28, P4): a caller that reads ALL sidecars
- * up front and writes them back ONE AT A TIME later (a bulk snapshot) can write a STALE
- * merge over a field a DIFFERENT process updated in between — e.g. the reconciler's
- * batch read racing a task's own `noteTransientFailure`/`noteTerminalFailure` call,
- * silently erasing `lastError`. Reading fresh, right before the write, shrinks that
- * window from "however long the caller's batch loop takes" to "the time between this
- * one read and this one write" — the SAME granularity every other sidecar mutator in
- * this file already uses. It does NOT eliminate the race: a write landing in that exact
- * gap still loses. A hard guarantee needs real locking or a version/mtime compare-and-
- * swap, which is a larger change and out of scope here — recorded, not silently claimed.
+ * THE RACE THIS CLOSES (documentIngest task #28, P4; then #1044): a caller that reads
+ * ALL sidecars up front and writes them back ONE AT A TIME later (a bulk snapshot) can
+ * write a STALE merge over a field a DIFFERENT writer updated in between — e.g. the
+ * reconciler's batch read racing a task's own `noteTransientFailure`/`noteTerminalFailure`
+ * call, silently erasing `lastError`, or its per-sweep DB-row merge racing
+ * `lib/intake.mjs:439` and erasing the transport fields. Reading fresh, right before the
+ * write, shrank that window to "the time between this one read and this one write"; it did
+ * NOT eliminate it, and a write landing in that exact gap still lost (#1044, measured at
+ * 95 of 100 rounds on Windows and 97 of 100 on Linux). The read and the write now happen
+ * inside ONE turn of this path's `withSidecarLock`, so no other mutation of THIS sidecar
+ * can land between them — the "real locking" this header used to say was out of scope.
+ * Its limit is stated where the lock is defined: one process, one spool directory.
  */
 export async function mergeTaskMeta(id, patch, { requireExists = false } = {}) {
-  const current = await readTaskMeta(id);
-  if (requireExists && !current) {
-    throw Object.assign(new Error(`document task ${id} has no durable runtime metadata`), { code: "internal" });
-  }
-  const next = { ...(current ?? {}), ...patch, updatedAt: new Date().toISOString() };
-  await writeTaskMeta(id, next);
-  return next;
+  return withSidecarLock(taskMetaPath(id), async () => {
+    const current = await readTaskMeta(id);
+    if (requireExists && !current) {
+      throw Object.assign(new Error(`document task ${id} has no durable runtime metadata`), { code: "internal" });
+    }
+    const next = { ...(current ?? {}), ...patch, updatedAt: new Date().toISOString() };
+    await atomicJson(taskMetaPath(id), next, { locked: true });
+    return next;
+  });
 }
 
 /**

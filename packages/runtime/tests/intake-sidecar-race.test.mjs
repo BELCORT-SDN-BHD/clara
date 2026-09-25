@@ -50,8 +50,8 @@ after(async () => {
 });
 
 const {
-  intakePaths, listIntakeMetaEntries, listIntakeMetas, readIntakeMeta, readTaskMeta, spoolConfig, sweepSpoolTtl,
-  taskMetaPath, writeIntakeMeta, writeTaskMeta,
+  intakePaths, listIntakeMetaEntries, listIntakeMetas, mergeTaskMeta, readIntakeMeta, readTaskMeta, spoolConfig,
+  sweepSpoolTtl, taskMetaPath, writeIntakeMeta, writeTaskMeta,
 } = await import("../lib/spool.mjs");
 const { recoverPendingDocumentIntakes } = await import("../lib/intake.mjs");
 
@@ -293,6 +293,81 @@ test(`p1043.collide: ${COLLIDE_ROUNDS} rounds of TWO writers on ONE sidecar leav
     `both writers must win rounds — otherwise nothing raced (intake=${wins.intake}, reconciler=${wins.reconciler})`);
   assert.equal((await readTaskMeta(taskId)).taskId, taskId,
     "…and the sidecar is still a readable sidecar at the end, not a temp file left in its place");
+});
+
+// ---------------------------------------------------------------------------
+// 2b · THE LOST UPDATE — ONE sidecar, one writer at a time (#1044).
+// ---------------------------------------------------------------------------
+//
+// WHAT #1043 LEFT BEHIND, in the README's own words: "Two writers of one sidecar still race on the
+// rename itself, and the last rename wins: a full transport write and a DB-row merge landing
+// together can still leave the merge's shorter body on disk." That is not a splice — every reader
+// still sees a body some writer wrote, WHOLE — it is a LOST UPDATE, and the loss is not
+// recoverable: the DB task row carries no transport, the runtime holds no SELECT on
+// `clara.documents` (PIN-AB-6), so a sidecar left without `storageKey` cannot be repaired from
+// Postgres. What follows is the belt refusing to dispatch the run ("has no transport metadata in
+// its sidecar") or `documentIngest_v2` manufacturing a `storage_error` on an already-enqueued run.
+//
+// THE INTERLEAVE, in the order the ticket names it: `mergeTaskMeta` reads its base (nothing on disk
+// yet — `clara.finalize_document_intake` commits the row BEFORE `lib/intake.mjs:439` writes the
+// sidecar), the intake path's write lands, and the merge renames its stale body over it.
+//
+// MEASURED AGAINST THE PRE-FIX CODE, both launch orders, both platforms, 100 rounds each: at the
+// natural body size 95 and 99 of 100 rounds lost the storage key on this Windows rig, 97 and 99 of
+// 100 under WSL (the runner's platform). With the widener below, 100 of 100 on both. That is why
+// this cell is ONE round per arm and not a loop — the interleave is reproduced by construction.
+// `p1044.rounds` below keeps the loop, at the natural size, for the same property.
+//
+// THE WIDENER IS A CLOCK, NOT THE DEFECT. `engine_config` is a jsonb column `documentTaskSnapshot`
+// carries verbatim onto the merge's patch; a megabyte of it makes the merge's own temp write long
+// enough that the intake's short write always lands inside the merge's read-to-rename window. The
+// window exists at any size — the 95-of-100 figure above is the natural one — and the widener only
+// removes the need for a sleep.
+const WIDENER_BYTES = 1024 * 1024;
+
+/** `reconcilerShapedTask`, widened: the same DB-row patch with a megabyte of `engineConfig`. */
+const widenedRow = (taskId, n) => ({
+  ...reconcilerShapedTask(taskId, n),
+  engineConfig: { model: "prebuilt-layout", widener: "x".repeat(WIDENER_BYTES) },
+});
+
+const TRANSPORT_KEYS = ["storageKey", "sha256", "mime", "format"];
+
+test("p1044.lost_update: a merge cannot drop the transport fields a concurrent writer put on disk", async (t) => {
+  await ownSpool(t);
+
+  // Both launch orders, because the defect does not care which call was made first: what decides
+  // it is which RENAME lands last, and before the fix that was whichever body took longer to write.
+  for (const [label, mergeFirst] of [["merge first", true], ["intake write first", false]]) {
+    const taskId = randomUUID();
+    const intake = intakeShapedTask(taskId, 1);
+    const startMerge = () => mergeTaskMeta(taskId, widenedRow(taskId, 1));
+    const startWrite = () => writeTaskMeta(taskId, intake);
+    await Promise.all(mergeFirst ? [startMerge(), startWrite()] : [startWrite(), startMerge()]);
+
+    const onDisk = await readTaskMeta(taskId);
+    for (const key of TRANSPORT_KEYS) {
+      assert.equal(onDisk?.[key], intake[key],
+        `${label}: the sidecar lost '${key}'. A merge may only change the keys it was given — `
+        + `the DB task row carries no transport, and nothing can put it back (the runtime holds no `
+        + `SELECT on clara.documents), so this sidecar can never be dispatched (#1044)`);
+    }
+  }
+
+  // NON-VACUITY. Without this arm the cell would pass against a `mergeTaskMeta` that wrote nothing
+  // at all: the two arms above end with the intake's own body on disk. Here the merge is the LAST
+  // writer, so its write is the one on disk, and it must carry BOTH what it was given and what it
+  // was not.
+  const taskId = randomUUID();
+  const intake = intakeShapedTask(taskId, 1);
+  await writeTaskMeta(taskId, intake);
+  await mergeTaskMeta(taskId, reconcilerShapedTask(taskId, 2));
+  const merged = await readTaskMeta(taskId);
+  assert.equal(merged.writer, "reconciler", "the merge really did write — otherwise the cell proves nothing");
+  assert.equal(merged.n, 2, "…with its OWN values for the keys it was given");
+  for (const key of TRANSPORT_KEYS) {
+    assert.equal(merged[key], intake[key], `…and it kept '${key}', a key it was not given`);
+  }
 });
 
 // ---------------------------------------------------------------------------

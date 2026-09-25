@@ -2096,6 +2096,54 @@ every time; on this Windows rig, 6 and 116. After the fix, 0 and 0 on both. In t
 `ENOENT … rename '/tmp/clara-intake-admission-AdS9Jw/spool/task-c6245da9-….json.7113.1790191021685.tmp'`
 1.8 s after the world booted.
 
+## #1044 — one sidecar, one mutation at a time: the reconciler's merge can no longer drop the intake's transport
+
+**The defect, and why it is not #1043.** #1043 gave every write its own temp file, so no reader ever
+sees a body no writer wrote. It left the LOST UPDATE, and said so: "a full transport write and a
+DB-row merge landing together can still leave the merge's shorter body on disk". `mergeTaskMeta`
+read its base, computed, and renamed; a write landing between the read and the rename was simply
+erased, because the merge's body was computed from a base that no longer existed. On the ordinary
+document path the erased keys are the transport ones — `storageKey`, `sha256`, `mime`, `format` —
+because `lib/reconciler-documents.mjs`'s per-sweep merge carries the `clara.document_processing_tasks`
+row, which has none of them, while `lib/intake.mjs:439` carries all of them, and the row is
+committed BEFORE that write runs.
+
+**Nothing restored them.** The runtime holds no SELECT on `clara.documents` (PIN-AB-6), so the
+storage key cannot be read back from Postgres. What follows is either the belt refusing to dispatch
+the run (`ingest task … has no transport metadata in its sidecar`, with no preceding
+`task sidecar unreadable` line — that preceding line was #1043's defect) or `documentIngest_v2`
+manufacturing a `storage_error` on a run that is already enqueued. Either can red the required
+`db-live-gates` job.
+
+**Measured against the pre-fix code**, 100 rounds of the two real writer shapes per arm, both launch
+orders, and the runner's platform is again the worse one: at the natural body size **95 and 99 of
+100 rounds lost the storage key on this Windows rig, 97 and 99 of 100 under WSL**. It is a lost
+update by construction, not a corner.
+
+**The fix: `withSidecarLock`, in `lib/spool.mjs`.** One in-process queue per sidecar PATH.
+`mergeTaskMeta` holds that lock across its read AND its rename, so no other mutation of that
+sidecar can land between them — the "real locking" `mergeTaskMeta`'s own header used to name as out
+of scope. **The lock's scope is the rename, not the whole write**, and that is deliberate: a
+mutation is only observable when its rename lands, so serialising the renames of one path is all
+the exclusion a read-modify-write needs, and the two temp writes still run in parallel — which is
+why the order two plain `writeTaskMeta` calls settle in is still decided by the filesystem rather
+than by which call was made first. `p1043.collide`'s own non-vacuity control ("both writers must win
+rounds") depends on that, and it still holds: measured at 42/158 on this rig and 7/193 under WSL
+after the change, against 8/192 under WSL before it — the distribution did not move.
+
+**The residual, stated.** This is an in-process lock, so the guarantee is exactly as strong as "one
+spool directory belongs to one runtime process" — which is how the spool is deployed: the default
+`CLARA_SPOOL_DIR` is a Fly volume, and a Fly volume is attached to one machine. Two processes
+sharing one directory would still need an on-disk compare-and-swap or an advisory file lock. Also
+unchanged, and out of this ticket's scope: `lib/intake.mjs:442`'s post-enqueue write rebuilds its
+body from the `task` snapshot taken BEFORE the enqueue, so a status or `lastError` the reconciler
+wrote during the enqueue is still overwritten by it. It can no longer cost the transport (that body
+carries it), which is what #1044 is about.
+
+**Evidence.** `tests/intake-sidecar-race.test.mjs` — `p1044.lost_update`: both launch orders, one
+round each, reproduced by construction with a widened `engineConfig` rather than a sleep, plus a
+non-vacuity arm in which the merge is the last writer and must keep the keys it was not given.
+
 ## #981 — one structured-detail carrier on a durable-Work refusal, instead of a fold per refusal
 
 `src/workRoutes.ts` turns one raised database error into one HTTP answer (`workErrorResponse`). It
