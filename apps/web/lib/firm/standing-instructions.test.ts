@@ -102,7 +102,8 @@ test("#1147 a receipt that does NOT carry the count leaves it unknown rather tha
   // 0338's own receipt shape, which is what a database below 0362 answers. A decoder that
   // defaulted to 0 would state, in words, that no plan keeps posting — the exact claim #1147
   // exists to make honest.
-  const { plans_still_posting: _omitted, ...pre0362 } = WITHDRAWN;
+  const pre0362: Record<string, unknown> = { ...WITHDRAWN };
+  delete pre0362.plans_still_posting;
   await withDoor(
     () => json(pre0362),
     async () => {

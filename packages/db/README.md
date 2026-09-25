@@ -10447,3 +10447,114 @@ cell went red first against a deliberately broken map, and green again once 0361
 detects its own marker and returns without touching the body. The prestate admits exactly two
 pre-images per recut body — the sha measured on this lane's rig, or a body already carrying this
 file's own `0361` attribution — so a redo is admitted and real drift refuses by name.
+
+## 0362 — the model lane reaches the firm's standing instruction, and a withdrawal names its consequence (#1147, riders closing wave, lane 01)
+
+[0362_standing_instruction_agent_read.sql](migrations/0362_standing_instruction_agent_read.sql)
+closes two of the three halves [0338](migrations/0338_prepayment_close_standing_instruction.sql)
+was never given (#1050's own follow-ups 2, 3 and 4; candidates C10, C11 and C12 of the sweep
+wave's follow-up list) and holds the third with a census instead of a comment.
+
+**What 0338 left.** #1050 shipped the firm-level standing instruction whole on the HUMAN lane. Both
+write doors are `clara_authenticated`-only by design — *an instruction a machine recorded would
+name nobody* — and `clara.firm_standing_instructions` grants nothing to `clara_agent_ro` or
+`clara_runtime` either, which 0338's own tail asserts. The member's own web read needs no door at
+all (forced RLS plus `firm_id = clara.jwt_firm()`), which is why nothing noticed that a chat model
+asked *"does this firm let Clara do this?"* had **no door and no relation it may read**. Separately,
+withdrawing an instruction answered five keys and said nothing about the plans it had already
+authorised, which keep posting under the member who authorised them.
+
+| § | object | what it is |
+|---|---|---|
+| A | `clara.wake_get_firm_standing_instruction(text)` | the model lane's own read door — `clara_agent_ro`, one `interactive` allowlist row |
+| B | `clara.withdraw_firm_standing_instruction(text,text,text)` | 0338 §G's body plus ONE answer key, `plans_still_posting` |
+| D | ACL + allowlist | one EXECUTE, one row |
+
+**§A takes no firm argument, and that IS the tenancy wall.** The firm is `clara.wake_context()`'s
+own answer for the calling credential. A door that took a firm would be an existence oracle the
+moment anybody asked it about somebody else's, so the ticket's own criterion — *another firm's row
+and no row at all answer the same way* — is structurally true here rather than defended by a
+predicate. `p1147.read.no_oracle` drives it anyway, from three firms at once.
+
+**No shared core, and law 31 is why.** 0320, 0352 and 0353 each split a read into one ungranted
+core with two entrances because a HUMAN door and a MODEL door compute the same rows. This read has
+one entrance: the human lane reads the relation directly under RLS. A core here would be an
+ungranted body with exactly one caller.
+
+**No floor of its own, which is a measurement rather than an omission.** The read's own floor is
+VIEWER — every member of a firm may see what their firm has instructed Clara to do, which is
+exactly what 0338 §A.2's policy grants. `clara.wake_context` only returns a row when the
+credential's `on_behalf_of` is an ACTIVE BOOKKEEPER+ of the credential's firm, so the effective
+floor is STRICTLY ABOVE the read's and a viewer-rank re-check could never fire.
+`p1147.read.floor_is_the_credential` drives both halves: a viewer reads the relation herself, and no
+credential may be minted on her behalf.
+
+**§B adds one key and changes nothing else.** `plans_still_posting` is the count of this firm's
+LIVE (`status = 'active'`) plans whose `authority_ref` cites the instruction being withdrawn. It is
+taken AFTER the withdrawal stamp, inside the same transaction, so it reports the world the
+withdrawal leaves rather than the one it found; and the reference is compared as TEXT, never cast
+to `uuid`, because `authority_ref` is an open jsonb object (0193's only CHECK is that it IS an
+object) and a cast would turn a count into a `22P02` at the moment a firm is trying to withdraw.
+The body was taken from the LIVE catalog rather than retyped, and §0 refuses to apply over anything
+that is neither 0338 §G's pinned body nor one already carrying this file's own attribution.
+
+**WHAT WITHDRAWAL DOES TO A PLAN DOES NOT CHANGE, AND THAT IS THE RULING THIS FILE RECORDS.** The
+plans an instruction already authorised keep posting under the member who authorised them — #940's
+own ruling for a retired roster enrolment, restated by 0338 §G. **Whether withdrawal should also
+PAUSE them is an accounting and product question #1050 was never given and #1147 does not take.**
+It is a real question: a firm that says *"stop letting Clara do this"* may well mean the schedules
+too, and the argument the other way is that a plan is a separate, already-authorised commitment
+whose occurrences a person can pause or end one at a time (Client → Plans). The file makes the
+consequence VISIBLE — the count in the receipt, the count and the remedy on the settings card — and
+leaves the behaviour alone. The tail asserts the door names no plan-state verb at all, so the
+decision cannot drift in by accident.
+
+**The deferred-revenue asymmetry, and what closing it would cost.**
+`clara._prepayment_schedule_core` admits `('human','obo','wake')`;
+`clara._revenue_recognition_core` admits `('human','obo')` and no wake wrapper for it exists
+anywhere in the catalog, so the contract-liability side cannot be stood by a standing instruction
+at all. 0338 said so in a header comment and nothing else held it. This ticket adds no lane there;
+it adds `p1147.asymmetry.census`
+([standing-instruction-agent-read.test.mjs](tests/standing-instruction-agent-read.test.mjs)), which
+reads both cores' closed lane sets, every `clara.wake_%` body that reaches either, and the
+`clara.wake_fn_allowlist` rows for those wrappers, off the LIVE catalog — and fails the day one
+side is widened without the other, naming which half moved. **Closing the asymmetry would cost
+four moving parts**: a wake wrapper over the revenue core, the lane set widened to include `wake`,
+a `clara.wake_fn_allowlist` row for the wrapper, and a SECOND instruction key in 0338 §A's closed
+set (and in both write doors) so a firm could stand the revenue side separately. **The question
+underneath is an owner ruling, not an oversight**: should a firm that let Clara amortise its
+prepayments thereby also let Clara recognise its deferred revenue, or are those two separate
+delegations? Until that is answered, the census keeps the asymmetry a decision.
+
+**Prestate pins, measured on this rig** (riders closing wave lane 01, `clara_c01`, 337 files, max
+`0361_reservation_release_advice`; no ticket of this lane landed before this one). One recut body,
+admitting its measured pre-image or a body already carrying this file's `#1147 [0362]` attribution,
+so a redo (#957) is admitted and real drift refuses BY NAME:
+
+| body | pinned pre-image |
+|---|---|
+| `clara.withdraw_firm_standing_instruction(text,text,text)` | `c63c1fd09bc92713127a038b3565f399b8ee17fcbf27097272b7a919cbb7b6e5` |
+
+**Deliberately NOT sha-pinned:** `clara._prepayment_schedule_core` and
+`clara._revenue_recognition_core`. A sha is the right instrument for a body no other lane of this
+wave writes; the schedule family is read here STRUCTURALLY (a closed lane set, off the live
+catalog) and this file recuts neither, so a pin would turn another lane's lawful recut into an
+abort of the whole chain. The rest of §0 is structural: the relation's six columns, its grants
+(the file refuses to apply over a database where a machine role already reads it directly), the
+wake context/allowlist pair, the `standing_instruction` authority kind and the four
+`clara.accounting_plans` columns §B's count keys on.
+
+**Redo-safe by construction** (#957): `create or replace function` throughout, one
+`insert … on conflict do nothing` for the allowlist row, no table, no backfill, no row of business
+data written. Both prestate branches were exercised for real on this rig rather than merely
+written: `read door FIRST` on the first apply, then `read door REDO, withdraw door FIRST` on the
+redo that landed §B, then `REDO, REDO`.
+
+**Tail (8 assertions, all read off the live catalog):** the read door resolves at exactly one
+`pg_proc` row and is STABLE SECURITY DEFINER owned by `clara_fn_owner` with its `search_path`
+pinned; `clara_agent_ro` holds it and no other role does (read off the ACL, so a grant to a role
+this file never names is caught too); exactly one allowlist row and it is the `interactive` kind;
+the relation's own grants are unmoved (0338's tail assertion, re-read); both WRITE doors are still
+`clara_authenticated`'s alone across all five machine principals; the recut withdraw door still
+carries 0338's whole refusal vocabulary and its reservation pair; it names no plan-state verb; and
+no wake wrapper reaches the deferred-revenue core.
