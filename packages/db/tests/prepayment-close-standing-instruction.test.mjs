@@ -448,3 +448,162 @@ async (t) => {
 
   assert.deepEqual(await footprint(sc), before, "the refused wake left something durable behind");
 });
+
+// ---------------------------------------------------------------------------------------------
+// #1036's AC2 — THE PLAN A CLOCKED RUN WROTE ACTUALLY POSTS, AND IT POSTS AS THE MEMBER.
+//
+// This is the cell that could not exist before this ticket: the whole reason the lane refused was
+// that a plan written on it could never admit a single occurrence. Admission is driven for real,
+// through `clara._plan_admit_occurrence`, which hands the plan's `authorised_by` to
+// `clara.admit_journal_work` -- the door that rechecks membership, activity, role rank and client
+// status every month.
+// ---------------------------------------------------------------------------------------------
+test("p1050.admit.under_member -- the clocked lane's plan ADMITS its first occurrence and the Work "
+  + "is initiated by the RECORDING MEMBER, not by the agent; once that membership is removed the "
+  + "next occurrence is refused BY NAME and no Work is written for it (#1036 AC2)",
+async (t) => {
+  if (await standingGate(t)) return;
+  const sc = await prepaidScene("p1050admit");
+  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
+  await record(sc.alice, { opKey: opk("p1050-admit") });
+
+  const r = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.ok(r.schedule_id, `the clocked lane refused: ${JSON.stringify(r)}`);
+  assert.ok(r.next_occurrences.length >= 2,
+    "this scene must yield at least two occurrences for the lapse half of this cell");
+
+  const admit = (due) => rootQuery(
+    "select clara._plan_admit_occurrence($1::uuid,$2::date,'primary','p1050') as r",
+    [r.plan_id, due]).then((x) => x.rows[0].r);
+
+  const first = await admit(r.next_occurrences[0].due_date);
+  assert.equal(first.admitted, true,
+    `the clocked lane's plan could not admit its own first occurrence: ${JSON.stringify(first)}`);
+  assert.ok(first.work_id, "an admitted occurrence with no Work");
+
+  const work = (await rootQuery(
+    "select initiator, client_id from clara.accounting_work where id = $1", [first.work_id])).rows[0];
+  assert.equal(work.initiator, sc.alice,
+    "the month's Work is not initiated by the member whose standing instruction authorised it");
+  assert.notEqual(work.initiator, AGENT, "the month's Work is initiated by the agent");
+  assert.equal(work.client_id, sc.client);
+
+  // ---- THE LAPSE. Committed, and restored in a `finally` -- the admission door reads the
+  //      membership on its own connection, exactly as the wake door does.
+  let second;
+  try {
+    await rootQuery(
+      "update clara.firm_memberships set role = 'owner' where firm_id = $1 and user_id = $2",
+      [sc.firm, sc.bob]);
+    await rootQuery(
+      "update clara.firm_memberships set status = 'removed' where firm_id = $1 and user_id = $2",
+      [sc.firm, sc.alice]);
+    second = await admit(r.next_occurrences[1].due_date);
+  } finally {
+    await rootQuery(
+      "update clara.firm_memberships set status = 'active' where firm_id = $1 and user_id = $2",
+      [sc.firm, sc.alice]);
+    await rootQuery(
+      "update clara.firm_memberships set role = 'bookkeeper' where firm_id = $1 and user_id = $2",
+      [sc.firm, sc.bob]);
+  }
+
+  assert.equal(second.admitted, false,
+    "a plan whose directing human has left the firm still posted a month's Work");
+  assert.ok(second.reason && second.reason !== "unclassified",
+    `the refusal is not named: ${JSON.stringify(second)}`);
+  assert.equal(second.work_id, undefined, "a refused occurrence carried a Work id");
+  // The occurrence keeps its own refusal on the plan's append-only ledger, which is how a person
+  // reading Needs you finds out WHY the month did not post.
+  const occ = (await rootQuery(
+    "select outcome from clara.accounting_plan_occurrences where id = $1",
+    [second.occurrence_id])).rows[0];
+  assert.equal(occ.outcome.state, "refused");
+  assert.equal(occ.outcome.reason, second.reason);
+
+  // …AND THE PLAN RESUMES once the member is back: the instruction did not need re-recording, and
+  // the month that was refused is not lost.
+  const retry = await admit(r.next_occurrences[1].due_date);
+  assert.equal(retry.admitted, true,
+    `the plan did not resume after its directing human was restored: ${JSON.stringify(retry)}`);
+});
+
+// ---------------------------------------------------------------------------------------------
+// #1036's AC4 — THE TRAIL. Instruction, wake and plan are linked, and a reader needs no join it
+// cannot make: the plan's own `authority_ref` carries BOTH the instruction row and the clocked
+// task, and the audit log carries the three acts with the right actor on each.
+// ---------------------------------------------------------------------------------------------
+test("p1050.trail -- the instruction, the clocked run and the plan are one chain: the plan's "
+  + "authority_ref names the instruction row AND the wake task, the audit log carries the "
+  + "recording act under the MEMBER, the plan creation under the MEMBER, and the schedule write "
+  + "under the AGENT",
+async (t) => {
+  if (await standingGate(t)) return;
+  const sc = await prepaidScene("p1050trail");
+  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
+  const si = await record(sc.alice, { opKey: opk("p1050-trail") });
+  const r = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.ok(r.schedule_id, `the clocked lane refused: ${JSON.stringify(r)}`);
+
+  const plan0 = (await rootQuery(
+    "select authority_kind, authority_ref, authorised_by from clara.accounting_plans where id = $1",
+    [r.plan_id])).rows[0];
+
+  const audits = await rootQuery(
+    `select fn, actor, args, via_wake_kind from clara.audit_log
+      where firm_id = $1 and fn in ('record_firm_standing_instruction',
+        'create_accounting_plan', 'create_prepayment_schedule')
+      order by at, id`, [sc.firm]);
+  const byAction = (a) => audits.rows.filter((x) => x.fn === a);
+
+  const recorded = byAction("record_firm_standing_instruction");
+  assert.equal(recorded.length, 1, "the recording act is not in the audit log exactly once");
+  assert.equal(recorded[0].actor, sc.alice, "the recording act does not name the member");
+  assert.equal(recorded[0].args.instruction_id, si.instruction_id);
+  assert.equal(recorded[0].args.instruction_key, KEY);
+
+  const planned = byAction("create_accounting_plan");
+  assert.equal(planned.length, 1, "the plan creation is not in the audit log exactly once");
+  assert.equal(planned[0].actor, sc.alice,
+    "the plan creation is not attributed to the member whose instruction authorised it");
+  assert.equal(planned[0].args.plan, r.plan_id);
+  assert.equal(planned[0].args.authority.kind, "firm_standing_instruction");
+  assert.equal(planned[0].args.authority.id, si.instruction_id,
+    "the plan's audit row does not cite the instruction");
+  assert.equal(planned[0].args.authority.task_id, sc.s.task,
+    "the plan's audit row does not name the clocked task that acted");
+  assert.equal(planned[0].args.via, "create_prepayment_schedule_for",
+    "a reader cannot tell which entrance wrote this plan");
+
+  const scheduled = byAction("create_prepayment_schedule");
+  assert.equal(scheduled.length, 1, "the schedule write is not in the audit log exactly once");
+  assert.equal(scheduled[0].actor, AGENT,
+    "the schedule write is not attributed to the unattended run that performed it");
+  assert.equal(scheduled[0].args.schedule, r.schedule_id);
+  assert.equal(scheduled[0].args.plan, r.plan_id);
+
+  assert.equal(scheduled[0].via_wake_kind, "close_prep",
+    "the schedule's audit row does not say a CLOCKED run wrote it -- without via_wake_kind the "
+    + "only thing telling this from a typed configuration is an actor id a reader must recognise");
+  assert.equal(recorded[0].via_wake_kind, null, "the recording act was attributed to a wake");
+  assert.equal(planned[0].via_wake_kind, null,
+    "the plan creation is the MEMBER's act and must not be stamped with a wake kind");
+
+  // THE TASK THE PLAN CITES IS A REAL CLOCKED RUN of this firm and client, so the chain closes on
+  // rows rather than on a string the wrapper happened to echo. (`clara.agent_act_receipts` is NOT
+  // the link here: `clara._close_wake_ctx` writes none for this verb, measured -- the receipts in
+  // that relation belong to the close-limb verbs that mint them themselves.)
+  const task = (await rootQuery(
+    "select kind, firm_id, client_id from clara.agent_tasks where id = $1",
+    [plan0.authority_ref.task_id])).rows[0];
+  assert.ok(task, "the plan cites a clocked task this database does not hold");
+  assert.equal(task.kind, "close_prep");
+  assert.equal(task.firm_id, sc.firm);
+  assert.equal(task.client_id, sc.client);
+
+  // AND THE PLAN ROW ITSELF IS THE WHOLE CHAIN, readable with no audit log at all.
+  assert.deepEqual(
+    [plan0.authority_kind, plan0.authority_ref.kind, plan0.authority_ref.id,
+      plan0.authority_ref.task_id, plan0.authorised_by],
+    ["standing_instruction", "firm_standing_instruction", si.instruction_id, sc.s.task, sc.alice]);
+});

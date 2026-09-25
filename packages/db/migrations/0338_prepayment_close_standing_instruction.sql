@@ -1277,7 +1277,15 @@ begin
           'raced', true)::text;
   end;
 
-  perform clara._audit(p_firm, p_actor, null, null, 'create_prepayment_schedule', null,
+  -- #1050 (0338 §F) -- THE FOURTH ARGUMENT IS THE WAKE KIND ON THE WAKE LANE, null on the two
+  -- human ones, which is exactly what `clara.audit_log.via_wake_kind` exists to carry. Without it
+  -- this row would read as something a person did -- `clara.agent_user_id()` is a person-shaped
+  -- row -- and the only thing telling a clocked configuration from a typed one would be an actor
+  -- id a reader has to recognise. #1036's AC4 asks for the instruction, the wake and the plan to
+  -- be readable as ONE chain; the plan row carries the instruction end, and this is the wake end.
+  perform clara._audit(p_firm, p_actor, null,
+    case when p_lane = 'wake' then p_authority_ref ->> 'wake_kind' else null end,
+    'create_prepayment_schedule', null,
     jsonb_build_object('client', p_client, 'schedule', v_sid, 'plan', v_plan_id,
       'source_entry', p_source_entry, 'service_period', v_sp_id,
       'term_source', v_term_source, 'stated_term', v_st_id,
