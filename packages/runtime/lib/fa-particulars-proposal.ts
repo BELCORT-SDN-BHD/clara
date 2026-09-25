@@ -548,3 +548,98 @@ export function mapDepreciationKnowledgeRows(
   }
   return notes;
 }
+
+// =========================================================================================
+// #1092 — THE `retired_account_policy` GROUND, FED. Migration 0346 gives the runtime read
+// credential (`clara_agent_ro`) a firm-scoped SELECT on `clara.fa_account_depreciation_policies`;
+// this is the ONE mapping its brief still owes, and the statement that produces its input.
+//
+// THE READ IS A CONSTANT HERE, NOT A CALL, for the reason this file's own header gives: "the reads
+// that gather its facts are the successor workflow's own step". The step
+// (`loadFaProposalInputsStepV6` or its successor) does not exist in this repository and lives
+// inside a frozen-workflow closure. Keeping the SQL as an exported constant gives the statement ONE
+// home — the db battery drives THIS string under a real `clara_agent_ro` wake credential rather
+// than a copy of it — while the module still reaches for no pool and stays drivable without a
+// database.
+
+/**
+ * THE READ, VERBATIM. `$1` is the client, `$2` the register row's own `asset_account_code`; it
+ * returns AT MOST ONE row, and the caller runs it under the OBO read credential `readScoped`
+ * already mints (`clara_agent_ro`), whose RLS policy `p_fadp_agent` (migration 0346) binds
+ * `firm_id = clara.wake_firm()`. The client is pinned here as well, exactly as v4's register read
+ * pins it, so a wake firm with two clients cannot widen it.
+ *
+ * WHY IT ASKS FOR "RETIRED, AND NOTHING LIVE ABOVE IT" RATHER THAN "THE NEWEST RETIRED".
+ * `clara.set_fa_depreciation_policy` is VERSION-FORWARD: setting a policy again retires version N
+ * and inserts a live version N+1 (0277 §D). So an account can hold a retired version 1 underneath a
+ * LIVE version 2, and a register row that was already pending when version 2 landed still opens a
+ * question. Grounding that question on version 1 would put a judgement the person has SINCE
+ * REPLACED onto a form, under this module's own sentence claiming they signed it — the ground is
+ * "the last thing a person said about this account", and while a live policy exists that is not the
+ * retired one. The `not exists` clause is therefore load-bearing, and it is the reason migration
+ * 0346's RLS policy is plain tenancy rather than "retired rows only": under a retired-only wall
+ * this sub-select would see nothing and always pass, i.e. the guard would be vacuous under the very
+ * credential that runs it. `packages/db/tests/fa-retired-policy-agent-read.test.mjs` (`fp.read`)
+ * drives both arms and carries the control that shows the clause, not luck, suppresses the
+ * superseded row.
+ *
+ * WHAT IT DELIBERATELY DOES NOT SELECT. `residual_cents` — this module reads no residual off any
+ * ground (see the header); `reason`, `retired_reason`, `created_by`, `retired_by` — a proposal's
+ * sentence names the VERSION, never a person or their words, and a column nothing reads is a column
+ * a later reader must not start reading by accident.
+ */
+export const FA_RETIRED_ACCOUNT_POLICY_SQL = `select p.asset_account_code, p.version, p.method,
+       p.useful_life_months, p.rate_bps
+  from clara.fa_account_depreciation_policies p
+ where p.client_id = $1::uuid
+   and p.asset_account_code = $2
+   and not p.active
+   and not exists (select 1 from clara.fa_account_depreciation_policies q
+                    where q.client_id = p.client_id
+                      and q.asset_account_code = p.asset_account_code
+                      and q.active)
+ order by p.version desc
+ limit 1`;
+
+/** One `clara.fa_account_depreciation_policies` row, exactly as `FA_RETIRED_ACCOUNT_POLICY_SQL`
+ *  returns it — the raw shape a future step hands the mapper, with no reshaping in between. */
+export type RetiredAccountPolicyRow = {
+  asset_account_code: unknown;
+  version: unknown;
+  method: unknown;
+  useful_life_months: unknown;
+  rate_bps: unknown;
+};
+
+/**
+ * `clara.fa_account_depreciation_policies` -> `FaProposalRetiredPolicy`, or `null` where the row
+ * cannot ground anything.
+ *
+ * TWO REASONS FOR `null`, and they are different in kind. NO ROW means the account has no retired
+ * policy the read admits (see the guard in the SQL above) — the ordinary case, and the proposal
+ * simply falls to the next ground. AN UNREADABLE `asset_account_code` means the row cannot be
+ * SCOPED, and that is a harder refusal than the knowledge mapper's: `asset_account_code` is NOT
+ * NULL on the relation (0277 §A), so unlike `FaProposalKnowledgeNote.assetAccount` a null here is
+ * not a meaningful "about the client as a whole" statement. Mapping it to null anyway would hand
+ * `speaksFor` a ground that speaks for every register row carrying NO account code — a policy for
+ * account 1500 grounding an unclassified asset, under a reason naming an account it never came
+ * from, which is the exact defect this module's own header records for the three grounds.
+ *
+ * EVERYTHING ELSE IS TOLERATED, not refused — the same rule an incongruent SIBLING already lives
+ * by. A method this module does not recognise, or a missing life or rate, is `congruent()`'s
+ * business to DROP downstream; refusing it here would move one shape gate into two places.
+ */
+export function mapRetiredAccountPolicyRow(
+  row: RetiredAccountPolicyRow | null | undefined,
+): FaProposalRetiredPolicy | null {
+  if (row === null || row === undefined) return null;
+  const account = row.asset_account_code;
+  if (typeof account !== "string" || account === "") return null;
+  return {
+    assetAccount: account,
+    version: typeof row.version === "number" ? row.version : null,
+    method: typeof row.method === "string" ? (row.method as FaMethod | string) : null,
+    usefulLifeMonths: typeof row.useful_life_months === "number" ? row.useful_life_months : null,
+    rateBps: typeof row.rate_bps === "number" ? row.rate_bps : null,
+  };
+}

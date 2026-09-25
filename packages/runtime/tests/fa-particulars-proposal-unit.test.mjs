@@ -533,3 +533,70 @@ test("p1090.map.order_is_preserved_and_nothing_is_ranked_here — ranking is der
   ]);
   assert.deepEqual(notes.map((n) => n.recordId), ["first", "second"]);
 });
+
+// =========================================================================================
+// #1092 — `mapRetiredAccountPolicyRow`: ONE `clara.fa_account_depreciation_policies` row (as
+// `FA_RETIRED_ACCOUNT_POLICY_SQL` returns it, under the clara_agent_ro read policy migration 0346
+// adds) -> `FaProposalRetiredPolicy | null`. The RANKING this ground feeds is already proven above
+// (`p933.core.a_retired_account_policy_outranks_the_siblings`); what is new here is the
+// READ-SHAPE MAPPING itself, driven as a pure function exactly like the rest of this file.
+
+test("p1092.map.happy_path — a well-formed retired row maps field for field, from an independent expected literal", () => {
+  assert.deepEqual(
+    p.mapRetiredAccountPolicyRow({
+      asset_account_code: "1500", version: 2, method: "reducing_balance",
+      useful_life_months: 84, rate_bps: 2500,
+    }),
+    { assetAccount: "1500", version: 2, method: "reducing_balance", usefulLifeMonths: 84, rateBps: 2500 },
+  );
+});
+
+test("p1092.map.an_unreadable_account_code_DROPS_the_whole_ground — `asset_account_code` is NOT NULL on the relation, so a missing one is not a client-wide statement and must never be allowed to speak for an account-less register row", () => {
+  for (const bad of [undefined, null, "", 1500, {}]) {
+    assert.equal(
+      p.mapRetiredAccountPolicyRow({
+        asset_account_code: bad, version: 1, method: "straight_line", useful_life_months: 60, rate_bps: null,
+      }),
+      null,
+      `asset_account_code ${JSON.stringify(bad) ?? String(bad)} grounds nothing`);
+  }
+  // THE CONTROL: the same row with a readable account code DOES ground, so the four above are
+  // refused for their account code and not because the mapper refuses everything.
+  assert.equal(
+    p.mapRetiredAccountPolicyRow({
+      asset_account_code: "1500", version: 1, method: "straight_line", useful_life_months: 60, rate_bps: null,
+    })?.assetAccount,
+    "1500");
+});
+
+test("p1092.map.no_row_is_null — an account with no retired policy the read admits grounds nothing, and the successor hands the mapper exactly that", () => {
+  assert.equal(p.mapRetiredAccountPolicyRow(undefined), null, "rows[0] of an empty result set");
+  assert.equal(p.mapRetiredAccountPolicyRow(null), null);
+});
+
+test("p1092.map.missing_drivers_become_null, never undefined — a shape the wire schema would drop is not what this mapper emits", () => {
+  assert.deepEqual(
+    p.mapRetiredAccountPolicyRow({ asset_account_code: "1600", version: 1, method: "none",
+      useful_life_months: null, rate_bps: null }),
+    { assetAccount: "1600", version: 1, method: "none", usefulLifeMonths: null, rateBps: null });
+  assert.deepEqual(
+    p.mapRetiredAccountPolicyRow({ asset_account_code: "1600" }),
+    { assetAccount: "1600", version: null, method: null, usefulLifeMonths: null, rateBps: null });
+});
+
+test("p1092.map.an_unusable_method_is_carried, never repaired — congruent() is the ONE shape gate, exactly as it is for a sibling", () => {
+  const mapped = p.mapRetiredAccountPolicyRow({ asset_account_code: "1500", version: 3,
+    method: "sum_of_digits", useful_life_months: 60, rate_bps: null });
+  assert.equal(mapped.method, "sum_of_digits", "the mapper neither repairs nor refuses it");
+  // AND the derivation drops it, so an unusable retired policy costs the proposal nothing: the
+  // account's completed siblings ground it instead.
+  const proposal = p.deriveFaParticularsProposal({
+    asset: { assetId: "a", description: "Lathe", costCents: 100_000, nonDepreciable: false,
+      particularsComplete: false, assetAccount: "1500", acquiredDate: "2026-03-01" },
+    retiredPolicy: mapped,
+    siblings: [{ assetAccount: "1500", particularsComplete: true, method: "straight_line",
+      usefulLifeMonths: 36, rateBps: null }],
+  });
+  assert.deepEqual(proposal.basis, ["account_siblings", "acquisition_date", "firm_default_residual"]);
+  assert.equal(proposal.useful_life_months, 36);
+});

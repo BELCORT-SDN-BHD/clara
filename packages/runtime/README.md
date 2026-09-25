@@ -1159,6 +1159,26 @@ derivation, PURE (every fact is passed in) and tested on its own by
   register read mints) is still not wired into any workflow step — see the successor contract
   below — so the ground is catalogued and mapped, but a captured note does not yet reach a live
   proposal in production; #1090's own report carries the successor-contract addition in full.
+* The **retired-policy ground is now REACHABLE** (#1092, migration
+  `0346_fa_retired_policy_agent_read.sql`). `clara.fa_account_depreciation_policies` (#932) had no
+  grant and no policy for the runtime read credential, so the `retired_account_policy` ground could
+  never fire at all; 0346 gives `clara_agent_ro` a firm-scoped SELECT (`p_fadp_agent`,
+  `firm_id = clara.wake_firm()`) and nothing else — no write of any kind, and no other role.
+  `FA_RETIRED_ACCOUNT_POLICY_SQL` (same file) is the statement the step runs, exported so it has ONE
+  home and so the db battery drives THAT string rather than a copy, and
+  `mapRetiredAccountPolicyRow` maps its at-most-one row onto `FaProposalRetiredPolicy`. **The read
+  supplies a retired policy only while no LIVE version supersedes it**: the set door is
+  version-forward, so an account can hold a retired version 1 underneath a live version 2, and
+  grounding a still-pending row on version 1 would put a judgement the person has since replaced
+  onto a form under Clara's own sentence. That guard is also why 0346's RLS predicate is plain
+  tenancy rather than "retired rows only" — under a retired-only wall the guard's sub-select would
+  see nothing and always pass. Driven end to end, doors through derivation, by
+  `packages/db/tests/fa-retired-policy-agent-read.test.mjs`; still not wired into any workflow step,
+  for the same reason the knowledge ground is not — #1092's report carries its successor contract.
+  An **unreadable `asset_account_code` drops the whole ground** rather than mapping to `null`: the
+  column is NOT NULL on the relation, so unlike a knowledge note a null here is not a "client-wide"
+  statement, and letting it through would hand `speaksFor` a ground that speaks for every register
+  row carrying no account code.
 
 The block is consumed by `apps/web/lib/registers/fa-particulars-proposal.ts` on all three answering
 surfaces. `claraWork_v6` is the cut that puts it on the wire; until then the derivation ships
