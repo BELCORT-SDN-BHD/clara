@@ -179,6 +179,46 @@ test("reconcile: trace prune deletes spans older than retention + writes a recei
   assert.ok(after2.rows[0].n > before.rows[0].n, "an audited prune-log receipt was written");
 });
 
+// #1046 (0348) — the two pre-session rate-wall evidence tables ride the SAME pruneTraces() lane
+// (the "prunedWorkTraces rides this lane" precedent above, for a third and fourth relation). No
+// new belt, no new scheduler: this cell drives pruneTraces() itself, exactly as the trace-prune
+// cell above does, and reads the two new counters it returns.
+test("reconcile: rate-wall attempt prune rides the trace-prune lane, deletes past the margin, keeps the window", { skip }, async () => {
+  // Planted through ROOT, not clara_runtime: both evidence tables carry NO application-role table
+  // grant at all (0309/0163's own design — only the DEFINER doors and the DEFINER prune verbs may
+  // touch them), so even the runtime connection cannot INSERT directly. There is no door that
+  // backdates `attempted_at` either, so a superuser insert is the only way to reach "a row past
+  // the retention margin" without waiting an hour in real time — the db-level
+  // rate-wall-attempts-retention.test.mjs precedent.
+  const staleToken = randomUUID().replace(/-/g, "").padEnd(64, "0");
+  const freshToken = randomUUID().replace(/-/g, "").padEnd(64, "1");
+  await rig.rootQuery(
+    "insert into clara.invite_preview_attempts (token_hash, origin_digest, attempted_at) values " +
+    "(sha256(decode($1,'hex')), decode($2,'hex'), now() - interval '2 hours'), " +
+    "(sha256(decode($3,'hex')), decode($4,'hex'), now() - interval '5 minutes')",
+    [staleToken, "aa".repeat(32), freshToken, "bb".repeat(32)],
+  );
+  const staleEmail = "cc".repeat(32);
+  const freshEmail = "dd".repeat(32);
+  await rig.rootQuery(
+    "insert into clara.confirmation_attempts (email_digest, origin_digest, attempted_at) values " +
+    "(decode($1,'hex'), decode($2,'hex'), now() - interval '2 hours'), " +
+    "(decode($3,'hex'), decode($4,'hex'), now() - interval '5 minutes')",
+    [staleEmail, "ee".repeat(32), freshEmail, "ff".repeat(32)],
+  );
+
+  const res = await rig.asRuntime((c) => pruneTraces(c, { rateWallRetentionMinutes: 60, rateWallBatchSize: 100 }));
+  assert.ok(res.prunedInvitePreviewAttempts >= 1, "at least the 2-hour-old invite-preview row pruned");
+  assert.ok(res.prunedConfirmationAttempts >= 1, "at least the 2-hour-old confirmation row pruned");
+
+  const ipaFreshKept = await rig.rootQuery(
+    "select count(*)::int n from clara.invite_preview_attempts where token_hash = sha256(decode($1,'hex'))", [freshToken]);
+  assert.equal(ipaFreshKept.rows[0].n, 1, "the 5-minute-old invite-preview row, inside the window, survives");
+  const caFreshKept = await rig.rootQuery(
+    "select count(*)::int n from clara.confirmation_attempts where email_digest = decode($1,'hex')", [freshEmail]);
+  assert.equal(caFreshKept.rows[0].n, 1, "the 5-minute-old confirmation row, inside the window, survives");
+});
+
 test("reconcile: heartbeat upserts a component beat", { skip }, async () => {
   await rig.asRuntime((c) => heartbeat(c, "test-component"));
   const r = await rig.rootQuery("select beat_at from clara.runtime_heartbeats where component='test-component'");

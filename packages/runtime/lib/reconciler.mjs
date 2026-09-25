@@ -44,6 +44,16 @@ const ORPHAN_WINDOW = process.env.CLARA_RECONCILE_ORPHAN_WINDOW || "30 minutes";
 const TRACE_RETENTION_DAYS = Number(process.env.CLARA_TRACE_RETENTION_DAYS || 90);
 const PRUNE_BATCH = Number(process.env.CLARA_TRACE_PRUNE_BATCH || 1000);
 const PRUNE_MAX_BATCHES = Number(process.env.CLARA_TRACE_PRUNE_MAX_BATCHES || 20);
+// #1046 (0348) — the two pre-session rate-wall evidence tables' own retention margin, in
+// MINUTES rather than days: their wall counts a 15-minute window, so a margin of 60 (four times
+// the window) is generous safety over the exact boundary without letting the table grow for
+// long. clara.prune_invite_preview_attempts / clara.prune_confirmation_attempts (0348) both
+// REFUSE (CLR10) a threshold inside the wall's own window regardless of what this constant is
+// set to, so a misconfigured override here cannot silently corrupt an active wall — it can only
+// make the sweep call fail loudly.
+const RATE_WALL_ATTEMPT_RETENTION_MINUTES = Number(process.env.CLARA_RATE_WALL_ATTEMPT_RETENTION_MINUTES || 60);
+const RATE_WALL_PRUNE_BATCH = Number(process.env.CLARA_RATE_WALL_PRUNE_BATCH || 1000);
+const RATE_WALL_PRUNE_MAX_BATCHES = Number(process.env.CLARA_RATE_WALL_PRUNE_MAX_BATCHES || 20);
 
 // The document-lane sweepers moved to reconciler-documents.mjs (module-size budget);
 // re-exported so existing import sites (intake-db, intake-reconcile, ingest-workflow-db)
@@ -157,7 +167,54 @@ export async function pruneTraces(client, opts = {}) {
     prunedWorkTraces += n;
     if (n < batch) break;
   }
-  return { pruned, prunedWorkTraces };
+  // #1046 (0348) — THE TWO PRE-SESSION RATE-WALL EVIDENCE TABLES RIDE THIS SAME LANE.
+  // clara.invite_preview_attempts (0309) and clara.confirmation_attempts (0163) are both
+  // append-only with no sweep of their own, so each grows forever even though its own wall only
+  // ever reads the trailing 15-minute window. clara.prune_invite_preview_attempts /
+  // clara.prune_confirmation_attempts (0348) are the SECURITY DEFINER verbs that disable each
+  // table's own append-only trigger, delete the batch and re-enable it, all inside one call —
+  // the only way to prune a table whose trigger raises unconditionally for every role including
+  // its owner (0309's header, lines 170-177). Same "count in minutes, not days" shape as the
+  // trace lanes above, and both verbs independently refuse (CLR10) a threshold inside the wall's
+  // own window, so a sweep mid-window can never remove a row either wall's own count still
+  // depends on. Inert below 0348: an undefined_function is swallowed exactly as prunedWorkTraces
+  // above, so this belt stays a no-op on any database that has not yet applied that migration.
+  const rwMinutes = opts.rateWallRetentionMinutes ?? RATE_WALL_ATTEMPT_RETENTION_MINUTES;
+  const rwBatch = opts.rateWallBatchSize ?? RATE_WALL_PRUNE_BATCH;
+  const rwMaxBatches = opts.rateWallMaxBatches ?? RATE_WALL_PRUNE_MAX_BATCHES;
+  let prunedInvitePreviewAttempts = 0;
+  for (let i = 0; i < rwMaxBatches; i++) {
+    let n = 0;
+    try {
+      const r = await client.query(
+        "select (clara.prune_invite_preview_attempts((now() - ($1 || ' minutes')::interval), $2) ->> 'attempts_deleted')::bigint as n",
+        [String(rwMinutes), rwBatch],
+      );
+      n = Number(r.rows[0]?.n ?? 0);
+    } catch (err) {
+      if (err?.code !== '42883') throw err;
+      break;
+    }
+    prunedInvitePreviewAttempts += n;
+    if (n < rwBatch) break;
+  }
+  let prunedConfirmationAttempts = 0;
+  for (let i = 0; i < rwMaxBatches; i++) {
+    let n = 0;
+    try {
+      const r = await client.query(
+        "select (clara.prune_confirmation_attempts((now() - ($1 || ' minutes')::interval), $2) ->> 'attempts_deleted')::bigint as n",
+        [String(rwMinutes), rwBatch],
+      );
+      n = Number(r.rows[0]?.n ?? 0);
+    } catch (err) {
+      if (err?.code !== '42883') throw err;
+      break;
+    }
+    prunedConfirmationAttempts += n;
+    if (n < rwBatch) break;
+  }
+  return { pruned, prunedWorkTraces, prunedInvitePreviewAttempts, prunedConfirmationAttempts };
 }
 
 // ---------------------------------------------------------------------------
