@@ -280,9 +280,8 @@ export function DocumentDetail({
    *  "source version 0" under a table of payroll figures would be this surface stating something
    *  the document never said. A document carrying both reports the invoice one, which is the
    *  chain the note has always meant. */
-  const notedVersion = factsVersion !== null && factsVersion > 0
-    ? factsVersion
-    : (payrollFactsVersion ?? factsVersion);
+  const notedVersion = (invoiceVersion: number): number =>
+    invoiceVersion > 0 ? invoiceVersion : (payrollFactsVersion ?? invoiceVersion);
 
   return (
     <div className="flex flex-col gap-4">
@@ -362,7 +361,7 @@ export function DocumentDetail({
             </p>
           ) : (
             <p className="text-xs text-muted-foreground" data-testid="facts-version">
-              {t("factsVersionNote", { version: notedVersion })}
+              {t("factsVersionNote", { version: notedVersion(factsVersion) })}
             </p>
           )}
           <DoorFeedback err={revisions.err} clr={revisions.clr} />

@@ -189,7 +189,9 @@ test("1056 · DRIFT CELL: the revisable payroll set is exactly the payroll paths
   // or correctable and unlabelled, and both are wrong.
   const labelled = KNOWN_FACT_PATHS.filter((p) => p.startsWith("payroll."));
   assert.deepEqual([...REVISABLE_PAYROLL_RUN_PATHS].sort(), [...labelled].sort());
-  assert.equal(REVISABLE_PAYROLL_RUN_PATHS.length, 11, "#945's eleven run-level questions");
+  // "ticket 945", spelled out: the lint rule that bans a raw colour cannot tell `#945` from a hex
+  // literal and says so in its own message, and the fix it recommends is to reword the string.
+  assert.equal(REVISABLE_PAYROLL_RUN_PATHS.length, 11, "ticket 945's eleven run-level questions");
 });
 
 test("the dialog states the field path, the current value and the source version before the confirm", async () => {
