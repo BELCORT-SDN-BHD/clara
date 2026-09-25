@@ -317,3 +317,57 @@ test("proposalDepartures: an answer that is not an object (or absent) reads as n
   assert.deepEqual(proposalDepartures(FA_FIELDS, proposal, null), {});
   assert.deepEqual(proposalDepartures(FA_FIELDS, proposal, undefined), {});
 });
+
+// ------------------------------------------------------------------------------------------
+// THE WIRE BELT (adversarial ADV-L05-03, 2026-09-25). AC1's server-side filter is the FIRST
+// jsonb-path filter key this app sends, and nothing in this repository drives it against a real
+// PostgREST: the db battery proves the PREDICATE is lawful SQL, the cell above proves the query
+// STRING is built, and between those two sits an unproven wire hop. The failure mode is silent by
+// construction — this reader catches everything and answers `null` — so a filter a server ignores
+// would hand the form ANOTHER asset's drivers under a sentence naming this one, with nothing red
+// anywhere. The two cells below are the belt that makes an ignored filter a no-op instead.
+// ------------------------------------------------------------------------------------------
+
+test("loadAssetParticularsProposal: a server that IGNORES the jsonb-path filters never yields another asset's proposal (ADV-L05-03)", async () => {
+  // The mock answers as a PostgREST that did not understand `source_ref->>asset_id` would: the
+  // client's whole pending roster, newest first, with a SIBLING asset's question at the head.
+  const mine = "11111111-1111-4111-8111-111111111111";
+  const sibling = "99999999-9999-4999-8999-999999999999";
+  const { impl } = captureRead([
+    { id: "q-sibling", source_ref: { kind: "fixed_asset", asset_id: sibling, proposal: { ...WIRE, useful_life_months: 24 } } },
+    { id: "q-mine", source_ref: sourceRef() },
+  ]);
+  await withMockedFetch(impl, async () => {
+    const p = await loadAssetParticularsProposal(fakeSession("tok"), { clientId: "c1", assetId: mine });
+    assert.ok(p, "this asset's own question is still found");
+    assert.equal(p.useful_life_months, 60,
+      "the sibling's 24 months is NOT what pre-fills this asset's form: an ignored server filter degrades to the old client-side scan, never to a wrong-row read");
+  });
+
+  // AND WHEN ONLY THE SIBLING IS RETURNED, the answer is `null` — the ordinary empty form — rather
+  // than the sibling's drivers.
+  const { impl: onlyOther } = captureRead([
+    { id: "q-sibling", source_ref: { kind: "fixed_asset", asset_id: sibling, proposal: WIRE } },
+  ]);
+  await withMockedFetch(onlyOther, async () => {
+    assert.equal(
+      await loadAssetParticularsProposal(fakeSession("tok"), { clientId: "c1", assetId: mine }),
+      null,
+      "no question of this asset's own means no proposal");
+  });
+});
+
+test("loadAssetParticularsProposal: a question of ANOTHER kind carrying the same asset_id is not read as this asset's particulars proposal (ADV-L05-03)", async () => {
+  const mine = "11111111-1111-4111-8111-111111111111";
+  const { impl } = captureRead([
+    // A #639-shaped block on a question whose OWN kind is something else entirely. The block reads
+    // perfectly well; what disqualifies it is the kind, which is the filter's other half.
+    { id: "q-other-kind", source_ref: { kind: "tenancy_rent_plan", asset_id: mine, proposal: { ...WIRE, useful_life_months: 24 } } },
+  ]);
+  await withMockedFetch(impl, async () => {
+    assert.equal(
+      await loadAssetParticularsProposal(fakeSession("tok"), { clientId: "c1", assetId: mine }),
+      null,
+      "kind is half the identity: a block on a question of another kind grounds nothing here");
+  });
+});

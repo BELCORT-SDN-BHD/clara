@@ -142,10 +142,13 @@ const PENDING_QUESTION_SCAN = 50;
  *
  * THE FILTER IS SERVER-SIDE, ON `source_ref->>asset_id` AND `source_ref->>kind` TOGETHER — never
  * a client-side scan over the client's whole pending roster (#1093 AC1). PostgREST's jsonb-path
- * filter syntax on a query-string key (`col->>key=eq.value`) is lawful here — measured against a
- * live database by `p933.read.by_asset`'s own "AND THE NARROWER SERVER-SIDE FORM IS LAWFUL TOO"
- * cell (`packages/db/tests/fa-particulars-proposal.test.mjs`), which runs the identical predicate
- * as a raw SQL `where` under the human role. Filtering `kind` ALONGSIDE `asset_id` (#1093 item 2)
+ * filter syntax on a query-string key (`col->>key=eq.value`) is lawful here — the PREDICATE is
+ * measured against a live database by `p933.read.by_asset` (`packages/db/tests/fa-particulars-
+ * proposal.test.mjs`), which runs BOTH paths together as a raw SQL `where` under the human role
+ * and carries the control showing the `kind` half really excludes. What that cell does NOT
+ * measure, and nothing in this repository does, is the WIRE: no test drives this query string
+ * through a real PostgREST (STD-2 / ADV-L05-03, 2026-09-25). That gap is why the loop below keeps
+ * its identity belt. Filtering `kind` ALONGSIDE `asset_id` (#1093 item 2)
  * closes a narrower gap the asset-id-alone filter would still have: a pending question of some
  * OTHER kind that happens to carry the same `asset_id` key in an unrelated part of its own
  * `source_ref` must never be read as this asset's fixed-asset particulars proposal.
@@ -178,11 +181,21 @@ export async function loadAssetParticularsProposal(
     // pre-fill that threw would leave a person unable to complete particulars AT ALL, which is a
     // far worse outcome than not seeing a suggestion.
     if (!Array.isArray(rows)) return null;
-    // The server has already narrowed to this asset's own kind and id; this loop is defence in
-    // depth against a MATCHED row whose block itself does not read (a version this build does not
-    // know, a malformed shape) — never a second identity check, which the filter above now owns.
+    // THE BELT, AND WHY IT SURVIVED THE SERVER-SIDE FILTER (adversarial ADV-L05-03, 2026-09-25).
+    // The filter above is this app's FIRST jsonb-path filter key, and nothing here drives it
+    // against a real PostgREST — the db battery proves the predicate is lawful SQL and the unit
+    // cell proves the query string is built, which leaves the wire hop between them unproven. A
+    // server that does not understand `source_ref->>asset_id` answers with the client's whole
+    // pending roster instead of an error, and this reader swallows errors by design, so WITHOUT
+    // this check a wire regression would pre-fill ANOTHER asset's drivers under a sentence naming
+    // this one, silently. With it, an ignored filter degrades to the client-side scan this read
+    // used before #1093 — slower, never wrong. It is defence in depth, not the identity rule:
+    // the filter above is what makes the ordinary read one row rather than fifty.
     for (const row of rows) {
-      const proposal = readFaParticularsProposal(row.source_ref);
+      const ref = row.source_ref;
+      if (ref === null || typeof ref !== "object" || Array.isArray(ref)) continue;
+      if (ref.kind !== "fixed_asset" || ref.asset_id !== assetId) continue;
+      const proposal = readFaParticularsProposal(ref);
       if (proposal !== null) return proposal;
     }
     return null;
