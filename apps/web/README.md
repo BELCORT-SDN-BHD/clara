@@ -561,9 +561,20 @@ operator to rotate instead of three — but that means rotating it stops all thr
 The runtime compares each request's bearer token against the identical `CLARA_AUTH_WALL_SERVICE_TOKEN`
 it holds as its own Fly secret on `clara-runtime` (`packages/runtime/src/authWallRoutes.ts`,
 `packages/runtime/src/invitePreviewRoutes.ts`), so rotate this Worker secret and the matching Fly
-secret together, in the same change: an operator who rotates only the Worker's copy sends email
-confirmation, code resend and invite preview all into a 503 at once, not just the route they meant
-to touch.
+secret together, in the same change: an operator who rotates only one side breaks email
+confirmation, code resend and invite preview all at once, not just the route they meant to touch.
+
+**What a half-rotation looks like in the log**, because the two halves fail differently and an
+operator who greps for the wrong status loses an hour:
+
+| what is wrong | runtime answers | what the runtime log says | what the visitor sees |
+|---|---|---|---|
+| the two copies DISAGREE (this Worker rotated, Fly not, or the other way round) | **401** `{"error":"unauthorized"}` | nothing — a bearer mismatch is a normal refusal, so it is not logged | the confirm wall renders its honest "we couldn't check" (`{kind:"unavailable"}`), and the invite preview block is simply absent (`indefinite("transport")`) |
+| the runtime's copy is UNSET or blank | **503** `{"outcome":"unavailable"}` / `{"error":…}` | `[clara-runtime] … REFUSED: CLARA_AUTH_WALL_SERVICE_TOKEN is not configured` | the same two surfaces, identically |
+
+Both halves are answered above every other probe on purpose: the lane-DSN checks sit BELOW the
+bearer so an anonymous caller cannot read which lane is wired. Nothing the visitor sees
+distinguishes the two cases, which is why the runtime log is the only place to tell them apart.
 
 Build the Cloudflare bundle in Linux with a Linux-native `pnpm install`; it provisions this
 package's Node runtime. Do not reuse this Windows checkout's `node_modules` from WSL because
