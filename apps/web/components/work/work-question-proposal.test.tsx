@@ -360,3 +360,80 @@ test("p933.conversation.no_proposal a ticket-639 question that carries no block 
     storage.restore();
   }
 });
+
+// ------------------------------------------------------------------------------------------
+// #1093 ITEM 3 — THE SETTLED SURFACE: "Clara proposed, who confirmed". `WorkQuestionForm` is the
+// ONE form rendered on B3/B4/B6 alike (this file's own header), so wiring the departure note here
+// covers every surface that renders a settled fixed-asset particulars question — there is no
+// second copy to keep in step. `AcceptedAnswer` is what renders once `record.status === "answered"`.
+// ------------------------------------------------------------------------------------------
+
+function settledRecord(answer: Record<string, unknown>): WorkQuestionRecord {
+  return record({
+    status: "answered",
+    answer,
+    answered_by: USER,
+    answered_role: "bookkeeper",
+    answered_at: "2026-09-11T00:00:00.000Z",
+  });
+}
+
+test("p933.conversation.settled_departure a settled question shows what Clara proposed beside a field the person confirmed DIFFERENTLY", async () => {
+  const h = await renderComponent(App({ record: settledRecord({
+    method: "straight_line", useful_life_months: "84", residual_cents: 150_000,
+    start_date: "2026-03-01", description: "Air compressor, workshop bay 2",
+  }) }));
+  try {
+    await h.settle();
+    assert.ok(byTestId(h, "work-question-accepted"), "settled_departure: the settled record renders");
+    const confirmedLife = byTestId(h, "work-question-accepted-useful_life_months");
+    assert.match(String((confirmedLife as { textContent?: unknown } | null)?.textContent ?? ""), /84/,
+      "settled_departure: the CONFIRMED value renders where every other settled field already does");
+    const proposedLife = byTestId(h, "work-question-proposed-useful_life_months");
+    assert.ok(proposedLife, "settled_departure: the field Clara proposed differently is annotated");
+    assert.match(String((proposedLife as { textContent?: unknown }).textContent ?? ""), /60/,
+      "settled_departure: the annotation names what CLARA proposed, 60 — never the 84 already shown beside it");
+    assert.ok(!byTestId(h, "work-question-proposed-start_date"),
+      "settled_departure: the in-service date was confirmed AS PROPOSED, so it carries no departure annotation");
+    assert.ok(!byTestId(h, "work-question-proposed-method"),
+      "settled_departure: method was confirmed as proposed too");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("p933.conversation.settled_as_proposed a settled question confirmed EXACTLY as proposed carries no departure annotation anywhere", async () => {
+  const h = await renderComponent(App({ record: settledRecord({
+    method: "straight_line", useful_life_months: "60", residual_cents: 0,
+    start_date: "2026-03-01", description: "Air compressor, workshop bay 2",
+  }) }));
+  try {
+    await h.settle();
+    assert.ok(byTestId(h, "work-question-accepted"));
+    for (const field of FA_FIELDS) {
+      assert.ok(!byTestId(h, `work-question-proposed-${field.key}`),
+        `settled_as_proposed: ${field.key} was confirmed as proposed — nothing departed, nothing to annotate`);
+    }
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("p933.conversation.settled_no_proposal a settled #639 question that carried no proposal renders the accepted answer with no departure annotation at all", async () => {
+  const h = await renderComponent(App({
+    record: {
+      ...settledRecord({ method: "none", start_date: "2026-03-01" }),
+      source_ref: { kind: "fixed_asset", asset_id: ASSET },
+    },
+  }));
+  try {
+    await h.settle();
+    assert.ok(byTestId(h, "work-question-accepted"), "settled_no_proposal: the settled record still renders");
+    for (const field of FA_FIELDS) {
+      assert.ok(!byTestId(h, `work-question-proposed-${field.key}`),
+        `settled_no_proposal: ${field.key} has nothing proposed to depart from — every #639 question opened before claraWork_v6 is this case`);
+    }
+  } finally {
+    await h.unmount();
+  }
+});
