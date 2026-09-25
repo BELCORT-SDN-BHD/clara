@@ -856,3 +856,389 @@ test("p1137.obo.one_op_key_namespace — a chat confirmation replays to a byte-i
       where p.client_id=$1 and p.authority_ref->>'kind'='contract_confirmation'`, [client]);
   assert.equal(plans.rows[0].n, 1, "two entrances under one key left two plans");
 });
+
+// ===========================================================================================
+// S7 — THE ON-BEHALF-OF ESCALATION CONFIRMATION, and the ONE body both lanes now revise through.
+// ===========================================================================================
+
+const REVISION_FOR_SPECS = [
+  { name: "p_client", cast: "uuid" }, { name: "p_author", cast: "uuid" },
+  { name: "p_document", cast: "uuid" }, { name: "p_judgement", cast: "text" },
+  { name: "p_op_key", cast: "text" },
+];
+
+const confirmRevisionFor = async ({ client, author, document, judgement = null, opKey = null }) =>
+  (await roleQuery(ROLES.runtime, namedCall("confirm_tenancy_rent_plan_revision_for", REVISION_FOR_SPECS),
+    [client, author, document, judgement, opKey ?? opk1137("obo-revise")])).rows[0].result;
+
+const confirmRevision = async (sub, { client, document, judgement = null, opKey = null }) =>
+  (await humanQuery(sub, namedCall("confirm_tenancy_rent_plan_revision", [
+    { name: "p_client" }, { name: "p_document" }, { name: "p_judgement" }, { name: "p_op_key" }]),
+    [client, document, judgement, opKey ?? opk1137("revise")])).rows[0].result;
+
+const liveRevision = async (planId) =>
+  (await rootQuery(
+    `select r.revision, r.basis, r.effective_from::text as effective_from,
+            r.effective_to::text as effective_to, r.created_by
+       from clara.accounting_plan_revisions r
+      where r.plan_id=$1 and r.superseded_at is null`, [planId])).rows[0];
+
+const inDays = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+
+/** A confirmed level-rent plan with the escalation recorded AFTERWARDS off the side letter, which
+ *  is the real sequence: the tenancy is read and the plan started, and the rent review is found in
+ *  a clause a person reads for themselves. */
+async function escalatingTenancy(sub, { effectiveFrom = null } = {}) {
+  const { client, doc } = await tenancyFor(sub, { framework: "MPERS" });
+  await recordProposed(sub, client, doc.documentId);
+  const receipt = await confirmPlan(BOB(), { client, document: doc.documentId });
+  await recordTerms(sub, {
+    client, document: doc.documentId,
+    terms: [{
+      term_key: "escalation",
+      escalation: {
+        effective_from: effectiveFrom ?? inDays(30),
+        new_amount_cents: ESCALATED_CENTS, printed_raw: "3,960.00",
+      },
+      basis_kind: "person_stated",
+      basis: "clause 4(b) of the side letter raises the rent in the second year",
+    }],
+  });
+  return { client, doc, planId: receipt.plan_id };
+}
+
+const JUDGEMENT = "The increases follow the landlord's stated index and are within expected general "
+  + "inflation for the term, so the straight-line expense is not materially different from the "
+  + "month's cash rent; charged as incurred under MPERS Section 20.";
+
+test("p1137.revision.obo — the chat lane confirms the escalation's revision on a named bookkeeper's behalf, and the plan moves under THEIR name", async (t) => {
+  if (unready(t)) return;
+  const { client, doc, planId } = await escalatingTenancy(ALICE());
+  const before = await liveRevision(planId);
+  assert.equal(Number(before.revision), 1, "mandatory setup: the plan is on its first revision");
+
+  const receipt = await confirmRevisionFor({
+    client, author: BOB(), document: doc.documentId, judgement: JUDGEMENT });
+
+  assert.ok(receipt.confirmation_id, `the OBO twin returned a receipt: ${JSON.stringify(receipt)}`);
+  assert.equal(receipt.plan_id, planId, "…for the plan the tenancy already runs");
+  assert.equal(Number(receipt.revision), 2, "…and it is the plan's SECOND revision");
+  assert.equal(Number(receipt.from_cents), RENT_CENTS);
+  assert.equal(Number(receipt.to_cents), ESCALATED_CENTS);
+  assert.equal(receipt.professional_judgement, JUDGEMENT,
+    "the accountant's own written treatment is passed through unchanged");
+
+  // THE ACT IS RECORDED AS THE NAMED PERSON'S, on both rows it touches.
+  const cf = await confirmationRow(receipt.confirmation_id);
+  assert.equal(cf.confirmed_by, BOB(), "the revision confirmation names the bookkeeper");
+  assert.equal(cf.kind, "rent_plan_revision");
+  assert.equal(Number(cf.monthly_rent_cents), ESCALATED_CENTS);
+  assert.equal(cf.professional_judgement, JUDGEMENT);
+
+  const after = await liveRevision(planId);
+  assert.equal(Number(after.revision), 2);
+  assert.equal(after.created_by, BOB(), "the plan revision is created by the named bookkeeper");
+  assert.equal(after.effective_from, receipt.effective_from, "…from the escalation's own date");
+  const credit = (after.basis.lines ?? []).find((l) => l.account_code === PAYABLE_ACCOUNT);
+  assert.equal(Number(credit.credit_cents), ESCALATED_CENTS,
+    "the plan now charges the escalated rent, not the old one");
+
+  const audit = (await auditRows(FIRM_A(), "confirm_tenancy_rent_plan_revision"))[0];
+  assert.equal(audit.actor, BOB());
+  assert.equal(audit.args.via, "confirm_tenancy_rent_plan_revision_for");
+});
+
+test("p1137.revision.judgement_required — a stepped rent ALWAYS asks, and the refusal is the branch's own question on BOTH entrances", async (t) => {
+  if (unready(t)) return;
+  const { client, doc, planId } = await escalatingTenancy(ALICE());
+
+  const h = await caught(() => confirmRevision(BOB(), { client, document: doc.documentId }));
+  const o = await caught(() => confirmRevisionFor({ client, author: BOB(), document: doc.documentId }));
+  assert.ok(h, "the human door did NOT ask for a judgement");
+  assert.ok(o, "the OBO twin did NOT ask for a judgement");
+  assert.equal(o.code, h.code);
+  assert.equal(o.message, h.message, "the two entrances ask different questions");
+  assert.deepEqual(detailOf(o), detailOf(h));
+  assert.equal(detailOf(h).reason, "professional_judgement_required");
+  assert.equal(detailOf(h).treatment_reason, "escalation_stated");
+  assert.match(h.message, /straight-line|escalation/i,
+    "the refusal states what the standard asks, in the branch's own words");
+
+  // AND NOTHING MOVED: the model does not supply the judgement, it asks the accountant for one.
+  assert.equal(Number((await liveRevision(planId)).revision), 1, "a refusal revised the plan");
+});
+
+test("p1137.revision.refusals_match — no escalation, not due yet and already revised answer identically on both entrances", async (t) => {
+  if (unready(t)) return;
+
+  async function bothRefuse(label, { client, document }, expect) {
+    const h = await caught(() => confirmRevision(BOB(), { client, document, judgement: JUDGEMENT }));
+    const o = await caught(() => confirmRevisionFor({ client, author: BOB(), document, judgement: JUDGEMENT }));
+    assert.ok(h, `${label}: the human door did NOT refuse`);
+    assert.ok(o, `${label}: the OBO twin did NOT refuse`);
+    assert.equal(o.code, h.code, `${label}: sqlstate differs`);
+    assert.equal(o.message, h.message, `${label}: the sentence differs`);
+    assert.deepEqual(detailOf(o), detailOf(h), `${label}: the typed detail differs`);
+    assert.equal(detailOf(h).reason, expect, `${label}: expected reason ${expect}`);
+    return h;
+  }
+
+  // 1 — A RUNNING PLAN WITH NO ESCALATION RECORDED.
+  const plain = await tenancyFor(ALICE(), { framework: "MPERS" });
+  await recordProposed(ALICE(), plain.client, plain.doc.documentId);
+  await confirmPlan(BOB(), { client: plain.client, document: plain.doc.documentId });
+  await bothRefuse("no_escalation_recorded",
+    { client: plain.client, document: plain.doc.documentId }, "no_escalation_recorded");
+
+  // 2 — AN ESCALATION FURTHER OUT THAN THE SIXTY-DAY LEAD: real, recorded, and not yet the
+  //     person's business.
+  const far = await escalatingTenancy(ALICE(), { effectiveFrom: inDays(120) });
+  const notDue = await bothRefuse("not_due_yet",
+    { client: far.client, document: far.doc.documentId }, "not_due_yet");
+  assert.equal(detailOf(notDue).plan_id, far.planId);
+
+  // 3 — ALREADY REVISED: the plan already charges the escalated rent.
+  const done = await escalatingTenancy(ALICE());
+  await confirmRevisionFor({
+    client: done.client, author: BOB(), document: done.doc.documentId, judgement: JUDGEMENT });
+  await bothRefuse("already_revised",
+    { client: done.client, document: done.doc.documentId }, "already_revised");
+
+  // 4 — THE AUTHORITY LADDER IS THE CONFIRMATION TWIN'S, and it is the same body's.
+  const live = await escalatingTenancy(ALICE());
+  const nullAuthor = await caught(() => confirmRevisionFor({
+    client: live.client, author: null, document: live.doc.documentId, judgement: JUDGEMENT }));
+  assert.equal(detailOf(nullAuthor).reason, "invalid_author");
+  const viewer = await caught(() => confirmRevisionFor({
+    client: live.client, author: CAROL(), document: live.doc.documentId, judgement: JUDGEMENT }));
+  assert.equal(viewer.code, "CLR04");
+  assert.equal(detailOf(viewer).reason, "insufficient_role");
+  const noKey = await caught(() => confirmRevisionFor({
+    client: live.client, author: BOB(), document: live.doc.documentId, judgement: JUDGEMENT, opKey: " " }));
+  assert.equal(detailOf(noKey).reason, "invalid_op_key");
+  assert.equal(Number((await liveRevision(live.planId)).revision), 1, "a refusal revised the plan");
+});
+
+test("p1137.revise.human_door_unchanged — clara.revise_accounting_plan still checks its op key FIRST and still walls a plan to the caller's firm, through clara._plan_door_ctx", async (t) => {
+  if (unready(t)) return;
+  const mine = await escalatingTenancy(ALICE());
+  const args = [
+    { name: "p_plan", cast: "uuid" }, { name: "p_frequency", cast: "text" },
+    { name: "p_day_rule", cast: "text" }, { name: "p_day_of_month", cast: "integer" },
+    { name: "p_timezone", cast: "text" }, { name: "p_effective_from", cast: "date" },
+    { name: "p_effective_to", cast: "date" }, { name: "p_basis", cast: "jsonb" },
+    { name: "p_reversal_day_rule", cast: "text" }, { name: "p_op_key", cast: "text" },
+  ];
+  const revise = (sub, plan, opKey) => humanQuery(sub, namedCall("revise_accounting_plan", args),
+    [plan, "monthly", "day_of_month", 5, "Asia/Kuala_Lumpur", TERM_START, TERM_END, null, null, opKey]);
+
+  // 1 — THE OP KEY IS STILL FIRST: a blank key answers CLR10 even for a caller who could not have
+  //     reached the plan anyway, which is 0193's own order and the reason it is in the delegate.
+  const blank = await caught(() => revise(BOB(), mine.planId, "   "));
+  assert.equal(blank.code, "CLR10");
+  assert.equal(detailOf(blank).reason, "invalid_op_key");
+
+  // 2 — A PLAN OUTSIDE THE CALLER'S FIRM answers clara._plan_door_ctx's OWN refusal, and an
+  //     invented id answers the same, so the split opened no existence oracle.
+  const foreign = await caught(() => revise(DAVE(), mine.planId, opk1137("rev-foreign")));
+  const invented = await caught(() => revise(DAVE(), "00000000-0000-4000-8000-0000000011f1", opk1137("rev-none")));
+  assert.equal(foreign.code, "CLR11");
+  assert.equal(detailOf(foreign).reason, "plan_not_found");
+  assert.equal(foreign.message, invented.message,
+    "another firm's real plan and an invented id must be indistinguishable");
+  assert.equal(Number((await liveRevision(mine.planId)).revision), 1, "a refusal revised the plan");
+});
+
+// ===========================================================================================
+// S9 — THE GRANTS THIS TICKET BOUGHT, AND NOTHING ELSE. Driven role by role, never read off the
+// catalog: an ACL a test only READS is an ACL nobody has proved.
+// ===========================================================================================
+
+const READ_DOORS = () => [
+  { name: "wake_get_contract_terms", specs: DOC_SPECS },
+  { name: "wake_get_tenancy_rent_plan_draft", specs: DOC_SPECS },
+  { name: "wake_propose_contract_terms", specs: DOC_SPECS },
+  { name: "wake_get_tenancy_escalation_revision", specs: DOC_SPECS },
+  { name: "wake_get_rent_settlement_candidates", specs: CLIENT_SPECS },
+  { name: "wake_get_tenancy_deposit_coding", specs: CLIENT_SPECS },
+];
+
+const HUMAN_DOORS = () => [
+  { name: "get_contract_terms", specs: DOC_SPECS },
+  { name: "get_tenancy_rent_plan_draft", specs: DOC_SPECS },
+  { name: "propose_contract_terms", specs: DOC_SPECS },
+  { name: "get_tenancy_escalation_revision", specs: DOC_SPECS },
+  { name: "get_rent_settlement_candidates", specs: CLIENT_SPECS },
+  { name: "get_tenancy_deposit_coding", specs: CLIENT_SPECS },
+];
+
+const NOWHERE = "00000000-0000-4000-8000-0000000011fa";
+
+test("p1137.acl.eight_doors_two_roles — clara_agent_ro holds the six reads and clara_runtime the two acts; every other role is refused 42501 on every one of them, and the ten cores are reachable by nobody", async (t) => {
+  if (unready(t)) return;
+  const { client, doc } = await tenancyFor(ALICE(), { framework: "MPERS" });
+  await recordProposed(ALICE(), client, doc.documentId);
+  const { secret } = await chatCredential();
+
+  // DRIVEN, not read off the catalog: the role that is supposed to hold them does.
+  for (const d of READ_DOORS()) {
+    const arg = d.specs === DOC_SPECS ? doc.documentId : client;
+    assert.ok(await wakeRead(d.name, secret, arg, d.specs) !== undefined,
+      `clara_agent_ro cannot call ${d.name}`);
+  }
+  // …and so does the act lane, on a real clara_runtime connection with no JWT at all.
+  const ok = await confirmFor({ client, author: BOB(), document: doc.documentId });
+  assert.ok(ok.confirmation_id, "clara_runtime cannot call the OBO confirmation");
+
+  // THE SIX READS: every OTHER role, 42501.
+  for (const d of READ_DOORS()) {
+    const arg = d.specs === DOC_SPECS ? doc.documentId : client;
+    for (const role of [ROLES.runtime, ROLES.authenticated, ROLES.wakeInteractive]) {
+      await assertRaises(PG.insufficientPrivilege,
+        () => roleQuery(role, namedCall(d.name, d.specs), [arg]), `${role} on ${d.name}`);
+    }
+  }
+
+  // THE TWO ACTS: every OTHER role, 42501 — and clara_agent_ro above all, because a read role that
+  // could confirm a rent plan would be the agent deciding what it is allowed to do.
+  const acts = [
+    [namedCall("confirm_tenancy_rent_plan_for", CONFIRM_FOR_SPECS),
+     [client, BOB(), doc.documentId, null, null, null, "p1137-never"]],
+    [namedCall("confirm_tenancy_rent_plan_revision_for", REVISION_FOR_SPECS),
+     [client, BOB(), doc.documentId, null, "p1137-never"]],
+  ];
+  for (const [sql, vals] of acts) {
+    for (const role of [ROLES.agentRo, ROLES.authenticated, ROLES.wakeInteractive]) {
+      await assertRaises(PG.insufficientPrivilege, () => roleQuery(role, sql, vals), `${role} on an OBO act`);
+    }
+  }
+
+  // THE TEN CORES: nobody, including the two roles that hold the doors in front of them.
+  const cores = [
+    ["select clara._get_contract_terms_core($1::uuid,$2::uuid)", [FIRM_A(), doc.documentId]],
+    ["select clara._get_tenancy_rent_plan_draft_core($1::uuid,$2::uuid)", [FIRM_A(), doc.documentId]],
+    ["select clara._propose_contract_terms_core($1::uuid,$2::uuid)", [FIRM_A(), doc.documentId]],
+    ["select clara._get_tenancy_escalation_revision_core($1::uuid,$2::uuid)", [FIRM_A(), doc.documentId]],
+    ["select clara._get_rent_settlement_candidates_core($1::uuid,$2::uuid)", [FIRM_A(), client]],
+    ["select clara._get_tenancy_deposit_coding_core($1::uuid,$2::uuid)", [FIRM_A(), client]],
+    ["select clara._confirm_tenancy_rent_plan_core($1::uuid,$2::uuid,'obo',$3::uuid,$4::uuid,null,null,null,'p1137-never')",
+     [FIRM_A(), BOB(), client, doc.documentId]],
+    ["select clara._confirm_tenancy_rent_plan_revision_core($1::uuid,$2::uuid,'obo',$3::uuid,$4::uuid,null,'p1137-never')",
+     [FIRM_A(), BOB(), client, doc.documentId]],
+    ["select clara._revise_accounting_plan_core($1::uuid,$2::uuid,$3::uuid,'monthly','day_of_month',5,'Asia/Kuala_Lumpur',$4::date,$5::date,null,null,'p1137-never')",
+     [FIRM_A(), BOB(), NOWHERE, TERM_START, TERM_END]],
+    ["select clara._tenancy_plan_core($1::uuid,$2::uuid,$3::uuid,'x','explicit_instruction','{}'::jsonb,'monthly','day_of_month',5,'Asia/Kuala_Lumpur',$4::date,$5::date,null)",
+     [FIRM_A(), client, BOB(), TERM_START, TERM_END]],
+  ];
+  for (const [sql, vals] of cores) {
+    for (const role of [ROLES.runtime, ROLES.agentRo, ROLES.authenticated, ROLES.wakeInteractive]) {
+      await assertRaises(PG.insufficientPrivilege, () => roleQuery(role, sql, vals),
+        `${role} on an ungranted core`);
+    }
+  }
+
+  // THE ELEVEN HUMAN DOORS are still closed to the machine lane: the model lane gained NEW NAMES
+  // beside them, never a widened grant on one of them.
+  for (const d of HUMAN_DOORS()) {
+    const arg = d.specs === DOC_SPECS ? doc.documentId : client;
+    for (const role of [ROLES.agentRo, ROLES.runtime, ROLES.wakeInteractive]) {
+      await assertRaises(PG.insufficientPrivilege,
+        () => roleQuery(role, namedCall(d.name, d.specs), [arg]), `${role} on the HUMAN door ${d.name}`);
+    }
+  }
+  const humanActs = [
+    [namedCall("confirm_tenancy_rent_plan", [
+      { name: "p_client", cast: "uuid" }, { name: "p_document", cast: "uuid" },
+      { name: "p_rent_account", cast: "text" }, { name: "p_payable_account", cast: "text" },
+      { name: "p_judgement", cast: "text" }, { name: "p_op_key", cast: "text" }]),
+     [client, doc.documentId, null, null, null, "p1137-never"]],
+    [namedCall("confirm_tenancy_rent_plan_revision", [
+      { name: "p_client", cast: "uuid" }, { name: "p_document", cast: "uuid" },
+      { name: "p_judgement", cast: "text" }, { name: "p_op_key", cast: "text" }]),
+     [client, doc.documentId, null, "p1137-never"]],
+    // …AND THE TWO ACTS THIS TICKET DELIBERATELY DID NOT OPEN. A settlement with two candidate
+    // lines of the same amount is adjudicated where a person can see both; recording a term is
+    // the person's own reading of the page.
+    [namedCall("settle_rent_payable", [
+      { name: "p_client", cast: "uuid" }, { name: "p_entry", cast: "uuid" },
+      { name: "p_line", cast: "uuid" }, { name: "p_op_key", cast: "text" }]),
+     [client, NOWHERE, NOWHERE, "p1137-never"]],
+    [namedCall("record_contract_terms", [
+      { name: "p_client", cast: "uuid" }, { name: "p_document", cast: "uuid" },
+      { name: "p_terms", cast: "jsonb" }, { name: "p_op_key", cast: "text" }]),
+     [client, doc.documentId, "[]", "p1137-never"]],
+    [namedCall("revise_accounting_plan", [
+      { name: "p_plan", cast: "uuid" }, { name: "p_frequency", cast: "text" },
+      { name: "p_day_rule", cast: "text" }, { name: "p_day_of_month", cast: "integer" },
+      { name: "p_timezone", cast: "text" }, { name: "p_effective_from", cast: "date" },
+      { name: "p_effective_to", cast: "date" }, { name: "p_basis", cast: "jsonb" },
+      { name: "p_reversal_day_rule", cast: "text" }, { name: "p_op_key", cast: "text" }]),
+     [NOWHERE, "monthly", "day_of_month", 5, "Asia/Kuala_Lumpur", TERM_START, TERM_END, null, null, "p1137-never"]],
+  ];
+  for (const [sql, vals] of humanActs) {
+    for (const role of [ROLES.agentRo, ROLES.runtime, ROLES.wakeInteractive]) {
+      await assertRaises(PG.insufficientPrivilege, () => roleQuery(role, sql, vals),
+        `${role} on a HUMAN act this ticket did not open`);
+    }
+  }
+
+  // AND THE ALLOWLIST IS SIX ROWS OF ONE KIND, with NOTHING for an act: the OBO twins are runtime
+  // doors, not wake doors, and a wake credential can never reach them.
+  const rows = await rootQuery(
+    `select wake_kind, function_name from clara.wake_fn_allowlist
+      where function_name like 'wake_get_tenancy%' or function_name like 'wake_get_contract%'
+         or function_name like 'wake_propose_contract%' or function_name like 'wake_get_rent%'
+         or function_name like 'confirm_tenancy%'
+      order by function_name`);
+  assert.equal(rows.rows.length, 6, `six allowlist rows and no more: ${JSON.stringify(rows.rows)}`);
+  assert.ok(rows.rows.every((r) => r.wake_kind === "interactive"),
+    "a kind other than `interactive` may call the new reads");
+});
+
+test("p1137.reads.read_only — all six model-lane reads answer inside a READ ONLY transaction, which is the only kind the chat lane's read pool opens, and none of them writes a row", async (t) => {
+  if (unready(t)) return;
+  const { client, doc } = await tenancyFor(ALICE(), { framework: "MPERS" });
+  await recordProposed(ALICE(), client, doc.documentId);
+  await confirmPlan(BOB(), { client, document: doc.documentId });
+  await freshBank(ALICE(), client);
+  const { secret } = await chatCredential();
+
+  const before = (await rootQuery(
+    "select (select count(*) from clara.domain_events) as ev, (select count(*) from clara.op_receipts) as ops, (select count(*) from clara.audit_log) as aud")
+  ).rows[0];
+
+  const answers = await asWake(ROLES.agentRo, secret, async (c) => {
+    await c.query("select set_config('transaction_read_only', 'on', true)");
+    // The control: this transaction really IS read-only, proven by a write that 25006s in it. It
+    // runs inside a savepoint, because a refused statement aborts the transaction it was refused
+    // in and the doors still have to be called in the SAME one.
+    await c.query("savepoint p1137_ro");
+    let refused = null;
+    try { await c.query("create temporary table _p1137_ro_probe(x int)"); }
+    catch (e) { refused = e.code; }
+    await c.query("rollback to savepoint p1137_ro");
+    assert.equal(refused, PG.readOnly, "the read-only probe did not make the transaction read-only");
+    const out = {};
+    for (const d of READ_DOORS()) {
+      const arg = d.specs === DOC_SPECS ? doc.documentId : client;
+      out[d.name] = (await c.query(namedCall(d.name, d.specs), [arg])).rows[0].result;
+    }
+    return out;
+  });
+  assert.equal(answers.wake_get_contract_terms.terms.length, 4, "the terms door answered read-only");
+  assert.equal(answers.wake_get_tenancy_rent_plan_draft.confirmed, true, "the draft door answered read-only");
+  assert.equal(answers.wake_propose_contract_terms.proposed.length, 4, "the proposal door answered read-only");
+  assert.equal(answers.wake_get_tenancy_escalation_revision.pending, false, "the escalation door answered read-only");
+  assert.ok(Array.isArray(answers.wake_get_rent_settlement_candidates), "the rent door answered read-only");
+  assert.equal(answers.wake_get_tenancy_deposit_coding.length, 1, "the deposit door answered read-only");
+
+  // NO ACT, stated as a measurement: these are readings, so none of the estate's three act ledgers
+  // moves. #949's contract says the two read tools mint no work_accepted and ask no work_question;
+  // this is the database half of that promise.
+  const after = (await rootQuery(
+    "select (select count(*) from clara.domain_events) as ev, (select count(*) from clara.op_receipts) as ops, (select count(*) from clara.audit_log) as aud")
+  ).rows[0];
+  assert.equal(after.ev, before.ev, "a model-lane read emitted a domain event");
+  assert.equal(after.ops, before.ops, "a model-lane read wrote an operation receipt");
+  assert.equal(after.aud, before.aud, "a model-lane read wrote an audit row");
+});
