@@ -578,11 +578,10 @@ begin
       -- (`clara._prepayment_schedule_core`) and this one both suffixed their caller's key with the
       -- same four characters, a caller that spent one operation key on both lanes reserved the SAME
       -- receipt row twice with different arguments and was answered `op_key reused with different
-      -- args` — CLR10 with no detail at all, indistinguishable from any other bad request. Note
-      -- that the OUTER reservations never
-      -- collided (their fns differ); only this derived one did. Qualifying it per lane is the fix
-      -- the ticket names first, and it leaves `clara._reserve_op` — which every door in the estate
-      -- rides — untouched.
+      -- args` — CLR10 with no detail at all, indistinguishable from any other bad request. The
+      -- OUTER reservations never collided (their fns differ); only this derived one did.
+      -- Qualifying it per lane is the fix the ticket names first, and it leaves
+      -- `clara._reserve_op` — which every door in the estate rides — untouched.
       p_basis => v_basis, p_reversal_day_rule => null, p_op_key => p_op_key || ':rrplan');
   else
     v_plan := clara._obo_plan_core(
@@ -963,7 +962,7 @@ begin
     p_authority_kind => 'explicit_instruction', p_authority_ref => p_authority_ref,
     p_frequency => 'monthly', p_day_rule => 'last_day_of_month', p_day_of_month => null,
     p_timezone => 'Asia/Kuala_Lumpur', p_effective_from => v_from, p_effective_to => v_to,
-  -- #1077 [0336] — `:rrplan`, this lane's own nested plan key; see the note above the end call.
+    -- #1077 [0336] — `:rrplan`, this lane's own nested plan key; see the note above the end call.
     p_basis => v_basis, p_reversal_day_rule => null, p_op_key => p_op_key || ':rrplan');
   v_plan_id := (v_plan ->> 'plan_id')::uuid;
   v_rev_id  := (v_plan ->> 'revision_id')::uuid;
