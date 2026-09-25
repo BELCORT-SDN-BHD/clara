@@ -320,6 +320,11 @@ export async function handleStaffExpenseClaimSupabase(request, response, path, u
       pending_item_count: row.pending_item_count,
       corrects_claim_id: row.corrects_claim_id,
       corrected_by_claim_id: row.corrected_by_claim_id,
+      // #1069 — none of this fixture's HISTORY rows carry a multi-advance
+      // `advance_allocations` list, so the honest count for every one of them is the real
+      // door's own single-advance answer: 1 for the advance-application row, 0 for every other
+      // settlement (it discharges no advance at all).
+      allocation_count: row.settlement === "advance_application" ? 1 : 0,
     }, cors);
     return true;
   }
