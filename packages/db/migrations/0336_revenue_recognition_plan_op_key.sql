@@ -93,7 +93,9 @@ declare
   -- BY NAME. 0317's and 0335's idiom, line for line.
   v_recut text[][] := array[
     ['clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)',
-     '28bc14e93fc61863b76ae40a47fd30c1d40a30940a9c7997c38c1862a62290dd']
+     '28bc14e93fc61863b76ae40a47fd30c1d40a30940a9c7997c38c1862a62290dd'],
+    ['clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)',
+     'c69273a9b4dadb7274358adcf7c54de4f17c513efd50a394396fe89982c6453e']
   ];
   -- …AND THE PREPAYMENT SIBLINGS THIS FILE MUST NOT MOVE AND DEPENDS ON NOT MOVING. The whole
   -- change is an ASYMMETRY — the deferred-revenue lane's derived keys become its own and the
@@ -133,17 +135,31 @@ begin
     end if;
   end loop;
 
-  -- 3 · THE COLLISION IS REAL AND IT IS WHERE THIS FILE SAYS IT IS. Before the recut, the two
-  --     CREATE cores derive the SAME nested key literal; after it, only the prepayment one does.
-  --     Either state is admissible (a redo has already split them); anything else means the defect
-  --     moved and this file is patching a body that no longer carries it.
+  -- 3 · THE COLLISION IS REAL AND IT IS WHERE THIS FILE SAYS IT IS. Before the recut, all FOUR
+  --     bodies — the two create cores and the two correction doors — derive the same `:plan`
+  --     literal; after it, only the two prepayment ones do. Either state is admissible (a redo has
+  --     already split them); anything else means the defect moved and this file is patching a body
+  --     that no longer carries it.
   select count(*) into v_n from pg_proc p
    where p.oid = any (array[
            'clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)'::regprocedure,
-           'clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)'::regprocedure])
+           'clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text)'::regprocedure,
+           'clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)'::regprocedure,
+           'clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)'::regprocedure])
      and p.prosrc like '%p_op_key || '':plan''%';
+  if v_n not in (2, 4) then
+    raise exception '0336 prestate: expected the four schedule bodies to derive '':plan'' (4 before, 2 after), found %', v_n
+      using errcode='CLR10';
+  end if;
+  --     …and the two CORRECTION doors share `:end` the same way, which is where they actually meet
+  --     first: `clara.end_accounting_plan` is reserved before the plan door is called at all.
+  select count(*) into v_n from pg_proc p
+   where p.oid = any (array[
+           'clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text)'::regprocedure,
+           'clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)'::regprocedure])
+     and p.prosrc like '%p_op_key || '':end''%';
   if v_n not in (1, 2) then
-    raise exception '0336 prestate: expected the two schedule cores to derive '':plan'' (2 before, 1 after), found %', v_n
+    raise exception '0336 prestate: expected the two correction doors to derive '':end'' (2 before, 1 after), found %', v_n
       using errcode='CLR10';
   end if;
 
@@ -165,6 +181,11 @@ end $c0336_pre$;
 -- =====================================================================================
 -- §A — clara._revenue_recognition_core (0317 §B's cut, unmoved by 0335). VERBATIM except the
 --      derived nested plan key on the human arm, and the comment that explains it.
+--
+--      THE OBO ARM IS NOT AFFECTED and is left exactly as it stands: it calls
+--      `clara._obo_plan_core` with no operation key at all (0317:2252-2259 states the reason —
+--      `clara.create_accounting_plan` resolves its actor from a JWT a runtime connection does not
+--      carry), so the machine lane never took a nested reservation and had nothing to collide with.
 -- =====================================================================================
 create or replace function clara._revenue_recognition_core(p_firm uuid, p_client uuid, p_actor uuid, p_lane text, p_source_entry uuid, p_revenue_account text, p_revenue_basis text, p_purpose text, p_authority_ref jsonb, p_op_key text, p_pattern text)
 returns jsonb language plpgsql security definer
@@ -650,12 +671,388 @@ begin
   return clara._finish_op(p_firm, 'create_revenue_recognition_schedule', p_op_key, v_result);
 end $c0336_rrc$;
 -- =====================================================================================
+-- §B — clara.replace_revenue_recognition_schedule (0317 §D's cut, unmoved by 0335). VERBATIM
+--      except the two derived nested keys, and the comments that explain them.
+--
+--      The correction door takes TWO derived reservations, not one: it ends the predecessor plan
+--      through `clara.end_accounting_plan` and opens the successor through
+--      `clara.create_accounting_plan`. Its prepayment sibling derives both from its own caller's
+--      key the same way, so the two corrections met at the FIRST of them. Both move here; both of
+--      the prepayment sibling's stay.
+-- =====================================================================================
+create or replace function clara.replace_revenue_recognition_schedule(
+  p_client uuid, p_schedule uuid, p_reason text, p_authority_ref jsonb, p_op_key text)
+returns jsonb language plpgsql security definer set search_path = clara, pg_temp
+as $c0336_rr$
+declare
+  v_actor uuid; v_firm uuid; v_client_firm uuid; v_client_status text; v_dedupe jsonb;
+  v_s clara.revenue_recognition_schedules; v_entry record; v_plan_row clara.accounting_plans;
+  v_corr jsonb; v_rem jsonb; v_remaining bigint; v_next date;
+  v_new_start date; v_new_end date; v_sched jsonb; v_refusal text; v_lines jsonb;
+  v_paired jsonb := '[]'::jsonb; v_x jsonb; v_n int; v_base bigint; v_from date; v_to date;
+  v_acct record; v_breach jsonb; v_fy record; v_plan jsonb; v_plan_id uuid; v_rev_id uuid;
+  v_memo text; v_basis jsonb; v_eval uuid; v_sid uuid;
+  v_code text; v_detail text; v_reason text; v_constraint text;
+  v_sp_id uuid; v_st_id uuid; v_doc uuid;
+begin
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'replacing a revenue recognition schedule requires its idempotency key'
+      using errcode='CLR10', detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
+  end if;
+  if p_reason is null or btrim(p_reason) = '' then
+    raise exception 'replacing a schedule records why' using errcode='CLR10',
+      detail='{"reason":"invalid_request","field":"reason","constraint":"nonempty"}';
+  end if;
+
+  select a.actor, a.firm into v_actor, v_firm
+    from clara._human_ctx(clara.role_rank('bookkeeper')) a;
+
+  select c.firm_id, c.status into v_client_firm, v_client_status
+    from clara.clients c where c.id = p_client;
+  if v_client_firm is null or v_client_firm <> v_firm then
+    raise exception 'client not found in your firm' using errcode='CLR11',
+      detail='{"reason":"client_not_found"}';
+  end if;
+  if v_client_status <> 'active' then
+    raise exception 'client is not active -- no replacement schedule' using errcode='CLR10',
+      detail='{"reason":"client_inactive"}';
+  end if;
+
+  v_dedupe := clara._reserve_op(v_firm, 'replace_revenue_recognition_schedule', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'schedule', p_schedule,
+      'reason', btrim(p_reason), 'authority', p_authority_ref)));
+  if v_dedupe is not null then
+    if v_dedupe ? 'pending' then
+      raise exception 'this replacement key is held by an in-flight sibling'
+        using errcode='CLR13', detail='{"reason":"operation_in_flight"}';
+    end if;
+    return v_dedupe;
+  end if;
+
+  select s.* into v_s from clara.revenue_recognition_schedules s
+   where s.id = p_schedule and s.client_id = p_client and s.firm_id = v_firm;
+  if v_s.id is null then
+    raise exception 'revenue recognition schedule not found for this client' using errcode='CLR11',
+      detail='{"reason":"revenue_recognition_schedule_not_found"}';
+  end if;
+  if v_s.superseded_at is not null then
+    raise exception 'this schedule has already been replaced'
+      using errcode='CLR13',
+        detail=jsonb_build_object('reason','deferred_revenue_schedule_superseded',
+          'schedule_id', p_schedule, 'superseded_by', v_s.superseded_by)::text;
+  end if;
+
+  perform 1 from clara.accounting_plans where id = v_s.plan_id for update;  -- RUNG 1
+  select * into v_plan_row from clara.accounting_plans where id = v_s.plan_id;
+
+  v_corr := clara._schedule_term_correction(v_s.term_source,
+    coalesce(v_s.stated_term_id, v_s.service_period_id));
+  if v_corr is null then
+    raise exception 'the term carrier this schedule was derived from cannot be read'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_term_underivable',
+          'axis','carrier_missing', 'schedule_id', p_schedule,
+          'term_source', v_s.term_source)::text;
+  end if;
+  if (v_corr ->> 'rode_live')::boolean then
+    raise exception 'the term this schedule was derived from is still the one on record'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_term_not_corrected',
+          'reason_text','the term this schedule was derived from is still the one on record',
+          'axis','term_live', 'schedule_id', p_schedule, 'term_source', v_s.term_source,
+          'remedy', case when v_s.term_source = 'human_stated'
+                         then 'clara.record_prepayment_stated_term'
+                         else 'clara.record_document_service_period' end)::text;
+  end if;
+  if not (v_corr ->> 'moved')::boolean then
+    raise exception 'the term on record states the same two dates this schedule already recognises'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_term_not_corrected',
+          'reason_text','the term on record states the same two dates this schedule already recognises',
+          'axis','term_unmoved', 'schedule_id', p_schedule,
+          'term_start', to_char(v_s.term_start,'YYYY-MM-DD'),
+          'term_end', to_char(v_s.term_end,'YYYY-MM-DD'))::text;
+  end if;
+
+  select je.id, je.status, je.document_id, je.posting_date, je.reversed_by into v_entry
+    from clara.journal_entries je
+   where je.id = v_s.source_entry_id and je.client_id = p_client and je.firm_id = v_firm;
+  if v_entry.id is null then
+    raise exception 'the source receipt is not this client''s' using errcode='CLR10',
+      detail=jsonb_build_object('reason','deferred_revenue_source_unfit',
+        'axis','source_not_found', 'source_entry', v_s.source_entry_id)::text;
+  end if;
+  if v_entry.status <> 'approved' then
+    raise exception 'a recognition schedule recognises a POSTED receipt; this one is %', v_entry.status
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_source_unfit',
+          'axis','source_not_posted', 'source_entry', v_s.source_entry_id,
+          'status', v_entry.status)::text;
+  end if;
+  if v_entry.reversed_by is not null then
+    raise exception 'this receipt has been reversed, so there is nothing left to recognise'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_source_unfit',
+          'reason_text','this receipt has been reversed, so there is nothing left to recognise',
+          'axis','source_reversed', 'source_entry', v_s.source_entry_id,
+          'reversed_by', v_entry.reversed_by)::text;
+  end if;
+
+  v_rem := clara._schedule_open_remainder(v_s.plan_id, v_s.period_lines, v_s.total_cents);
+  v_remaining := (v_rem ->> 'remaining_cents')::bigint;
+  v_next := (v_rem ->> 'next_start')::date;
+  if v_remaining <= 0 then
+    raise exception 'every period of this schedule has already been taken up; nothing is left to re-spread'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_correction_nothing_remaining',
+          'reason_text','every period of this schedule has already been taken up; nothing is left to re-spread',
+          'schedule_id', p_schedule, 'total_cents', v_s.total_cents,
+          'admitted_periods', v_rem -> 'admitted_periods',
+          'admitted_cents', v_rem -> 'admitted_cents')::text;
+  end if;
+  v_new_start := greatest((v_corr ->> 'live_start')::date,
+                          coalesce(v_next, (v_corr ->> 'live_start')::date));
+  v_new_end   := (v_corr ->> 'live_end')::date;
+  if v_new_end < v_new_start then
+    raise exception 'the corrected term ends before the first period this schedule has not taken up'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_correction_no_open_period',
+          'reason_text','the corrected term ends before the first period this schedule has not taken up',
+          'schedule_id', p_schedule,
+          'first_open_period_start', to_char(v_new_start,'YYYY-MM-DD'),
+          'corrected_term_end', to_char(v_new_end,'YYYY-MM-DD'),
+          'admitted_periods', v_rem -> 'admitted_periods')::text;
+  end if;
+
+  select fy.id, fy.starts_on, fy.ends_on into v_fy
+    from clara.fiscal_years fy
+   where fy.client_id = p_client
+     and v_entry.posting_date between fy.starts_on and fy.ends_on;
+  if v_fy.id is null then
+    raise exception 'the source receipt does not sit inside any opened fiscal year for this client'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_term_underivable',
+          'reason_text','the source receipt does not sit inside any opened fiscal year for this client',
+          'missing','fiscal_years', 'source_entry', v_s.source_entry_id)::text;
+  end if;
+  if v_new_end > v_fy.ends_on
+     and not exists (select 1 from clara.fiscal_years nx
+                      where nx.client_id = p_client and nx.starts_on > v_fy.ends_on
+                        and nx.status in ('open', 'reopened')) then
+    raise exception 'the corrected term runs past this fiscal year and no successor year is open yet'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_term_underivable',
+          'reason_text','the corrected term runs past this fiscal year and no successor year is open yet',
+          'missing','fiscal_years.successor', 'fy_ends_on', v_fy.ends_on,
+          'period_end', v_new_end, 'source_entry', v_s.source_entry_id)::text;
+  end if;
+
+  -- The released leg here is a deferred-revenue LIABILITY, which is released by DEBIT — the one
+  -- argument that differs from §C, and the reason `clara.prepayment_schedule_v2` refuses to default
+  -- it (0305: getting that side wrong posts the books backwards).
+  v_sched := clara.prepayment_schedule_v2(v_remaining, v_s.deferred_account_code, 'debit',
+    v_new_start, v_new_end);
+  v_refusal := v_sched ->> 'refusal';
+  if v_refusal is not null then
+    raise exception '%', coalesce(v_sched ->> 'reason', 'this correction cannot be scheduled')
+      using errcode='CLR10',
+        detail=(jsonb_build_object(
+                  'reason', case v_refusal
+                              when 'prepayment_term_underivable' then 'deferred_revenue_term_underivable'
+                              when 'prepayment_source_unfit' then 'deferred_revenue_source_unfit'
+                              else v_refusal end,
+                  'reason_text', v_sched ->> 'reason', 'schedule_id', p_schedule)
+                || (v_sched - 'refusal' - 'reason' - 'schedule_version'))::text;
+  end if;
+  v_lines := v_sched -> 'period_lines';
+  v_n     := (v_sched ->> 'period_count')::int;
+
+  if not clara._prepayment_account_enrolled(p_client, v_s.deferred_account_code, 'deferred_revenue') then
+    raise exception 'account % is not enrolled as a deferred-revenue account for this client',
+      v_s.deferred_account_code
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','deferred_revenue_source_unfit',
+          'reason_text','account ' || v_s.deferred_account_code || ' is not enrolled as a deferred-revenue account for this client',
+          'axis','deferred_account_not_enrolled',
+          'deferred_account_code', v_s.deferred_account_code,
+          'source_entry', v_s.source_entry_id,
+          'remedy','clara.enrol_prepayment_account',
+          'panel','client_registers_prepayment_accounts')::text;
+  end if;
+  v_breach := clara._adj_line_eligibility_breach(p_client,
+    jsonb_build_array(jsonb_build_object('account_code', v_s.deferred_account_code,
+      'debit_cents', 1, 'credit_cents', 0)));
+  if v_breach is not null then
+    raise exception 'account % can no longer carry deferred revenue', v_s.deferred_account_code
+      using errcode='CLR10',
+        detail=(jsonb_build_object('reason','deferred_revenue_source_unfit',
+          'axis','deferred_account_ineligible',
+          'deferred_account_code', v_s.deferred_account_code,
+          'source_entry', v_s.source_entry_id) || jsonb_build_object('breach', v_breach))::text;
+  end if;
+
+  select ca.account_code, ca.account_type, ca.is_active into v_acct
+    from clara.coa_accounts ca
+   where ca.client_id = p_client and ca.account_code = v_s.revenue_account_code;
+  if v_acct.account_code is null or v_acct.account_type <> 'income' then
+    raise exception 'the revenue account this schedule recognises into is no longer an income account on this chart'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','revenue_target_ineligible',
+          'axis', case when v_acct.account_code is null then 'account_unknown'
+                       else 'not_income_class' end,
+          'account_code', v_s.revenue_account_code)::text;
+  end if;
+  v_breach := clara._adj_line_eligibility_breach(p_client,
+    jsonb_build_array(jsonb_build_object('account_code', v_acct.account_code,
+      'debit_cents', 0, 'credit_cents', 1)));
+  if v_breach is not null then
+    raise exception 'account % cannot carry recognised revenue', v_acct.account_code
+      using errcode='CLR10',
+        detail=(jsonb_build_object('reason','revenue_target_ineligible') || v_breach)::text;
+  end if;
+
+  for v_x in select value from jsonb_array_elements(v_lines) loop
+    v_paired := v_paired || jsonb_build_array(v_x
+      || jsonb_build_object('amount_cents', (v_x ->> 'debit_cents')::bigint,
+           'deferred_account_code', v_s.deferred_account_code,
+           'revenue_account_code', v_acct.account_code));
+  end loop;
+  v_from := (v_lines -> 0 ->> 'period_end')::date;
+  v_to   := (v_lines -> (v_n - 1) ->> 'period_end')::date;
+  v_base := (v_lines -> 0 ->> 'debit_cents')::bigint;
+  v_memo := 'Deferred revenue recognition: ' || btrim(v_plan_row.purpose);
+  v_basis := jsonb_build_object(
+    'posting_date', to_char(v_from, 'YYYY-MM-DD'), 'memo', v_memo, 'currency', 'MYR',
+    'lines', jsonb_build_array(
+      jsonb_build_object('account_code', v_s.deferred_account_code, 'debit_cents', v_base,
+        'credit_cents', 0, 'description', 'deferred revenue released'),
+      jsonb_build_object('account_code', v_acct.account_code, 'debit_cents', 0,
+        'credit_cents', v_base, 'description', 'revenue recognised')));
+  begin
+    perform clara._assert_journal_basis(v_basis);
+  exception when others then
+    get stacked diagnostics v_code = returned_sqlstate, v_detail = pg_exception_detail;
+    begin
+      v_reason := (v_detail::jsonb) ->> 'reason';
+      v_constraint := (v_detail::jsonb) ->> 'constraint';
+    exception when others then
+      v_reason := null; v_constraint := null;
+    end;
+    if v_reason = 'invalid_basis' and v_base <= 0 then
+      raise exception 'the remaining balance recognises nothing in at least one period: % cents over % periods truncates to a base of 0', v_remaining, v_n
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','deferred_revenue_amount_below_period_granularity',
+            'constraint', v_constraint, 'owner', 'clara._assert_journal_basis',
+            'total_cents', v_remaining, 'period_count', v_n, 'base_cents', v_base)::text;
+    end if;
+    raise;
+  end;
+
+  -- #1077 [0336] — AND THE END KEY IS THIS LANE'S OWN TOO (`:rrend`, not `:end`), for the same
+  -- reason and one step earlier: `clara.replace_prepayment_schedule` suffixes ITS caller's key with
+  -- the same four characters this line used to, and `clara.end_accounting_plan` reserves under one
+  -- fn for every lane, so two corrections sharing one operation key collided HERE — before either
+  -- of them ever reached the plan door below. AC1 asks that the two lanes' nested plan reservations
+  -- no longer share a namespace; leaving this one shared would make that false at the first
+  -- reservation either correction takes.
+  perform clara.end_accounting_plan(v_s.plan_id, btrim(p_reason), p_op_key || ':rrend');
+
+  v_plan := clara.create_accounting_plan(
+    p_client => p_client, p_kind => 'revenue_recognition_schedule',
+    p_purpose => btrim(v_plan_row.purpose),
+    p_authority_kind => 'explicit_instruction', p_authority_ref => p_authority_ref,
+    p_frequency => 'monthly', p_day_rule => 'last_day_of_month', p_day_of_month => null,
+    p_timezone => 'Asia/Kuala_Lumpur', p_effective_from => v_from, p_effective_to => v_to,
+  -- #1077 [0336] — `:rrplan`, this lane's own nested plan key; see the note above the end call.
+    p_basis => v_basis, p_reversal_day_rule => null, p_op_key => p_op_key || ':rrplan');
+  v_plan_id := (v_plan ->> 'plan_id')::uuid;
+  v_rev_id  := (v_plan ->> 'revision_id')::uuid;
+  perform 1 from clara.accounting_plans where id = v_plan_id for update;  -- RUNG 1
+
+  select e.id into v_eval from clara.evaluator_versions e
+   where e.evaluator_name = 'prepayment_schedule'
+     and e.entrypoint_signature = 'clara.prepayment_schedule_v2(bigint,text,text,date,date)'
+   order by e.version desc limit 1;
+
+  v_sid := gen_random_uuid();
+  update clara.revenue_recognition_schedules
+     set superseded_by = v_sid, superseded_at = now()
+   where id = p_schedule;
+  v_sp_id := case when v_s.term_source = 'document_service_period'
+                  then (v_corr ->> 'live_id')::uuid else null end;
+  v_st_id := case when v_s.term_source = 'human_stated'
+                  then (v_corr ->> 'live_id')::uuid else null end;
+  v_doc   := case when v_s.term_source = 'document_service_period'
+                  then (v_corr ->> 'live_document_id')::uuid else null end;
+  insert into clara.revenue_recognition_schedules(id, firm_id, client_id, plan_id, plan_kind,
+      revision, source_entry_id, deferred_account_code, revenue_account_code,
+      revenue_account_basis, service_period_id, document_id, term_start, term_end, basis_kind,
+      period_lines, total_cents, period_count, remainder_placement, recognition_pattern,
+      schedule_version, evaluator_version_id, created_by, term_source, stated_term_id,
+      replaces_schedule_id)
+    values (v_sid, v_firm, p_client, v_plan_id, 'revenue_recognition_schedule',
+      (v_plan ->> 'revision')::int, v_s.source_entry_id, v_s.deferred_account_code,
+      v_acct.account_code, v_s.revenue_account_basis,
+      v_sp_id, v_doc, v_new_start, v_new_end,
+      coalesce(v_corr ->> 'live_basis_kind', v_s.basis_kind), v_paired,
+      v_remaining, v_n, coalesce(v_sched ->> 'remainder_placement', 'final_period'),
+      -- The pattern is carried forward, and it is the one this estate offers. #941 decision 2:
+      -- anything but straight line is a typed refusal at the create door, so there is no second
+      -- pattern a correction could ever be asked to preserve.
+      v_s.recognition_pattern,
+      coalesce(v_sched ->> 'schedule_version', 'v2'), v_eval, v_actor,
+      v_s.term_source, v_st_id, p_schedule);
+
+  perform clara._audit(v_firm, v_actor, null, null, 'replace_revenue_recognition_schedule', null,
+    jsonb_build_object('client', p_client, 'replaced_schedule', p_schedule,
+      'replaced_plan', v_s.plan_id, 'schedule', v_sid, 'plan', v_plan_id,
+      'source_entry', v_s.source_entry_id, 'term_source', v_s.term_source,
+      'term_carrier', v_corr ->> 'live_id',
+      'admitted_periods', v_rem -> 'admitted_periods',
+      'admitted_cents', v_rem -> 'admitted_cents',
+      'remaining_cents', v_remaining, 'periods', v_n, 'op_key', p_op_key));
+
+  return clara._finish_op(v_firm, 'replace_revenue_recognition_schedule', p_op_key,
+    jsonb_build_object(
+      'schedule_id', v_sid, 'replaces_schedule_id', p_schedule,
+      'replaced_plan_id', v_s.plan_id,
+      'plan_id', v_plan_id, 'revision_id', v_rev_id, 'revision', (v_plan ->> 'revision')::int,
+      'status', v_plan ->> 'status', 'kind', 'revenue_recognition_schedule',
+      'client_id', p_client, 'source_entry_id', v_s.source_entry_id, 'document_id', v_doc,
+      'service_period_id', v_sp_id, 'term_source', v_s.term_source, 'stated_term_id', v_st_id,
+      'basis_kind', coalesce(v_corr ->> 'live_basis_kind', v_s.basis_kind),
+      'term_start', to_char(v_new_start, 'YYYY-MM-DD'),
+      'term_end', to_char(v_new_end, 'YYYY-MM-DD'),
+      'deferred_account_code', v_s.deferred_account_code,
+      'revenue_account_code', v_acct.account_code,
+      'revenue_account_basis', v_s.revenue_account_basis,
+      'recognition_pattern', v_s.recognition_pattern,
+      'total_cents', v_remaining, 'period_count', v_n,
+      'admitted_periods', (v_rem ->> 'admitted_periods')::int,
+      'admitted_cents', (v_rem ->> 'admitted_cents')::bigint,
+      'first_open_period_start', to_char(v_new_start, 'YYYY-MM-DD'),
+      'remainder_placement', coalesce(v_sched ->> 'remainder_placement', 'final_period'),
+      'schedule_version', coalesce(v_sched ->> 'schedule_version', 'v2'),
+      'period_lines', v_paired,
+      'frequency', 'monthly', 'day_rule', 'last_day_of_month', 'day_of_month', null,
+      'timezone', 'Asia/Kuala_Lumpur',
+      'effective_from', to_char(v_from, 'YYYY-MM-DD'), 'effective_to', to_char(v_to, 'YYYY-MM-DD'),
+      'next_occurrences', v_plan -> 'next_occurrences',
+      'overlap_warning', v_plan -> 'overlap_warning',
+      'configuration_only', true));
+end $c0336_rr$;
+-- =====================================================================================
 -- §C — TAIL. Read off the LIVE catalog, never off this file's own text.
 -- =====================================================================================
 do $c0336_tail$
 declare v_src text; v_n int; v_sig text;
   v_mine text[] := array[
-    'clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)'
+    'clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)',
+    'clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)'
+  ];
+  v_theirs text[] := array[
+    'clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)',
+    'clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text)'
   ];
 begin
   -- 1 · THE DEFERRED-REVENUE LANE DERIVES ITS OWN KEYS AND NO LONGER DERIVES THE PREPAYMENT
@@ -672,15 +1069,38 @@ begin
     if v_src like '%p_op_key || '':plan''%' then
       raise exception '0336 tail: % still derives '':plan''', v_sig using errcode='CLR10';
     end if;
+    if v_src like '%p_op_key || '':end''%' then
+      raise exception '0336 tail: % still derives '':end''', v_sig using errcode='CLR10';
+    end if;
   end loop;
-
-  -- 2 · THE PREPAYMENT LANE IS UNTOUCHED. Its core still derives `:plan` and has not learned this
-  --     file's keys, which is the whole of the asymmetry the fix consists of.
+  -- …and the correction door, which is the only one of the two that ends a predecessor, derives
+  -- `:rrend` for it.
   select p.prosrc into v_src from pg_proc p
-   where p.oid = 'clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)'::regprocedure;
-  if v_src not like '%p_op_key || '':plan''%' or v_src like '%:rrplan%' or v_src like '%:rrend%' then
-    raise exception '0336 tail: the prepayment core lost '':plan'' or learned this file''s keys'
+   where p.oid = 'clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)'::regprocedure;
+  if v_src not like '%p_op_key || '':rrend''%' then
+    raise exception '0336 tail: the deferred-revenue correction door does not derive '':rrend'''
       using errcode='CLR10';
+  end if;
+
+  -- 2 · THE PREPAYMENT LANE IS UNTOUCHED. Both its bodies still derive `:plan` (and the correction
+  --     door still derives `:end`), and neither has learned this file's keys. That asymmetry is the
+  --     whole of the fix.
+  foreach v_sig in array v_theirs loop
+    select p.prosrc into v_src from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_src is null then
+      raise exception '0336 tail: % is absent', v_sig using errcode='CLR10';
+    end if;
+    if v_src not like '%p_op_key || '':plan''%' then
+      raise exception '0336 tail: % lost '':plan''', v_sig using errcode='CLR10';
+    end if;
+    if v_src like '%:rrplan%' or v_src like '%:rrend%' then
+      raise exception '0336 tail: % learned this file''s keys', v_sig using errcode='CLR10';
+    end if;
+  end loop;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text)'::regprocedure;
+  if v_src not like '%p_op_key || '':end''%' then
+    raise exception '0336 tail: the prepayment correction door lost '':end''' using errcode='CLR10';
   end if;
 
   -- 3 · NO BODY IN THE ESTATE DERIVES BOTH NAMESPACES, and `:rrplan`/`:rrend` are derived by this
@@ -703,9 +1123,11 @@ begin
       using errcode='CLR10';
   end if;
 
-  -- 4 · NOTHING ELSE MOVED. No overload was minted and the ACL is exactly what 0317 left: the core
-  --     is an INTERNAL body no application role reaches, and `create or replace function` preserves
-  --     a grant rather than granting one.
+  -- 4 · NOTHING ELSE MOVED. No overload was minted, and the two ACLs are exactly 0317's: the core
+  --     is an INTERNAL body no application role reaches, and the correction door is
+  --     `clara_authenticated`'s alone — no machine lane and no wake wrapper, which #941 AC3 decided
+  --     and this file has no standing to change. `create or replace function` preserves a grant
+  --     rather than granting one; this re-measures both rather than trusting it.
   foreach v_sig in array v_mine loop
     select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'clara' and p.proname = split_part(split_part(v_sig, '.', 2), '(', 1);
@@ -723,6 +1145,24 @@ begin
     raise exception '0336 tail: a role reached the deferred-revenue core, which is ungranted by design'
       using errcode='CLR10';
   end if;
+  if not has_function_privilege('clara_authenticated',
+       'clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)'::regprocedure, 'EXECUTE') then
+    raise exception '0336 tail: clara_authenticated lost EXECUTE on the deferred-revenue correction door'
+      using errcode='CLR10';
+  end if;
+  if has_function_privilege('clara_runtime',
+       'clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)'::regprocedure, 'EXECUTE')
+     or has_function_privilege('clara_agent_ro',
+       'clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)'::regprocedure, 'EXECUTE')
+     or has_function_privilege('clara_wake_interactive',
+       'clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)'::regprocedure, 'EXECUTE')
+     or has_function_privilege('clara_wake_proactive',
+       'clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)'::regprocedure, 'EXECUTE')
+     or has_function_privilege('public',
+       'clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)'::regprocedure, 'EXECUTE') then
+    raise exception '0336 tail: a machine lane reached the deferred-revenue correction door'
+      using errcode='CLR10';
+  end if;
 
-  raise notice '0336 OK: the deferred-revenue lane derives its own nested plan key (op_key || '':rrplan''), the prepayment lane still derives op_key || '':plan'', no clara body derives both namespaces, and nothing else about either lane moved.';
+  raise notice '0336 OK: the deferred-revenue lane derives its own nested plan keys (op_key || '':rrplan'' and, on the correction door, op_key || '':rrend''), the prepayment lane still derives op_key || '':plan'' and op_key || '':end'', no clara body derives both namespaces, and neither lane''s grants, tokens or normal idempotency moved.';
 end $c0336_tail$;

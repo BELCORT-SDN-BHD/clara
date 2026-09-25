@@ -23,6 +23,7 @@ import {
   assertDeferredLanePresent, endPool, opk,
   deferredRevenueScene, createRecognitionSchedule, recordStatedTerm,
   createPrepaymentSchedule, opReceiptsFor,
+  replaceRecognitionSchedule, replacePrepaymentSchedule, recordPeriod, monthEndAfter,
 } from "./revenue-recognition-fixtures.mjs";
 import {
   RR_PLAN_OP_KEY_GATE, RR_PLAN_OP_KEY_STEM, rrPlanOpKeyApplied,
@@ -30,7 +31,7 @@ import {
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 1;
+const EXPECTED_CELLS = 2;
 
 before(async () => { ready = await rrPlanOpKeyApplied().catch(() => false); });
 
@@ -109,4 +110,73 @@ async () => {
     "the deferred-revenue lane reserves its nested plan under a key of its own");
   assert.equal(deferredNested.length, 1,
     "…and exactly one row, so the lane really took the reservation rather than skipping it");
+});
+
+// ===========================================================================================
+// AC1 / AC2 — THE CORRECTION DOORS, which collide one step EARLIER than the create pair: on the
+// derived key they hand `clara.end_accounting_plan` before they ever reach the plan door.
+// ===========================================================================================
+
+cell("p1077.cross_lane.replace — one operation key spent on both correction doors replaces BOTH "
+  + "schedules: each lane ends its predecessor and opens its successor under its own derived keys, "
+  + "and the four reservations stand as four rows rather than colliding on two",
+async () => {
+  const scene = await deferredRevenueScene("xlanereplace", {
+    cents: 90000, termMonthsBack: 4, termMonths: 3 });
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt,
+    start: scene.termStart, end: scene.termEnd,
+    reason: "#1077 battery: the member said three months when they paid" });
+
+  // Two schedules, each configured under ITS OWN key — the collision this cell is about is the
+  // CORRECTION pair's, and configuring them under one key would measure the create pair again.
+  const madePrepaid = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.entry, expenseAccount: scene.target,
+    authorityRef: scene.authorityRef, opKey: opk("p1077-pcreate") });
+  const madeDeferred = await createRecognitionSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt, revenueAccount: scene.revenue,
+    authorityRef: scene.authorityRef, opKey: opk("p1077-dcreate") });
+
+  // BOTH TERMS ARE CORRECTED, each through its own carrier's door: the prepayment schedule rode a
+  // DOCUMENT service period, the deferred-revenue one a person's STATED term. Two months instead of
+  // three, so the correction stays inside the fiscal year the scene opened.
+  const shorter = await monthEndAfter(scene.termStart, 1);
+  assert.notEqual(shorter, scene.termEnd, "the correction really moves the term");
+  await recordPeriod(scene.bob, {
+    document: scene.document, start: scene.termStart, end: shorter,
+    basis: "#1077 battery: the invoice's own term is two months, not three" });
+  await recordStatedTerm(scene.bob, {
+    client: scene.client, sourceEntry: scene.receipt, start: scene.termStart, end: shorter,
+    reason: "#1077 battery: the member's agreement ran two months, not three" });
+
+  // ONE KEY, BOTH CORRECTIONS.
+  const shared = opk("p1077-shared-rep");
+
+  const repPrepaid = await replacePrepaymentSchedule(scene.bob, {
+    client: scene.client, schedule: madePrepaid.schedule_id,
+    authorityRef: scene.authorityRef, opKey: shared });
+  assert.ok(repPrepaid.schedule_id, "the prepayment lane opened its replacement");
+
+  const repDeferred = await replaceRecognitionSchedule(scene.bob, {
+    client: scene.client, schedule: madeDeferred.schedule_id,
+    authorityRef: scene.authorityRef, opKey: shared });
+  assert.ok(repDeferred.schedule_id,
+    "the deferred-revenue correction is admitted on a key the prepayment correction already spent");
+  assert.notEqual(repDeferred.plan_id, repPrepaid.plan_id,
+    "the two corrections wrote two different plans, so neither replayed the other's receipt");
+
+  // FOUR NESTED RESERVATIONS, in two namespaces of two. Before 0336 the two lanes shared `:end` and
+  // `:plan`, so the second correction met the first's rows.
+  assert.deepEqual((await opReceiptsFor(scene.firm, `${shared}:end`)).map((r) => r.fn),
+    ["end_accounting_plan"], "the prepayment correction keeps `:end`");
+  assert.deepEqual((await opReceiptsFor(scene.firm, `${shared}:plan`)).map((r) => r.fn),
+    ["create_accounting_plan"], "…and `:plan`");
+  assert.deepEqual((await opReceiptsFor(scene.firm, `${shared}:rrend`)).map((r) => r.fn),
+    ["end_accounting_plan"], "the deferred-revenue correction ends its predecessor under its own key");
+  assert.deepEqual((await opReceiptsFor(scene.firm, `${shared}:rrplan`)).map((r) => r.fn),
+    ["create_accounting_plan"], "…and opens its successor under its own key");
+
+  // AND THE TWO OUTER RESERVATIONS, which never collided, are still one per door.
+  assert.deepEqual((await opReceiptsFor(scene.firm, shared)).map((r) => r.fn).sort(),
+    ["replace_prepayment_schedule", "replace_revenue_recognition_schedule"]);
 });

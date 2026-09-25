@@ -7359,3 +7359,115 @@ five times during the vertical-slice loop and the vacuity controls (`3 FIRST, 1 
 its pre-image by hand). Every redo landed on the same checksum
 `439962ebd877cc5376dbda790fdf75d0b4f2fbee63f431863331924ffd063f11`, from BOTH pre-images, which is
 what "safe over its own effects" has to mean.
+
+## 0336 — two lanes derived the same nested idempotency key, so one operation key spent on both collided (#1077, riders sweep wave, lane 02)
+
+`clara._reserve_op` ([0004_governed_fns.sql](migrations/0004_governed_fns.sql) line 47) keys an
+operation receipt on `(firm_id, fn, op_key)` and is the reserve-before-effect primitive every
+governed door in this estate rides. A door that nests ANOTHER door inside itself therefore has to
+hand that inner door an operation key of its own, and this estate's convention is to derive it —
+`p_op_key || ':<suffix>'`. Both schedule lanes write their underlying accounting plan through
+0193's own human door, and both derived it with the SAME suffix:
+
+| body | derived key, before 0336 | the fn it reserves under |
+|---|---|---|
+| `clara._prepayment_schedule_core` (human arm) | `<key>:plan` | `create_accounting_plan` |
+| `clara._revenue_recognition_core` (human arm) | `<key>:plan` | `create_accounting_plan` |
+| `clara.replace_prepayment_schedule` | `<key>:end`, then `<key>:plan` | `end_accounting_plan`, `create_accounting_plan` |
+| `clara.replace_revenue_recognition_schedule` | `<key>:end`, then `<key>:plan` | `end_accounting_plan`, `create_accounting_plan` |
+
+The OUTER reservations never collided: each door reserves under its own `fn`. The DERIVED ones did.
+A caller that spends one operation key on both lanes — a run deriving its keys from a shared seed is
+#1077's own example — inserted `(firm, 'create_accounting_plan', '<key>:plan')` on the first lane,
+and the second lane met that row with a different request hash and was answered
+`op_key reused with different args` under **CLR10 with no detail at all**: indistinguishable from
+any other bad request, and naming neither the lane, the key, nor the fact that a reservation was
+reused. Measured on the lane rig before the fix, at both pairs of doors.
+
+### The fix: the deferred-revenue lane's derived keys become its own
+
+    prepayment lane      <key>:plan      <key>:end        unchanged
+    deferred-revenue     <key>:rrplan    <key>:rrend      0336
+
+#1077 offers two remedies and this file takes the first. The second — giving `clara._reserve_op`'s
+reuse raise a typed reason — would only make the collision legible, and it would change what dozens
+of unrelated doors answer for a genuine retry-with-different-arguments, because that raise is the
+shared one. Qualifying the key REMOVES the collision, and the ticket names that arm first ("for
+example `:rrplan` for the deferred-revenue lane, keeping `:plan` for prepayment"). The
+deferred-revenue lane moves because the ticket names it as the one to move, so no schedule already
+configured on the prepayment lane changes the key it reserved.
+
+**The correction door is in scope, and that is not a widening.** AC1 asks that "the two lanes'
+nested plan reservations no longer share a key namespace". The two correction doors meet at `:end`
+one step BEFORE they reach the plan door, so leaving that one shared would make AC1 false at the
+first reservation either of them takes. Both of the deferred-revenue door's derived keys move; both
+of its prepayment sibling's stay.
+
+**The on-behalf-of arm was never affected.** `clara._revenue_recognition_core`'s machine lane calls
+`clara._obo_plan_core` with no operation key at all — 0317 states the reason at lines 2252-2259:
+`clara.create_accounting_plan` resolves its actor from a JWT a runtime connection does not carry —
+so it never took a nested reservation and had nothing to collide with. The same is true of the
+prepayment core's OBO arm (0317:1752-1756 says so in its own prose).
+
+**Normal idempotency is untouched (#1077 AC3).** A true retry — the same door, the same key, the
+same arguments — is answered by the OUTER reservation, which this file does not touch: the door
+replays its stored result and never reaches the nested call at all. A retry with DIFFERENT arguments
+is still refused by that same outer reservation with the same message. Both are driven in
+`p1077.same_lane.idempotent` (`tests/revenue-recognition-plan-op-key.test.mjs`).
+
+**No receipt is backfilled.** Rows already written under `<key>:plan` by the deferred-revenue lane
+stay as they are. They are historical records of acts that happened, the outer receipt is what a
+retry of those acts replays from, and rewriting an idempotency ledger to match a later naming
+decision would be the more dangerous act. The one residue is that a NEW prepayment schedule using an
+operation key an OLD deferred-revenue schedule already spent still meets that old `<key>:plan` row;
+that is the pre-0336 collision surviving in data rather than in code, and it shrinks to nothing as
+keys are spent once.
+
+### What 0336 recuts, and what it refuses to touch
+
+Two `create or replace function` statements — `clara._revenue_recognition_core` and
+`clara.replace_revenue_recognition_schedule` — each VERBATIM from its live 0317 cut (0335 moved
+neither) except the derived key literals and the comments that explain them.
+
+It does **not** touch `clara._reserve_op`, `clara.create_accounting_plan` or
+`clara.end_accounting_plan` — not a line, and not a sha pin either. That the two nested reservations
+really land under those two fns is proved by DRIVING the doors and reading `clara.op_receipts`
+(`p1077.cross_lane.create`, `p1077.cross_lane.replace`), never by pinning a body another lane of
+this wave writes.
+
+It mints no function, no relation, no grant, no role and no reason token. The tail re-measures both
+ACLs: the core stays ungranted to every application role, and the correction door stays
+`clara_authenticated`'s alone with no machine lane and no wake wrapper, which is #941 AC3's decision
+and not this file's to change.
+
+### The prestate pins (measured on the riders sweep lane-02 database, 310 files, max 0335)
+
+| signature | pre-image `sha256(prosrc)` |
+|---|---|
+| `clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)` | `28bc14e93fc61863b76ae40a47fd30c1d40a30940a9c7997c38c1862a62290dd` |
+| `clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)` | `c69273a9b4dadb7274358adcf7c54de4f17c513efd50a394396fe89982c6453e` |
+| `clara._prepayment_schedule_core(…)` — must NOT move | `87fc7e25d9e872e593d7c1c1e6fd6afb2a6373a25b868d711c62f99d73fef79a` |
+| `clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text)` — must NOT move | `ed859dbe813067464a7635d6775c823a36c3f400b59f326952fb22c6ce34e699` |
+
+Each recut body admits exactly two pre-images of its own — its pinned sha, or a body already
+carrying this file's `0336` attribution — so a redo is admitted and real drift still refuses by name.
+The prestate also asserts that the four schedule bodies share the `:plan` suffix before the file runs
+(and that the two correction doors share `:end`), and that `:rrplan` and `:rrend` are derived by
+nothing in the estate outside this file's two bodies.
+
+**The rule for a future lane.** A door that nests a plan door inside itself derives a suffix that is
+its OWN lane's, not `:plan`. The tail holds it for these four bodies: no `clara` body may derive both
+namespaces, and `:rrplan`/`:rrend` may be derived by 0336's two bodies and by nothing else.
+`tests/revenue-recognition-plan-op-key.test.mjs`'s census cell holds the same statement against the
+live catalog after any later recut.
+
+**The suffix namespace is wider than these two lanes, and 0336 does not claim otherwise.**
+`clara.create_accrual_adjustment`, `clara.correct_accrual_adjustment` and
+`clara.confirm_tenancy_rent_plan` also derive `:plan` from their callers' keys. #1077 names the
+prepayment and deferred-revenue pair and only that pair, so those three are left alone and recorded
+as a follow-up rather than swept in silently.
+
+**Redo-safe by construction (#957).** Every statement is `create or replace function`. Both branches
+were exercised on the lane database: the FIRST APPLY of the complete file with both bodies put back
+at their 0317 pre-images by hand (prestate reported `2 FIRST, 0 REDO`), and the REDO branch through
+`CLARA_MIGRATION_REDO=0336_revenue_recognition_plan_op_key`.
