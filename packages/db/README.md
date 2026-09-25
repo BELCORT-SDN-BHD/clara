@@ -10558,3 +10558,115 @@ the relation's own grants are unmoved (0338's tail assertion, re-read); both WRI
 `clara_authenticated`'s alone across all five machine principals; the recut withdraw door still
 carries 0338's whole refusal vocabulary and its reservation pair; it names no plan-state verb; and
 no wake wrapper reaches the deferred-revenue core.
+
+## 0363 — a granted, document-scoped read of the payroll posting verdict (#1148, riders closing wave, lane 01)
+
+[0363_payroll_posting_state_read.sql](migrations/0363_payroll_posting_state_read.sql) mints ONE
+door: `clara.get_payroll_posting_state(uuid)`. Source: candidate C15 of the sweep wave's follow-up
+list, which is #1048's own report `waveS-lane04-ticket1048.md` section 10 follow-up 1.
+
+**What #1048 left.** `clara._payroll_posting_verdict(uuid)` ([0297](migrations/0297_payroll_summary_posting.sql),
+recut by [0343](migrations/0343_payroll_completeness_witness.sql) SectionH) holds the whole answer — the
+sentence naming what stopped the post, the verdict, the rung, the reason and the completeness
+state — and is **ungranted**: 0297 revokes it from public and nothing ever granted it. It is
+reached from `clara._post_payroll_run`, `clara._list_review_queue_core` and
+`clara.answer_payroll_completeness` alone, so the ONLY way to see the verdict was a Needs-you queue
+row (firm-wide or client-scoped) or the entry's own receipt. A document page that wanted to say
+*"this payslip did not post because …"* had no read to call, which is why #1048's own tool contract
+(section 9.2 of that report) had to ask `clara.list_review_queue` with a client scope and a row-kind
+filter rather than asking about the document it actually has.
+
+| section | object | what it is |
+|---|---|---|
+| 0 | prestate | six checks (below) |
+| A | `clara.get_payroll_posting_state(uuid)` | the document page's read — STABLE SECURITY DEFINER, `clara_authenticated`, VIEWER floor, firm-scoped |
+| Z | tail | 5 assertions, all off the live catalog |
+
+**The floor is VIEWER, and that is a decision rather than a default.** Every member of a firm may
+already see the document, its filing, its entries and the Needs-you row this sentence is derived
+for; a higher floor would make the document page say LESS about a payslip than the queue already
+says about the same payslip. The floor is the estate's one body, `clara._human_ctx`, and this door
+adds nothing to it. Note what that means for the ticket's *"a caller below the viewer floor is
+refused"* criterion: `clara.role_rank` puts viewer at **0** and
+`clara.firm_memberships_role_check` admits no fifth string, so there is no ROLE below this floor.
+The reachable arms are *no authenticated actor* and *no active membership*, both CLR04 from
+`clara._human_ctx`, and both are driven in `tests/payroll-posting-state-read.test.mjs`
+(`p1148.read.floor`). The third arm that body raises — *insufficient role* — is unreachable here
+and is named in the cell so the next reader does not go looking for a test that cannot exist.
+
+**The wall is `clara.documents.firm_id`, asked before anything about the document is read.** The
+internal takes no firm and cannot: every body that calls it has already resolved one. A
+document-scoped read cannot borrow that, so it asks the question itself, exactly as
+`clara.answer_payroll_completeness` (0343 SectionK) does and for the same stated reason — a document
+id that is not this firm's must not be distinguishable from one that does not exist. Both raise the
+SAME CLR11 at ONE place. `p1148.read.no_oracle` compares every discriminant a caller can see (code,
+message, detail, hint, constraint, table, column) and requires them byte-identical.
+
+**And then the door's own subject, which is the one refusal a surface answers with silence.** The
+brief's desired behaviour is a wrapper that answers *"the posting state of ONE PAYROLL SUMMARY
+document"*. Handed an invoice, the verdict underneath would answer `facts_read / payroll_not_read`
+— *"This payroll summary has not been read yet."* said over a supplier bill. SectionA therefore
+refuses `CLR10` + `{"reason":"not_a_payroll_summary"}` instead. That refusal is deliberately **not**
+the CLR11 above: the document IS the caller's firm's and its `document_kind` is already theirs to
+read, so "not found" would be the lie here, and the wall above has already decided the only question
+a stranger may ask. The web panel gates on the kind it already holds, so the refusal is a wall
+rather than a banner (`apps/web/components/documents/payroll-posting-section.tsx`).
+
+**What it projects, and what it leaves behind.** `sentence`, `verdict`, `rung`, `reason`,
+`completeness` — the brief's own list — plus `document_id`, which is the caller's own argument
+echoed back and carries no information they did not supply. It does **not** project `rung_vector`
+(the evaluator's internal ladder), nor `detail`, `plan`, `client_id`, `firm_id`, `filing_id`,
+`source_doc_sha256`, `extraction_id`, `existing_entry_id`, `period_month`, `posting_date` or
+`period_label`, which are internals of the posting lane that a page asking *why did this not post*
+has no act to spend on. `p1148.read.projection` reads BOTH sides — the internal as root, to
+establish that a ladder was there to project, and the door as a viewer — because a cell that looked
+only at the door would green just as happily against a verdict that never carried one.
+
+**No core, and that is law 31 rather than an omission.** 0320, 0352 and 0353 each split a read into
+one ungranted core with two entrances because a HUMAN door and a MODEL door compute the same rows.
+This read has one entrance today; the model-lane twin is a successor contract for a cut after this
+wave's (#1144's roster is closed), and a core minted now would be an ungranted body with exactly
+one caller.
+
+**It is STABLE, and that is a wall rather than a hint.** PostgreSQL refuses every INSERT, UPDATE
+and DELETE inside a non-volatile function, so a later edit that tried to make this read write would
+fail to create. The body it wraps is STABLE too (0297 SectionD: *"THE GATE WRITES NOTHING"*), so
+nothing is given up by saying so, and the tail re-derives `provolatile = 's'` from the catalog
+rather than trusting the declaration.
+
+**Prestate pins**, measured on the lane rig (127.0.0.1:55742 / `clara_c01`, 338 files, max
+`0362_standing_instruction_agent_read` — #1147 landed first in this lane and recut nothing named
+here). All three are pinned **unconditionally**: this file recuts none of them in either mode, so a
+changed sha is always a finding and never a redo artefact.
+
+| body | pinned sha256(prosrc) | why it is pinned |
+|---|---|---|
+| `clara._payroll_posting_verdict(uuid)` | `4c350623e41527b717a1fc58e3ee8b772060b895b5353098f8cd21153585dac8` | the body this door wraps |
+| `clara._human_ctx(integer)` | `d1a8a1940ffee67f0bbe1f44f4081c8a5b1fca1775832948c2c606ced2043a46` | the floor it enters at and never mentions again |
+| `clara.role_rank(text)` | `5ced25aed03ff000519af583c5c5b89c4d59c4cb5f20e49f39877435e8c2576f` | what "viewer" means underneath that floor |
+
+The name `clara.get_payroll_posting_state(uuid)` is pinned bimodally — free, or already carrying
+this file's own `#1148 [0363]` marker (a redo, #957) — so anything else refuses BY NAME. The rest
+of section 0 is structural: the four roles; 0297 and 0343 applied; **the internal's ACL is exactly
+its owner's** (the file refuses to apply over a database where some role already holds EXECUTE on
+it, because a wrapper on top of a body the caller can already call is decoration, not a wall);
+`clara.documents` carries `id`, `firm_id` and `document_kind`; and `clara.document_capabilities`
+knows the `payroll_summary` kind, so this door's subject is not a string the file invented.
+
+**Post-image** for the integrator's re-derivation:
+`clara.get_payroll_posting_state(uuid)` = `bf304a34fcc5775bdf70fe607e1d3ba350ec74fa469e2c399789cdf6abdf2cb4`.
+
+**Redo-safe by construction** (#957): one `create or replace function`, one `revoke`, one `grant`,
+no table, no row, no backfill. Both prestate branches were exercised for real on this rig rather
+than merely written: FIRST APPLY on the first `db:migrate`, and again — after the SectionA.2b edit
+— with the door dropped inside a transaction that was rolled back; REDO on two
+`CLARA_MIGRATION_REDO` runs. All three refusal arms were driven in rolled-back transactions too (a
+foreign body squatting on the name, the wrapped body drifted, the internal granted).
+
+**Tail (5 assertions, all read off the live catalog):** the door resolves at exactly one `pg_proc`
+row and is STABLE + SECURITY DEFINER + `clara_fn_owner` with its `search_path` pinned, carrying the
+viewer floor, the firm wall, the payroll-summary subject and **no** `rung_vector`;
+`clara_authenticated` holds EXECUTE and none of the five machine principals does; the internal's
+ACL is still its owner's alone; the internal's body did not move while this file applied; and the
+two surfaces that already reach the verdict — `clara.answer_payroll_completeness` and
+`clara.list_review_queue` — keep the grants they had.
