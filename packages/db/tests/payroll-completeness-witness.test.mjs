@@ -1098,3 +1098,67 @@ test("W13 · ADV-04: the entry records the STATE version it was judged from, not
   assert.equal(v.plan.plan_version, "v1", "the drafting body's output shape is still v1");
   assert.equal(v.plan.state_version, "v2", "…and it says which state it drafted from");
 });
+
+test("W14 · ADV-02: a HIGH-STAKES run posted from a person's answer is left a DRAFT for a distinct checker", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const firm = await firmOf(world.clients.A1);
+  const restore = (
+    await rootQuery("select high_stakes_amount_cents as v from clara.firms where id=$1", [firm])
+  ).rows[0].v;
+  // An ORDINARY firm setting: RM1,000. The run's gross sum is RM5,000, so this is the everyday
+  // case, not a contrived floor -- and it is the SAME setting payroll-settlement.test.mjs's S7
+  // uses to prove the sibling settlement door leaves its entry a draft.
+  await rootQuery("update clara.firms set high_stakes_amount_cents=100000 where id=$1", [firm]);
+  try {
+    const checkers = (await rootQuery("select clara.eligible_checker_count($1)::int as n", [firm])).rows[0].n;
+    assert.ok(checkers >= 2, "the premise: this firm really does have a second pair of eyes available");
+
+    const doc = await readPayrollDoc(world.users.alice, world.clients.A1, { answers: noTotals("2027-02") });
+    assert.equal(doc.receipt.posting.posted, false, "mandatory setup: parked, not posted");
+
+    // BOB, a bookkeeper, answers. This is the first human-initiated post the payroll family has
+    // ever had, and it is the one case where a second pair of eyes matters most: the figure is
+    // not on the page.
+    const r = (await answerCompleteness(world.users.bob, { document: doc.documentId, answer: "yes" })).rows[0].r;
+    assert.equal(r.answer, "yes", "the answer still stands -- it is a fact about what a person said");
+    assert.equal(r.posted, false, "…but one bookkeeper's click does not approve an unlimited payroll entry");
+    assert.equal(r.status, "awaiting_checker");
+    assert.equal(r.reason, "high_stakes_needs_checker");
+    assert.ok(r.entry_id, "the entry EXISTS, balanced and drafted: nothing is dark");
+
+    const e = (
+      await rootQuery(
+        `select status, maker_actor, checker_actor, last_human_editor, revision_token
+           from clara.journal_entries where id=$1`,
+        [r.entry_id],
+      )
+    ).rows[0];
+    assert.equal(e.status, "draft");
+    assert.equal(e.checker_actor, null, "nobody has checked it");
+    assert.equal(
+      e.last_human_editor, world.users.bob,
+      "and the LEDGER names the human who authorised it on its face, not only inside flags",
+    );
+    assert.equal((await rootQuery("select clara.is_high_stakes($1) as h", [r.entry_id])).rows[0].h, true);
+
+    // THE RUN IS NOT STUCK. A distinct checker finishes it through the ordinary approve door --
+    // the one that carries all three governance arms -- and the sentence a person reads while it
+    // waits says so rather than claiming the run is posted.
+    const v = await verdict(doc.documentId);
+    assert.match(v.sentence, /waiting for a checker/i, `got: ${v.sentence}`);
+
+    const approved = (
+      await humanQuery(world.users.alice, "select clara.approve_entry($1,$2,$3,$4) as r", [
+        r.entry_id, e.revision_token, null, opk("approve"),
+      ])
+    ).rows[0].r;
+    assert.equal(approved.status, "approved", `${JSON.stringify(approved)}`);
+    const after = (await rootQuery("select status, checker_actor from clara.journal_entries where id=$1", [r.entry_id])).rows[0];
+    assert.equal(after.status, "approved");
+    assert.equal(after.checker_actor, world.users.alice, "a DISTINCT checker, which is the whole point");
+  } finally {
+    await rootQuery("update clara.firms set high_stakes_amount_cents=$2 where id=$1", [firm, restore]);
+  }
+});

@@ -1769,10 +1769,24 @@ begin
       format('Payroll run %s was not posted: the entry it would make does not balance (%s debit, %s credit).',
         coalesce(v_month_label, 'for this payslip'), v_plan->>'debit_cents', v_plan->>'credit_cents')
     when 'no_duplicate_entry' then
-      format('Payroll run %s is already posted (%s, %s). This payslip was not posted again -- open that entry to decide whether this is a correction or a re-upload.',
-        coalesce(v_month_label, 'for this payslip'),
-        coalesce(v_detail->'duplicate'->>'memo', 'an existing entry'),
-        coalesce(v_detail->'duplicate'->>'posting_date', 'no date'))
+      -- #1048 FIX ROUND (ADV-02): A DRAFT IS NOT A POST, and saying so matters now that this lane
+      -- can leave one. A high-stakes run posted from a person's answer is drafted and handed to
+      -- the ordinary approve door; "already posted -- decide whether this is a correction or a
+      -- re-upload" would be exactly wrong about it, and would send the next person to the wrong
+      -- remedy. The rung and the reason token are unchanged: a draft on this filing really does
+      -- stop a second entry, which is the thing this rung exists to say.
+      case coalesce(v_detail->'duplicate'->>'status','')
+        when 'draft' then
+          format('Payroll run %s is drafted (%s, %s) and waiting for a checker to approve it. Nothing was posted again.',
+            coalesce(v_month_label, 'for this payslip'),
+            coalesce(v_detail->'duplicate'->>'memo', 'an existing entry'),
+            coalesce(v_detail->'duplicate'->>'posting_date', 'no date'))
+        else
+          format('Payroll run %s is already posted (%s, %s). This payslip was not posted again -- open that entry to decide whether this is a correction or a re-upload.',
+            coalesce(v_month_label, 'for this payslip'),
+            coalesce(v_detail->'duplicate'->>'memo', 'an existing entry'),
+            coalesce(v_detail->'duplicate'->>'posting_date', 'no date'))
+      end
     else format('Payroll run %s was not posted (%s).', coalesce(v_month_label,'for this payslip'),
                 coalesce(v_tokens->>v_first, v_first))
   end;
@@ -1852,7 +1866,7 @@ declare
   v_client uuid; v_firm uuid; v_filing uuid; v_sha text; v_month date; v_posting date;
   v_extraction uuid; v_engine text; v_code text; v_detail text; v_reason text; v_pair boolean;
   -- #1048's own locals.
-  v_basis jsonb; v_rationale text;
+  v_basis jsonb; v_rationale text; v_human uuid;
 begin
   v := clara._payroll_posting_verdict(p_document);
   if v->>'verdict' <> 'ready' then
@@ -1868,6 +1882,13 @@ begin
   v_month := (v->>'period_month')::date;
   v_posting := (v->>'posting_date')::date;
   v_basis := coalesce(v->'plan'->'posting_basis', 'null'::jsonb);
+  -- #1048 FIX ROUND (ADV-02): WHO AUTHORISED THIS POST, when anybody did. An unattended post has
+  -- nobody: the page witnessed itself and no human was asked. A post whose witness is
+  -- `answered_question` has exactly one named person, and this body needs to know that for two
+  -- reasons -- the ledger must name them on its face, and a human-initiated post meets the
+  -- estate's maker-checker ladder like every other human-initiated post.
+  v_human := case when v_basis->>'witness' = 'answered_question'
+                  then nullif(v_basis->'answer'->>'answered_by','')::uuid end;
   select t.engine_id into v_engine from clara.document_processing_tasks t
    where t.document_id = p_document and t.lane = 'payroll_facts' and t.status = 'done'
    order by t.version_n desc limit 1;
@@ -1929,7 +1950,7 @@ begin
     insert into clara.journal_entries(client_id, status, posting_date, memo, origin,
         document_id, source_doc_sha256, filing_id, maker_actor, last_human_editor, flags)
       values (v_client, 'draft', v_posting, v_memo, 'document',
-        p_document, v_sha, v_filing, clara.agent_user_id(), null, v_flags)
+        p_document, v_sha, v_filing, clara.agent_user_id(), v_human, v_flags)
       returning id into v_entry;
 
     insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents, credit_cents,
@@ -1939,6 +1960,39 @@ begin
         x.elem->>'description'
       from jsonb_array_elements(v_lines) with ordinality as x(elem, idx);
     perform clara._assert_balanced(v_entry);
+
+    -- #1048 FIX ROUND (ADV-02) · THE HIGH-STAKES WALL, AND ONLY ON A HUMAN-INITIATED POST.
+    --
+    -- The unattended arm is untouched: #946 shipped it self-approving as the agent, the registry
+    -- publishes it as an unattended post, and widening the wall onto it would be a different
+    -- ticket's decision. What 0343 adds is the payroll family's FIRST human-initiated post, and it
+    -- is the one case where a second pair of eyes matters most -- the figure is not on the page.
+    -- Driven in the adversarial review: one bookkeeper's single click approved an unlimited-value
+    -- payroll entry no checker saw, while the SAME run's net-pay settlement for the SAME amount is
+    -- high-stakes-gated one migration earlier (0298:494). The estate was inconsistent with itself.
+    --
+    -- THE POSTURE IS 0298's, WHICH IS clara.reverse_entry's (0042): LEAVE IT A DRAFT and let the
+    -- ordinary approve door finish it. That door carries all three arms (agent attestation,
+    -- distinct checker, solo self-attestation) and re-typing a governance ladder is how two of
+    -- them drift apart. NOTHING IS DARK: the entry exists, balanced, with its legs and its basis,
+    -- and the gate's own sentence says it is waiting for a checker until one approves it.
+    if v_human is not null and clara.is_high_stakes(v_entry) then
+      perform clara._append_event(v_firm, 'entry.drafted', v_client, v_human, null, 'interactive',
+        v_entry, p_document, null,
+        jsonb_build_object('reason', 'high_stakes_needs_checker', 'posting_basis', v_basis));
+      perform clara._audit(v_firm, v_human, null, null, 'post_payroll_run', v_entry,
+        jsonb_build_object('document', p_document, 'entry', v_entry,
+          'period_month', to_char(v_month,'YYYY-MM-DD'),
+          'status', 'awaiting_checker', 'reason', 'high_stakes_needs_checker',
+          'posting_basis', v_basis));
+      return jsonb_build_object('posted', false, 'entry_id', v_entry,
+        'status', 'awaiting_checker', 'reason', 'high_stakes_needs_checker',
+        'eligible_checker_count', clara.eligible_checker_count(v_firm),
+        'posting_date', to_char(v_posting,'YYYY-MM-DD'),
+        'period_month', to_char(v_month,'YYYY-MM-DD'),
+        'posting_basis', v_basis,
+        'rung', 'awaiting_checker', 'rung_vector', v->'rung_vector');
+    end if;
 
     update clara.journal_entries
        set status = 'approved', checker_actor = clara.agent_user_id(), approved_at = now(),
@@ -2384,7 +2438,17 @@ begin
       'posted', coalesce((v_post->>'posted')::boolean, false),
       'entry_id', coalesce(v_post->'entry_id','null'::jsonb),
       'reason', coalesce(v_post->'reason','null'::jsonb),
-      'rung', coalesce(v_post->'rung','null'::jsonb)));
+      'rung', coalesce(v_post->'rung','null'::jsonb),
+      -- #1048 FIX ROUND (ADV-02): the awaiting-checker shape 0298 already returns, carried through
+      -- verbatim so the panel and the Needs-you affordance read ONE vocabulary for "your act
+      -- landed, and a second pair of eyes has to finish it" across both payroll doors. A `no`
+      -- attempted no post at all, so it carries no status rather than a made-up one.
+      'status', case
+        when v_post is null then 'null'::jsonb
+        when v_post ? 'status' then v_post->'status'
+        when coalesce((v_post->>'posted')::boolean, false) then to_jsonb('posted'::text)
+        else to_jsonb('blocked'::text) end,
+      'eligible_checker_count', coalesce(v_post->'eligible_checker_count','null'::jsonb)));
 end $apc$;
 
 revoke all on function clara.answer_payroll_completeness(uuid, text, text, text) from public;
