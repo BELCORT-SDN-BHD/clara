@@ -398,13 +398,16 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
   // L4's 0343, and the human fact door by this lane's own 0344 as recut at integration. §0's two
   // pins are now bimodal, each naming the file that produces the second shape. Nothing else in the
   // file moved, and neither splice, anchor nor replacement changed at all, which is why the
-  // barrier's REASON below is unchanged: cc79bbfc… → 2086572f….
+  // barrier's REASON below is unchanged. Re-measured TWICE, once per integration recut of the
+  // file: cc79bbfc… → 2086572f… (the two bimodal prestate pins) → 46226c10… (the payroll arm's
+  // structural check, which reads clara._list_review_queue_core where lane L8's 0352 has moved it
+  // and clara.list_review_queue where it has not).
   [
     "0360_payroll_correction_sentences.sql",
     {
       reason:
         "Reviewed pg_get_functiondef splices recut exactly TWO named FUNCTIONS, each read at its own literal regprocedure spelled in this file — clara._payroll_posting_verdict(uuid) (its `ready` sentence becomes a two-armed case keyed on the reading's own `human_declared` array, 0297's original sentence carried into the else arm unchanged) and clara.revise_document_fact(uuid,text,jsonb,int,text,text) (the posted-entry refusal states what the probe measures, renames its reason to live_entry_present and discloses is_payroll_run). Each anchor is a single dollar-quoted literal asserted to occur EXACTLY once before replacing, and so is each replacement — no concatenation chain and no chr() — so every installed statement is reconstructible. Both functions return jsonb, so neither can emit a view definition of any kind, and the file contains no `create view` of any spelling at all, static or spliced, so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) is reachable, by construction rather than by inspection of a rendered string. Each splice detects its own marker in the INSTALLED body and no-ops on a redo, each postcheck re-reads the COMMITTED catalog for owner, ACL, DEFINER-ness, search_path and a MOVED prosrc sha, and the tail re-derives both sentences at exactly one occurrence each, every 0297 rung region and every 0344 region the file must not have disturbed, the payroll-lane guard around the pin, the ungranted verdict and the clara_authenticated-only door. The file creates no table, no policy, no grant, no chart row and no event type: outside the two do-blocks it contains only a prestate and a tail that read the catalog.",
-      sha256: "2086572f7653a78c176d762634d637e0e64c063e666225680299004a94aa0539",
+      sha256: "46226c10ab3f912d8aa2486a5ff3ca207bd2e6c28e634be9b87dba50fc4db6a5",
     },
   ],
   // #1078 fix round [0361] (riders sweep wave, lane 02) — the SAME 0041/0042 splice family,
