@@ -2105,6 +2105,30 @@ Three things that component now says which neither surface said before:
 The accrual form's method hint is rule-dependent for the same reason (#937): it stated that one rule
 exists, beside a control that offers two.
 
+## #1070 — the accrual detail view renders the per-period schedule
+
+`clara.get_accrual_adjustment` (0303/#937) has answered with `period_amounts` since the door was
+widened; `components/accruals/accrual-detail.tsx` (#652) never read it, so a reader of a
+`stated_period_amount` accrual's OWN detail page saw only the window-total `amount_cents` and no
+breakdown by due date — the create and correction forms both already rendered the block
+(`AccrualPeriodAmountsBlock`, above), and the side was already on this same page (#942's own note at
+`accrual-detail.tsx:90-93`), so the detail view was the one surface still missing a fact the register
+and both forms already told a reader.
+
+**Read-only, and absent rather than empty.** The array is always present — `[]` under `stated_amount`
+— so the new section renders when `period_amounts.length > 0` and not at all otherwise; there is no
+third state to invent for "this accrual does not use this rule". Each row is the due date and its
+own stated amount, the same two fields `AccrualPeriodAmountsBlock` edits, under the SAME heading key
+(`periodAmountsHeading`, "Amount for each period") so a reader who has seen either form recognises
+the label. Unlike the form's block this is not a control: no select, no remove button, no running
+total — the amounts are already admitted, and a detail page does not offer to change a row the door
+already wrote.
+
+`components/accruals/accrual-detail.test.tsx` is the first dedicated unit test file for this
+component (none existed before this ticket): it proves the per-period schedule renders its own due
+dates and amounts, that the section is absent for a `stated_amount` row, and that the side (already
+built) renders labelled consistently with the list and forms.
+
 ## #940 — which accounts hold prepayments, and what the surfaces say when none do
 
 Before migration 0306 any ordinary asset account could be amortised: the prepaid-leg wall is
