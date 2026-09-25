@@ -74,11 +74,15 @@ declare
   -- …AND THE ONE RECUT BODY WITH **TWO** ADMISSIBLE PRE-IMAGES, because two lanes of this wave
   -- write it. `clara._obo_plan_core` is 0308 §D's on-behalf twin. Lane L1's #1051
   -- (`0330_plan_authority_wall_predicate.sql` §C) extracts its authority wall into the shared
-  -- `clara._assert_plan_authority` and recuts this body to `perform` it; the sweep plan merges L1
-  -- FIRST, so on the integrated chain the pre-image here is L1's post-image and not 0308's. §E
-  -- writes whichever shape it finds -- decided by whether the shared predicate EXISTS, a fact
-  -- about the catalog rather than a marker inside a body -- and both shapes are pinned here, so a
-  -- body that is neither refuses BY NAME rather than being silently overwritten.
+  -- `clara._assert_plan_authority` and recuts this body to `perform` it; 0330 is the lower number
+  -- and ships in the same merge, so on every chain this file can reach the pre-image here is L1's
+  -- post-image and not 0308's. Both shapes stay pinned so a body that is neither refuses BY NAME
+  -- rather than being silently overwritten.
+  --   RECUT AT INTEGRATION: §E used to choose its wall at RUN TIME off this same catalog fact and
+  --   carry 0308's block where the predicate was absent. That branch is GONE -- §E now delegates
+  --   unconditionally, and check 4c below refuses the apply if the predicate is missing. What these
+  --   two pins admit is unchanged; what moved is the body §E INSTALLS, never the ones it accepts
+  --   finding.
   --   · 2049c1c4… — 0308 §D, the shape on a chain WITHOUT lane L1 (this lane's own rig).
   --   · 149b4a3d… — 0330 §C's post-image, MEASURED off lane L1's own migration file
   --                 (`git show riders/wS-lane01:packages/db/migrations/0330_…sql`, the function
@@ -175,7 +179,7 @@ begin
   elsif position('0338' in v_src) > 0 then
     v_redo := v_redo + 1; v_modes := v_modes || v_obo || '=REDO ';
   else
-    raise exception '0338 prestate: % is none of its three admissible shapes -- not 0308 §D (%), not 0330 §C''s post-image (%), and not this file''s own recut; live sha %. Lane L1 moved it again: re-derive §E''s POST-#1051 branch against the new body and re-measure this pin.',
+    raise exception '0338 prestate: % is none of its three admissible shapes -- not 0308 §D (%), not 0330 §C''s post-image (%), and not this file''s own recut; live sha %. Lane L1 moved it again: re-derive §E''s delegating body against the new body and re-measure this pin.',
       v_obo, v_obo_pre[1], v_obo_pre[2], v_sha using errcode='CLR10';
   end if;
 
