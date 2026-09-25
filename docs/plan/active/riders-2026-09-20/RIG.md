@@ -113,3 +113,21 @@ out to grep), the Defender/EICAR skip, no `pg_dump` on PATH (four runtime files)
 - `rigw2`, `rigw3` and `rigw3h` (ports 55760, 55770, 55771) were dropped on 2026-09-25 after the
   wave-4 release; `rigw4`, `rigw4h`, `rigw4c`, `rigint`, `rigrt`, `rigreh` and `rl03` through `rl10`
   were left untouched.
+
+## Sweep wave (2026-09-25)
+
+Seven code lanes on the wave-4 lane clusters, each database rebuilt from scratch at 309 / 0318 with the fixed 0295 checksum (5196d64d) and seeded; the branches are cut from main at 7bc5a710f. Lane L8 (the frozen family, #1136 #1137) runs on `clara-wt/635` after the cut phase merges, cut from the merged cut head. Migration numbers are assigned by the orchestrator (0330 upward; overflow 0360 upward on request).
+
+| lane | worktree | PG port | db | Playwright triple | branch |
+|---|---|---|---|---|---|
+| L1 | `clara-wt/651` | 55744 | `clara_l04` | 3530 / 3531 / 3532 | `riders/wS-lane01` |
+| L2 | `clara-wt/655` | 55745 | `clara_l05` | 3540 / 3541 / 3542 | `riders/wS-lane02` |
+| L3 | `clara-wt/656` | 55746 | `clara_l06` | 3550 / 3551 / 3552 | `riders/wS-lane03` |
+| L4 | `clara-wt/657` | 55747 | `clara_l07` | 3560 / 3561 / 3562 | `riders/wS-lane04` |
+| L5 | `clara-wt/642` | 55743 | `clara_l03` | 3520 / 3521 / 3522 | `riders/wS-lane05` |
+| L6 | `clara-wt/658` | 55748 | `clara_l08` | 3570 / 3571 / 3572 | `riders/wS-lane06` |
+| L7 | `clara-wt/659` | 55749 | `clara_l09` | 3580 / 3581 / 3582 | `riders/wS-lane07` |
+| L8 | `clara-wt/635` | 55741 | `clara_l01` | 3500 / 3501 / 3502 | `riders/wS-lane08` (cut from main at 061a6992b after the cut merged) |
+| spare | `clara-wt/636` | 55742 | `clara_l02` | 3510 / 3511 / 3512 | `riders/wS-spare-636` |
+
+Windows cannot reach TCP 55772 to 55871 today (a Hyper-V or WSL NAT exclusion range), so every new cluster takes a port below 55772: rigw4 55700, rigw4h 55701, rigw4c 55702, the cut gate's disposable rigcut 55706, the fix workers' disposable clusters 55704, 55705, 55707. rigw2, rigw3 and rigw3h were dropped on 2026-09-25 after the wave-4 release.
