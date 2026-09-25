@@ -296,6 +296,11 @@ let busy = false;
 let probeOverride = null; // test seam only; production is always null
 let loopStartedAt = 0;
 let lastSettledAt = 0;
+// #1128 — a monotonic count of REAL cycles that have SETTLED (started and finished, whether the
+// verdict landed or the hard bound discarded it), plus the resolvers of anyone waiting on the
+// NEXT one. See _waitForLaneProbeSettleForTest's own header for the defect this closes.
+let settleSeq = 0;
+let settleWaiters = [];
 
 async function refreshOnce() {
   // NEVER a fresh no-op promise while a cycle is running (review-558 r2 NIT): returning the
@@ -312,6 +317,13 @@ async function refreshOnce() {
     if (Array.isArray(result)) lastSettledAt = Date.now();
   } finally {
     busy = false;
+    // #1128 — announce a REAL settle to every waiter registered before this cycle's finish, then
+    // clear the list. A waiter registered DURING this finally (impossible today — nothing async
+    // happens here — but kept correct regardless) would simply wait for the NEXT one.
+    settleSeq += 1;
+    const waiters = settleWaiters;
+    settleWaiters = [];
+    for (const resolve of waiters) resolve();
   }
   return undefined;
 }
@@ -387,6 +399,8 @@ export function _resetLaneProbeCacheForTest() {
   probeOverride = null;
   loopStartedAt = 0;
   lastSettledAt = 0;
+  settleSeq = 0;
+  settleWaiters = [];
 }
 
 /** Test-only: drive the background loop with an injected prober, so a cell can arm a lane that
@@ -395,10 +409,33 @@ export function _setLaneProbeForTest(fn) {
   probeOverride = fn;
 }
 
-/** Test-only: await the most recently started (or currently in-flight) cycle — starting the
- *  loop if it has not started — so a cell asserts on a SETTLED verdict instead of racing it. */
+/**
+ * Test-only: await the NEXT background cycle to genuinely settle — one that starts at or after
+ * this call — so a cell asserts on a FRESH verdict instead of racing it, or reading a stale one.
+ *
+ * #1128 — the OLD implementation (`laneProbeHealth(); await inFlight; return laneProbeHealth();`)
+ * read the module-level `inFlight` variable, which is only REASSIGNED when the interval's own
+ * callback fires. Called BETWEEN ticks — after a cycle has already settled but before the next
+ * scheduled tick — `inFlight` still pointed at that PRIOR cycle's already-resolved promise, so
+ * `await inFlight` returned near-instantly with the SAME cached verdict, not a fresh one. A caller
+ * looping on this (`settleLaneUntil`, in ready.test.mjs) ended up busy-polling `checkReadiness()`
+ * at whatever cadence a DB round trip takes until the real tick eventually landed, rather than
+ * genuinely waiting for it.
+ *
+ * This version instead waits on `settleSeq`, a monotonic count of cycles that have ACTUALLY
+ * settled, bumped once per real `refreshOnce()` completion — the loop's own first start, an
+ * interval tick, or a manual `_refreshOnceForTest()`. A call between ticks therefore genuinely
+ * blocks until the loop's next real cycle — whether already in flight or not yet started —
+ * completes, with NO extra cycle forced out of the interval's own schedule.
+ */
 export async function _waitForLaneProbeSettleForTest() {
-  laneProbeHealth();
-  await inFlight;
+  laneProbeHealth(); // starts the loop lazily, same as before
+  const target = settleSeq + 1;
+  if (settleSeq < target) {
+    await new Promise((resolve) => {
+      if (settleSeq >= target) resolve();
+      else settleWaiters.push(resolve);
+    });
+  }
   return laneProbeHealth();
 }
