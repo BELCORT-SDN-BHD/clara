@@ -37,16 +37,15 @@
 -- with no rows for an enrolled code. The cells are `p1078.claim.bank` and `p1078.reserve.roster`
 -- in tests/prepayment-account-reservation.test.mjs.
 --
--- THE FIX, IN ONE SENTENCE: the shared census gains a third domain, and the four bodies that read
--- it are brought up to three domains — the one that must NOT see the new domain is told so, and
--- the three that must are given the release door that actually releases it.
+-- THE FIX, IN ONE SENTENCE: the shared census gains a third domain, and every body that SPEAKS for
+-- it is brought up to three — the one reader that must NOT see the new domain is told so, and each
+-- refusal that names a release door is given the one that actually releases THIS claim.
 --
 --   §A  clara._acct_role_reserved            + the prepayment-roster arm (LIVE enrolments only)
 --   §B  clara._adj_line_eligibility_breach   the posting wall skips the new domain; answers unmoved
 --   §C  clara._fa_assert_code_unreserved     the bank belt's reason token names the right register
 --   §D  clara.upsert_fa_account_profile      its remedy names retire_prepayment_account
 --   §E  clara._adv_enrolment_admission       a third remedy branch, with its own advice
---   §F  clara._draft_opening_item_core       the release list names the third register too
 --
 -- WHY §B IS NOT A SOFTENING, and why it is the load-bearing half of this file. The fixed-asset and
 -- staff-advance reservations mean "a register machine owns this code; an ad-hoc line must not touch
@@ -70,6 +69,17 @@
 --     prepayment account foreign to the FA register as of that date, which is an accounting answer
 --     nobody asked to change. The twin is PINNED in §0 so the asymmetry is deliberate and a drift
 --     is visible.
+--   · It does not recut `clara._draft_opening_item_core`. That body is the FOURTH reader of
+--     `clara._fa_role_claim_conflict`, so §A already makes the opening-balance fixed-asset
+--     carry-down REFUSE a code the roster holds -- the gate is closed. What it does not do is name
+--     the third release door: its refusal offers "Seed this asset on a different account" first,
+--     which is always valid, and then enumerates the two release doors it knew about. That list is
+--     incomplete rather than wrong, the fix is one `case` in a 445-line body, and no cell in this
+--     battery can DRIVE that door without building the wave-b onboarding world (a client, a plan,
+--     an opening seed, a tie document and a seeded asset). Re-emitting 445 lines for a sentence no
+--     cell exercises is the widening the work order names, so it is filed as a follow-up with the
+--     exact site instead. `clara._fa_reversal_blocked`, the other reader this file does not recut,
+--     needs nothing: its sentence is already domain-neutral, and its text is pinned in §0.
 --   · It does not reserve a code whose enrolment has been RETIRED while a schedule still runs
 --     against it. #940's owner decision 5 says retiring closes the account to NEW schedules and
 --     leaves a running one posting to term end, so that state is reachable and is NOT covered here;

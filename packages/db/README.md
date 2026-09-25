@@ -7585,6 +7585,22 @@ enrolled account through any governed door**. Each of the wall's five axes is cl
 `p1078.wall.unmoved` measures that it is still asked, and `p940.schedule.roster_gate` says so in its
 own comment instead of quietly dropping the claim.
 
+### The one reader 0337 does not recut, and why
+
+`clara._draft_opening_item_core` is the FOURTH reader of `clara._fa_role_claim_conflict`, so §A
+already makes the opening-balance fixed-asset carry-down **refuse** a code the roster holds — the
+gate is closed. What its refusal does not do is name the third release door: it offers "Seed this
+asset on a different account" first, which is always valid, and then enumerates the two release
+doors it knew about. That list is incomplete rather than wrong; the fix is one `case` in a 445-line
+body, and nothing in this battery can DRIVE that door without building the wave-b onboarding world.
+Re-emitting 445 lines for a sentence no cell exercises is the widening the riders work order names,
+so it is filed as a follow-up with the exact site instead. `clara._fa_reversal_blocked`, the other
+reader 0337 leaves alone, needs nothing: its sentence is already domain-neutral ("release that claim
+first (retire the enrolment or the profile that took it)"), and its text is pinned in §0.
+
 **Redo-safe by construction (#957).** Every statement is `create or replace function`, between a
 marker-tolerant prestate (each recut body admits its pinned pre-image OR a body already carrying
-this file's `0337` attribution) and a tail that reads the live catalog.
+this file's `0337` attribution) and a tail that reads the live catalog. Both branches were exercised on the lane
+database: the REDO branch four times while the file grew section by section, and the FIRST-APPLY
+branch with all five bodies restored to their measured pre-images by hand (prestate reported
+`5 FIRST, 0 REDO`, file checksum unchanged at `42b2281f6c1156ed0a22632260d00cca92a26729f1bdde025f74fc57dd4d69b6`).

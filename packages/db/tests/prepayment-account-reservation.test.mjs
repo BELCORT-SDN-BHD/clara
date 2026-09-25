@@ -25,12 +25,12 @@ import {
   RESERVATION_STEM, RESERVATION_GATE, reservationApplied,
   RESERVED_DOMAIN, RESERVED_ROLE, BANK_BELT_REASON, ADV_REMEDY_PREPAYMENT,
   RESERVATION_RECUTS, reservedRolesFor, eligibilityBreach, enrolStaffAdvanceAccount,
-  reservationConsumers, bankBindingCount, faProfileCount, advanceEnrolmentCount,
+  reservationConsumers, bankBindingCount, faProfileCount, advanceEnrolmentCount, bodySha,
 } from "./prepayment-account-reservation-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 5;
+const EXPECTED_CELLS = 6;
 
 before(async () => { ready = await reservationApplied().catch(() => false); });
 
@@ -286,4 +286,50 @@ cell("p1078.claim.staff_advance — an account the prepayment roster holds canno
     "enrolling a fixed-asset-reserved account as a staff-advance account");
   assert.equal(fa.detail.remedy, "retire_fa_profile_then_re_enrol",
     "the fixed-asset remedy is still 0043's own");
+});
+
+// ===========================================================================================
+// THE STRUCTURAL CELL. Everything above drives a door; this one reads the CATALOG, because the
+// claim it holds is about the SHAPE of the authority rather than about any one answer — the house
+// standard the work order names ("a catalog census, a prestate pin, a tail assertion"). It reads
+// `pg_proc`, never a migration's text, so a body a later file recuts is measured as it stands.
+// ===========================================================================================
+
+cell("p1078.census.authority — ONE census, FOUR consumers, ONE place that mints the new domain: the reservation authority's shape is held against the live catalog, the as-of twin is still FA+advance only, and every body 0337 recut still carries its change", async () => {
+  // (a) THE CONSUMER SET IS EXACT, read comment-stripped so a body that merely NAMES the census in
+  //     prose is not counted as a consult (0042 S5.14's own instrument, replayed after 0337).
+  assert.deepEqual(await reservationConsumers(), [
+    "clara._adj_line_eligibility_breach(uuid,jsonb)",
+    "clara._adv_enrolment_admission(uuid,text,uuid)",
+    "clara._fa_assert_code_unreserved(uuid,text)",
+    "clara._fa_role_claim_conflict(uuid,text,text)",
+  ], "the shared census is consulted by exactly the wall, the bank belt, the FA discriminator and the advance admission delegate — a fifth reader is a design decision, not an accident");
+
+  // (b) THE DOMAIN IS MINTED IN EXACTLY ONE BODY. Two arms answering "which register holds this
+  //     code" with the same word is the drift the one-authority doctrine exists to prevent.
+  const minters = await rootQuery(
+    `select p.oid::regprocedure::text as sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.prosrc like '%''prepayment''::text%' order by 1`);
+  assert.deepEqual(minters.rows.map((r) => r.sig), ["clara._acct_role_reserved(uuid,text)"],
+    "only the census itself emits the 'prepayment' reservation domain");
+
+  // (c) THE AS-OF TWIN IS DELIBERATELY NOT WIDENED. Its single reader, clara._fa_gl_leg_foreign,
+  //     asks "was a NON-FA register holding this code when that leg was booked"; a prepayment arm
+  //     would make every leg on a prepayment account foreign to the fixed-asset register as of that
+  //     date, which is an accounting answer #1078 did not ask for.
+  const asOf = await rootQuery(
+    `select p.prosrc as src from pg_proc p
+      where p.oid = 'clara._acct_role_reserved_at(uuid,text,timestamptz)'::regprocedure`);
+  assert.equal(/prepayment/.test(asOf.rows[0].src), false,
+    "the as-of reservation twin carries no prepayment arm");
+
+  // (d) EVERY BODY 0337 RECUT STILL CARRIES ITS CHANGE. A later migration that re-emits one of
+  //     these from an older pre-image would drop #1078 silently; it fails here, by name.
+  for (const sig of RESERVATION_RECUTS) {
+    const r = await rootQuery(
+      "select p.prosrc as src from pg_proc p where p.oid = $1::regprocedure", [sig]);
+    assert.equal(/#1078 \[0337\]/.test(r.rows[0]?.src ?? ""), true,
+      `${sig} no longer carries #1078's own attribution — a later recut dropped it`);
+    assert.ok(await bodySha(sig), `${sig} resolves at its exact signature`);
+  }
 });
