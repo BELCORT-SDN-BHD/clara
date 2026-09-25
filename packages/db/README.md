@@ -7518,3 +7518,70 @@ SQLSTATE (`42501`), never `CLR10`:
 **Gate:** `tests/rate-wall-attempts-retention.test.mjs`, frontier-gated on the stable stem
 `rate_wall_attempts_retention$` with
 `tests/rate-wall-attempts-retention-preintegration-gate.mjs`.
+
+## 0349 — a successful admission writes no sweep-run-item row, disclosed rather than fixed (#1132, riders sweep wave, lane 07)
+
+**The trap, in plain words.** `clara.sweep_run_items.outcome`'s CHECK constraint has no `admitted`
+member, and `clara.admit_autodraft_task`'s own successful path writes no `clara.sweep_run_items`
+row at all — only `clara.op_receipts`, through `clara._finish_op`
+(`packages/db/migrations/0036_wave_c0_deferred_belts.sql:1468-1470`). Every OTHER return arm the
+same function carries (`noop_existing`, `refused_attempts`, `skipped_lane` for a sales
+mis-route or a lane change, `refused_budget`) DOES write a run-bound `sweep_run_items` row when
+`p_run_id` is not null (0036:1182, 1190, 1232, 1240, 1251, 1337, 1367, 1400, 1411, and the
+`unique_violation` handler's own noop at 1476). A reader who assumes every admission outcome is
+visible on `sweep_run_items` therefore reads NOTHING for a genuinely successful one, and if they
+instead read whatever a LATER settlement wrote for that filing, they read what the task's own
+posting attempt decided, which can silently disagree with what admission itself decided (a task
+`admitted` now can settle `failed` later for an unrelated reason during its own posting attempt).
+
+**Two candidate fixes, and why this file takes the documentation one.** #1132's own Agent Brief
+names two paths: document the trap and name the correct read, or widen
+`clara.sweep_run_items.outcome` with a new `admitted` member. The lane's owner ruling takes the
+documentation path only — this file adds a catalog `comment on function` to
+`clara.admit_autodraft_task(uuid,text,uuid,text,bigint)` and this README section; it never recuts
+the function body and never touches `sweep_run_items_outcome_check`, both pinned in the prestate
+and re-measured byte-for-byte in the tail.
+
+**Where to actually read a successful admission's outcome.** `clara.op_receipts` where
+`fn='admit_autodraft_task'` and `op_key='autodraft:'||filing_id||':'||origin` — the `result`
+column carries `{outcome, task_id, reserved_tokens}` with `outcome` one of `admitted` or
+`re_admitted`. This is the same read `tests/x34-autodraft-retry-door.test.mjs`'s own
+`receiptFor()` fixture already uses, and the one the catalog comment now names.
+
+**Grounded, not only read off the body text** (wave-3 addendum: "a door's behaviour is asserted
+only after it was driven"). `tests/admit-autodraft-task-outcome-disclosure.test.mjs`'s
+`p1132.trap` cell drives a real admission on this lane's own database: a genuine `admitted`
+outcome leaves ZERO `sweep_run_items` rows for that filing on that run and DOES leave a real
+`op_receipts` row; an immediate re-admission of the SAME filing on a SECOND run answers
+`noop_existing` and DOES write one `sweep_run_items` row — the contrast that proves the
+"zero rows" assertion discriminates a real difference rather than being vacuously true of an
+always-empty query. The same cell re-confirms `sweep_run_items_outcome_check` still carries no
+`admitted` member. The catalog comment and this section are driven by
+`tests/admit-autodraft-task-outcome-disclosure.test.mjs`'s two other cells,
+`p1132.comment.discloses_no_sweep_item_and_names_op_receipts` and
+`p1132.readme.section_discloses_no_sweep_item_and_names_op_receipts`, which read
+`obj_description()` and this file's own bytes respectively.
+
+**What this file does not change**, pinned in the prestate and re-measured in the tail:
+`clara.admit_autodraft_task`'s body (`prosrc`) is byte-identical before and after — a catalog
+comment only, never a `create or replace function`; `sweep_run_items_outcome_check` is
+byte-identical before and after — no `admitted` member is added. This file mints no new function,
+table or other catalog name, so it owes no `packages/db/tests/rig-meta.mjs` cohort entry.
+
+**Redo-safe by construction (#957).** `comment on function ... is '...'` always sets the comment
+fresh, so the prestate's only two sane states are "no comment yet" (FIRST) or "already carries
+exactly this file's own comment, verbatim" (REDO) — any OTHER non-null comment is a foreign
+comment this file refuses to clobber, CLR10.
+
+**Acceptance criteria, each with its own cell in
+`tests/admit-autodraft-task-outcome-disclosure.test.mjs`.** AC1 (the chosen path) — the catalog
+comment names both `sweep_run_items` and `op_receipts` and states plainly that a successful
+admission writes no sweep-run-item row:
+`p1132.comment.discloses_no_sweep_item_and_names_op_receipts`; the same fact restated in this
+README section: `p1132.readme.section_discloses_no_sweep_item_and_names_op_receipts`. AC2 (the
+NOT-chosen path, confirmed still not taken) is folded into the grounding cell itself:
+`p1132.trap.admitted_writes_no_sweep_item_noop_does_and_the_enum_still_lacks_admitted`.
+
+**Gate:** `tests/admit-autodraft-task-outcome-disclosure.test.mjs`, frontier-gated on the stable
+stem `admit_autodraft_task_outcome_disclosure$` with
+`tests/admit-autodraft-task-outcome-disclosure-preintegration-gate.mjs`.
