@@ -30,7 +30,11 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { rootQuery, humanQuery, endPool } from "./rig-helpers.mjs";
-import { buildWorld, upsertAccount } from "./rig-fixtures.mjs";
+import { buildWorld } from "./rig-fixtures.mjs";
+import {
+  readPayrollDoc, seedPayrollChart, bankedState, verdictOf, payrollExtractionsOf, regionsOf,
+  value, opk, RUN_FIELDS,
+} from "./payroll-fact-revision-fixtures.mjs";
 
 const STEM = "payroll_fact_revision$";
 
@@ -100,4 +104,135 @@ test("S1 · the lane predicate names the payroll lane, the invoice lane, and ref
   // (clara._assert_field_path) is what refuses it, and it runs FIRST inside the door.
   assert.equal(await lane("payroll.run.bonus"), null);
   assert.equal(await lane(null), null);
+});
+
+// ---------------------------------------------------------------------------------------------
+// S2 — the payroll chain's own observation
+// ---------------------------------------------------------------------------------------------
+
+const payrollObservation = async (document) =>
+  (await rootQuery(
+    "select facts_extraction_id, facts_version from clara._payroll_source_observation($1)",
+    [document])).rows[0];
+
+test("S2 · the payroll observation points at the payroll chain, and counts it", async (t) => {
+  if (gate(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1);
+
+  const obs = await payrollObservation(doc.documentId);
+  // ONE read has happened, so the payroll facts version is 1 — the same counting rule
+  // clara._document_source_observation applies to the invoice chain (0217:441), asked of the
+  // kind this lane actually writes.
+  assert.equal(obs.facts_version, 1, "one done payroll_text_facts extraction");
+
+  // …and it is the row clara._payroll_posting_verdict judges, not some neighbour of it. Measured
+  // by reading the extraction the door will supersede rather than by trusting the observation.
+  const banked = await payrollExtractionsOf(doc.documentId);
+  const text = banked.filter((e) => e.engine_kind === "payroll_text_facts");
+  assert.equal(text.length, 1, "mandatory setup: exactly one text row on file");
+  assert.equal(obs.facts_extraction_id, text[0].id);
+
+  // THE INVOICE CHAIN IS EMPTY on this document, which is the whole reason a payroll lane was
+  // needed: the door's existing observation would have answered 0 and refused `no_facts_to_revise`.
+  const invoice = (await rootQuery(
+    "select facts_version from clara._document_source_observation($1)", [doc.documentId])).rows[0];
+  assert.equal(invoice.facts_version, 0, "no invoice_facts extraction exists on a payroll summary");
+});
+
+// ---------------------------------------------------------------------------------------------
+// S3 — what a human declaration does to the banked fact state
+// ---------------------------------------------------------------------------------------------
+
+const declared = async (state, field, raw, cents) =>
+  (await rootQuery(
+    "select clara._payroll_state_with_human_fact($1::jsonb, $2, $3, $4::bigint) as s",
+    [JSON.stringify(state), field, raw, cents])).rows[0].s;
+
+test("S3 · a declared figure establishes its own question, discloses itself, and moves nothing else", async (t) => {
+  if (gate(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  // The two channels read the printed gross differently — the exact condition #1056 names first
+  // ("a channel disagreement the evaluator could not resolve"). Everything else agrees.
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: { "payroll.run.gross_pay": value("5,050.00") },
+    visionAnswers: { "payroll.run.gross_pay": value("5,000.00") },
+  });
+  const before = await bankedState(doc.documentId);
+  assert.equal(before.facts["payroll.run.gross_pay"].state, "channels_disagree",
+    "mandatory setup: the evaluator could not resolve the gross");
+  // The COLUMN SUM the evaluator computed from the two quoted rows: 3,000.00 + 2,000.00, by hand
+  // from the worked example. It is what a later reader compares a declared figure against.
+  assert.equal(Number(before.facts["payroll.run.gross_pay"].computed_cents), 500000);
+
+  // A person reads the page and states the figure: RM 5,000.00.
+  const after = await declared(before, "payroll.run.gross_pay", "5,000.00", 500000);
+  const fact = after.facts["payroll.run.gross_pay"];
+
+  assert.equal(fact.state, "established", "the question the person answered is answered");
+  assert.equal(Number(fact.printed_cents), 500000, "…carrying the figure they stated");
+  assert.equal(fact.printed_raw, "5,000.00", "…rendered as they typed it");
+  assert.equal(fact.basis, "human_declared",
+    "the basis vocabulary says WHO established it — never a printed_* basis a person did not read off a page");
+  assert.equal(fact.reason, null, "the evaluator's refusal reason is spent");
+
+  // THE MACHINE'S OWN READING SURVIVES BESIDE IT. A declaration replaces the verdict, never the
+  // evidence: both channel quotes and the row-sum stay on the fact, so a reviewer can still see
+  // what the two readings said and what the rows added up to.
+  assert.equal(Number(fact.computed_cents), 500000, "the row sum is carried, never recomputed");
+  assert.equal(fact.text_raw, "5,050.00");
+  assert.equal(fact.vision_raw, "5,000.00");
+
+  // DISCLOSED ON THE STATE ITSELF: `state_version` still says v1 (clara._payroll_entry_plan
+  // refuses anything else), so the provenance has to be said somewhere a reader will find it.
+  assert.equal(after.state_version, "v1");
+  assert.deepEqual(after.human_declared, ["payroll.run.gross_pay"]);
+  assert.equal(before.human_declared, undefined, "…and the machine's own state never carries the key");
+
+  // THE BUCKETS ARE RE-DERIVED, in the eleven questions' own order.
+  assert.ok(after.established.includes("payroll.run.gross_pay"));
+  assert.equal(after.disagreed.includes("payroll.run.gross_pay"), false);
+  assert.deepEqual(after.established, RUN_FIELDS.filter((f) => after.facts[f].state === "established"),
+    "every established question, in the roster's own order");
+
+  // NOTHING ELSE MOVED. The other ten facts and the whole rows object are byte-identical.
+  assert.deepEqual(after.rows, before.rows,
+    "a run-level declaration says NOTHING about the quoted employee rows");
+  for (const f of RUN_FIELDS.filter((x) => x !== "payroll.run.gross_pay")) {
+    assert.deepEqual(after.facts[f], before.facts[f], `${f} is untouched`);
+  }
+});
+
+test("S3 · a second declaration joins the first, and the month is declared without cents", async (t) => {
+  if (gate(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: { "payroll.run.period": value("Aug 2026") },
+    visionAnswers: { "payroll.run.period": value("2026-08") },
+  });
+  const before = await bankedState(doc.documentId);
+  assert.equal(before.facts["payroll.run.period"].state, "channels_disagree",
+    "mandatory setup: the two channels read the month differently");
+
+  // THE ONE NON-MONETARY QUESTION. It is declared as a rendering and carries no cents at all —
+  // the same asymmetry clara.persist_payroll_facts writes it under (0296 step 9's
+  // `v_f <> 'payroll.run.period'` arm).
+  const once = await declared(before, "payroll.run.period", "2026-08", null);
+  assert.equal(once.facts["payroll.run.period"].state, "established");
+  assert.equal(once.facts["payroll.run.period"].printed_raw, "2026-08");
+  assert.equal(once.facts["payroll.run.period"].printed_cents, null, "a month is not a figure");
+
+  // A SECOND declaration on the same state APPENDS to the disclosure rather than replacing it:
+  // two questions a person answered are two questions a person answered.
+  const twice = await declared(once, "payroll.run.hrdf_levy", "50.00", 5000);
+  assert.deepEqual(twice.human_declared, ["payroll.run.hrdf_levy", "payroll.run.period"],
+    "sorted, so the disclosure has one spelling however the declarations arrived");
+
+  // RE-DECLARING a question already declared does not list it twice.
+  const thrice = await declared(twice, "payroll.run.period", "2026-09", null);
+  assert.deepEqual(thrice.human_declared, ["payroll.run.hrdf_levy", "payroll.run.period"]);
+  assert.equal(thrice.facts["payroll.run.period"].printed_raw, "2026-09", "…and the newest wins");
 });

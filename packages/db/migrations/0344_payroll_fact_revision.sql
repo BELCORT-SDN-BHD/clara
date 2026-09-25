@@ -233,6 +233,178 @@ revoke all on function clara._revisable_fact_lane(text) from public;
 comment on function clara._revisable_fact_lane(text) is
   '#1056: the ONE arbiter of which fact chain a human revision of this path would land in -- `invoice`, `payroll`, or NULL for a path no chain can carry. clara.revise_document_fact asks it once and branches on the answer, so "is this revisable" and "which chain" can never disagree. It ASKS clara._revisable_invoice_field rather than restating it: neither closed set learns the other''s members. Ungranted.';
 
+-- =====================================================================================
+-- §D  WHICH PAYROLL READING IS CURRENT -- clara._payroll_source_observation(uuid).
+--
+--     THE PAYROLL TWIN of clara._document_source_observation (0217:441), and derived in exactly
+--     one place for the same reason that one is: two transcribed copies would eventually disagree
+--     about the same document.
+--
+--     IT ORDERS THE WAY THE GATE ORDERS, and that is the load-bearing line in this body.
+--     clara._payroll_posting_verdict judges "the NEWEST payroll pair banked for this document",
+--     by `version_n desc, extracted_at desc` and with no `superseded_by` term at all (0297:597-600).
+--     This body repeats that ordering verbatim rather than borrowing 0217's kind-current shape
+--     (newest NOT-superseded by `extracted_at, id`). If the two disagreed, the door would revise
+--     one reading while the gate judged another -- which is the desynchronisation this whole file
+--     exists to prevent, arriving by a different road.
+--
+--     `facts_version` IS A COUNT, for 0217:433's reason restated in the payroll lane's terms:
+--     `version_n` is scoped to (document, engine_id, engine_kind) by the table's own four-column
+--     unique, so the machine's first read and the first human revision would BOTH be version_n 1
+--     under their own engine ids -- a comparator that could not tell them apart. The count of done
+--     `payroll_text_facts` rows moves once per accepted revision, whoever wrote it, which is
+--     exactly the quantity a stale-version refusal has to compare.
+--
+--     NO `payroll_vision_facts` TERM. The vision row is the independence receipt, never a reading
+--     a person revises: `clara.persist_payroll_facts` banks the state and every region on the TEXT
+--     row (0296 steps 7-9) and the gate reads the text row alone. A human declaration is about
+--     what the page says, and there is one place in this estate that records that.
+-- =====================================================================================
+create or replace function clara._payroll_source_observation(p_document uuid)
+  returns table (facts_extraction_id uuid, facts_version int)
+  language plpgsql stable security definer set search_path = clara, pg_temp as $fn$
+begin
+  return query
+    select
+      (select e.id from clara.document_extractions e
+        where e.document_id = d.id and e.firm_id = d.firm_id
+          and e.engine_kind = 'payroll_text_facts' and e.status = 'done'
+        order by e.version_n desc, e.extracted_at desc limit 1),
+      (select count(*)::int from clara.document_extractions e
+        where e.document_id = d.id and e.firm_id = d.firm_id
+          and e.engine_kind = 'payroll_text_facts' and e.status = 'done')
+    from clara.documents d where d.id = p_document;
+end $fn$;
+revoke all on function clara._payroll_source_observation(uuid) from public;
+
+comment on function clara._payroll_source_observation(uuid) is
+  '#1056: which payroll reading of this document is CURRENT, and how many there have been. The payroll twin of clara._document_source_observation, ordered the way clara._payroll_posting_verdict orders (version_n desc, extracted_at desc, no superseded_by term) so the door and the gate can never judge different readings of the same document. `facts_version` is a COUNT of done payroll_text_facts extractions, not a version_n: version_n is per engine, so the machine''s first read and a human''s first revision are both 1. Ungranted.';
+
+-- =====================================================================================
+-- §E  WHAT A HUMAN DECLARATION MAKES OF THE BANKED STATE --
+--     clara._payroll_state_with_human_fact(jsonb, text, text, bigint).
+--
+--     WHY THIS BODY EXISTS AT ALL, rather than a second call to the evaluator. The reading that
+--     `clara._payroll_posting_verdict` judges is not the regions on the page; it is the
+--     `payroll_state` object banked in the extraction envelope (0297:597-600). So a correction
+--     that moved only the region would show a person one figure and post from another -- the
+--     silent desynchronisation #1056 exists to remove. The state has to move with the fact.
+--
+--     AND IT CANNOT BE THE EVALUATOR THAT MOVES IT. `clara.evaluate_payroll_run_state_v1` takes
+--     the TWO FULL CHANNEL ENVELOPES, and the per-employee quotes inside them were stripped and
+--     discarded at read time by construction (0296 step 7). They do not exist by the time a
+--     person reads the page. It is also a REGISTERED, FROZEN closure (0296 §D.1), and a changed
+--     formula there "is a _v2, never an edit". This body therefore asks a DIFFERENT question --
+--     "what does this stored state become when a professional states one of its figures?" -- and
+--     gets its own body, which touches the evaluator not at all.
+--
+--     WHAT IT REPLACES: the VERDICT on the one question, and nothing else.
+--       state         -> `established`. Anything narrower would leave the run blocked on a rung
+--                        naming a condition the person has just resolved:
+--                        `clara._payroll_entry_plan` drafts from `established` ALONE (0297:451)
+--                        and would report `run_totals_not_printed` about a figure a person had
+--                        just typed.
+--       printed_cents -> the declared figure; NULL for `payroll.run.period`, the one non-monetary
+--                        question, exactly as clara.persist_payroll_facts writes it (0296 step 9).
+--       printed_raw   -> the declared rendering, verbatim.
+--       basis         -> `human_declared`, a new member of the vocabulary 0296 already keeps for
+--                        exactly this purpose. It is the ONLY place a reader can tell a figure a
+--                        person stated from a figure the frozen evaluator established, per fact.
+--       reason        -> null. The evaluator's refusal reason is spent.
+--
+--     WHAT IT CARRIES, UNCHANGED, and why each one matters:
+--       computed_cents  the column sum over the quoted employee rows. A person correcting a
+--                       printed TOTAL has not re-read the rows, so the sum still says what it
+--                       said -- and a reviewer comparing the two is exactly who needs it.
+--       text_raw /      what each channel actually read. A declaration replaces the verdict, not
+--       vision_raw      the evidence; the machine's own two readings stay on the record.
+--       rows            the whole object: `agreed`, `contested`, `unbalanced`, `unchecked`. This
+--                       is the load-bearing carry. Rungs 3 and 4 of the gate read `rows` DIRECTLY
+--                       as well as the per-fact states (0297:607-634), so a run whose employee
+--                       rows genuinely disagree or genuinely fail their own gross-minus-deductions
+--                       identity STAYS BLOCKED after any number of run-level declarations. A
+--                       person cannot clear a row problem from the run line, and this body does
+--                       not let them appear to.
+--       everything else including `state_version`, which stays `v1` because the drafting body
+--                       refuses any other value (0297:415) and a corrected run that made the whole
+--                       gate unreadable would be worse than the defect being corrected.
+--
+--     AND WHAT IT ADDS: `human_declared`, a sorted, duplicate-free array of every question a
+--     person has stated on this reading. `state_version` cannot carry that disclosure, so the
+--     state carries it beside the version. A machine-produced state never has the key at all.
+--
+--     THE THREE BUCKETS ARE RE-DERIVED, in the eleven questions' own order, by the evaluator's
+--     own rule (`established` -> established, `not_printed` -> missing, anything else ->
+--     disagreed; 0296:672-675). Patching one bucket and trusting the others is how a projection
+--     starts disagreeing with the facts it projects.
+-- =====================================================================================
+create or replace function clara._payroll_state_with_human_fact(p_state jsonb, p_field text,
+    p_raw text, p_cents bigint)
+  returns jsonb language plpgsql immutable set search_path = clara, pg_temp as $fn$
+declare
+  v_run text[] := array['payroll.run.period','payroll.run.gross_pay',
+    'payroll.run.epf_employee','payroll.run.epf_employer',
+    'payroll.run.socso_employee','payroll.run.socso_employer',
+    'payroll.run.eis_employee','payroll.run.eis_employer',
+    'payroll.run.pcb','payroll.run.hrdf_levy','payroll.run.net_pay'];
+  v_facts jsonb; v_prior jsonb; v_declared jsonb;
+  v_est text[] := array[]::text[];
+  v_dis text[] := array[]::text[];
+  v_mis text[] := array[]::text[];
+  v_f text; v_state text;
+begin
+  -- IT REFUSES RATHER THAN NO-OPS. A body that quietly returned the state unchanged would let the
+  -- door append an extraction whose reading had not moved, which is the defect wearing a receipt.
+  if p_state is null or p_state->>'state_version' is distinct from 'v1'
+     or jsonb_typeof(p_state->'facts') <> 'object' then
+    raise exception 'the banked payroll state is not a v1 fact state this door can revise'
+      using errcode = 'CLR10', detail = '{"reason":"payroll_state_unreadable"}';
+  end if;
+  if not clara._revisable_payroll_run_field(p_field) then
+    raise exception 'field path % is not a payroll run question', quote_literal(left(p_field, 160))
+      using errcode = 'CLR10', detail = '{"reason":"field_path_not_revisable"}';
+  end if;
+  v_prior := p_state->'facts'->p_field;
+  if v_prior is null or jsonb_typeof(v_prior) <> 'object' then
+    raise exception 'the banked payroll state carries no fact for %', quote_literal(left(p_field, 160))
+      using errcode = 'CLR10', detail = '{"reason":"payroll_fact_absent"}';
+  end if;
+
+  v_facts := (p_state->'facts') || jsonb_build_object(p_field, v_prior || jsonb_build_object(
+    'state', 'established',
+    'printed_raw', to_jsonb(p_raw),
+    'printed_cents', to_jsonb(p_cents),
+    'reason', null::text,
+    'basis', 'human_declared'));
+
+  foreach v_f in array v_run loop
+    v_state := v_facts->v_f->>'state';
+    if v_state = 'established' then v_est := v_est || v_f;
+    elsif v_state = 'not_printed' then v_mis := v_mis || v_f;
+    else v_dis := v_dis || v_f;
+    end if;
+  end loop;
+
+  select coalesce(jsonb_agg(s.d order by s.d), '[]'::jsonb) into v_declared
+    from (select t.e as d
+            from jsonb_array_elements_text(
+                   case when jsonb_typeof(p_state->'human_declared') = 'array'
+                        then p_state->'human_declared' else '[]'::jsonb end) as t(e)
+          union
+          select p_field) s;
+
+  return p_state || jsonb_build_object(
+    'facts', v_facts,
+    'established', to_jsonb(v_est),
+    'disagreed', to_jsonb(v_dis),
+    'missing', to_jsonb(v_mis),
+    'human_declared', v_declared);
+end $fn$;
+revoke all on function clara._payroll_state_with_human_fact(jsonb, text, text, bigint) from public;
+
+comment on function clara._payroll_state_with_human_fact(jsonb, text, text, bigint) is
+  '#1056: what a banked payroll fact state becomes when a professional states one of its figures. It replaces the VERDICT on that one question -- state `established`, the declared figure and rendering, basis `human_declared` -- re-derives the three buckets by the evaluator''s own rule, and discloses itself in a sorted `human_declared` array. It carries `computed_cents`, both channel quotes and the WHOLE `rows` object unchanged, so a run whose quoted employee rows disagree or fail their own identity stays blocked on the gate''s rungs 3 and 4 however many run-level figures a person declares. It never calls clara.evaluate_payroll_run_state_v1 (a frozen closure that takes envelopes this estate no longer holds) and never touches it. Ungranted.';
+
 reset role;
 
 -- =====================================================================================
@@ -264,7 +436,9 @@ begin
   --     0217:1425 shape, role by role rather than by an ACL emptiness that `revoke from public`
   --     itself makes false.
   foreach v_fn in array array[
-    'clara._revisable_payroll_run_field(text)', 'clara._revisable_fact_lane(text)'] loop
+    'clara._revisable_payroll_run_field(text)', 'clara._revisable_fact_lane(text)',
+    'clara._payroll_source_observation(uuid)',
+    'clara._payroll_state_with_human_fact(jsonb,text,text,bigint)'] loop
     if to_regprocedure(v_fn) is null then
       raise exception '#1056 tail: % does not resolve', v_fn using errcode = 'CLR10';
     end if;
