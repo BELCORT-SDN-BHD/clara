@@ -7439,3 +7439,64 @@ recorded note outranks a disagreeing account-siblings ground for the same asset.
 knowledge`, never promoted from a committed onboarding answer — the same posture
 `banking_arrangement`, `customer_identity_policy` and `trade_nature` already carry (measured live:
 none of the three holds a `clara.knowledge_plan_item_map` row either).
+
+## 0346 — the runtime read credential reaches a retired default depreciation policy (#1092, riders sweep wave, lane 05)
+
+`0346_fa_retired_policy_agent_read.sql` adds ONE row-level-security policy (`p_fadp_agent`) and ONE
+table-level `grant select` on `clara.fa_account_depreciation_policies` for `clara_agent_ro`, and
+nothing else: no function, no column, no index, no door, and no widening of any other role.
+
+**The gap.** #933 built `deriveFaParticularsProposal`'s `retired_account_policy` ground — ranked
+below `client_knowledge` (fed by 0345) and above `account_siblings` — but the rows it reads live in
+`clara.fa_account_depreciation_policies` (#932, 0277 §A), whose only read policy was `p_fadp_human`
+for `clara_authenticated`. Measured live before this file: `clara_agent_ro`, `clara_runtime` and
+every wake role held zero privilege on the relation, so the ground could never fire and the
+proposal fell through to the siblings every time.
+
+**Why `clara_agent_ro` and not `clara_runtime`.** A workflow step reads under the run's own OBO READ
+credential: `readScoped` checks out of the read pool, whose group role is `clara_agent_ro`
+(`packages/runtime/lib/pools.mjs:101`). That is the same credential
+`loadPendingFixedAssetStepV4` already reads `clara.fixed_assets` with, under `p_fixed_assets_agent`.
+`clara_runtime` is the unscoped service identity and carries no firm; it is deliberately left with
+nothing here.
+
+**Why the predicate is plain tenancy and not "retired rows only", which was this file's first
+draft.** The ticket's title says "retired depreciation policies", and `... and not active` would
+have been the tighter wall. It was rejected for a measured reason. `clara.set_fa_depreciation_policy`
+is version-forward, so an account can hold a RETIRED version 1 underneath a LIVE version 2; a
+register row that was already pending when version 2 landed still opens a question, and proposing
+from the retired version 1 while a live version 2 says something else would put a SUPERSEDED human
+judgement on a form under Clara's own sentence. The read therefore carries a
+`not exists (… where q.active)` guard (`FA_RETIRED_ACCOUNT_POLICY_SQL`,
+`packages/runtime/lib/fa-particulars-proposal.ts`). Under a retired-only RLS wall that sub-select
+would see nothing and ALWAYS pass — the guard would be vacuous under the very credential that runs
+it, which is worse than a slightly wider read. `packages/db/tests/fa-retired-policy-agent-read.test.mjs`
+(`fp.read`) drives both arms and carries the vacuity control that shows the guard, not luck, is what
+suppresses the superseded row.
+
+**What that widening costs, measured.** `clara_agent_ro` already holds table-level SELECT on
+`clara.fixed_assets` under `p_fixed_assets_agent`, and that register carries the same five drivers
+per ASSET (`depreciation_method`, `useful_life_months`, `depreciation_rate_bps`, `residual_cents`,
+`cost_cents`). A per-account DEFAULT of those drivers is the account-level statement of what this
+credential can already read row by row, not a new class of data. The shape is the estate's own: all
+52 policies `clara_agent_ro` holds today are plain tenancy predicates, and the only column-level
+grant anywhere in this estate is an UPDATE pair on `clara.wake_intents` — so a column-level SELECT
+grant would have been a novel mechanism with no precedent and a silent-by-default failure mode for
+every column added later.
+
+**What stays shut, and is asserted rather than assumed** (§Z): SELECT and only SELECT for
+`clara_agent_ro` (INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER each named and refused);
+`clara_runtime`, the three wake roles, `clara_freeform_ro` and PUBLIC each named and holding
+nothing; `p_fadp_human` unmoved; and both write doors
+(`clara.set_fa_depreciation_policy`, `clara.retire_fa_depreciation_policy`) still
+`clara_authenticated`-only. The firm wall itself cannot be proven from inside the migration
+(`clara.wake_firm()` needs a minted credential), so `fp.wall` drives it under a real credential with
+a second firm's credential as the control.
+
+**Prestate pins** (measured live on `clara_l03`, chain 0001..0345, after this lane's #1056 and
+#1090): `clara.wake_firm()` `76311c51…cbfabc`, `clara.set_fa_depreciation_policy(…)`
+`11f0aa0a…20b67d`, `clara.retire_fa_depreciation_policy(…)` `f75d3f25…ac8c05e`,
+`clara._tf_fa_acquisition_birth()` `a584e946…5395b69c`, `clara._fa_on_approve(uuid)`
+`412fd7a0…5faf643b`. The last two are pinned because this file's "a LIVE policy is never a proposal
+ground" reasoning IS those two 0292-recut bodies. No function is recut; the tail re-measures all
+five.
