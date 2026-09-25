@@ -2261,3 +2261,40 @@ wire, are #1066's, which rides on this prop.
 
 One key, `StaffExpenseClaim.advanceSourceEnrolment`. Copy is EN only, for the reason #940 records
 above.
+
+## #1066 — the chooser's own candidate filter reaches a second enrolled account
+
+#1052's "What is deliberately NOT here" paragraph above said the chooser still narrowed
+`staff_advance_summary` to the claimant's own account code alone, and named this ticket as the one
+that widens it. This is that ticket, and that paragraph is no longer current: an advance on a
+DIFFERENT enrolled account of the same client now reaches the chooser too, when the wall
+(`clara._assert_claim_basis`, 0340) would admit it — arm (b) of the claimant-ownership match.
+
+**`advanceCandidates` in `staff-expense-claim-form.tsx`** now admits a `staff_advance_summary` row
+whose `account_code` differs from `draft.claimantAccountCode` when, and only when, its own
+`enrolment_active` is true (mirroring the wall's `sa2.active`: a RETIRED second-account enrolment
+still fails arm (b) at the door and is not offered here either) AND its `person_label`, normalised
+`.trim().toLowerCase()`, equals the claimant's own resolved label, normalised the same way — the
+identical case/whitespace-tolerant match 0340 put at the wall, kept in lockstep on purpose so the
+chooser never offers a candidate the door would refuse, and never hides one the door would admit.
+The claimant's own label is read off the enrolment register (`listStaffAdvanceEnrolments`) via the
+claimant's OWN resolved enrolment (`claimantEnrolmentId`, moved above `advanceCandidates` because
+the filter now needs it too) — `null` while the register is unread or the claimant's own account
+carries no live enrolment yet, in which case no second-account candidate is offered: the same
+conservative direction `advanceSourceEnrolment` already takes for naming one.
+
+**The naming comes for free.** #1052's `advanceSourceEnrolment` already compares `enrolment_id`
+against the claimant's own resolved enrolment and names any candidate that differs; a second-account
+candidate's `enrolment_id` is by construction never the claimant's own, so it is named exactly the
+way an earlier-generation, same-account candidate already was. No change to that reader, or to the
+shared editor, was needed.
+
+**What is unchanged.** The claimant's own account's candidates are exactly as `#930`/`#931` left
+them — `account_code === draft.claimantAccountCode`, `isOutstandingAdvance`, nothing more — so a
+single-account claim (no second live enrolment shares the claimant's label) behaves byte for byte
+as before. `suggestAllocationsByDate` is untouched: it is already account-agnostic (oldest
+`issue_date` first, across whatever candidates it is given), so a claim spanning two accounts
+suggests correctly with no change there either.
+
+**What is deliberately out of scope**, per the ticket: no staff master, and no widening of the chat
+tool's own allocation handling beyond its existing successor contract (`chatTurn_v22`).
