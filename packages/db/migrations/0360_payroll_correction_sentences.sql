@@ -107,6 +107,23 @@ declare
   c_door_sig    constant text := 'clara.revise_document_fact(uuid,text,jsonb,int,text,text)';
   c_verdict_pre constant text := '23c644b7b4ad11cee43c1e02acb2599733cb1000a808d108a5519d4b3a0a4df0';
   c_door_pre    constant text := 'a6858d3e88bfca79d9a0f527a0d511db3702d53ca5612d796a05255fa1927fb8';
+  -- BIMODAL, ADDED AT INTEGRATION (riders sweep wave). This file is lane L5's fix round and its
+  -- two pins were measured on `clara_l03`, a chain of L5's own files alone. On the INTEGRATED
+  -- chain it is the LAST file but one, so both bodies have been moved again by files that apply
+  -- before it, and each has a second admissible pre-image named with the file that produces it:
+  --
+  --   · `clara._payroll_posting_verdict` -- lane L4's #1048 (0343) recuts it for the
+  --     row-sum-plus-witness posting arm. This file does not care what the verdict DECIDES; it
+  --     replaces ONE sentence in the `ready` arm, and §A counts its anchor and refuses unless it
+  --     occurs EXACTLY once. The anchor survives 0343's recut intact (measured: 1 occurrence), so
+  --     the splice is the same splice, applied to a longer body.
+  --   · `clara.revise_document_fact` -- this lane's OWN 0344 §G, as recut at integration to carry
+  --     the cut phase's 0321 substitution (the typed no-op guard) and to admit both payroll state
+  --     versions. The sha 0344 now installs is the one below.
+  --
+  -- A body at NEITHER shape still refuses by name, and nothing else is loosened.
+  c_verdict_alt constant text := '378086068b13e4fa9eba17bb1beba8aa749d0200989872d3296d1246da5a1242';
+  c_door_alt    constant text := '4b9a264d57925d0d4c9622991b42c39c54d7b7a510df5622f41aa70c6654ea0f';
 begin
   if to_regprocedure(c_verdict_sig) is null then
     raise exception '#1056 fix prestate: % is absent -- 0297 must apply first', c_verdict_sig
@@ -133,15 +150,15 @@ begin
   if v_mode = 'FIRST' then
     select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
       from pg_proc p where p.oid = c_verdict_sig::regprocedure;
-    if v_sha is distinct from c_verdict_pre then
-      raise exception '#1056 fix prestate: % is at %, expected the pinned pre-image % -- another change moved it',
-        c_verdict_sig, v_sha, c_verdict_pre using errcode = 'CLR10';
+    if v_sha is distinct from c_verdict_pre and v_sha is distinct from c_verdict_alt then
+      raise exception '#1056 fix prestate: % is at %, expected the pinned pre-image % or lane L4 0343''s post-image % -- a third change moved it',
+        c_verdict_sig, v_sha, c_verdict_pre, c_verdict_alt using errcode = 'CLR10';
     end if;
     select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
       from pg_proc p where p.oid = c_door_sig::regprocedure;
-    if v_sha is distinct from c_door_pre then
-      raise exception '#1056 fix prestate: % is at %, expected the pinned pre-image % -- another change moved it',
-        c_door_sig, v_sha, c_door_pre using errcode = 'CLR10';
+    if v_sha is distinct from c_door_pre and v_sha is distinct from c_door_alt then
+      raise exception '#1056 fix prestate: % is at %, expected the pinned pre-image % or 0344''s integrated post-image % -- a third change moved it',
+        c_door_sig, v_sha, c_door_pre, c_door_alt using errcode = 'CLR10';
     end if;
   end if;
 
