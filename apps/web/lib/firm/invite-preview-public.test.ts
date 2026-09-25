@@ -85,8 +85,9 @@ test("p871.web.preview: a 404 is the DEFINITE single refusal -- and it is the on
 });
 
 test("p871.web.preview: every OTHER failure is INDEFINITE -- a reader that could not read is not a verdict", async () => {
+  // #1095 -- a rate refusal is INDEFINITE too, but it carries a `retryAfterSeconds` the other
+  // reasons do not, so it has its own test group below rather than this shared-shape loop.
   const cases: [string, Parameters<typeof stubFetch>[0], string][] = [
-    ["a rate refusal", { status: 429, body: { outcome: "rate_limited", retryAfterSeconds: 60 } }, "rate_limited"],
     ["a dormant lane", { status: 503, body: { outcome: "unavailable" } }, "transport"],
     ["an unauthorised caller", { status: 401, body: { error: "unauthorized" } }, "transport"],
     ["a server error", { status: 500, body: { error: "boom" } }, "transport"],
@@ -101,6 +102,54 @@ test("p871.web.preview: every OTHER failure is INDEFINITE -- a reader that could
       { fetchImpl: impl, env: ENV },
     );
     assert.deepEqual(outcome, { ok: false, kind: "indefinite", reason }, label);
+  }
+});
+
+// #1095 -- THE RATE-LIMITED WAIT, CARRIED THROUGH. The runtime route
+// (`packages/runtime/src/invitePreviewRoutes.ts`) answers a 429 with `{outcome:"rate_limited",
+// retryAfterSeconds}`, the door's OWN number from its 15-minute/5-reload wall
+// (`0309_invite_preview_public_door.sql`), already clamped to [0,900]. This courier used to
+// discard it entirely (`indefinite("rate_limited")`, no payload); the invite landing page could
+// not have told a visitor how long to wait even though the runtime had already computed it.
+// The clamp-and-flag rule is the ONE shared owner every pre-session wait on this app already
+// uses -- `app/(entry)/auth/confirm/wait-seconds.ts`'s `waitSeconds` -- reused here rather than a
+// second copy of "an over-long wait is clamped and flagged, never downgraded".
+test("p871.web.preview: a rate refusal carries the door's own retryAfterSeconds through, verbatim", async () => {
+  const { impl } = stubFetch({ status: 429, body: { outcome: "rate_limited", retryAfterSeconds: 47 } });
+  const outcome = await readPublicInvitePreview(
+    { token: "t", clientIp: "203.0.113.7" },
+    { fetchImpl: impl, env: ENV },
+  );
+  assert.deepEqual(outcome, { ok: false, kind: "indefinite", reason: "rate_limited", retryAfterSeconds: 47 },
+    "no atLeast key when the wait is inside the display ceiling");
+});
+
+test("p871.web.preview: a rate refusal's over-long wait is CLAMPED to the display ceiling and FLAGGED, never downgraded", async () => {
+  const { impl } = stubFetch({ status: 429, body: { outcome: "rate_limited", retryAfterSeconds: 3600 } });
+  const outcome = await readPublicInvitePreview(
+    { token: "t", clientIp: "203.0.113.7" },
+    { fetchImpl: impl, env: ENV },
+  );
+  assert.deepEqual(outcome,
+    { ok: false, kind: "indefinite", reason: "rate_limited", retryAfterSeconds: 900, atLeast: true },
+    "clamped to the 900s ceiling, never turned into a different outcome -- the wall answered perfectly");
+});
+
+test("p871.web.preview: a missing or unusable rate-limit wait still tells a true story -- the wall's own 900s ceiling", async () => {
+  const cases: [string, Parameters<typeof stubFetch>[0]][] = [
+    ["no retryAfterSeconds at all", { status: 429, body: { outcome: "rate_limited" } }],
+    ["a non-number retryAfterSeconds", { status: 429, body: { outcome: "rate_limited", retryAfterSeconds: "47" } }],
+    ["a negative retryAfterSeconds", { status: 429, body: { outcome: "rate_limited", retryAfterSeconds: -5 } }],
+    ["an unparseable 429 body", { status: 429 }],
+  ];
+  for (const [label, response] of cases) {
+    const { impl } = stubFetch(response);
+    const outcome = await readPublicInvitePreview(
+      { token: "t", clientIp: "203.0.113.7" },
+      { fetchImpl: impl, env: ENV },
+    );
+    assert.deepEqual(outcome, { ok: false, kind: "indefinite", reason: "rate_limited", retryAfterSeconds: 900 },
+      `${label}: the honest ceiling of the wall this route stands in front of, not a shorter guess`);
   }
 });
 
