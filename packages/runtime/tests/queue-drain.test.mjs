@@ -128,3 +128,40 @@ test("waitForQueueDrain still resolves cleanly when no run has ever failed — t
   const result = await waitForQueueDrain(rig, { deadlineMs: 3000 });
   assert.ok(result.polls >= 2, `expected at least 2 polls, got ${result.polls}`);
 });
+
+// #1151 — `firmIds` IS THREADED THROUGH TO THE UNBOUND-TASK CENSUS, entirely at the wiring level:
+// `censusUnboundTasks` itself (the SQL filter, the real defence against another firm's stray row)
+// is proven against a real database in `rollback-preflight.test.mjs`'s own #1151 cell, which this
+// file's own header says is deliberately out of scope here (no database). What THIS file can prove
+// in-memory is narrower and just as load-bearing: that `waitForQueueDrain` actually PASSES its own
+// `opts.firmIds` down as the real `censusUnboundTasks`'s 4th bind parameter, and that omitting the
+// option changes nothing for every existing caller above.
+function paramCapturingRig(agentParamsSink) {
+  return {
+    rootQuery: async (sql, params) => {
+      if (/status = 'failed'/.test(sql)) return { rows: [] };
+      if (/workflow_runs/.test(sql)) return { rows: [] };
+      if (/agent_tasks/.test(sql)) {
+        agentParamsSink.push(params);
+        return { rows: [] };
+      }
+      return { rows: [] };
+    },
+  };
+}
+
+test("waitForQueueDrain threads opts.firmIds through to the REAL censusUnboundTasks as its 4th bind parameter", async () => {
+  const seen = [];
+  const firmIds = ["11111111-1111-1111-1111-111111111111"];
+  const result = await waitForQueueDrain(paramCapturingRig(seen), { deadlineMs: 3000, firmIds });
+  assert.equal(result.polls, 1, "a clean (faked) database still needs exactly one poll");
+  assert.ok(seen.length >= 1, "the agent_tasks census ran at least once");
+  assert.deepEqual(seen[0][3], firmIds, "the 4th bind param on the agent_tasks census is exactly the caller's own firmIds");
+});
+
+test("waitForQueueDrain's default (no firmIds) leaves the census exactly as unscoped as every existing caller above", async () => {
+  const seen = [];
+  await waitForQueueDrain(paramCapturingRig(seen), { deadlineMs: 3000 });
+  assert.ok(seen.length >= 1, "the agent_tasks census ran at least once");
+  assert.equal(seen[0][3], null, "an omitted firmIds reaches the census as null — SQL's own 'no filter', unchanged from before #1151");
+});

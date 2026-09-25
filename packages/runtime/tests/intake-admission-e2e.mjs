@@ -1022,8 +1022,17 @@ async function main() {
   // one-shot creations exits 1 here with all 8 legs green. The order is run -> settle -> run, not
   // settle -> run; the recipe, the two-clone measurement and the CI risk it names are in
   // packages/runtime/README.md beside this file's own section. Do not widen the deadline.
+  //
+  // #1151 — SCOPED TO THIS LEG'S OWN FIRM. `clara_intake_ci` is always built fresh, but a rig clone
+  // of a used estate carries OTHER firms' client data, and that data can mint its own `held` wake
+  // tasks (compliance/lint notifications, with both `clara.wake_engine_sources` rows disabled —
+  // #1044's follow-up 2) that no engine this leg's process runs will ever clear, because they were
+  // never this leg's to drive. Unscoped, this call cannot tell a stranger's stuck row from this
+  // leg's own admitted work still being live, and times out on either the same way. `firm` is the
+  // ONE firm this leg itself built (`rig.buildFirm("intake-admission-e2e")`, above); every row the
+  // leg's own engine is actually responsible for draining carries it.
   const { waitForQueueDrain } = await import("./queue-drain.mjs");
-  await waitForQueueDrain(rig, { log: (m) => console.log(m) });
+  await waitForQueueDrain(rig, { log: (m) => console.log(m), firmIds: [firm] });
 
   console.log("INTAKE ADMISSION E2E: PASS (8 legs — no human gate, no kind from a failed read, duplicates converge, mixed batch independent, replayed finalize idempotent, H-53 custody, C-37 OFX/XLSX, #877 genuine admission)");
   process.exit(0);

@@ -98,13 +98,33 @@ async function censusFailedRuns(query) {
 }
 
 /**
+ * #1151 — `firmIds`, SO A CALLER CAN NAME ITS OWN FIRMS. The header above already says why this
+ * call must be the LAST thing a leg does with its own still-running engine; what it did not carry
+ * is that on any database that already holds OTHER firms' client data (never true of a freshly
+ * built `clara_intake_ci`, always true of a rig clone of a used estate), that other data can mint
+ * its own live `clara.agent_tasks` rows — most measurably `held` wake tasks born from the
+ * estate's OWN compliance/lint transitions while both `clara.wake_engine_sources` rows are
+ * disabled (#1044's follow-up 2; `waveS-lane06-fix.md` / `-fix-2.md`) — that no engine this leg's
+ * process runs will EVER clear, because they were never this leg's to drive. Unscoped, this call
+ * cannot tell "the estate has unrelated live rows" from "this leg's own admitted work is still
+ * live", and answers both the same way: TIMED OUT. Naming `firmIds` (the firm(s) this leg itself
+ * built, e.g. `rig.buildFirm(...)`'s own `firm`) answers only the first question — every row this
+ * leg's own engine is actually responsible for draining, and nothing a stranger's data left lying
+ * on the same cluster. Omitted (the default), the census is exactly as unscoped as it always was:
+ * this is a narrowing an explicit caller opts into, never a change to an existing caller's answer.
+ * `censusNonTerminalRuns`/`censusFailedRuns` (`workflow.workflow_runs`) are deliberately NOT
+ * scoped here — nothing in this ticket's own measurement named them, and a database this call
+ * runs against has never had a body run against it before THIS leg's own process started one
+ * (`clara_intake_ci` is always built fresh; a rig clone carries agent_tasks / document_processing_
+ * tasks residue from an estate that was seeded, never actually WORKED by a live engine).
  * @param {{rootQuery:(sql:string, params?:unknown[]) => Promise<{rows:Array<Record<string, unknown>>}>}} rig
- * @param {{deadlineMs?:number, log?:(m:string)=>void}} [opts]
+ * @param {{deadlineMs?:number, log?:(m:string)=>void, firmIds?:ReadonlyArray<string>|null}} [opts]
  * @returns {Promise<{waitedMs:number, polls:number}>}
  */
 export async function waitForQueueDrain(rig, opts = {}) {
   const deadlineMs = opts.deadlineMs ?? DEFAULT_DEADLINE_MS;
   const log = opts.log ?? (() => {});
+  const firmIds = opts.firmIds ?? null;
   const query = (sql, params) => rig.rootQuery(sql, params);
   const startedAt = Date.now();
   const end = startedAt + deadlineMs;
@@ -116,7 +136,7 @@ export async function waitForQueueDrain(rig, opts = {}) {
     polls += 1;
     const [runs, unbound, failedNow] = await Promise.all([
       censusNonTerminalRuns(query),
-      censusUnboundTasks(query),
+      censusUnboundTasks(query, { firmIds }),
       censusFailedRuns(query),
     ]);
     if (failedBaseline === null) {

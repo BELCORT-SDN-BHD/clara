@@ -611,12 +611,23 @@ function resolveDocumentLaneClass(lane) {
  * scoped; presence of the key, not its value, is the signal. An entirely EMPTY scope (`{}`, or no
  * `scope` at all — neither table is scoped by anything) is the same explicit ask from the other
  * side, and is how `preflight()`'s GLOBAL census and `tests/queue-drain.mjs` get the full picture.
+ *
+ * #1151 — `firmIds` IS A SEPARATE, ORTHOGONAL DIMENSION, not a third member of the
+ * agent-shaped/document-shaped pair above. Both tables carry their own `firm_id` natively (unlike
+ * `work_id`/`task_id`, which the document table has no column for at all), so naming `firmIds`
+ * narrows BOTH halves by the same firms directly — it never trips the `documentTaskIds`
+ * presence rule above, and an absent `firmIds` (the default) changes nothing about either half's
+ * existing behaviour. This is what lets a caller such as `tests/queue-drain.mjs` ask "is THIS
+ * leg's own work drained" without being answered by another firm's unrelated backlog on the same
+ * database — the estate's own `clara.agent_tasks.firm_id` / `clara.document_processing_tasks.
+ * firm_id` are read-only inputs here; no door and no migration.
  * @param {(sql:string, params?:unknown[]) => Promise<{rows:Array<Record<string, unknown>>}>} query
  * @param {{workIds?:ReadonlyArray<string>|null, taskIds?:ReadonlyArray<string>|null,
- *          documentTaskIds?:ReadonlyArray<string>|null}} [scope]
+ *          documentTaskIds?:ReadonlyArray<string>|null, firmIds?:ReadonlyArray<string>|null}} [scope]
  */
 export async function censusUnboundTasks(query, scope = {}) {
   const tasks = [];
+  const firmIds = scope.firmIds ?? null;
 
   const agent = await query(
     `select t.id, t.kind, t.work_id, t.status,
@@ -626,8 +637,9 @@ export async function censusUnboundTasks(query, scope = {}) {
         and t.workflow_run_id is null
         and ($2::uuid[] is null or t.work_id = any($2::uuid[]))
         and ($3::uuid[] is null or t.id = any($3::uuid[]))
+        and ($4::uuid[] is null or t.firm_id = any($4::uuid[]))
       order by t.created_at`,
-    [[...LIVE_TASK_STATUSES], scope.workIds ?? null, scope.taskIds ?? null],
+    [[...LIVE_TASK_STATUSES], scope.workIds ?? null, scope.taskIds ?? null, firmIds],
   );
   for (const row of agent.rows) {
     const resolved = resolveAgentTaskClass(String(row.kind), row.source_class);
@@ -660,8 +672,9 @@ export async function censusUnboundTasks(query, scope = {}) {
       where status = any($1::text[])
         and workflow_run_id is null
         and ($2::uuid[] is null or id = any($2::uuid[]))
+        and ($3::uuid[] is null or firm_id = any($3::uuid[]))
       order by created_at`,
-    [[...LIVE_DOCUMENT_TASK_STATUSES], documentTaskIds],
+    [[...LIVE_DOCUMENT_TASK_STATUSES], documentTaskIds, firmIds],
   );
   for (const row of docs.rows) {
     const resolved = resolveDocumentLaneClass(String(row.lane));
