@@ -974,6 +974,22 @@ kinds: a pre-`claraWork_v3` roster exits 1 naming `frontier_requires_body` (#637
 Before #1131 the second proof existed only as a hand-run invocation against a disposable WDK World
 clone, on nobody's schedule; now it runs on every PR, through the same `db-live-gates` job as the
 body-rule leg.
+
+> **Executed, not only written** (review round, SPEC-1131-UNRUN / STD-1). The cell shipped without
+> the whole drill ever having been run end to end, which for a cell that lives inside a required
+> per-PR gate is the risk of reddening that gate for the whole repo. It has since been run the way
+> `db-live-gates` runs it — `node scripts/ci/world-gate.mjs tests/two-build-cutover-e2e.mjs` against
+> a bootstrapped WDK World — and printed its own line:
+> `[tb-e2e] preflight CLI: --supported <body-complete roster>, no --supported-contracts, exits 1
+> naming frontier_requires_contract for intake_refusal_record_v1, fa_parked_run_v1`, with
+> `TWO-BUILD CUTOVER E2E: ALL PASS`, exit 0. **The vacuity control was then taken against the
+> committed cell inside its real file, twice.** (a) Emptying both `requiresContracts` rows in
+> `lib/rollback-preflight.mjs` reds the block's own control —
+> `control: a database at 0318_… must carry at least one frontier CONTRACT rule; got []`.
+> (b) Sharper, on the deliverable assertion itself: suppressing only the contract line in the CLI's
+> refusal output reds `…naming the reason`, i.e. `assert.match(cliC.stderr,
+> /frontier_requires_contract/)`. Each subject was restored byte for byte (`git status` clean, sha256
+> unchanged) and the drill re-run green afterwards.
 <!-- #794 -->
 **Since #794 it has a SECOND leg, on the lane that has no Work row.** The same file builds a second
 scratch image with `className: "chatTurn"` and its own scratch-image `name`, derives
