@@ -21,7 +21,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { humanQuery } from "./rig-helpers.mjs";
+import { humanQuery, asRoot } from "./rig-helpers.mjs";
 import { twoSessions, asHumanSession, waitBlockedByOrThrow } from "./binding-proposal-pr-1-helpers.mjs";
 import { ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, opk, caught, wake12 }
   from "./f-a4-pr2a-fixtures.mjs";
@@ -298,6 +298,98 @@ async (t) => {
       where n.nspname = 'clara' and p.proname <> '_authority_ref_refusal'
         and p.prosrc like '%clara._authority_ref_refusal(%'`);
   assert.ok(all.rows[0].n >= 1, "nothing reads clara._authority_ref_refusal -- #977's wall is gone");
+});
+
+test("p1050.authority.wall_route -- the twin asks the CATALOG which wall to use: where lane L1's "
+  + "shared predicate exists it DELEGATES to it, and where it does not it carries 0308's own "
+  + "block. Driven inside one rolled-back transaction, because this rig has no #1051 on it",
+async (t) => {
+  if (await standingGate(t)) return;
+
+  // WHY A STAND-IN AND NOT L1's OWN BODY. What can break at integration is the ROUTE -- whether
+  // this twin still reaches the one wall once #1051 has landed -- and a stand-in at the same
+  // signature answers exactly that, without this lane building another lane's deliverable. That
+  // the two routes give the SAME refusal payloads on every axis is measured separately, by
+  // creating L1's real predicate from its own migration file inside a rolled-back transaction
+  // (recorded in this lane's fix report); this cell holds the part a merge can move.
+  const MARKER = "p1050 stand-in predicate was called";
+  const out = await asRoot(async (c) => {
+    await c.query("begin");
+    try {
+      // NOT present on this chain: the premise this cell is about.
+      const before = await c.query(
+        "select to_regprocedure('clara._assert_plan_authority(text,jsonb,uuid,uuid)') is null as absent");
+      assert.equal(before.rows[0].absent, true,
+        "#1051's predicate is already on this rig -- this cell's two branches are no longer both reachable");
+
+      // THE FALLBACK ARM, on the chain as it stands.
+      await c.query("savepoint probe1");
+      const fell = await c.query(
+        `select (select count(*) from (select clara._obo_plan_core('amortisation_schedule',
+            $1::uuid, $2::uuid, $3::uuid, 'route probe', 'nonsense',
+            jsonb_build_object('kind','chat_task','id',$4::text), 'monthly', 'last_day', null,
+            'Asia/Kuala_Lumpur', current_date, current_date + 30,
+            jsonb_build_object('lines', jsonb_build_array()))) q) as n`,
+        [NOWHERE, NOWHERE, NOWHERE, NOWHERE]).then(() => null, (e) => e);
+      await c.query("rollback to savepoint probe1");
+      assert.ok(fell, "the twin admitted an unknown authority kind");
+      assert.equal(fell.code, "CLR10");
+      assert.equal(JSON.parse(fell.detail).reason, "invalid_authority_kind",
+        "the fallback arm is not 0308's own wall");
+
+      // NOW #1051 EXISTS. A stand-in at the exact signature, raising a marker of its own.
+      await c.query("set local role clara_fn_owner");
+      await c.query(
+        `create or replace function clara._assert_plan_authority(
+            p_authority_kind text, p_authority_ref jsonb, p_firm uuid, p_client uuid) returns void
+          language plpgsql stable security definer set search_path = clara, pg_temp as $stub$
+         begin
+           raise exception '${MARKER}' using errcode='CLR10',
+             detail='{"reason":"p1050_stand_in"}';
+         end $stub$`);
+      await c.query("reset role");
+
+      await c.query("savepoint probe2");
+      const routed = await c.query(
+        `select (select count(*) from (select clara._obo_plan_core('amortisation_schedule',
+            $1::uuid, $2::uuid, $3::uuid, 'route probe', 'explicit_instruction',
+            jsonb_build_object('kind','chat_task','id',$4::text), 'monthly', 'last_day', null,
+            'Asia/Kuala_Lumpur', current_date, current_date + 30,
+            jsonb_build_object('lines', jsonb_build_array()))) q) as n`,
+        [NOWHERE, NOWHERE, NOWHERE, NOWHERE]).then(() => null, (e) => e);
+      await c.query("rollback to savepoint probe2");
+      assert.ok(routed, "the twin answered without consulting the wall at all");
+      assert.equal(JSON.parse(routed.detail).reason, "p1050_stand_in",
+        "the twin did NOT delegate to the shared predicate once it existed -- on the integrated "
+        + "chain that would be a second, stale copy of #1051's wall");
+
+      // …AND THIS FILE'S OWN KIND NEVER REACHES IT. The standing-instruction arm is answered
+      // here, which is the asymmetry the ruling asks for and tail item 6 refuses to lose.
+      await c.query("savepoint probe3");
+      const own = await c.query(
+        `select (select count(*) from (select clara._obo_plan_core('amortisation_schedule',
+            $1::uuid, $2::uuid, $3::uuid, 'route probe', 'standing_instruction',
+            jsonb_build_object('kind','chat_task','id',$4::text), 'monthly', 'last_day', null,
+            'Asia/Kuala_Lumpur', current_date, current_date + 30,
+            jsonb_build_object('lines', jsonb_build_array()))) q) as n`,
+        [NOWHERE, NOWHERE, NOWHERE, NOWHERE]).then(() => null, (e) => e);
+      await c.query("rollback to savepoint probe3");
+      assert.ok(own);
+      const d = JSON.parse(own.detail);
+      assert.equal(d.reason, "authority_ref_invalid",
+        "the standing-instruction kind was handed to the shared predicate, which does not admit it");
+      assert.equal(d.constraint, "kind");
+      return "driven";
+    } finally {
+      await c.query("rollback");
+    }
+  });
+  assert.equal(out, "driven");
+
+  // THE STAND-IN IS GONE. Rolled back, and re-read rather than assumed.
+  const after = await rootQuery(
+    "select to_regprocedure('clara._assert_plan_authority(text,jsonb,uuid,uuid)') is null as absent");
+  assert.equal(after.rows[0].absent, true, "the stand-in predicate outlived its transaction");
 });
 
 test("p1050.authority.resolve -- clara._authority_ref_refusal resolves a firm_standing_instruction "

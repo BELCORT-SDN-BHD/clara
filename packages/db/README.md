@@ -7765,15 +7765,34 @@ which extracts the authority wall this file widens into one shared predicate,
 `clara._assert_plan_authority(text, jsonb, uuid, uuid)`, and recuts both plan doors to `perform`
 it. L1 merges first, so on the integrated chain 0330 applies BEFORE 0338 and the pre-image is L1's,
 not 0308's. The first cut of this file pinned only 0308's, which meant it could not apply behind
-0330 at all; and a single unconditional `create or replace` would have silently reverted #1051 on
+0330 at all; and an unconditional recut written against 0308 would have silently reverted #1051 on
 the very chain it runs on.
 
-**§E therefore writes the shape it finds.** Which shape that is is decided by a fact about the
-CATALOG — does `clara._assert_plan_authority` exist — not by a marker inside a body, which is the
-wave-3 addendum's own rule and 0238's idiom. §0 pins BOTH pre-images (`2049c1c4…` for 0308 §D,
-`149b4a3d…` for 0330 §C, the latter measured off lane L1's own migration file and equal to the sha
-L1's ticket report records), so a third shape — L1 moving its body again before the merge —
-refuses BY NAME and says what to re-derive.
+**§E is therefore ONE STATIC BODY that asks the catalog which route exists.** Where
+`clara._assert_plan_authority` is present the twin `perform`s it — which is exactly what #1051
+wants of it — and where it is absent the twin carries 0308's own block, character for character.
+§0 pins BOTH pre-images (`2049c1c4…` for 0308 §D, `149b4a3d…` for 0330 §C, the latter measured off
+lane L1's own migration file and equal to the sha L1's ticket report records), so a THIRD shape —
+L1 moving its body again before the merge — refuses BY NAME and says what to re-derive.
+
+**Not two `create or replace` statements chosen by a `do` block**, which is what the first cut of
+this fix did: that is dynamic function-creating DDL, and `scripts/check-wiki-dynamic-sql.mjs`
+refuses it without a contract-level `DYNAMIC_SQL_ALLOWLIST` waiver — measured, the lint named this
+exact statement — while its own first piece of advice is *write the statement as plain SQL*. The
+runtime branch is plain SQL, and the tail can read every relation it names.
+
+**The fallback is not a weaker wall, and no estate ever runs two live copies.** It is 0308's block,
+admitting the same three reference kinds and raising the same payloads the predicate raises, and it
+is reachable only while the predicate does not exist. The whole `else` arm can be deleted the day
+#1051 is on every chain. Driven both ways: `p1050.authority.wall_route` proves the ROUTE inside one
+rolled-back transaction (absent → 0308's `invalid_authority_kind`; a stand-in at the exact
+signature → the twin delegates to it; and this file's own `standing_instruction` kind never reaches
+it either way), and the eight authority axes were driven through `clara._obo_plan_core` with L1's
+REAL predicate created from its own migration file in a rolled-back transaction: identical on both
+routes, code and `detail` byte for byte — `authority_rule_unsupported`, `invalid_authority_kind`,
+`authority_ref_invalid` on each of `object` / `kind` / `id`, the explicit-with-standing-ref
+pairing, and `authority_ref_unresolved` on both the chat-task and the standing-instruction
+reference.
 
 **The second kind stays OUTSIDE the shared predicate, and that is a decision.**
 `clara._assert_plan_authority` admits exactly one authority kind and is called by the human plan
@@ -7781,17 +7800,6 @@ door and, after #1080, by the accrual core; folding `standing_instruction` into 
 firm's blanket delegation at doors the ruling gives it to nobody — which this file's own tail item
 6 refuses. So the twin answers its own kind in its own branch and delegates every other kind,
 unchanged, to the one wall.
-
-**Both branches were measured, not reasoned.** The POST-#1051 branch was driven inside one
-rolled-back transaction on this rig, by the wave-3 recipe: 0330 §A, §B and §C were applied from
-lane L1's own file, then 0338's §0, §E and the whole §TAIL were run VERBATIM. §0 reported
-`clara._obo_plan_core = FIRST(0330/#1051)`, §E took the POST branch, the body it left hashes to
-`697af938…` (exactly the text this file carries), and the tail passed in full. The eight authority
-axes were then driven through `clara._obo_plan_core` on BOTH shapes and answered identically, code
-and `detail` byte for byte: `authority_rule_unsupported`, `invalid_authority_kind`,
-`authority_ref_invalid` on each of `object` / `kind` / `id`, the explicit-with-standing-ref
-pairing, and `authority_ref_unresolved` on both the chat-task and the standing-instruction
-reference.
 
 **Three pins that are no longer shas, and why.** A sha pin is the right instrument for a body no
 other lane of this wave writes; for one another lane DOES write it turns that lane's lawful recut
