@@ -542,6 +542,17 @@ See [Cloudflare MCP](https://github.com/cloudflare/mcp) and
 - `STRIPE_SECRET_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
+`CLARA_AUTH_WALL_SERVICE_TOKEN` gates three pre-session runtime routes, not one: the confirm wall
+(`/api/auth-wall/confirm`), the resend wall (`/api/auth-wall/resend`, #621) and the signed-out
+invite preview (`/api/invite-preview`, #871). Sharing one value is deliberate — one secret for the
+operator to rotate instead of three — but that means rotating it stops all three at the same time.
+The runtime compares each request's bearer token against the identical `CLARA_AUTH_WALL_SERVICE_TOKEN`
+it holds as its own Fly secret on `clara-runtime` (`packages/runtime/src/authWallRoutes.ts`,
+`packages/runtime/src/invitePreviewRoutes.ts`), so rotate this Worker secret and the matching Fly
+secret together, in the same change: an operator who rotates only the Worker's copy sends email
+confirmation, code resend and invite preview all into a 503 at once, not just the route they meant
+to touch.
+
 Build the Cloudflare bundle in Linux with a Linux-native `pnpm install`; it provisions this
 package's Node runtime. Do not reuse this Windows checkout's `node_modules` from WSL because
 `workerd` is platform-specific. Local Wrangler account/version commands also work on Windows.
