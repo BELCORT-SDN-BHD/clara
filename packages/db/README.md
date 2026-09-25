@@ -10447,3 +10447,78 @@ cell went red first against a deliberately broken map, and green again once 0361
 detects its own marker and returns without touching the body. The prestate admits exactly two
 pre-images per recut body — the sha measured on this lane's rig, or a body already carrying this
 file's own `0361` attribution — so a redo is admitted and real drift refuses by name.
+
+## 0365 — the accrual register reads a page at a time, and the side filter reaches the door (#1152, riders closing wave, lane 03)
+
+[0365_accrual_register_pagination.sql](migrations/0365_accrual_register_pagination.sql) closes
+candidate E28 of the closing wave's follow-up set — `waveS-followup-candidates.md`, sourced from
+`waveS-lane01-fix.md` follow-up 1 / SPEC-03 and `waveS-lane01-recheck.json` RECHECK-03, both left
+on [0334](migrations/0334_accrual_list_side_filter.sql) (#1075): that file widened
+`clara.list_accrual_adjustments` with a server-side `p_side` filter but deliberately did not wire
+it up, because the register did not paginate yet and a filter with no page is a filter with
+nothing to disagree about. This file is the follow-up 0334's own comment named: the page.
+
+**What changed, in one sentence.** `clara.list_accrual_adjustments` gains a fifth and sixth
+argument, `p_cursor jsonb default null` and `p_limit integer default null` — the SAME
+drop-and-create widen 0334 itself used for `p_side` (PostgreSQL identifies a function by argument
+types; a new trailing parameter is a different signature, so the four-argument door is dropped and
+the six-argument one created in its place, never left resolvable beside it).
+
+**Why `p_limit` defaults to `null`, not `50`.** `clara.list_review_queue` has been paginated at a
+50-row default since its first day (0011) — a firm-wide queue was never meant to answer unbounded.
+This door's history is the opposite: every caller since 0222 has read one client's whole accrual
+history in one answer, and this ticket's own second acceptance criterion states the contract to
+keep — an omitted cursor and limit answer EXACTLY what the door answers today. `LIMIT NULL` is
+PostgreSQL's own reading of "no limit at all", so an omitted pair reproduces the pre-0365 query
+byte for byte; a caller that wants a page (`apps/web`'s register) sends `p_limit` explicitly.
+`next_cursor` follows the same rule: null when no limit was requested (an unbounded read already
+answered everything, so there is no "next" of it), non-null even on the true last page of a
+LIMITED read — a caller derives "any more?" from the page's own SIZE, the same
+`lib/firm/use-review-queue.ts` idiom the sibling review-queue register already uses.
+
+**The cursor is a three-tuple, text, opaque** — the `list_review_queue` shape
+(0011:3748-3781) narrowed to what this register orders by: `(effective_from desc, created_at
+desc)`, plus the accrual's own `id` as a tiebreaker so two rows can never compare equal (a keyset
+walk over a tied pair would otherwise place either one on either side of a page boundary). The
+second element is `to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US')` rather
+than a bare `::text` cast — narrower than `list_review_queue`'s own cast, because a bare cast's
+trailing-offset digit rides on the connection's `TimeZone` GUC rather than the stored instant; the
+migration's own header measures exactly why a bare cast was never actually a correctness bug
+(trailing-zero trimming on a fixed-width prefix still orders correctly) but fixes the needless GUC
+dependency anyway.
+
+**A NULL-propagation trap the cursor guard's first draft fell into, found by this file's own
+tests.** `jsonb_typeof(p_cursor -> 'tuple') <> 'array'` is SQL NULL, not TRUE, when the `tuple` key
+is simply absent (`{}`) — a three-valued-logic `or` chain of NULLs is NULL, so the guard would
+silently NOT fire and `{}` would pass as "no cursor" instead of being refused as malformed. Fixed
+with `IS DISTINCT FROM` throughout, which never returns NULL. `p1152.cursor.malformed`'s "no tuple
+key" case is exactly this regression, caught on the first test run against the first draft.
+
+**The web half** (same commit): `apps/web/lib/accruals/api.ts`'s `loadAccruals` gains a `page`
+argument (`side`/`cursor`/`limit`) and now returns the door's own envelope (`AccrualsPage`, with
+`next_cursor`) rather than a bare row array — `components/plans/plan-revise-form.tsx`'s existing
+call, which needs EVERY accrual of a client to find the one bound to a plan
+(`liveAccrualForPlan`), sends no `page` at all and so still reads everything, unpaged, exactly as
+before. `components/accruals/accruals-list.tsx` is the one caller that paginates: its former
+`all.filter((r) => r.side === side)` browser-side narrowing is deleted, and a new hook
+(`lib/accruals/use-accruals-register.ts`, the `use-review-queue.ts` idiom reimplemented narrowly
+for a register with no write half) sends `side` to the door and exposes `loadMore`/`hasMore` for a
+"Load more" affordance.
+
+**Driven, not asserted.** `accrual-register-pagination.test.mjs` walks a five-accrual client at a
+page size of 2 and checks every row arrives exactly once, in the door's own order; compares an
+omitted-cursor-and-limit read against an INDEPENDENT raw table read (never a re-derivation of the
+door's own logic); proves the side filter still composes with a limited page; drives five shapes
+of malformed cursor through the real door; and reads the catalog for the unchanged owner/grants/
+posture. `accrual-adjustments.test.mjs`'s own `p652.acl.grants` cell (gated on 0222 alone, so the
+`db-slice-frontiers` matrix runs it against a chain where neither 0334 nor 0365 has applied) now
+picks its probed signature off the live catalog for THREE shapes, not two.
+
+**Redo-safe by construction** (#957): `drop function if exists` on the four-argument signature (a
+no-op on a redo, where it is already gone) followed by `create or replace` on the six-argument one
+(idempotent either way) — the same shape 0334 itself uses. The prestate admits exactly two starting
+shapes — the four-argument door's live sha, or a six-argument body already carrying this file's own
+`p_cursor`/`accrual_cursor_malformed`/`next_cursor` marks — and refuses anything else. This file was
+itself redone once, on this lane's own rig, to fix the NULL-propagation trap above; the redo ran
+under `CLARA_MIGRATION_REDO=0365_accrual_register_pagination` and the prestate correctly took the
+"my own body is already live" branch.
