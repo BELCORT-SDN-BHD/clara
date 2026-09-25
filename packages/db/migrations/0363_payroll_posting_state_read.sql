@@ -113,9 +113,16 @@ begin
   --     prosrc, and `clara.documents.firm_id` IS the tenancy wall this door closes over.
   select count(*) into v_n from pg_attribute a
    where a.attrelid = 'clara.documents'::regclass and a.attnum > 0 and not a.attisdropped
-     and a.attname in ('id','firm_id');
-  if v_n <> 2 then
-    raise exception '0363 prestate: clara.documents carries % of the 2 columns this file''s wall reads', v_n
+     and a.attname in ('id','firm_id','document_kind');
+  if v_n <> 3 then
+    raise exception '0363 prestate: clara.documents carries % of the 3 columns this file reads (id, firm_id, document_kind)', v_n
+      using errcode = 'CLR10';
+  end if;
+  --     …and `payroll_summary` is a kind this estate actually files under, rather than a string
+  --     this file invented: 0296/0297's whole lane is keyed on it, and the capability registry
+  --     carries its rows.
+  if not exists (select 1 from clara.document_capabilities where document_kind = 'payroll_summary') then
+    raise exception '0363 prestate: clara.document_capabilities knows no payroll_summary kind -- this door''s subject would be unreachable'
       using errcode = 'CLR10';
   end if;
 
@@ -156,6 +163,15 @@ $c0363_pre$;
 --          exist. Both answer CLR11 with ONE message, raised at ONE place, before anything about
 --          the document has been read.
 --
+--      (2b) …AND THEN ON ITS OWN SUBJECT, A PAYROLL SUMMARY. The brief's desired behaviour is a
+--          wrapper that "answers the posting state of ONE PAYROLL SUMMARY DOCUMENT". The internal
+--          takes any uuid because every body that calls it has already established what it is
+--          looking at; a granted door has not. Handed an invoice it would answer
+--          `facts_read / payroll_not_read` — "This payroll summary has not been read yet." said
+--          over a supplier bill — so it refuses BY NAME instead, `CLR10` +
+--          `{"reason":"not_a_payroll_summary"}`. That refusal is not the CLR11 above and must not
+--          be: the document IS the caller's firm's and its kind is already theirs to read.
+--
 --      (3) IT PROJECTS FIVE KEYS. `sentence`, `verdict`, `rung`, `reason`, `completeness` — the
 --          brief's own list — plus `document_id`, which is the caller's own argument echoed back
 --          and carries no information the caller did not supply. What it does NOT project is the
@@ -186,15 +202,28 @@ create or replace function clara.get_payroll_posting_state(p_document uuid)
 declare
   h record;
   v jsonb;
+  v_kind text;
 begin
   -- #1148 [0363]: the granted, document-scoped read of what 0297 §D decided.
   select * into h from clara._human_ctx(clara.role_rank('viewer'));
 
   -- THE FIRM WALL, ASKED BEFORE ANYTHING ELSE IS READ. One message for "not yours" and for "not a
   -- document at all", so a caller cannot tell the two apart (0343 §K's own wording and reason).
-  if not exists (select 1 from clara.documents d
-                  where d.id = p_document and d.firm_id = h.firm) then
+  select d.document_kind into v_kind from clara.documents d
+   where d.id = p_document and d.firm_id = h.firm;
+  if not found then
     raise exception 'payroll summary not found' using errcode = 'CLR11';
+  end if;
+
+  -- …AND THEN THE DOOR'S OWN SUBJECT. The body below takes any uuid and is right to: every other
+  -- caller of it has already established what it is looking at. A GRANTED door has not, and handed
+  -- an invoice it would answer `facts_read / payroll_not_read` -- "This payroll summary has not
+  -- been read yet." said over a supplier bill. CLR10 rather than the CLR11 above, because this
+  -- document IS the caller's firm's and its kind is already theirs to read: "not found" would be
+  -- the lie here, and the wall above has already decided the only question a stranger may ask.
+  if coalesce(v_kind, '') <> 'payroll_summary' then
+    raise exception 'this document is not a payroll summary, so it has no payroll posting state'
+      using errcode = 'CLR10', detail = '{"reason":"not_a_payroll_summary"}';
   end if;
 
   v := clara._payroll_posting_verdict(p_document);
@@ -212,7 +241,7 @@ revoke all on function clara.get_payroll_posting_state(uuid) from public;
 grant execute on function clara.get_payroll_posting_state(uuid) to clara_authenticated;
 
 comment on function clara.get_payroll_posting_state(uuid) is
-  '#1148 [0363]: the granted, DOCUMENT-SCOPED read of the payroll posting verdict. clara_authenticated only, VIEWER floor through clara._human_ctx, firm-scoped on clara.documents.firm_id -- another firm''s document and an id that is no document answer the SAME CLR11, so this read is no existence oracle. It projects clara._payroll_posting_verdict''s sentence, verdict, rung, reason and completeness and NOTHING else: rung_vector is the evaluator''s internal ladder, and the lane internals (detail, plan, filing, extraction, entry, dates) are not a person''s business on a page that is asking why a payslip did not post. STABLE, so PostgreSQL itself refuses a write inside it. The internal it wraps stays ungranted; this door is the first granted way to reach its answer, and before it the only way to see the verdict was a Needs-you queue row or the entry''s own receipt.';
+  '#1148 [0363]: the granted, DOCUMENT-SCOPED read of the payroll posting verdict. clara_authenticated only, VIEWER floor through clara._human_ctx, firm-scoped on clara.documents.firm_id -- another firm''s document and an id that is no document answer the SAME CLR11, so this read is no existence oracle. A document that IS this firm''s but is not a payroll summary is refused CLR10 / not_a_payroll_summary rather than answered about, because the verdict would otherwise say "This payroll summary has not been read yet." over a supplier bill. It projects clara._payroll_posting_verdict''s sentence, verdict, rung, reason and completeness and NOTHING else: rung_vector is the evaluator''s internal ladder, and the lane internals (detail, plan, filing, extraction, entry, dates) are not a person''s business on a page that is asking why a payslip did not post. STABLE, so PostgreSQL itself refuses a write inside it. The internal it wraps stays ungranted; this door is the first granted way to reach its answer, and before it the only way to see the verdict was a Needs-you queue row or the entry''s own receipt.';
 
 reset role;
 
@@ -239,9 +268,11 @@ begin
      and p.prosrc like '%#1148 [0363]%'
      and p.prosrc like '%clara._human_ctx(clara.role_rank(''viewer''))%'
      and p.prosrc like '%d.firm_id = h.firm%'
-     and p.prosrc like '%CLR11%';
+     and p.prosrc like '%CLR11%'
+     and p.prosrc like '%not_a_payroll_summary%'
+     and p.prosrc not like '%rung_vector%';   -- the ladder is NOT projected, read off the body
   if v_n <> 1 then
-    raise exception '0363 tail: the read door is not SECURITY DEFINER + STABLE + clara_fn_owner + pinned search_path with the viewer floor and the firm wall'
+    raise exception '0363 tail: the read door is not SECURITY DEFINER + STABLE + clara_fn_owner + pinned search_path with the viewer floor, the firm wall, the payroll-summary subject and no rung ladder'
       using errcode = 'CLR10';
   end if;
 
