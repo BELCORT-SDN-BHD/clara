@@ -296,7 +296,7 @@ async function main() {
 
   const probe = await rig.rootQuery(`
     select to_regprocedure('clara.admit_trade_invoice_work(uuid,uuid,text,text,jsonb,jsonb,text,jsonb,text)') is not null as admit,
-           to_regprocedure('clara.probe_trade_invoice_duplicates_for(uuid,uuid,text,jsonb)') is not null as probe,
+           to_regprocedure('clara.probe_trade_invoice_duplicates_for(uuid,uuid,text,jsonb,text)') is not null as probe,
            to_regprocedure('clara.record_trade_invoice_duplicate_ack(uuid,uuid,text,text,jsonb,jsonb)') is not null as ack,
            to_regclass('clara.trade_invoice_duplicate_acks') is not null as acks,
            to_regprocedure('clara.admit_staff_expense_claim_work(uuid,uuid,text,jsonb,text,jsonb,text)') is not null as claim,
@@ -308,7 +308,7 @@ async function main() {
     process.exit(0);
   }
   if (!p.probe || !p.ack || !p.acks) {
-    console.log("[v22-e2e] SKIPPED — migration 0275 (the duplicate probe and its acknowledgement) is not on this database");
+    console.log("[v22-e2e] SKIPPED — migration 0275/0323 (the duplicate probe carrying an intent key, and its acknowledgement) is not on this database");
     process.exit(0);
   }
   if (!p.claim || !p.applications) {

@@ -225,8 +225,14 @@ test("v22.trade-invoice: the tool calls the probe, then the ack, then the admiss
   const admit = src.indexOf("clara.admit_trade_invoice_work");
   assert.ok(probe > 0 && ack > probe && admit > ack, "the acknowledgement is written BEFORE the admission");
   // The probe's argument order is the door's own, and the fourth argument is the SAME object the
-  // door will receive (`wave3-lane02-fix.md` amendment 1).
-  assert.match(src, /probe_trade_invoice_duplicates_for\(\$1::uuid, \$2::uuid, \$3::text, \$4::jsonb\)/);
+  // door will receive (`wave3-lane02-fix.md` amendment 1). The FIFTH is 0323's: the intent key the
+  // admission door is idempotent on, so a retried recording is not its own look-alike (ADV-C1-01).
+  assert.match(
+    src,
+    /probe_trade_invoice_duplicates_for\(\$1::uuid, \$2::uuid, \$3::text, \$4::jsonb,"\s*\+ " \$5::text\)/,
+  );
+  // …and the key it passes is the recording's key, not a second one minted for the probe.
+  assert.match(src, /JSON\.stringify\(particulars\), intentKey\]/);
   assert.match(src, /record_trade_invoice_duplicate_ack\(\$1::uuid, \$2::uuid, \$3::text, \$4::text,\s*"?\s*\+?\s*"?\s*\$5::jsonb, \$6::jsonb\)/);
 });
 

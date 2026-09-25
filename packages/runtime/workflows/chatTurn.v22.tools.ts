@@ -906,9 +906,16 @@ export async function runStartTradeInvoiceWorkV22(
       // 1 · THE PROBE. It writes nothing and refuses no duplicate; what it CAN raise is the
       //     admission door's own client and party refusals, which reach the model through the
       //     same map by the catch below.
+      //
+      //     IT CARRIES THE INTENT KEY (0323, the five-argument twin), so a recording is never
+      //     shown as its own look-alike. Without it, a retried call saw the invoice the earlier
+      //     attempt under this same key had already admitted and asked the person whether to
+      //     duplicate their own recording — measured on clara_l01, ADV-C1-01. The four-argument
+      //     door is untouched and is what chatTurn_v21's parked runs still call.
       const probed = await c.query(
-        "select clara.probe_trade_invoice_duplicates_for($1::uuid, $2::uuid, $3::text, $4::jsonb) as r",
-        [clientId, ctx.createdBy, input.kind, JSON.stringify(particulars)],
+        "select clara.probe_trade_invoice_duplicates_for($1::uuid, $2::uuid, $3::text, $4::jsonb,"
+        + " $5::text) as r",
+        [clientId, ctx.createdBy, input.kind, JSON.stringify(particulars), intentKey],
       );
       const probe = (probed.rows[0]?.r ?? null) as Record<string, unknown> | null;
       const matchCount = Number((probe ?? {}).match_count ?? 0);

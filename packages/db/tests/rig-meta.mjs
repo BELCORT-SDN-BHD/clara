@@ -3240,6 +3240,17 @@ export const TRADE_INVOICE_DUPLICATE_0275_COHORT = [
   ...TRADE_INVOICE_DUPLICATE_0275_HUMAN_FNS, ...TRADE_INVOICE_DUPLICATE_0275_RUNTIME_FNS,
   ...TRADE_INVOICE_DUPLICATE_0275_UNGRANTED_FNS,
 ];
+// #1007 — 0323 (cut-phase fix round, ADV-C1-01) ADDS NO NAME TO THIS COHORT, and the absence of a
+// cohort of its own is the honest record rather than an oversight. 0323 widens two bodies by
+// ARITY, not by name: `clara._trade_invoice_probe_core(uuid,text,jsonb,text)` beside the
+// three-argument core (ungranted, so it rides TRADE_INVOICE_DUPLICATE_0275_UNGRANTED_FNS) and
+// `clara.probe_trade_invoice_duplicates_for(uuid,uuid,text,jsonb,text)` beside the four-argument
+// twin (clara_runtime, so it rides TRADE_INVOICE_DUPLICATE_0275_RUNTIME_FNS). This roster is
+// name-keyed, T17's grant matrix is name-keyed, and both new siblings carry exactly the posture
+// the name they share already declares — so a second cohort would enumerate the same two names
+// twice and assert nothing new. What 0323 DOES assert, it asserts in its own §TAIL: two overloads
+// of the probe twin, neither carrying a DEFAULT (a default would make a four-argument call
+// ambiguous), one new clara_runtime EXECUTE and nothing beyond it.
 // #1007 END
 // #1002 [0276, the second-pass cash-account-set membership editor's own read] — its own cohort,
 // bimodal like 0270's: wholly present once 0276 applies, wholly absent before it, because the
