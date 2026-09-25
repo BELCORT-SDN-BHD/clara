@@ -1700,6 +1700,64 @@ accumulated from an earlier, out-of-order local run, `waitForQueueDrain` correct
 the queue drained and timed out (see the action.yml comment above this step).
 <!-- /#967 -->
 
+<!-- #1151 -->
+**Two intake drills that were green for the wrong reason (candidates E26/E27; #1044's follow-ups
+1 and 2, `waveS-lane06-fix.md` / `waveS-lane06-fix-2.md`).**
+
+1. **The terminal drain (this leg) now takes `firmIds`.** `waitForQueueDrain(rig, { firmIds })`
+   scopes `censusUnboundTasks`'s own census to the leg's OWN firm(s) — this file calls it with
+   `firmIds: [firm]`, the one firm `rig.buildFirm("intake-admission-e2e")` built at the top. `clara_
+   intake_ci` is always built fresh, so an unscoped drain never saw another firm's data there; a rig
+   CLONE of a used estate does, and that estate's own compliance/lint notifications can mint `held`
+   wake tasks with no `clara.wake_engine_sources` row enabled to place them — no engine this leg's
+   process runs will EVER clear a row it was never responsible for. Unscoped, the drain cannot tell
+   that stranger's stuck row from this leg's own admitted work still being live, and times out on
+   either the same way ("TIMED OUT … unbound live tasks: […]"). Measured on a disposable clone (338
+   files / `0365`, world-bootstrapped, otherwise empty) with ONE `held` wake task planted for a
+   SEPARATE firm (`tests/g1-wake-bodies.fixtures.mjs`'s `plantHeldWakeTask`, the same producer
+   contract `rollback-preflight.test.mjs` uses): unscoped, this leg's drain times out at exactly that
+   one row every time; scoped to its own firm, it drains in 6-9 polls / ~2-2.6s every time, three
+   consecutive rounds, with the stranger row still `held`, untouched, throughout. `censusUnboundTasks`
+   (`lib/rollback-preflight.mjs`) itself grew a `firmIds` scope alongside `workIds`/`taskIds`/
+   `documentTaskIds` — orthogonal to them (both `clara.agent_tasks` and `clara.document_processing_
+   tasks` carry their own `firm_id` natively), and absent (the default) it changes nothing for
+   `preflight()`'s own global census or any other existing caller. `censusNonTerminalRuns` /
+   `censusFailedRuns` (`workflow.workflow_runs`) are deliberately NOT scoped: nothing this ticket
+   measured named them, and a database this call runs against has never had a body run against it
+   before THIS leg's own process started one — `clara_intake_ci` is always built fresh, and a rig
+   clone's own `agent_tasks`/`document_processing_tasks` residue was seeded, never actually WORKED
+   by a live engine. The real SQL filter is proven against a live database in `rollback-preflight.
+   test.mjs`'s own `#1151` cell; `queue-drain.test.mjs` proves only the in-memory wiring (the 4th
+   bind parameter), by its own header's design (no database in that file).
+2. **`intake-batch-e2e.mjs`'s LEG 3 receipt census is now BY IDENTITY, not by raw count.** The old
+   assertion (`op_receipts` count === `live.length`) had no allowance for a live child settling ON
+   ITS OWN — a genuine terminal ingest failure — between the cancel decision and the belt's own
+   sweep, though the lines just above it already make exactly that allowance for the earlier
+   seed-to-decision window. Under load the window widens and the belt's own worklist read
+   (`clara._intake_batch_live_children`) finds that child gone before it ever gets there —
+   `{"batchCancelOk":true,"batchCancelSettled":0,"batchCancelChildren":0}` is what an EMPTY worklist
+   looks like — so the blunt count came up short (measured on this rig, round 1: `3 of 7`). The leg
+   now FORCES exactly that drift on one live child every round (`clara.settle_work_run(task,
+   'failed', …)` on the one child the interruption loop never directly cancels), so the census is
+   proven against the drift it exists for rather than waiting for load to happen to open the window,
+   and then checks each live child BY IDENTITY: explained by its own `cancel_accounting_work` op
+   receipt, or by its Work having reached some OTHER terminal status on its own — never by neither
+   (a genuinely skipped child still reds the leg, unchanged) and never by two (`clara.op_receipts`'s
+   own primary key, `(firm_id, fn, op_key)`, makes "decided twice" structurally unobservable here,
+   which is why the old count's real job was never actually catching that half). Three consecutive
+   solo rounds on the same disposable clone: green every time, the forced spontaneous child settled
+   `failed` with no cancel receipt every time, `0` unexplained every time.
+
+**Reproduction rig, for whoever needs to re-run this.** A disposable WSL Postgres 17 cluster on a
+free port (never `rigl06ac3`, never a lane's own shared cluster — migration 0154 forbids a second
+from-scratch chain on a cluster that already ran one), migrated 0001→0365 and seeded from scratch,
+`WORKFLOW_POSTGRES_URL` bootstrapped once (`pnpm --filter @clara/runtime exec bootstrap`), then the
+three legs through `scripts/ci/world-gate.mjs` in the action's own order. A stranger firm's held wake
+task is planted with `tests/g1-wake-bodies.fixtures.mjs`'s `plantHeldWakeTask({ owner, client,
+payload })` — no `registerSource` call, so it is born `held` with no source to place it, exactly the
+production shape.
+<!-- /#1151 -->
+
 NAMED RESIDUAL: leg 5 proves the LOST-FINALIZE-RESPONSE convergence, not a SIGKILL
 between finalize and checkpoint. This file boots the runtime in-process (as
 `intake-e2e.mjs` does) so it can inject the OCR fixture; a true SIGKILL variant needs the

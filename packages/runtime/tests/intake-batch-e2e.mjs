@@ -625,6 +625,20 @@ async function main() {
   assert.ok(live.length >= 2 && live.length <= RESUME_N - committedIds.length,
     `the live child list is the un-committed remainder (${live.length} of at most ${RESUME_N - committedIds.length})`);
 
+  // #1151 — THE DELIBERATE DRIFT, DRIVEN RATHER THAN WAITED FOR. A live child can legitimately
+  // settle ON ITS OWN — a genuine terminal ingest failure, exactly the shape measured on this rig
+  // under load (`waveS-lane06-fix.md`'s own log: "document ingest terminally failed (engine_error)")
+  // — strictly BETWEEN this decision and the belt's own sweep below. Under load that happens by
+  // chance and reddened this leg once in nine rounds; here it is FORCED, on the one live child the
+  // interruption loop below never touches (`live[live.length - 1]`, outside `live.slice(0, half)`),
+  // so the census after the belt sweep is proven against the drift every round rather than by luck.
+  const spontaneous = live[live.length - 1];
+  const spontaneousTask = (await rig.rootQuery(
+    "select current_task_id from clara.accounting_work where id=$1", [spontaneous.work_id])).rows[0].current_task_id;
+  if (spontaneousTask) {
+    await settleRun(spontaneousTask, "failed").catch(() => {});
+  }
+
   // THE INTERRUPTION: the first half of the fan-out runs, then the process "dies". Each child's
   // cancel is its OWN transaction, so this is exactly the durable state a SIGKILL leaves behind.
   const half = Math.floor(live.length / 2);
@@ -641,14 +655,33 @@ async function main() {
   assert.equal(beltOut.batchCancelOk, true);
   console.log(`[p636] belt after the interruption: ${JSON.stringify(beltOut)}`);
 
-  // NO CHILD WAS CANCELLED TWICE: every governed decision leaves exactly one op receipt per
-  // (firm, fn, op_key), and the replayed halves returned the STORED result rather than deciding
-  // again. The ledger is the witness.
+  // #1151 — THE BELT SWEEP WINDOW, BY IDENTITY, not by raw count. A live child settling on its own
+  // between the decision and the belt (the spontaneous drift forced above, and the same drift the
+  // identity check above already tolerates for the earlier seed-to-decision window) leaves no
+  // `cancel_accounting_work` receipt behind — the belt's own worklist (`clara._intake_batch_live_
+  // children`) never offered it, because it was no longer live to offer. That is lawful. What is
+  // NEVER lawful is a live child left with NEITHER a cancel receipt NOR its own terminal settle —
+  // "decided twice" cannot even be observed here (`clara.op_receipts`'s own primary key is
+  // `(firm_id, fn, op_key)`, and `childCancelKey` embeds the work id once), so the census that
+  // matters is which live children are EXPLAINED, not how many receipt rows exist.
   const opReceipts = await rig.rootQuery(
-    `select count(*)::int n from clara.op_receipts
+    `select op_key from clara.op_receipts
       where fn='cancel_accounting_work' and op_key like $1`, [`${cKey}:%`]);
-  assert.equal(opReceipts.rows[0].n, live.length,
-    `exactly one op receipt per live child (${opReceipts.rows[0].n} of ${live.length}) — none decided twice, none skipped`);
+  const cancelledWorkIds = new Set(opReceipts.rows.map((r) => String(r.op_key).slice(`${cKey}:`.length)));
+  const liveStatuses = await rig.rootQuery(
+    "select id, status from clara.accounting_work where id = any($1::uuid[])",
+    [live.map((c) => c.work_id)]);
+  const statusByWorkId = new Map(liveStatuses.rows.map((r) => [String(r.id), String(r.status)]));
+  const SETTLED_WITHOUT_CANCEL = new Set(["completed", "refused", "failed", "expired"]);
+  const unexplained = live.filter((child) =>
+    !cancelledWorkIds.has(child.work_id) && !SETTLED_WITHOUT_CANCEL.has(statusByWorkId.get(child.work_id)));
+  assert.equal(unexplained.length, 0,
+    `every live child is explained by a cancel receipt or its own terminal settle — unexplained: ` +
+    `${JSON.stringify(unexplained.map((c) => ({ work_id: c.work_id, status: statusByWorkId.get(c.work_id) })))}`);
+  assert.ok(cancelledWorkIds.has(spontaneous.work_id) === false,
+    "the spontaneous child settled WITHOUT a cancel receipt — the belt correctly never decided it");
+  console.log(`[p636] belt receipt census: ${cancelledWorkIds.size} cancelled by receipt, ` +
+    `${live.length - cancelledWorkIds.size} settled on their own (incl. the forced spontaneous child), 0 unexplained`);
 
   // Every already-committed child still answers `already_completed` with its receipt id.
   for (const workId of committedIds) {
