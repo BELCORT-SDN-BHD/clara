@@ -15,6 +15,21 @@ Use the Node version in `.nvmrc` and the pnpm version in `package.json`, then ru
 in the web README; pnpm provisions the web package's Node runtime automatically. Credentials come
 from the environment; package examples list their names.
 
+**A checkout's `node_modules` can go stale against `pnpm-lock.yaml` and look exactly like a code
+defect (#1124).** Dependencies are installed once per checkout or worktree; if `pnpm-lock.yaml`
+later gains a package — on `main`, or in an earlier commit on your own branch — that checkout does
+not pick it up by itself. The symptom is a failure in code you never touched: `pnpm typecheck`
+reporting `Cannot find module '<pkg>/<entry>'`, a test file reporting `Cannot find package
+'<pkg>'`, or `next build` (so every browser walk) reporting `Module not found: Can't resolve
+'<pkg>/…'`. Before treating a session's FIRST typecheck, lint, build or test failure as a real
+defect, rule this out by running once from the repository root:
+`CI=true pnpm install --frozen-lockfile --prefer-offline`. It adds nothing and changes no tracked
+file when nothing was missing, and installs only what was missing when something was. There is no
+cheaper check: the pinned pnpm predates `pnpm install --dry-run`, which landed in pnpm
+[v11.8.0](https://github.com/pnpm/pnpm/releases/tag/v11.8.0) (2026-06-18). Five parallel lanes
+each spent a cycle rediscovering this separately, which is why it is written here rather than in
+any one wave's rig notes.
+
 | Component | Purpose | Setup and verification |
 |---|---|---|
 | `apps/web` | Next.js workbench and agent rail; Cloudflare Worker | [Web README](apps/web/README.md) |
