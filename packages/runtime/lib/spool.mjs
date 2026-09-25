@@ -145,10 +145,20 @@ function withSidecarLock(path, fn) {
   const settled = mine.then(() => {}, () => {});
   sidecarLocks.set(path, settled);
   settled.then(() => {
-    // Only the LAST holder clears the entry, so an idle spool leaves no map behind.
+    // Only the LAST holder clears the entry, so an idle spool leaves no map behind. A runtime
+    // mints a new task id for every document it ever ingests, so an entry that outlived its
+    // queue would be a slow leak for the lifetime of the process, not a rounding error.
     if (sidecarLocks.get(path) === settled) sidecarLocks.delete(path);
   });
   return mine;
+}
+
+/** How many sidecar paths currently have a queue. Exported for the leak cell in
+ *  `tests/intake-sidecar-race.test.mjs` (`p1044.rounds`), which is the only way to see from the
+ *  outside that a settled queue really does leave the map — same shape as
+ *  `_resetIntakeGateForTest` below. */
+export function _sidecarLockCountForTest() {
+  return sidecarLocks.size;
 }
 
 /**

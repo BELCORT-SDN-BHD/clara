@@ -2140,9 +2140,26 @@ body from the `task` snapshot taken BEFORE the enqueue, so a status or `lastErro
 wrote during the enqueue is still overwritten by it. It can no longer cost the transport (that body
 carries it), which is what #1044 is about.
 
-**Evidence.** `tests/intake-sidecar-race.test.mjs` — `p1044.lost_update`: both launch orders, one
-round each, reproduced by construction with a widened `engineConfig` rather than a sleep, plus a
-non-vacuity arm in which the merge is the last writer and must keep the keys it was not given.
+**Evidence.** `tests/intake-sidecar-race.test.mjs`, three cells:
+
+- `p1044.lost_update` — both launch orders, one round each, reproduced by construction with a
+  widened `engineConfig` rather than a sleep, plus a non-vacuity arm in which the merge is the last
+  writer and must keep the keys it was not given.
+- `p1044.sweep` — the REAL `reconcileDocumentTasks` merge against the real intake write shape, the
+  write launched from inside the fake client at the moment the snapshot resolves: the transport
+  survives, and the NEXT sweep dispatches the task (`documentTransportless: 0`,
+  `documentReenqueued: 1`) where before the fix both sweeps refused it.
+- `p1044.rounds` — 200 rounds at the NATURAL body size, alternating launch orders, zero losses;
+  per round a settling merge must still land its patch AND keep the keys it was not given (without
+  it the cell would pass against a `mergeTaskMeta` that wrote nothing, because the intake's own
+  body is a legal outcome of the race); and the lock map must be empty at the end, because a
+  runtime mints a new task id for every document it ever ingests
+  (`_sidecarLockCountForTest`, the same shape as `_resetIntakeGateForTest`).
+
+Vacuity control for all three: with `withSidecarLock` reduced to `return fn()` — the pre-#1044
+behaviour — `p1044.lost_update` reds on `merge first: the sidecar lost 'storageKey'`, `p1044.sweep`
+on `the sweep's merge dropped 'storageKey' (documentTransportless=1)`, and `p1044.rounds` at
+**169 of 200 rounds**. `spool.mjs` was restored byte for byte afterwards.
 
 ## #981 — one structured-detail carrier on a durable-Work refusal, instead of a fold per refusal
 

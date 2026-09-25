@@ -50,8 +50,8 @@ after(async () => {
 });
 
 const {
-  intakePaths, listIntakeMetaEntries, listIntakeMetas, mergeTaskMeta, readIntakeMeta, readTaskMeta, spoolConfig,
-  sweepSpoolTtl, taskMetaPath, writeIntakeMeta, writeTaskMeta,
+  _sidecarLockCountForTest, intakePaths, listIntakeMetaEntries, listIntakeMetas, mergeTaskMeta, readIntakeMeta,
+  readTaskMeta, spoolConfig, sweepSpoolTtl, taskMetaPath, writeIntakeMeta, writeTaskMeta,
 } = await import("../lib/spool.mjs");
 const { recoverPendingDocumentIntakes } = await import("../lib/intake.mjs");
 const { reconcileDocumentTasks } = await import("../lib/reconciler.mjs");
@@ -430,6 +430,52 @@ test("p1044.sweep: the REAL sweep's merge keeps the transport a concurrent intak
   assert.equal(second.documentTransportless, 0, "the second sweep must not refuse a task whose transport is on disk");
   assert.equal(second.documentReenqueued, 1, "…it dispatches it");
   assert.ok(dispatched.includes(taskId), `…through the ingest enqueue (dispatched=${JSON.stringify(dispatched)})`);
+});
+
+// The two cells above reproduce the interleave by construction, with a widened body. This one keeps
+// the loop `p1043.collide` uses, at the size production actually writes: the window is not an
+// artefact of the widener, and 95 of 100 rounds at THIS size lost the storage key before the fix on
+// this rig (97 of 100 under WSL). It also holds the two things a lock is easy to get wrong: a
+// merge that lands on a settled body still merges, and a settled queue leaves no entry behind.
+const LOST_UPDATE_ROUNDS = 200;
+
+test(`p1044.rounds: ${LOST_UPDATE_ROUNDS} rounds at the NATURAL body size keep every transport field`, async (t) => {
+  await ownSpool(t);
+  const lost = [];
+  const unmerged = [];
+  for (let i = 1; i <= LOST_UPDATE_ROUNDS; i += 1) {
+    const taskId = randomUUID();
+    const intake = intakeShapedTask(taskId, i);
+    const startMerge = () => mergeTaskMeta(taskId, reconcilerShapedTask(taskId, i));
+    const startWrite = () => writeTaskMeta(taskId, intake);
+    // Both launch orders, alternating, because the defect never cared which call was made first.
+    await Promise.all(i % 2 === 1 ? [startMerge(), startWrite()] : [startWrite(), startMerge()]);
+
+    const raced = await readTaskMeta(taskId);
+    const missing = TRANSPORT_KEYS.filter((key) => raced?.[key] !== intake[key]);
+    if (missing.length > 0) lost.push({ round: i, missing });
+
+    // NON-VACUITY, per round: a `mergeTaskMeta` that wrote nothing at all would pass every
+    // assertion above, because the intake's own body is a legal outcome of the race. A merge over
+    // the SETTLED body must land, and must keep the keys it was not given.
+    const settled = await mergeTaskMeta(taskId, reconcilerShapedTask(taskId, -i));
+    const wrong = TRANSPORT_KEYS.filter((key) => settled[key] !== intake[key]);
+    if (settled.n !== -i || settled.writer !== "reconciler" || wrong.length > 0) {
+      unmerged.push({ round: i, n: settled.n, writer: settled.writer, wrong });
+    }
+  }
+
+  assert.deepEqual(lost, [],
+    `a merge may only change the keys it was given: ${lost.length} of ${LOST_UPDATE_ROUNDS} rounds lost a `
+    + `transport field (${JSON.stringify(lost.slice(0, 3))}). The DB task row carries none of them and `
+    + `nothing can put them back, so each one is a document that can never be dispatched (#1044)`);
+  assert.deepEqual(unmerged, [],
+    `…and the merge still MERGES: ${unmerged.length} rounds came back without the patch or without the `
+    + `keys the patch did not name (${JSON.stringify(unmerged.slice(0, 3))})`);
+  assert.equal(_sidecarLockCountForTest(), 0,
+    `every queue must be collected when it drains — ${_sidecarLockCountForTest()} left after `
+    + `${LOST_UPDATE_ROUNDS} distinct sidecars, and a runtime mints a new task id for every document `
+    + `it ever ingests`);
 });
 
 // ---------------------------------------------------------------------------
