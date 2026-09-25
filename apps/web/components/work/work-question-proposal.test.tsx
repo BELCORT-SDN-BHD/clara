@@ -419,7 +419,7 @@ test("p933.conversation.settled_as_proposed a settled question confirmed EXACTLY
   }
 });
 
-test("p933.conversation.settled_no_proposal a settled #639 question that carried no proposal renders the accepted answer with no departure annotation at all", async () => {
+test("p933.conversation.settled_no_proposal a settled ticket-639 question that carried no proposal renders the accepted answer with no departure annotation at all", async () => {
   const h = await renderComponent(App({
     record: {
       ...settledRecord({ method: "none", start_date: "2026-03-01" }),
@@ -431,7 +431,7 @@ test("p933.conversation.settled_no_proposal a settled #639 question that carried
     assert.ok(byTestId(h, "work-question-accepted"), "settled_no_proposal: the settled record still renders");
     for (const field of FA_FIELDS) {
       assert.ok(!byTestId(h, `work-question-proposed-${field.key}`),
-        `settled_no_proposal: ${field.key} has nothing proposed to depart from — every #639 question opened before claraWork_v6 is this case`);
+        `settled_no_proposal: ${field.key} has nothing proposed to depart from — every ticket-639 question opened before claraWork_v6 is this case`);
     }
   } finally {
     await h.unmount();
