@@ -159,21 +159,26 @@ test("p871.web.signed_out: every failed read renders NOTHING extra and never tak
   }
 });
 
-// #1095 -- THE ONE INDEFINITE REASON THAT RENDERS SOMETHING. The runtime already computes a
-// `retryAfterSeconds` off the door's own 15-minute/5-reload wall (`0309_invite_preview_public_
-// door.sql`); before this ticket the courier discarded it and this page rendered nothing at all
-// for a rate-limited read, identically to a transport failure. The property under test: the
-// visitor now sees how long the wall asked them to wait, and NOTHING else about this journey
-// changes -- no verdict about the invitation, the sign-in step still offered, the firm/role/email
-// block (a DIFFERENT section, for a DIFFERENT outcome) still absent.
-test("p871.web.signed_out: a rate-limited read renders the wall's own wait, and nothing else changes", async () => {
-  const h = await mount(formWith({ ok: false, kind: "indefinite", reason: "rate_limited", retryAfterSeconds: 47 }));
+// #1095 -- THE ONE INDEFINITE REASON THAT RENDERS SOMETHING. Before this ticket a rate-limited
+// read rendered nothing at all, identically to a transport failure, so a visitor who had simply
+// reloaded too often was left staring at a page that would not say why. The property under test:
+// they now get a distinct, actionable notice, and NOTHING else about this journey changes -- no
+// verdict about the invitation, the sign-in step still offered, the firm/role/email block (a
+// DIFFERENT section, for a DIFFERENT outcome) still absent.
+test("p871.web.signed_out: a rate-limited read renders its own notice, and nothing else changes", async () => {
+  const h = await mount(formWith({ ok: false, kind: "indefinite", reason: "rate_limited" }));
 
   const text = textOf(h.container as never);
-  assert.match(text, /47 seconds/, "the door's own wait, rendered exactly -- never rounded into a vaguer bucket");
+  assert.match(text, /too many times/i, "the visitor is told the read was walled, not left with silence");
+  assert.match(text, /reload this page/i, "...and what to do about it -- the 'try again' affordance the ticket asks for");
+  assert.match(text, /still continue|unaffected/i, "...and that the invitation itself is untouched");
 
-  // The firm/role/email block is a different section, for the `ok: true` outcome only; it must
-  // not appear here.
+  // DISTINCT from the other indefinite reasons: those two still render the generic note or
+  // nothing, so the two faces must not be the same string.
+  const generic = await mount(formWith({ ok: false, kind: "indefinite", reason: "transport" }));
+  assert.notEqual(text, textOf(generic.container as never), "a rate refusal reads differently from a transport failure");
+
+  // The firm/role/email block is a different section, for the `ok: true` outcome only.
   assert.equal(
     findIn(h.container as never, bySectionLabel("invite-signed-out-preview-heading")),
     null,
@@ -184,12 +189,47 @@ test("p871.web.signed_out: a rate-limited read renders the wall's own wait, and 
   assert.equal(/not valid|expired|revoked/i.test(text), false, "no verdict is printed about the invitation itself");
 });
 
-test("p871.web.signed_out: an over-long wait renders as 'at least', matching the courier's own flag", async () => {
-  const h = await mount(formWith({
-    ok: false, kind: "indefinite", reason: "rate_limited", retryAfterSeconds: 900, atLeast: true,
-  }));
-  const text = textOf(h.container as never);
-  assert.match(text, /at least 900 seconds/, "the clamp is disclosed, never silently understated");
+// #1095 FIX ROUND (ADV-L07-01) -- THE NOTICE PUBLISHES NO WAIT AND ACCUSES NOBODY.
+//
+// `clara.preview_invite_by_token` walls on two limbs (five loads per TOKEN and five per ORIGIN in
+// fifteen minutes) and advertises the MAXIMUM of the two waits, with no `scope`. So on an
+// anonymous page a printed number can be wholly another party's: measured on the lane rig, a
+// first-ever request from a cold address against a token somebody else had loaded five times four
+// minutes earlier answered `rate_limited, 660` with zero rows of the caller's own, and 900 - 660
+// dates that party's fifth-oldest load to the second. The same case makes "WE CHECKED YOUR
+// invitation too many times" a plain falsehood -- for that visitor, and for anyone behind a shared
+// NAT whose neighbour exhausted the origin limb.
+//
+// Two properties, pinned here because a future edit that re-adds the number would pass every other
+// cell in this file: the rendered notice contains NO digits at all, and it does not tell the
+// visitor they did something.
+test("p871.web.signed_out: the rate-limited notice carries no number and does not accuse the visitor", async () => {
+  const h = await mount(formWith({ ok: false, kind: "indefinite", reason: "rate_limited" }));
+  // The notice is ONE paragraph of its own, so the assertions below read exactly it rather than a
+  // window cut out of the whole page (a slice would have hidden the opening clause, which is the
+  // half that accuses).
+  const noticeNode = findIn(
+    h.container as never,
+    (n) => n.tagName === "P" && /too many times/i.test(textOf(n as never)),
+  );
+  assert.ok(noticeNode, "the rate-limited notice is its own paragraph");
+  const notice = textOf(noticeNode as never);
+  assert.equal(
+    /\d/.test(notice),
+    false,
+    `the notice must publish no wait at all -- any number here can be another party's activity: ${notice}`,
+  );
+  assert.equal(
+    /\bNaN\b/.test(notice),
+    false,
+    `...and certainly not a placeholder that never received one: ${notice}`,
+  );
+  assert.equal(
+    /\b(we|you) (checked|reloaded|looked)\b|your invitation too many times/i.test(notice),
+    false,
+    `the notice must not assert that THIS visitor made the attempts -- the origin limb can be exhausted by a `
+      + `neighbour behind the same NAT, and the token limb by the real invitee: ${notice}`,
+  );
 });
 
 test("p871.web.signed_out: the credential-holding reader is reachable ONLY from the server, and the client component imports it as a TYPE", async () => {

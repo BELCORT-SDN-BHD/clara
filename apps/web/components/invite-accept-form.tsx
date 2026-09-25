@@ -783,16 +783,22 @@ export function InviteAcceptForm({
               && signedOutPreview.reason === "rate_limited" ? (
             // #1095 — THE ONE INDEFINITE REASON THAT RENDERS SOMETHING. `transport` and
             // `unreadable` stay silent (the "failed read renders nothing extra" rule above); a
-            // rate refusal is different because the runtime already computed a wait
-            // (`readPublicInvitePreview`'s own header), so there IS something honest to say. This
-            // is still a NOTICE, not a verdict: the invitation itself is untouched (0309's own
-            // comment — "the refusal is soft by construction") and the control below still
-            // consumes the link exactly as it does for every other outcome.
-            <p className="max-w-prose text-xs text-muted-foreground">
-              {signedOutPreview.atLeast
-                ? tPreview("rateLimitedNoticeAtLeast", { seconds: signedOutPreview.retryAfterSeconds })
-                : tPreview("rateLimitedNotice", { seconds: signedOutPreview.retryAfterSeconds })}
-            </p>
+            // rate refusal is different because it is the one refusal the visitor can act on —
+            // come back in a while and the block appears. This is still a NOTICE, not a verdict:
+            // the invitation itself is untouched (0309's own comment — "the refusal is soft by
+            // construction") and the control below still consumes the link exactly as it does for
+            // every other outcome.
+            //
+            // #1095 FIX ROUND (ADV-L07-01) — NO NUMBER, AND NO ACCUSATION. The door walls on two
+            // limbs (five loads per token, five per origin, fifteen minutes) and advertises the
+            // MAXIMUM of their two waits with no `scope`, so on this anonymous page a printed wait
+            // can be wholly another party's: measured, a first-ever request from a cold address
+            // against a token somebody else had loaded five times came back `rate_limited, 660`,
+            // and 900 − 660 dates that party's fifth-oldest load to the second. The courier
+            // therefore carries no wait at all (see its header), and the copy no longer tells this
+            // visitor they did the checking — behind a shared NAT, or when the real invitee is the
+            // one reloading, that was simply untrue.
+            <p className="max-w-prose text-xs text-muted-foreground">{tPreview("rateLimitedNotice")}</p>
           ) : null}
           <Button
             type="button"

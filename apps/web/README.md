@@ -430,16 +430,25 @@ reaches the browser: this app holds only `CLARA_AUTH_WALL_SERVICE_TOKEN` and the
 the DSN.
 
 CORRECTED (ticket 1095, 2026-09-25) — "a walled read simply leaves the block out" no longer
-describes the rate-limited case. `clara.preview_invite_by_token`'s own wall already computed a
-`retry_after_seconds` and the runtime route (`packages/runtime/src/invitePreviewRoutes.ts`) already
-put it on the 429's own body and `Retry-After` header; only the courier
-(`lib/firm/invite-preview-public.ts`) discarded it. It now carries that wait through — clamped to
-900s and flagged when clamped, by the same `waitSeconds` rule the confirm lane's own walls use —
-and the confirm stage renders it as a notice distinct from the firm/role/email block (which still
-needs an `ok: true` read) and from the two OTHER indefinite reasons, `transport` and `unreadable`,
-which still render nothing at all: neither carries a number worth showing, and there is still
-nothing for the visitor to do about them. The invitation itself stays untouched either way — this
-is still a courtesy, never a second admission gate.
+describes the rate-limited case. It is now the ONE indefinite reason the confirm stage renders
+something for: a short notice saying the link has been looked up too many times just now and to
+reload in a little while, distinct from the firm/role/email block (which still needs an `ok: true`
+read) and from the two OTHER indefinite reasons, `transport` and `unreadable`, which still render
+nothing at all — there is nothing for the visitor to do about either. The invitation itself stays
+untouched — this is still a courtesy, never a second admission gate.
+
+**The notice publishes no wait, and that is a decision, not an omission** (ticket 1095, fix round).
+`clara.preview_invite_by_token` walls on TWO limbs — five loads per token and five per origin in
+fifteen minutes — computes each limb's wait independently and advertises the MAXIMUM, with no
+`scope` field, because "naming them would tell a prober which of two budgets it exhausted"
+(`0309_invite_preview_public_door.sql`:461-499, its own comment). On an anonymous page that
+maximum is an activity oracle for a third party: measured on the lane rig, a first-ever request
+from a cold address against a token somebody else had loaded five times four minutes earlier came
+back `rate_limited, 660` with zero rows of the caller's own — and 900 − 660 dates that party's
+fifth-oldest load to the second. So the wait stops at the runtime's `Retry-After` header, where a
+machine reads it; `lib/firm/invite-preview-public.ts`'s outcome type carries no number at all, and
+the copy does not tell this visitor they did the checking (behind a shared NAT, or when the real
+invitee is the one reloading, that was untrue).
 
 CLOSED (ticket 872, migration 0269): a fifth, READ-TIME-ONLY effective status, `issuer_lapsed`,
 now covers exactly the gap the paragraph below used to describe. When a still-`pending`
