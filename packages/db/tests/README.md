@@ -2209,3 +2209,79 @@ census found ZERO callers of the resolver. The sixth, `p1074.not_posted`, stayed
 correct answer for a guard against over-application. The subject was then restored byte for byte by
 re-running 0332's own statement (`5cc0fa56…` before the break and after the restore) and all six
 were green again.
+
+## A third accrual/bill-conflict remedy: one period's own correcting entry (#1073, `0333_plan_occurrence_reversal_door.sql`)
+
+`plan-occurrence-reversal-door.test.mjs`, frontier-gated on the `plan_occurrence_reversal_door$`
+stem. It drives `clara.reverse_plan_occurrence(uuid,date,text)` — the remedy that books the
+correcting entry for exactly ONE named period — beside the two remedies 0302 (#938) already offers,
+and reads every answer back off `clara.journal_lines`, `clara.accounting_plan_occurrences` and
+`clara.op_receipts` rather than off the envelopes the doors returned.
+
+* `p1073.one_period.nets_like_reverse_now` — the ticket's second acceptance criterion, as a
+  COMPARISON. Two identically configured clients each carry a 300,000c accrual and a 290,000c
+  document-sourced bill inside the same period; one is settled through the existing
+  `clara.request_plan_catch_up` remedy and one through the new door. The two reversal entries are
+  line-for-line identical, the profit-and-loss leg is left carrying **the bill's own 290,000c** —
+  an independent figure, never a re-computation of what the door did — and the conflict row is gone
+  from the next `clara.list_review_queue` read with nothing dismissed.
+* `p1073.scope.one_occurrence_only` — "scoped to exactly the conflicting period", measured. Its
+  FIRST assertion drives `clara._assert_plan_schedule`'s `reversal_collides_with_next_occurrence`
+  refusal (a monthly reversing accrual due on the 1st), because that wall is the REASON the two
+  remedies agree on this lane: a reversing schedule's `[due, reversal_date]` window can never carry
+  a second primary. Then: the door adds exactly one occurrence, the flagged period's own primary row
+  is unchanged (same Work, same attempt, same revision), the catch-up leaves the same set, and the
+  "never a window" guarantee is read off the catalog — the door's `prosrc` mentions neither
+  `clara._plan_due_events(` nor either existing remedy. An earlier draft of this cell claimed the
+  window admits MORE; the refusal above is what disproved it, and 0333's header and
+  `packages/db/README.md`'s §0333 both record the withdrawal.
+* `p1073.receipt.idempotent` — the third acceptance criterion. A replayed op_key returns the stored
+  answer byte for byte and adds no second occurrence; `clara.op_receipts` carries exactly one
+  finished row for `(firm, reverse_plan_occurrence, key)`; and a FRESH key naming a period already
+  reversed is refused `CLR13 reversal_already_admitted` — the name this door gives the admission
+  core's CONVERGED answer, which carries no `reason` key of its own.
+* `p1073.receipt.floor` — a viewer is refused `CLR04 insufficient_role`, nothing is written, and the
+  conflict row is still there rather than silently cleared.
+* `p1073.refusals.own` — the door's own four typed raises: an empty op_key, no period named, a date
+  this schedule never reached (`accrual_occurrence_not_found`, deliberately the same token
+  `clara.skip_plan_occurrence` uses for its own `p_after_due`), and `plan_does_not_reverse` on a
+  real `recurring_journal` plan built through `clara.create_accounting_plan`. That last wall is not
+  decorative: `clara._plan_primary_for_reversal` resolves a reversal date back to a real primary due
+  date from the date arithmetic alone, so without it the admission core would admit a swapped-sides
+  entry for a plan whose revision says `auto_reverse = false`.
+* `p1073.refusals.core` — the admission core's own answers, reaching a surface unchanged:
+  `not_yet_due` for a period whose scheduled reversal has not arrived, `reversal_before_primary` for
+  a period whose accrual never posted, and `plan_ended` / `plan_paused` — the same two tokens both
+  existing remedies raise, so the surfaces keep one sentence each. The cell then proves WHY this
+  door raises instead of reporting: the op_key a `plan_paused` refusal rolled back does the real act
+  once the plan is resumed.
+* `p1073.revenue.one_live_amount` — the same claim on the other half of the books (#942). A revenue
+  accrual (Dr accrued income / Cr revenue) with a document-sourced invoice crediting the same income
+  account inside the period: the reversal exchanges the sides of what that period posted, the income
+  account is left carrying the invoice's own amount alone, and the accrued-income asset nets to
+  zero.
+
+**Non-vacuity, run once over the whole file.** The subject was recut ON THE RIG ONLY into the null
+hypothesis a reviewer would raise — "the third remedy is 'reverse now' under another name": the same
+signature, the same floor, the same receipt, with the single admission replaced by
+`clara.request_plan_catch_up(p_plan, p_due, clara._plan_reversal_date(p_due), …)`, the window the
+web layer builds today. FOUR of the seven cells went RED, each for its own reason:
+
+```
+ok   1 … (p1073.one_period — the ledger really is the same on this lane; see below)
+not ok 2 … the one-period remedy must not reach clara.request_plan_catch_up(
+not ok 3 … reversing the same period twice under a fresh key: expected SQLSTATE CLR13 but the call SUCCEEDED
+not ok 5 … a plan whose schedule has no reversal leg: expected SQLSTATE CLR10 but the call SUCCEEDED
+not ok 6 … expected detail.reason="not_yet_due" beside CLR10, got {"reason":"catch_up_in_future"}
+ok   7 … (p1073.revenue — the ledger again)
+```
+
+Cells 1, 4 and 7 stayed GREEN **and that is the point**: the two ledger cells cannot tell the two
+acts apart, because on this lane they genuinely leave the same ledger — which is exactly what the
+ticket predicts when it asks for "the same net state". It is why the scope cell reads the CATALOG as
+well as the occurrence set, and why the refusal cells exist at all: they are the only cells that can
+see the difference between a scoped act and a window.
+
+The subject was then restored byte for byte by re-running 0333's own function statement
+(`3f6f656d…` before the break, `c9ab7ff4…` while broken, `3f6f656d…` after the restore) and all
+seven were green again.

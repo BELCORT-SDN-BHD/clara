@@ -39,10 +39,12 @@ import {
   humanQuery, namedCall, CLR, assertPair,
   freshAccrualClient, accrual, createAccrualAdjustment, postPlanWork, requestPlanCatchUp,
   occurrenceRows, occurrenceCount, instructionRef, opReceiptRows,
-  endAccountingPlan, pauseAccountingPlan,
+  createAccountingPlan, endAccountingPlan, pauseAccountingPlan, resumeAccountingPlan, PLAN_KIND,
   todayInPlanZone, shiftMonths, ACHART, ACCRUAL_TZ,
 } from "./accrual-adjustments-fixtures.mjs";
-import { filedDocument, draftEntryV3, billLines, freshResolution } from "./s6-helpers.mjs";
+import {
+  filedDocument, draftEntryV3, billLines, freshResolution, upsertAccountClassed,
+} from "./s6-helpers.mjs";
 import { approveEntry } from "./rig-fixtures.mjs";
 import { markSkip } from "./wave-a-helpers.mjs";
 
@@ -91,6 +93,7 @@ after(async () => {
 
 const ALICE = () => world.users.alice;
 const BOB = () => world.users.bob;
+const CAROL = () => world.users.carol;
 const FIRM_A = () => world.firms.A;
 
 const monthStart = (day) => `${day.slice(0, 7)}-01`;
@@ -362,4 +365,259 @@ test("p1073.scope.one_occurrence_only — the new remedy adds EXACTLY the flagge
   }
   assert.ok(body.includes("clara._plan_admit_occurrence("),
     "…it admits its one occurrence through the shared core rather than writing a row itself");
+});
+
+// ===========================================================================================
+// p1073.receipt — A GOVERNED ACT, on the conventions the other two remedies already carry
+// (the ticket's third acceptance criterion).
+// ===========================================================================================
+
+test("p1073.receipt.idempotent — the remedy writes its own op receipt, a replayed op_key returns the SAME answer and reverses nothing twice, and a second key is refused by name", async (t) => {
+  if (await gate1073(t)) return;
+  const s = await conflictScene({ tag: "receipt" });
+  const key = opk("p1073-receipt");
+
+  const first = await reversePlanOccurrence(BOB(), { plan: s.plan_id, due: s.row.period, opKey: key });
+  assert.equal(first.reversed, true);
+  const after = await occurrenceCount(s.plan_id);
+
+  // 1 · THE REPLAY. Byte-for-byte the same answer, and nothing new on the plan.
+  const replay = await reversePlanOccurrence(BOB(), { plan: s.plan_id, due: s.row.period, opKey: key });
+  assert.deepEqual(replay, first, "the replayed key answers with the stored result, not a new act");
+  assert.equal(await occurrenceCount(s.plan_id), after,
+    "…and the plan gained no second occurrence");
+
+  // 2 · THE RECEIPT ITSELF, read off clara.op_receipts — the same reader #652's own battery uses
+  //     for the configuration door's receipt.
+  const receipts = (await opReceiptRows(FIRM_A(), key))
+    .filter((r) => r.fn === "reverse_plan_occurrence");
+  assert.equal(receipts.length, 1, `exactly one receipt for this key (got ${JSON.stringify(receipts)})`);
+  assert.equal(receipts[0].finished, true, "…and it carries the door's own finished result");
+
+  // 3 · A DIFFERENT KEY FOR A PERIOD ALREADY REVERSED is not a second reversal. The admission
+  //     core CONVERGES (it answers with the occurrence that already exists and no `reason` of its
+  //     own); this door names that fact and refuses, the way its sibling names an already-skipped
+  //     period.
+  await assertPair(CLR.conflict, "reversal_already_admitted",
+    () => reversePlanOccurrence(BOB(), { plan: s.plan_id, due: s.row.period, opKey: opk("p1073-again") }),
+    "reversing the same period twice under a fresh key");
+  assert.equal(await occurrenceCount(s.plan_id), after, "…and still nothing new on the plan");
+});
+
+test("p1073.receipt.floor — a viewer cannot book a correcting entry, and the refusal says which of the three ways the floor was missed", async (t) => {
+  if (await gate1073(t)) return;
+  const s = await conflictScene({ tag: "floor" });
+  await assertPair(CLR.authz, "insufficient_role",
+    () => reversePlanOccurrence(CAROL(), { plan: s.plan_id, due: s.row.period }),
+    "a viewer reversing one period");
+  assert.equal(await occurrenceCount(s.plan_id), 1,
+    "the refusal wrote nothing: the flagged accrual is still the plan's only occurrence");
+  assert.equal(
+    conflictRows(await listReviewQueue(BOB(), { scope: { client_id: s.client } })).length, 1,
+    "…and the conflict row is still there, not silently cleared");
+});
+
+// ===========================================================================================
+// p1073.refusals — EVERY WAY THE REMEDY CANNOT ACT IS A TYPED RAISE.
+//
+// Four of them are the door's own (an empty key, a missing period, a plan that does not reverse,
+// a date this schedule never reached); the rest are the admission core's, passed outward under
+// the core's own token so no second vocabulary is minted for a fact the estate already names.
+// ===========================================================================================
+
+/** An accrual whose term reaches into NEXT month, so the battery has three kinds of period to
+ *  name on one plan: one that has posted (the configuration's own), one that is a real due date
+ *  whose reversal has NOT arrived (this month's), and one that is a real due date nothing ever
+ *  admitted (two months back). */
+async function longAccrual({ tag }) {
+  const client = await freshAccrualClient(ALICE(), `p1073-${tag}`);
+  const ref = await instructionRef({ client, author: BOB() });
+  const from = monthStart(await shiftMonths(today, -3));
+  const to = await monthEndBack(-1); // NEXT month's month end
+  const created = await createAccrualAdjustment(BOB(), {
+    client, authorityRef: ref,
+    accrual: accrual({ expenseAccount: ACHART.expense, servicePeriodStart: from, servicePeriodEnd: to }),
+    frequency: "monthly", dayRule: "last_day_of_month", dayOfMonth: null,
+    timezone: ACCRUAL_TZ, effectiveFrom: from, effectiveTo: to,
+  });
+  return {
+    client, plan_id: created.plan_id, admittedDue: created.occurrence?.due_date,
+    futureDue: await monthEndBack(0),      // THIS month's end: its reversal is next month's 1st
+    unpostedDue: await monthEndBack(2),    // a real due date nothing ever admitted
+  };
+}
+
+test("p1073.refusals.own — the door's own four: an empty key, a missing period, a plan that does not reverse, and a date this schedule never reached", async (t) => {
+  if (await gate1073(t)) return;
+  const s = await conflictScene({ tag: "refuse-own" });
+
+  await assertPair(CLR.badRequest, "invalid_op_key",
+    () => reversePlanOccurrence(BOB(), { plan: s.plan_id, due: s.row.period, opKey: "" }),
+    "an empty op_key");
+  await assertPair(CLR.badRequest, "invalid_request",
+    () => reversePlanOccurrence(BOB(), { plan: s.plan_id, due: null }),
+    "no period named");
+  await assertPair(CLR.badRequest, "accrual_occurrence_not_found",
+    () => reversePlanOccurrence(BOB(), { plan: s.plan_id, due: "2019-01-15" }),
+    "a date this schedule never reached");
+  assert.equal(await occurrenceCount(s.plan_id), 1, "none of the three wrote anything");
+
+  // A PLAN THAT DOES NOT REVERSE. ck_plan_revisions_auto_reverse (0193:561) ties `auto_reverse` to
+  // plan_kind='reversing_journal', so a recurring journal has no reversal leg in its schedule at
+  // all — while `clara._plan_primary_for_reversal` would still resolve one from the date
+  // arithmetic alone. Refused here by name, before anything is reserved or written.
+  const rClient = await freshAccrualClient(ALICE(), "p1073-recurring");
+  const rRef = await instructionRef({ client: rClient, author: BOB() });
+  const rFrom = monthStart(await shiftMonths(today, -2));
+  const rDue = monthStart(await shiftMonths(today, -1));
+  const plan = await createAccountingPlan(BOB(), {
+    client: rClient, kind: PLAN_KIND.recurring, purpose: "Monthly recurring journal",
+    authorityRef: rRef, frequency: "monthly", dayRule: "day_of_month", dayOfMonth: 1,
+    timezone: ACCRUAL_TZ, effectiveFrom: rFrom, effectiveTo: monthStart(today),
+    basis: {
+      posting_date: rFrom, memo: "1073 rig recurring journal", currency: "MYR",
+      lines: [
+        { account_code: ACHART.expense, debit_cents: 120000, credit_cents: 0 },
+        { account_code: ACHART.liability, debit_cents: 0, credit_cents: 120000 },
+      ],
+    },
+    opKey: opk("p1073-recurring"),
+  });
+  await assertPair(CLR.badRequest, "plan_does_not_reverse",
+    () => reversePlanOccurrence(BOB(), { plan: plan.plan_id, due: rDue }),
+    "reversing one period of a plan whose schedule has no reversal leg");
+});
+
+test("p1073.refusals.core — the admission core's own answers travel outward unchanged: not yet due, nothing posted behind it, and a plan that is no longer active", async (t) => {
+  if (await gate1073(t)) return;
+
+  // 1 · NOT YET DUE. This month's own period is a real due date of the schedule, and its scheduled
+  //     reversal falls on the FIRST of next month — which is in the future on every day the
+  //     battery runs. "Reverse now" refuses the same case as `catch_up_in_future`, naming the
+  //     window's end; this door names the OCCURRENCE.
+  const a = await longAccrual({ tag: "notyetdue" });
+  await assertPair(CLR.badRequest, "not_yet_due",
+    () => reversePlanOccurrence(BOB(), { plan: a.plan_id, due: a.futureDue }),
+    "a period whose scheduled reversal has not arrived");
+
+  // 2 · THE ORPHAN WALL. A period nothing ever admitted has no posted accrual behind it, so there
+  //     is nothing to undo — the core's own wall, reached through this door and named by it.
+  await assertPair(CLR.conflict, "reversal_before_primary",
+    () => reversePlanOccurrence(BOB(), { plan: a.plan_id, due: a.unpostedDue }),
+    "a period whose accrual never posted");
+
+  // 3 · A PLAN THAT IS NO LONGER ACTIVE. Both existing remedies refuse the same two states under
+  //     the same two tokens, and the surfaces render a different sentence for each — so this door
+  //     must not invent a third.
+  const ended = await conflictScene({ tag: "refuse-ended" });
+  await endAccountingPlan(BOB(), { plan: ended.plan_id, opKey: opk("p1073-end") });
+  await assertPair(CLR.badRequest, "plan_ended",
+    () => reversePlanOccurrence(BOB(), { plan: ended.plan_id, due: ended.row.period }),
+    "reversing one period of an ended plan");
+
+  // …AND A REFUSAL LEAVES THE KEY FREE. The paused plan refuses under `key`; once it is resumed
+  // the SAME key does the real act. That is the whole reason this door RAISES rather than
+  // reporting an outcome and committing a receipt for something that did not happen.
+  const paused = await conflictScene({ tag: "refuse-paused" });
+  await pauseAccountingPlan(BOB(), { plan: paused.plan_id, opKey: opk("p1073-pause") });
+  const key = opk("p1073-retry");
+  await assertPair(CLR.badRequest, "plan_paused",
+    () => reversePlanOccurrence(BOB(), { plan: paused.plan_id, due: paused.row.period, opKey: key }),
+    "reversing one period of a paused plan");
+  assert.equal(await occurrenceCount(paused.plan_id), 1, "…and it wrote nothing");
+
+  await resumeAccountingPlan(BOB(), { plan: paused.plan_id, opKey: opk("p1073-resume") });
+  const done = await reversePlanOccurrence(BOB(), {
+    plan: paused.plan_id, due: paused.row.period, opKey: key,
+  });
+  assert.equal(done.reversed, true, "a key a refusal rolled back is free for the real act");
+});
+
+// ===========================================================================================
+// p1073.revenue — THE OTHER SIDE (#942). The ticket's own AC2 says "one live expense OR REVENUE
+// amount for the period", so the claim is made on both halves of the books.
+// ===========================================================================================
+
+/** The revenue side's own two accounts, the pair #942's and #1074's batteries both choose. */
+const RCHART = { income: "4000", asset: "1320" };
+
+test("p1073.revenue.one_live_amount — a REVENUE accrual's conflicting period reverses the same way, and the income account is left carrying the invoice's own amount alone", async (t) => {
+  if (await gate1073(t)) return;
+  const ACCRUED = 300000;
+  const INVOICED = 290000;
+
+  const client = await freshAccrualClient(ALICE(), "p1073-revenue");
+  await upsertAccountClassed(ALICE(), {
+    client, code: RCHART.income, name: "Sales / Fees Income", type: "income",
+    accountClass: null, opKey: opk("p1073-coa"),
+  });
+  await upsertAccountClassed(ALICE(), {
+    client, code: RCHART.asset, name: "Unbilled Receivables (Work-in-Progress)", type: "asset",
+    accountClass: null, opKey: opk("p1073-coa"),
+  });
+  const ref = await instructionRef({ client, author: BOB() });
+  const from = monthStart(await shiftMonths(today, -2));
+  const to = await monthEndBack(1);
+  const created = await createAccrualAdjustment(BOB(), {
+    client, purpose: "Monthly unbilled fee accrual", authorityRef: ref,
+    accrual: {
+      ...accrual({
+        expenseAccount: RCHART.income, liabilityAccount: RCHART.asset, cents: ACCRUED,
+        servicePeriodStart: from, servicePeriodEnd: to,
+        memo: "Accrued fees delivered, not yet invoiced",
+      }),
+      side: "revenue",
+    },
+    frequency: "monthly", dayRule: "last_day_of_month", dayOfMonth: null,
+    timezone: ACCRUAL_TZ, effectiveFrom: from, effectiveTo: to,
+  });
+  const dueDate = created.occurrence.due_date;
+  const accrualEntry = await postPlanWork({
+    work: created.occurrence.work_id, client, author: BOB(), firm: FIRM_A(),
+  });
+  assert.deepEqual(await entryLines(accrualEntry),
+    [[RCHART.asset, ACCRUED, 0], [RCHART.income, 0, ACCRUED]],
+    "the revenue accrual posted Dr accrued income / Cr revenue");
+
+  // THE INVOICE THAT COLLIDES: a document-sourced, approved entry crediting the SAME income
+  // account inside the accrued period — the revenue half of the conflict 0304 widened the read to.
+  const doc = await filedDocument(BOB(), { firm: FIRM_A(), client });
+  const d = await draftEntryV3(BOB(), {
+    client,
+    resolution: freshResolution(BOB(), client, { subjectKind: "document", subjectId: doc.documentId }),
+    document: doc.documentId, sha256: doc.sha256,
+    lines: billLines(ACHART.bank, RCHART.income, INVOICED, { desc: "1073-invoice" }),
+    memo: "1073 rig invoice, inside the accrued period",
+    postingDate: `${dueDate.slice(0, 8)}01`, opKey: opk("p1073-inv-draft"),
+  });
+  await approveEntry(ALICE(), {
+    entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("p1073-inv-approve"),
+  });
+
+  const rows = conflictRows(await listReviewQueue(BOB(), { scope: { client_id: client } }));
+  assert.equal(rows.length, 1, `one conflict row on the revenue side (got ${JSON.stringify(rows)})`);
+  assert.equal(rows[0].accrual_side, "revenue", "…and the row says which way the accrual runs");
+  assert.equal(rows[0].period, dueDate);
+
+  // BEFORE: the period carries BOTH the estimate and the invoice.
+  assert.equal(await liveOnAccount(client, RCHART.income), -(ACCRUED + INVOICED),
+    "both amounts are live on the income account (credit-side, so negative debit-positive)");
+
+  // THE REMEDY, naming the flagged period.
+  const answer = await reversePlanOccurrence(BOB(), { plan: created.plan_id, due: rows[0].period });
+  assert.equal(answer.reversed, true);
+  const revEntry = await postReversal({
+    plan: created.plan_id, client, revDue: monthStart(today),
+  });
+  assert.deepEqual(await entryLines(revEntry),
+    [[RCHART.asset, 0, ACCRUED], [RCHART.income, ACCRUED, 0]],
+    "the reversal exchanges the sides of what that period POSTED");
+
+  // AFTER: ONE live revenue amount for the period — the invoice's own.
+  assert.equal(await liveOnAccount(client, RCHART.income), -INVOICED,
+    "the income account is left carrying the invoice's own amount alone");
+  assert.equal(await liveOnAccount(client, RCHART.asset), 0,
+    "…and the accrued-income asset nets to zero");
+  assert.equal(conflictRows(await listReviewQueue(BOB(), { scope: { client_id: client } })).length, 0,
+    "the conflict row cleared itself on the next read");
 });
