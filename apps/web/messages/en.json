@@ -3068,6 +3068,10 @@
     "orphanDismissReasonLabel": "Dismissal reason",
     "liveClaim": "A posted entry of {client} currently stands on this document.",
     "noLiveClaim": "No posted entry currently stands on this document.",
+    "payrollPosting": {
+      "heading": "Payroll posting",
+      "parkedNote": "Clara is waiting for somebody at your firm to answer this. The question is under Needs you."
+    },
     "tenancy": {
       "heading": "Tenancy terms and rent plan",
       "body": "What this tenancy states, where on the page each figure was read, and the recurring rent plan it would run once somebody confirms it. Nothing here posts by itself.",
