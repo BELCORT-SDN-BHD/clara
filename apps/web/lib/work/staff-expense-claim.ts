@@ -544,6 +544,10 @@ export function toClaimWire(
   draft: ClaimDraft,
   knownAccountCodes: ReadonlySet<string> | null,
   enrolledAccountCodes: ReadonlySet<string> | null = null,
+  /** #1066 — advance_id → the account it REALLY sits on, the caller's own `staff_advance_summary`
+   *  read (never guessed here). `null`/omitted is every pre-#1066 caller, and resolves every row
+   *  to the claim's own typed `advanceAccountCode`, byte-identical to before this ticket. */
+  advanceAccountCodes: ReadonlyMap<string, string> | null = null,
 ): Record<string, unknown> | null {
   if (validateClaimDraft(draft, knownAccountCodes, enrolledAccountCodes).length > 0) return null;
   const claimant: Record<string, unknown> = {};
@@ -576,15 +580,35 @@ export function toClaimWire(
   };
   if (draft.settlement === "reimbursement") out.payableAccountCode = draft.payableAccountCode.trim();
   if (draft.settlement === "advance_application") {
-    out.advanceAccountCode = draft.advanceAccountCode.trim();
     const rows = claimAllocations(draft);
     // THE HEAD fills `clara.staff_expense_claims.advance_id`, which is NOT NULL for this settlement.
     out.advanceId = rows[0]?.advanceId ?? "";
+    // #1066 — `claim.advance_account_code` FOLLOWS THE HEAD'S REAL ACCOUNT, never the raw typed
+    // field. `clara._assert_claim_basis` (0340) refuses a claim whose `advance_account_code`
+    // disagrees with the confirmed list's own first entry (`packages/db/tests/
+    // staff-expense-claim-allocations.test.mjs`'s own `allocClaim` helper states the same rule:
+    // `advanceAccountCode: allocations[0].account_code ?? SECHART.advance`). Every claim before
+    // this ticket could only ever choose an advance on the typed account, so the head's real
+    // account and the typed one were always the same value; this is that equality made explicit
+    // rather than assumed. Unknown (`advanceAccountCodes` omitted, or the head's id not in it)
+    // falls back to the typed field, byte-identical to before.
+    const headAccount = advanceAccountCodes?.get(rows[0]?.advanceId ?? "") ?? draft.advanceAccountCode.trim();
+    out.advanceAccountCode = headAccount;
     // A ONE-LINE LIST IS THE SINGLE-ADVANCE CLAIM, and it crosses exactly as it did before #931 —
     // the door normalises `advance_id` into the same one-element list either way, so sending the
-    // key would be a second spelling of one claim.
+    // key would be a second spelling of one claim. (A lone advance on a SECOND account needs no
+    // list either: `advanceAccountCode` above already carries its real account.)
     if (rows.length > 1) {
-      out.advanceAllocations = rows.map((r) => ({ advanceId: r.advanceId, amountCents: r.amountCents }));
+      out.advanceAllocations = rows.map((r) => {
+        const one: Record<string, unknown> = { advanceId: r.advanceId, amountCents: r.amountCents };
+        // #1066 — STATED ONLY WHEN THIS ROW SITS ON A DIFFERENT ACCOUNT THAN THE HEAD.
+        // `clara._claim_allocations` (0301) defaults a bare row's account to the claim's own
+        // `advance_account_code`, so a row that already matches the head needs no restating —
+        // the SAME "the caller decides, the door defaults" shape 0301 already documents.
+        const code = advanceAccountCodes?.get(r.advanceId);
+        if (code !== undefined && code !== headAccount) one.accountCode = code;
+        return one;
+      });
     }
   }
   if (draft.settlement === "already_settled") out.paymentAccountCode = draft.paymentAccountCode.trim();
