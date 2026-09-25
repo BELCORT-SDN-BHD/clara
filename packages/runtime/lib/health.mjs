@@ -47,7 +47,18 @@ import { bodyCensusHealth } from "./body-census.mjs";
 import { tlsPostureHealth } from "./tls-ca.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
-const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);
+// #1128 — read PER CALL, not bound once at module load. The old shape here was
+// `const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000)`, evaluated
+// exactly once, at import time, before any test body runs. A test that set the env var inside its
+// own body to shrink the window for a deterministic repro changed nothing, silently: the real
+// 30000ms default stayed in force. This codebase hit that directly building #1033's own fix (see
+// ready.test.mjs's #1033 test, which works around it via CLARA_LANE_PROBE_INTERVAL_MS instead,
+// for exactly this reason — `lib/lane-probe.mjs`'s two comparable knobs, `intervalMs()` and
+// `cycleMs()`, already read this way). The production default is byte-identical; only WHEN the
+// env var is read has changed.
+function heartbeatStaleMs() {
+  return Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);
+}
 
 function worldEnabled() {
   return process.env.CLARA_START_WORLD === "1";
@@ -219,9 +230,9 @@ export async function checkReadiness() {
           };
           const worldAge = ageOf("world");
           const controlAge = ageOf("control");
-          checks.world = { ok: worldAge <= HEARTBEAT_STALE_MS, age_ms: Number.isFinite(worldAge) ? Math.round(worldAge) : null };
+          checks.world = { ok: worldAge <= heartbeatStaleMs(), age_ms: Number.isFinite(worldAge) ? Math.round(worldAge) : null };
           checks.control = {
-            ok: controlAge <= HEARTBEAT_STALE_MS,
+            ok: controlAge <= heartbeatStaleMs(),
             age_ms: Number.isFinite(controlAge) ? Math.round(controlAge) : null,
           };
 
@@ -602,4 +613,12 @@ export async function checkReadiness() {
     (worldEnabled() && (checks.world?.ok === false || checks.control?.ok === false || checks.taxonomy?.ok === false));
 
   return { ready: !failed, checks, warnings };
+}
+
+/** Test-only: the resolved heartbeat staleness window, read the same way checkReadiness() reads
+ *  it (#1128) — so a cell can prove a per-test override is actually live without re-deriving the
+ *  parse itself, the same seam `lane-probe.mjs`'s `_laneProbeTimingForTest()` gives its own two
+ *  per-call knobs. */
+export function _heartbeatStaleMsForTest() {
+  return heartbeatStaleMs();
 }
