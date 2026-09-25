@@ -280,4 +280,110 @@ begin
     p_pattern => p_pattern);
 end $c0335_crrsf$;
 
--- (vertical-slice loop: sections 12 only; the tail lands last.)
+-- =====================================================================================
+-- §C — clara.read_prepayment_source_for (0317's cut). VERBATIM except the scope SQLSTATE.
+-- =====================================================================================
+create or replace function clara.read_prepayment_source_for(p_firm uuid, p_client uuid, p_source_entry uuid)
+returns jsonb language plpgsql stable security definer
+set search_path = clara, pg_temp as $c0335_rpsf$
+declare
+  -- SCALARS, NOT RECORDS, and the reason is a defect this file met on the rig: a plpgsql `record`
+  -- that no `select into` ever reaches raises `record "v_sp" is not assigned yet` the moment a
+  -- field is read — so a memo-only recognition (no document, hence no document-carrier select)
+  -- would make the read RAISE instead of reporting the absence it exists to report. Scalars start
+  -- NULL, which is exactly what "nothing recorded" means here.
+  v_entry record; v_legs int;
+  v_leg_code text; v_leg_cents bigint;
+  v_sp_id uuid; v_sp_start date; v_sp_end date; v_sp_kind text; v_sp_basis text;
+  v_st_id uuid; v_st_start date; v_st_end date; v_st_reason text;
+  v_sched_id uuid; v_sched_plan uuid; v_sched_source text;
+  v_term jsonb;
+begin
+  -- #1114 [0335] — CLR44, THE CALLER-CONTRACT CLASS. This read is `clara_runtime` ONLY and
+  -- its scope is three explicit arguments the run always holds; a null is a mis-wired caller,
+  -- never a person's mistake, and the successor contract already says it is never shown
+  -- (reports/wave4-lane04-ticket915.md line 389). CLR10 stays the code of a refusal a
+  -- surface renders, so the two can no longer be confused by a handler reading the code.
+  if p_firm is null or p_client is null or p_source_entry is null then
+    raise exception 'the runtime prepayment-source read names firm, client and source entry'
+      using errcode='CLR44', detail='{"reason":"prepayment_read_scope_required"}';
+  end if;
+  select je.id, je.status, je.document_id, je.posting_date into v_entry
+    from clara.journal_entries je
+   where je.id = p_source_entry and je.client_id = p_client and je.firm_id = p_firm;
+  if v_entry.id is null then
+    raise exception 'prepayment source entry not found in your firm' using errcode='CLR11',
+      detail='{"reason":"prepayment_source_not_found"}';
+  end if;
+
+  -- THE PREPAID LEG, by the door's own predicate: exactly one DEBITED ASSET line. Zero or many is
+  -- reported as a count rather than guessed at, for the same reason the door refuses it.
+  select count(*)::int into v_legs
+    from clara.journal_lines jl
+    join clara.coa_accounts ca
+      on ca.client_id = jl.client_id and ca.account_code = jl.account_code
+   where jl.entry_id = p_source_entry and jl.debit_cents > 0 and ca.account_type = 'asset';
+  if v_legs = 1 then
+    select jl.account_code, jl.debit_cents into v_leg_code, v_leg_cents
+      from clara.journal_lines jl
+      join clara.coa_accounts ca
+        on ca.client_id = jl.client_id and ca.account_code = jl.account_code
+     where jl.entry_id = p_source_entry and jl.debit_cents > 0 and ca.account_type = 'asset';
+  end if;
+
+  -- THE RECORDED TERM. The document carrier first, because a document-bound recognition is the
+  -- lane 0140 built; then #939's person-stated carrier. A recognition that binds a document does
+  -- not carry a stated term at all (0305 refuses one), so the two arms cannot both answer.
+  if v_entry.document_id is not null then
+    select sp.id, sp.period_start, sp.period_end, sp.basis_kind, sp.basis
+      into v_sp_id, v_sp_start, v_sp_end, v_sp_kind, v_sp_basis
+      from clara.document_service_periods sp
+     where sp.document_id = v_entry.document_id and sp.superseded_at is null;
+  end if;
+  select t.id, t.period_start, t.period_end, t.reason
+    into v_st_id, v_st_start, v_st_end, v_st_reason
+    from clara.prepayment_stated_terms t
+   where t.source_entry_id = p_source_entry and t.superseded_at is null;
+
+  if v_sp_id is not null then
+    v_term := jsonb_build_object('source', 'document_service_period',
+      'service_period_id', v_sp_id, 'stated_term_id', null,
+      'period_start', to_char(v_sp_start,'YYYY-MM-DD'),
+      'period_end', to_char(v_sp_end,'YYYY-MM-DD'),
+      'basis_kind', v_sp_kind, 'basis_text', v_sp_basis);
+  elsif v_st_id is not null then
+    v_term := jsonb_build_object('source', 'human_stated',
+      'service_period_id', null, 'stated_term_id', v_st_id,
+      'period_start', to_char(v_st_start,'YYYY-MM-DD'),
+      'period_end', to_char(v_st_end,'YYYY-MM-DD'),
+      'basis_kind', 'human_stated', 'basis_text', v_st_reason);
+  else
+    -- ABSENCE IS REPORTED AS ABSENCE, with the DOOR that fills it — never as an empty term a run
+    -- could read as "no term is needed". The remedy named is the human one, because a service
+    -- period is human-only by law and no agent path to it exists or ever will.
+    v_term := jsonb_build_object('source', null,
+      'service_period_id', null, 'stated_term_id', null,
+      'period_start', null, 'period_end', null, 'basis_kind', null, 'basis_text', null,
+      'remedy', case when v_entry.document_id is not null
+                     then 'clara.record_document_service_period'
+                     else 'clara.record_prepayment_stated_term' end);
+  end if;
+
+  select s.id, s.plan_id, s.term_source into v_sched_id, v_sched_plan, v_sched_source
+    from clara.prepayment_schedules s
+   where s.source_entry_id = p_source_entry and s.firm_id = p_firm and s.superseded_at is null;  -- 0317 (#939 AC4 / #941 AC3): the LIVE one
+
+  return jsonb_build_object(
+    'status', 'ok', 'firm_id', p_firm, 'client_id', p_client,
+    'source_entry_id', p_source_entry,
+    'entry', jsonb_build_object('status', v_entry.status, 'document_id', v_entry.document_id,
+      'posting_date', to_char(v_entry.posting_date,'YYYY-MM-DD')),
+    'prepaid', jsonb_build_object('account_code', v_leg_code,
+      'total_cents', v_leg_cents, 'candidate_legs', v_legs),
+    'term', v_term,
+    'schedule', case when v_sched_id is null then null
+                     else jsonb_build_object('schedule_id', v_sched_id, 'plan_id', v_sched_plan,
+                            'term_source', v_sched_source) end);
+end $c0335_rpsf$;
+
+-- (vertical-slice loop: sections 123 only; the tail lands last.)

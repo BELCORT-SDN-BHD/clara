@@ -556,7 +556,12 @@ async () => {
 
   // 5 — THE SCOPE IS REQUIRED, and a missing one is its own refusal rather than a null-shaped
   //     answer that a caller might read as "nothing is recorded".
-  await assertPair(CLR.badRequest, READ_REASON.scopeRequired,
+  //
+  //     #1114 — UNDER CLR44, NOT CLR10. The scope is three explicit arguments a run always holds,
+  //     so a null is a mis-wired caller and never a person's mistake; the successor contract
+  //     already calls it "an internal wiring error, never shown". It is the same class the null
+  //     author above carries, and a different class from the roster refusal a person acts on.
+  await assertPair(await callerContractCode(), READ_REASON.scopeRequired,
     () => readPrepaymentSourceFor({ firm: null, client: scene.client, sourceEntry: scene.entry }),
     "a read with no firm");
 
