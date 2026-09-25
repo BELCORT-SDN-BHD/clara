@@ -25,12 +25,12 @@ import {
   RESERVATION_STEM, RESERVATION_GATE, reservationApplied,
   RESERVED_DOMAIN, RESERVED_ROLE, BANK_BELT_REASON, ADV_REMEDY_PREPAYMENT,
   RESERVATION_RECUTS, reservedRolesFor, eligibilityBreach, enrolStaffAdvanceAccount,
-  reservationConsumers,
+  reservationConsumers, bankBindingCount, faProfileCount, advanceEnrolmentCount,
 } from "./prepayment-account-reservation-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 2;
+const EXPECTED_CELLS = 3;
 
 before(async () => { ready = await reservationApplied().catch(() => false); });
 
@@ -160,4 +160,45 @@ cell("p1078.wall.unmoved — the shared negative wall answers EXACTLY what it an
   const unknown = await eligibilityBreach(scene.client, "99999998");
   assert.equal(unknown?.axis, "account_unknown",
     `the unknown-account axis is unmoved (got ${JSON.stringify(unknown)})`);
+});
+
+cell("p1078.claim.bank — the ticket's own headline: an account the prepayment roster holds cannot be bound as a REGISTERED BANK ACCOUNT, the refusal names the register that holds it with a reason token of its own, nothing is bound by the refusal, and retiring the enrolment opens the code again", async () => {
+  const { scene, code } = await enrolledScene("bank", { code: "19000103" });
+  assert.equal(await bankBindingCount(scene.client, code), 0, "mandatory setup: nothing bound yet");
+
+  // BEFORE #1078 THIS CALL SUCCEEDED. Measured on this rig at 0336: the roster reserved nothing, so
+  // the bank belt read the shared census, found no claim and bound the code — leaving the
+  // prepayment machine and the bank register both believing they owned one account.
+  const refused = await assertPair(CLR.badRequest, BANK_BELT_REASON.prepayment,
+    () => bindBankAccount(scene.alice, {
+      client: scene.client, coaAccountCode: code, accountNumber: "5141078001" }),
+    "binding an enrolled prepayment account as a registered bank account");
+  assert.equal(refused.detail.reservation_domain, RESERVED_DOMAIN.prepayment,
+    "the refusal says WHICH register holds the code, so the person knows where to look");
+  assert.equal(refused.detail.reservation_role, RESERVED_ROLE.prepayment,
+    "…and which half of the roster holds it");
+  assert.equal(refused.detail.account_code, code);
+  assert.match(refused.err.message, /reserved by the prepayment register/,
+    `the sentence a person reads names the register too: ${refused.err.message}`);
+  assert.equal(await bankBindingCount(scene.client, code), 0, "the refusal bound nothing");
+
+  // THE ADVANCE TOKEN IS UNCHANGED. A surface that branches on `coa_account_advance_reserved` today
+  // must read exactly what it read yesterday, so the other domain is driven on the same client.
+  const advCode = await account(scene.alice, {
+    client: scene.client, code: "19000104", name: "#1078 advance", type: "asset" });
+  await enrolStaffAdvanceAccount(scene.alice, { client: scene.client, account: advCode });
+  const adv = await assertPair(CLR.badRequest, BANK_BELT_REASON.advance,
+    () => bindBankAccount(scene.alice, {
+      client: scene.client, coaAccountCode: advCode, accountNumber: "5141078002" }),
+    "binding an enrolled staff-advance account as a registered bank account");
+  assert.equal(adv.detail.reservation_domain, RESERVED_DOMAIN.staffAdvance,
+    "…and the advance domain still answers with the advance token, byte for byte");
+
+  // RETIRING THE ENROLMENT OPENS THE CODE. The reservation is a LIVE claim, not a brand: a firm
+  // that decides the account is really a bank account retires the enrolment and binds it.
+  await retirePrepaymentAccount(scene.bob, { client: scene.client, account: code });
+  const bound = await bindBankAccount(scene.alice, {
+    client: scene.client, coaAccountCode: code, accountNumber: "5141078003" });
+  assert.ok(bound, "a retired enrolment no longer holds the code");
+  assert.equal(await bankBindingCount(scene.client, code), 1, "…and the binding really happened");
 });

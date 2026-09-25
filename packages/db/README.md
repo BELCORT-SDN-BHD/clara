@@ -7498,6 +7498,7 @@ staff-advance siblings already do.
 |---|---|---|
 | A | `clara._acct_role_reserved` | a third arm: LIVE prepayment-roster enrolments, `domain = 'prepayment'`, `role = ` the enrolment's purpose, `owner_ref = ` the code |
 | B | `clara._adj_line_eligibility_breach` | its reservation read SKIPS the new domain, so every answer this wall gives is the answer it gave before 0337 |
+| C | `clara._fa_assert_code_unreserved` | the bank belt's machine reason names the register that actually holds the code |
 
 §A is the whole of the reservation: the bank belt (`clara._fa_assert_code_unreserved`, reached from
 the `t_bank_accounts_fa_reserved` trigger), the fixed-asset discriminator
@@ -7506,6 +7507,20 @@ disposal-reversal wall) and the staff-advance admission predicate
 (`clara._adv_enrolment_admission`) all read the census, so one arm closes all three at once and
 cannot drift from them. A fourth reader spliced into three doors is exactly the drift 0042's own
 tails exist to prevent.
+
+### The three claim doors, and the one thing each of them needed
+
+None of the three needed a new gate: they read the census, and §A put the roster in it. What they
+needed is that what they SAY stays true once a third register can hold a code.
+
+**§C — the bank belt.** `clara.add_bank_account` and `clara.remap_bank_account_coa` both reach
+`clara._fa_assert_code_unreserved` through the `t_bank_accounts_fa_reserved` trigger on
+`clara.bank_accounts` (`AFTER INSERT OR UPDATE OF coa_account_code, active ... WHEN (new.active)`),
+so #1078's headline example closes with no change to that body's logic at all. Its message was
+already domain-driven ("reserved by the *%* register"); its machine `reason` was not — it said
+`coa_account_advance_reserved` whatever domain held the code. A prepayment claim now answers
+`coa_account_prepayment_reserved`, and the advance token is unchanged byte for byte, which
+`p1078.claim.bank` drives on both domains on one client.
 
 ### §B is the load-bearing half, and it is not a softening
 

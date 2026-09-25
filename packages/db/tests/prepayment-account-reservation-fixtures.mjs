@@ -139,6 +139,34 @@ export async function enrolStaffAdvanceAccount(sub, {
   return r.rows[0].result;
 }
 
+/** How many ACTIVE bank bindings a client holds on one chart code — the instrument for "the
+ *  refusal bound nothing", which is a claim about the RELATION and not about the door's answer. */
+export async function bankBindingCount(client, code) {
+  const r = await rootQuery(
+    `select count(*)::int as n from clara.bank_accounts
+      where client_id = $1 and coa_account_code = $2 and active`, [client, code]);
+  return r.rows[0].n;
+}
+
+/** Every live fixed-asset account profile a client holds on one chart code, in any of the three
+ *  roles — the instrument for "the refusal enrolled no profile". */
+export async function faProfileCount(client, code) {
+  const r = await rootQuery(
+    `select count(*)::int as n from clara.fa_account_profiles
+      where client_id = $1 and active
+        and $2 in (asset_account_code, accum_depr_account_code, depr_expense_account_code)`,
+    [client, code]);
+  return r.rows[0].n;
+}
+
+/** Every live staff-advance enrolment a client holds on one chart code. */
+export async function advanceEnrolmentCount(client, code) {
+  const r = await rootQuery(
+    `select count(*)::int as n from clara.staff_advance_accounts
+      where client_id = $1 and account_code = $2 and active`, [client, code]);
+  return r.rows[0].n;
+}
+
 /** Every `clara` body whose comment-stripped source CALLS the shared reservation reader. The
  *  census instrument: it reads the CATALOG, never a migration's text, so a body a later file
  *  recuts is measured as it stands. */

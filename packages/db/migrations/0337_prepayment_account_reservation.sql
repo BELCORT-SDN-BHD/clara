@@ -108,7 +108,9 @@ declare
     ['clara._acct_role_reserved(uuid,text)',
      'e1b44ed0c2449c4e4947e40b0d9d2675da73d02c7365e90453382e158ebf69cd'],
     ['clara._adj_line_eligibility_breach(uuid,jsonb)',
-     '727fceade766c85a8fc4753d03e6e071a9008334e149266488e5d5232dd98021']
+     '727fceade766c85a8fc4753d03e6e071a9008334e149266488e5d5232dd98021'],
+    ['clara._fa_assert_code_unreserved(uuid,text)',
+     '816f9c24c6cf36b876c7fa3ec1df8a6eac4d492e5f139a8d64755caef534203b']
   ];
   -- …AND THE NEIGHBOURS THIS FILE DEPENDS ON AND MUST NOT MOVE.
   --
@@ -353,6 +355,58 @@ begin
 end $c0337_b$;
 revoke all on function clara._adj_line_eligibility_breach(uuid, jsonb) from public;
 
+-- =====================================================================================
+-- §C — clara._fa_assert_code_unreserved — THE BANK BELT. 0041's body VERBATIM except the reason
+--      token on its shared-union arm.
+--
+-- THIS IS THE TICKET'S OWN HEADLINE EXAMPLE: "an account enrolled as a prepayment account today
+-- can be bound as a bank account ... the very next day". It closes with NO edit to this body's
+-- logic at all — the belt reads the union, and §A put the roster in it. What this section changes
+-- is only the machine reason, which said `advance` whatever domain held the code. The message was
+-- already domain-driven and is untouched.
+-- =====================================================================================
+create or replace function clara._fa_assert_code_unreserved(p_client uuid, p_code text) returns void
+  language plpgsql security definer set search_path = clara, pg_temp as $c0337_c$
+declare v_role text; v_owner text; v_domain text; v_reserved_role text;
+begin
+  if p_client is null or p_code is null then return; end if;
+  perform clara._fa_lock_roles(p_client);
+  select rr.fa_role, rr.owner_asset_code into v_role, v_owner
+    from clara._fa_reserved_roles(p_client) rr where rr.account_code = p_code limit 1;
+  if v_role is not null then
+    raise exception 'chart account % is reserved by the fixed-asset register (% role, cost account %) and cannot back a bank account; pick a different account, or release the claim first -- an ACTIVE profile releases its codes on retire_fa_account_profile, and a register row holds the three codes it was born with until that row is disposed, superseded or its acquisition is reversed', p_code, v_role, v_owner
+      using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'coa_account_fa_reserved', 'account_code', p_code,
+          'fa_role', v_role, 'fa_profile_asset_account', v_owner)::text;
+  end if;
+  -- 0042 (Wave D-b, design SS2.1 / SS3.1): THE SHARED RESERVATION UNION. The FA arm above is
+  -- untouched -- same message, same token, same cost-account pointer -- and this arm covers
+  -- what D-b adds to the predicate: ACTIVE staff-advance enrolments and the register rows
+  -- born on them. Read through the ONE reservation reader rather than re-listing its members
+  -- here, so this belt, the enrolment doors and the adjustment-template line-eligibility
+  -- check can never come to disagree about what "reserved" means. A bank account bound to an
+  -- enrolled advance code would move the advance register's numbers through a door the
+  -- advance machine never sees; the leaf acquired at the top of this body is what makes the
+  -- read a decision rather than a snapshot.
+  select rr.domain, rr.role into v_domain, v_reserved_role
+    from clara._acct_role_reserved(p_client, p_code) rr limit 1;
+  if v_domain is not null then
+    raise exception 'chart account % is reserved by the % register (% role) and cannot back a bank account; pick a different account', p_code, v_domain, v_reserved_role
+      using errcode = 'CLR10',
+        -- #1078 [0337] THE TOKEN NAMES THE REGISTER THAT ACTUALLY HOLDS THE CODE. The message
+        -- above is already domain-driven ("reserved by the % register"), but the machine reason
+        -- said `advance` whatever the domain was, which was survivable while `staff_advance` was
+        -- the only domain this arm could ever see. It is not the only one any more. The advance
+        -- token is UNCHANGED, byte for byte, so nothing that reads it today reads anything new.
+        detail = jsonb_build_object('reason',
+            case when v_domain = 'prepayment' then 'coa_account_prepayment_reserved'
+                 else 'coa_account_advance_reserved' end,
+          'account_code', p_code, 'reservation_domain', v_domain,
+          'reservation_role', v_reserved_role)::text;
+  end if;
+end $c0337_c$;
+revoke all on function clara._fa_assert_code_unreserved(uuid, text) from public;
+
 reset role;
 
 -- =====================================================================================
@@ -364,7 +418,8 @@ declare
   v_src text; v_n int; v_sig text;
   v_mine text[] := array[
     'clara._acct_role_reserved(uuid,text)',
-    'clara._adj_line_eligibility_breach(uuid,jsonb)'
+    'clara._adj_line_eligibility_breach(uuid,jsonb)',
+    'clara._fa_assert_code_unreserved(uuid,text)'
   ];
 begin
   -- 1 · THE SHARED CENSUS CARRIES THREE DOMAINS AND LOST NEITHER OF THE TWO IT HAD. Gaining the
@@ -447,6 +502,19 @@ begin
     end if;
   end loop;
 
+  -- 4 · THE BANK BELT TYPES ITS REASON PER DOMAIN, and the advance token it already answered with
+  --     is still there: a surface reading `coa_account_advance_reserved` today reads nothing new.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara._fa_assert_code_unreserved(uuid,text)'::regprocedure;
+  if position('coa_account_prepayment_reserved' in v_src) = 0
+     or position('coa_account_advance_reserved' in v_src) = 0 then
+    raise exception '0337 tail: the bank belt does not carry BOTH reservation reason tokens'
+      using errcode='CLR10';
+  end if;
+  if position('clara._acct_role_reserved(p_client, p_code)' in v_src) = 0 then
+    raise exception '0337 tail: the bank belt no longer reads the shared reservation census (0045''s replay of 0042 tail 3(6))'
+      using errcode='CLR10';
+  end if;
 
 
 
