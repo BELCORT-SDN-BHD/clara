@@ -19,6 +19,101 @@ The registry selects the current chat, autodraft, statement/witness facts, docum
 firm interview, client onboarding, and bank/close wake workflows. Read it for the exact versions
 and retained exports; repository state alone is not evidence of a deployed image.
 
+### The two pins the 2026-09-26 CLOSING wave moved
+
+`chatTurn → chatTurn_v23` and `claraWork → claraWork_v7` (#1144). `statementFacts` stays at
+`statementFacts_v4`. Every superseded body stays exported and in `workflowBodies` — chatTurn v2–v22
+and claraWork v1–v6 alike — because the boot census refuses to start the world database-wide if a
+body a parked run needs is missing, and that is policy (c) enforced rather than promised.
+
+**What `chatTurn_v23` carries: SEVEN tools, and the ruling they unwind.** `chatTurn_v22`'s own
+roster cell asserts these seven names absent BY NAME and records that the absence "is a ruling, not
+an oversight": at that cut every door behind them was granted to `clara_authenticated` alone, and
+neither pooled chat credential carries JWT claims, so a tool over one could only ever answer a grant
+refusal — which is not a capability. The riders sweep wave built the machine-lane halves
+(`0352_agent_read_twins_payroll_agreement.sql` and `0353_tenancy_agent_twins_obo_confirmations.sql`,
+both hosted 2026-09-25) and #1144 collected their contracts, so the roster moves from v22's measured
+**45 to 52**:
+
+| tool | door(s), argument order as called | pool |
+|---|---|---|
+| `read_payroll_posting_state` | `clara.wake_list_review_queue(p_scope, p_cursor, p_limit)`, then `clara.get_document_state(p_document, p_client)` | read |
+| `read_payroll_settlement_state` | `clara.wake_get_payroll_settlement_candidates(p_client)` | read |
+| `read_agreement_terms` | `clara.get_document_extract(p_document, p_client, p_max_chars)` plus the queue | read |
+| `read_tenancy_terms` | `clara.wake_get_contract_terms(p_document)`, `clara.wake_get_tenancy_rent_plan_draft(p_document)`, and `clara.wake_propose_contract_terms(p_document)` ONLY when nothing is recorded | read |
+| `read_rent_settlement_candidates` | `clara.wake_get_rent_settlement_candidates(p_client)`, `clara.wake_get_tenancy_deposit_coding(p_client)` | read |
+| `confirm_tenancy_rent_plan` | `clara.confirm_tenancy_rent_plan_for(p_client, p_author, p_document, p_rent_account, p_payable_account, p_judgement, p_op_key)` | runtime |
+| `confirm_tenancy_rent_plan_revision` | `clara.wake_get_tenancy_escalation_revision(p_document)` first, then `clara.confirm_tenancy_rent_plan_revision_for(p_client, p_author, p_document, p_judgement, p_op_key)` | runtime |
+
+The two confirmations take a STABLE op key, `stableOpKey(ctx.taskId, TOOL, input)`, and that is a
+deliberate departure from #949's "a FRESH `p_op_key` per act": that was written for the WEB surface,
+where two clicks are two intents, and in chat a retried tool call is ONE intent. The core's
+reservation hashes the caller's five arguments and NOT the named author, which is what makes a chat
+confirmation and a human replay of the same decision converge on one receipt — so the key must never
+be derived from anything that can outlive the initiating person, and `ctx.taskId` does not.
+
+**NO WIRE KIND IS ADDED**, and that is a measurement rather than a preference. The five reads emit
+`freeform_result`, already declared and already emittable; the two confirmations return a TYPED TOOL
+RESULT in `runStartPrepaymentScheduleWork`'s shape and emit no part of their own, because every
+construction site of `work_result` is a `claraWork.*.impl.ts` and the chat lane has never emitted it
+(`waveS-lane08-fix.md` §7.2; the census `check-parts-parity.mjs` prints re-takes it on every run).
+So `apps/web` is untouched and `chatTurn.v16.prompt.ts` stays the declarer.
+
+**What the cut does NOT add, named so a later reader does not think it was forgotten:** a settle
+tool for either family (`clara.settle_payroll_net_pay` and `clara.settle_rent_payable` are
+`clara_authenticated`-only and both migrations' tails assert they stayed that way — two candidate
+lines of the same amount in one window are two lines a PERSON adjudicates); a record-terms tool; any
+call to an ungranted verdict or plan core; and the two payroll witnesses of #1144 item 3, which
+belong to `payrollFacts`'s own next version.
+
+**What `claraWork_v7` carries: ONE step body.** `loadFaProposalInputsStepV7` replaces v6's, and
+three things move, each of them a ground a PERSON already wrote down that v6 could not see: the
+completeness predicate becomes the estate's OWN six conditions (`clara._fa_particulars_complete`;
+under v6's two-condition form a register row with a method and a start date but NO useful life reads
+complete and the dependent question that would collect the drivers is never opened); the client's
+recorded depreciation note joins the inputs (#1090, migration 0345 catalogues the key); and the
+account's retired policy joins them (#1092, migration 0346 opens the relation to the read
+credential). The model sees none of it — the proposal is opened by the workflow BODY after a
+commit — so the tool roster does not move, the instructions text does not move, and the budgets do
+not move. What moves in the hashed bundle is this closure's four ids.
+
+**Deploy order: this cut adds NO obligation of its own.** Every door the seven tools touch has been
+live since 0352 and 0353, and 0345/0346 since the same wave, all hosted 2026-09-25 at frontier
+`0361_reservation_release_advice`. v6's 0321, v5's 0230 and v4's 0192/0216 are inherited unchanged.
+Against a database missing one of the seven doors the chat tool answers a typed refusal and the TURN
+SURVIVES; against one missing 0345/0346 the v7 step's reads throw inside its own `try`, the step
+answers `null` exactly as it does for any unreadable register, and the question opens without a
+block — the same behaviour v6 has today. The ORDER still stands as the runbook states it: database,
+then the runtime image by `sha256:` digest, then the web promotion, machine stopped before the
+migrate.
+
+**Rollback to v22 / v6** stops offering the seven tools and narrows the proposal back to the asset's
+own row and its siblings. The five reads changed no database state. The two CONFIRMATIONS did: a
+rent plan confirmed through this image is a plan on the books, and a v22 image cannot confirm
+another from the conversation — the human door still can, and a plan already recorded stays as it
+is, authored by the person named on it. A question already opened keeps the block it was opened
+with: the proposal is a value on a durable question row, not something an image re-derives on
+answer. That is the honest runbook line, not "rollback is free".
+
+**Refinements the digest cannot see** (CUT-PLAN §5, R5): `z.toJSONSchema` erases `.refine` /
+`.superRefine`. **v7 changes no refinement.** Stated here by hand because no gate will state it.
+
+**One module joins the frozen closure at this cut**: `lib/fa-proposal-grounds.ts`, hash-locked by
+`claraWork.v7.impl.ts` and `claraWork.v7.ts` (measured with
+`node scripts/check-frozen-workflows.mjs --print-closure`, which names both entry files). A
+hardening of either statement it exports now goes through the NEXT version closure, under the
+owner's standing ruling of 2026-09-15 — so DURABLE RULES LIVE IN MIGRATIONS 0345 and 0346, never in
+that file. It carries no module-level `node:` import, which is `lib/knowledge.mjs:44-64`'s measured
+constraint for any module entering a frozen closure.
+
+**The walk**: `tests/chat-turn-v23-e2e.mjs` with its own `chat-turn-v23-serve.mjs` child, wired into
+the `DRIVERS` roster and `.github/actions/db-live-gates/action.yml`. It drives two of the seven
+tools against the real wake doors on a real World — one refused by 0353's own CLR11 for a document
+the firm does not hold, one ANSWERING for a client it does — and shows `claraWork_v7` serving the
+Work a chat turn admits, with the committed receipt carrying the digest the boot banner logged.
+Every identifier the tools take is parsed out of the PERSON'S own message, never the leg's
+environment: v21's ADV-S-1 designed out rather than discovered.
+
 ### The three pins the 2026-09-25 cut phase moved
 
 `chatTurn → chatTurn_v22`, `claraWork → claraWork_v6` and `statementFacts → statementFacts_v4`.
@@ -1731,6 +1826,13 @@ undefined, and the failure is a RUN-TIME one no build gate sees.
   to the hash-locked v1 (`capability-registry.mjs:29-34`'s own rule; `layout-sandbox.mjs` is the
   estate's precedent for a sibling).
 - **`lib/work-trace-bounds.mjs`** — #847's owed writer half; see the section below.
+
+**The ledger has grown twice since.** The 2026-09-25 cut added `lib/prepayment-schedule-basis.ts`,
+`lib/fa-particulars-proposal.ts` and `lib/opening-parse.mjs` the same way, and the 2026-09-26
+CLOSING wave (#1144) added **`lib/fa-proposal-grounds.ts`**, hash-locked by `claraWork.v7.impl.ts`
+and `claraWork.v7.ts`. Every one of them entered BY CLOSURE rather than by a marker somebody
+added, and the rule is the same for all: a hardening ships with the NEXT version, and the durable
+rule lives in the migration (0345 and 0346 for this one), never in the file.
 
 **The status mapping, exported ONCE as `faceStatusOf`.** The runtime keeps its own frozen two
 words; every human face and the `clara.work_knowledge_reads.status` column use the estate's
