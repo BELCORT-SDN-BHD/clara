@@ -79,6 +79,20 @@ comment and close on every ticket.
 
 Then a short sweep wave for whatever wave 4's own review finds, until no ticket outside the #597 mainline is open.
 
+### Release status
+
+Each row is its own hosted release window; see the named runbook's own `§ RESULTS` for the full
+as-run record. DB reads `files / frontier` at the ledger position that release left hosted at.
+
+| release | released | PR | merge commit | DB (files / frontier) | runtime | web |
+|---|---|---|---|---|---|---|
+| Wave 1 | 2026-09-20 | #1025 | `ddb5a125821e323e5f999a228928e74f07fda49b` | 229 / `0234_legal_enforcement_mode` (unchanged, no migration) | `refresh-ddb5a125` | `922f9428-215c-4536-9602-5e0dd007efbd` |
+| Wave 2 | 2026-09-23 | #1029 | `68b979bf9de76fc40f701c85e8e86dcee052cab0` | 267 / `0272_document_capability_wall_completion` | `refresh-68b979bf` | `686ab53f-4079-4305-8d0b-54efac86adc0` |
+| Wave 3 | 2026-09-23 | #1039 | `46cf7c852790e7e935be1e7454aab3726bca8a7e` | 288 / `0293_fa_arrears_judgement_scope` | `refresh-46cf7c85` | `b659a3d4-a253-4f49-8a7e-c89306f6ab82` |
+| Wave 4 | 2026-09-24 | #1053 | `6da02a8dec786015a68209d08f3391af5156081e` | 309 / `0318_knowledge_fye_pair_applicability` | `refresh-6da02a8d` | `57c5dbab-5706-4a8b-a50a-a96fa37f6d97` |
+| Cut phase | 2026-09-25 | #1140 | `061a6992bca2bef457410f876454d719e766df64` | 312 / `0323_trade_invoice_probe_self_exclusion` | `refresh-061a6992` | `3089d906-5bae-48cb-9666-72dff5aa8ef4` |
+| **Sweep wave** | **RELEASED 2026-09-25** | **#1143** | **`322fdf29105c76132ec874dd70a7d3e24c5453e4`** | **337 / `0361_reservation_release_advice`** | **`refresh-322fdf29`** (`sha256:20ab8c8352fd4372f1c8a6f50f2f163f742e92c65c7fa6dc1f227435a608344f`) | **`fa2c6c0b-474c-40dc-9f6e-5064a2488a47`** |
+
 ### Wave 4 as integrated
 
 Wave 4 landed on `integration/riders-w4` at final head `fb1dae78a`. Twenty-one migrations: `0295` to
