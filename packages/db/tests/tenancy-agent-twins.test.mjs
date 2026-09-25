@@ -1150,6 +1150,66 @@ test("p1137.revision.refusals_match — no escalation, not due yet and already r
   assert.equal(Number((await liveRevision(live.planId)).revision), 1, "a refusal revised the plan");
 });
 
+// #1137 [fix round, ADV-L08-01, second half] THE REVISION LANE'S CLIENT STATUS -- the half of that
+// finding's required fix this lane REFUSES, and refuses with a measurement rather than an argument.
+//
+// The finding asked for the client-status wall on clara.confirm_tenancy_rent_plan_revision_for too,
+// "for symmetry with the precedent". It would be a DEFECT here. The precedent (0307) needs the wall
+// in its twin because clara._prepayment_schedule_core is SHARED by both entrances and cannot carry
+// it. This lane's revision step is shared too -- clara._revise_accounting_plan_core, ONE body, no
+// lane branch at all -- and clara.revise_accounting_plan (0193) carries NO client-status wall, so
+// the human entrance admits a non-active client today. A wall on the OBO entrance alone would
+// CREATE the divergence this finding exists to close, in the opposite direction.
+//
+// Whether the plan lane SHOULD refuse a revision for an archived client is 0193's question and a
+// person's judgement, not a twin's to answer on its own: it is carried as a follow-up. What this
+// cell pins is the property the twin owes -- the two entrances answer the SAME thing, whatever
+// 0193 decides that is.
+test("p1137.revision.client_status_parity -- a non-active client is answered IDENTICALLY by both "
+  + "revision entrances, because they revise through ONE body; the wall the plan door does not "
+  + "have is not invented on the machine lane", async (t) => {
+  if (unready(t)) return;
+
+  // TWO IDENTICAL SCENES, because whichever entrance runs first would consume the escalation.
+  const scenes = [await escalatingTenancy(ALICE()), await escalatingTenancy(ALICE())];
+  for (const sc of scenes) await setClientStatus(sc.client, "archived");
+
+  const call = [
+    () => confirmRevision(BOB(), { client: scenes[0].client, document: scenes[0].doc.documentId, judgement: JUDGEMENT }),
+    () => confirmRevisionFor({ client: scenes[1].client, author: BOB(), document: scenes[1].doc.documentId, judgement: JUDGEMENT }),
+  ];
+  const err = [await caught(call[0]), await caught(call[1])];
+
+  assert.equal(err[0] === null, err[1] === null,
+    err[0] === null
+      ? "the human door admitted an archived client and the OBO twin refused it -- the twin has a "
+        + "wall clara.revise_accounting_plan does not have"
+      : "the human door refused an archived client and the OBO twin admitted it -- the divergence "
+        + "ADV-L08-01 found on the FIRST confirmation, now on the revision");
+
+  if (err[0]) {
+    assert.equal(err[1].code, err[0].code, "sqlstate differs on a non-active client");
+    assert.equal(err[1].message, err[0].message, "the sentence differs on a non-active client");
+    assert.deepEqual(detailOf(err[1]), detailOf(err[0]), "the typed detail differs");
+  }
+
+  // …AND THE PLANS MOVED THE SAME WAY, or did not move at all, on both scenes.
+  const moved = await Promise.all(scenes.map(async (sc) => Number((await liveRevision(sc.planId)).revision)));
+  assert.equal(moved[1], moved[0],
+    `the archived client's plan is at revision ${moved[0]} through the human door and ${moved[1]} `
+    + "through the OBO twin");
+
+  // THE PREMISE THIS CELL RESTS ON, pinned so it cannot rot silently: the two entrances share ONE
+  // revision body, and that body is the thing that would have to grow the wall.
+  const core = (await rootQuery(
+    "select p.prosrc from pg_proc p where p.oid = to_regprocedure($1)",
+    ["clara._confirm_tenancy_rent_plan_revision_core(uuid,uuid,text,uuid,uuid,text,text)"])).rows[0].prosrc;
+  assert.match(core, /clara\._revise_accounting_plan_core\(/,
+    "the revision core no longer calls the shared revision body");
+  assert.doesNotMatch(core, /p_lane\s*=\s*'obo'/,
+    "the revision core has grown a lane branch -- the two entrances no longer revise through ONE body");
+});
+
 test("p1137.revise.human_door_unchanged — clara.revise_accounting_plan still checks its op key FIRST and still walls a plan to the caller's firm, through clara._plan_door_ctx", async (t) => {
   if (unready(t)) return;
   const mine = await escalatingTenancy(ALICE());
