@@ -7318,3 +7318,75 @@ PARTIAL signal rather than guessing. Both branches were exercised on the lane da
 APPLY through `pnpm db:migrate` (with all four recut pins checked), and the REDO branch through
 `CLARA_MIGRATION_REDO=0318_knowledge_fye_pair_applicability` after the promotion door was put back
 at its pre-image for `kp.14`'s vacuity control.
+
+## 0347 — the TIN item reaches the firms that had already committed their setup (#1098, riders sweep wave, lane 07)
+
+**The population 0311 left behind, closed as far as a data migration can close it.** Before 0311,
+`clara._firm_setup_applicability(plan,'tin')` read `'inapplicable'` for a firm whose turnover band
+was `<RM1M`, and 0257's seed guard skipped the row, so such a firm committed its checklist with no
+`tin` plan item at all. 0311 fixed the rule for every plan seeded from then on but backfilled
+nothing, and `clara.seed_firm_setup_plan` refuses a plan that is not open (`CLR10
+firm_setup_not_open`, 0218 §E.1) — so on an already-committed plan the row could never arrive
+through any door. That is the gap [#1098](https://github.com/BELCORT-SDN-BHD/clara/issues/1098)
+names, and the section above ("The population 0311 does NOT reach") is the record of it being
+found.
+
+**The backfill is a named verb, not an inline statement.**
+`clara._firm_setup_backfill_committed_tin()` plants one `pending`, unanswered, catalogue-shaped
+`tin` item on every COMMITTED firm-scope plan that has none and returns how many rows that was;
+0347 mints it and then calls it once. A one-shot statement inside an applied migration can only
+ever be observed against the rows that server held at apply time — zero on a from-scratch chain —
+which would make #1098's own third acceptance criterion ("a test drives an already-committed plan,
+seeded and committed BEFORE the backfill, and asserts it gains a TIN item after the backfill runs")
+vacuous everywhere but one lane database on one afternoon. A verb can be driven on any database
+against a world the cell planted itself. It is `insert … where not exists`, so it is idempotent and
+redo-safe by construction (the 0301 §G precedent), and it is EXECUTE-granted to NOBODY: it writes
+into every firm's plan at once, so it belongs to a migration or to an operator holding
+`clara_fn_owner`, never to `clara_authenticated`, `clara_runtime` or `clara_agent_ro`. The tail
+re-reads that posture rather than trusting the absence of a `grant` line. No GRANTED name is
+minted, so — like 0311 itself and `rig-meta.mjs`'s own #979 precedent — **no `rig-meta.mjs` cohort
+is owed**.
+
+**What it refuses to touch.** COMMITTED plans only: an OPEN plan is not a dead end (its admin
+reconciles it through `clara.seed_firm_setup_plan`, which has seeded `tin` since 0311 and bumps the
+plan revision while doing it, #895), and a CANCELLED plan is abandoned. No existing plan item is
+touched at all — `not exists`, never `on conflict do update` — and no plan row moves: no
+`revision_token`, no `revision_n`, no `updated_at`, and no new `clara.onboarding_plan_revisions`
+row. A committed plan's attestation is a receipt, and planting a question the firm was never asked
+is not a new revision of the document it signed. The tail proves each of those by digesting every
+`clara.onboarding_plan_items` and `clara.onboarding_plans` row in the prestate, carrying both
+digests in the temp table `_p1098_pre` (the 0295/0289/0291/0261 idiom), and re-reading them after
+the run; rows this transaction created are separated from the rest by `created_at >= now()`, since
+`now()` is the transaction timestamp and every earlier row is strictly before it. Both digests are
+ordered by the surrogate `id`, a uuid, which orders by its own type rather than by the server's
+`lc_collate` ("Collation and pinned order" above).
+
+**THE RESIDUAL, STATED RATHER THAN HIDDEN: the row exists, and the firm still cannot answer it.**
+`clara.answer_firm_setup_item` refuses every item on a plan that is not open (0218 §E.2, `CLR10
+firm_setup_not_open`), and the web checklist guards every write control behind `!committed`. So
+after 0347 a committed plan's TIN row reads `pending`, correctly marked `required` above the
+MyInvois threshold and `optional` below it, and a value still cannot be recorded into it. That wall
+is not specific to `tin`: a committed firm-setup plan has always been closed to every item, and the
+catalogue carries no reopen door. Opening one — **may a committed checklist still be COMPLETED for
+a question it was never asked, while never being AMENDED for a fact it attested to?** — changes
+what a commit means, which is a product decision for the owner and not a data migration's to take.
+`tests/firm-setup-committed-tin-backfill.test.mjs`'s cell
+`p1098.residual.a_committed_plan_still_refuses_the_answer` DRIVES that refusal rather than
+asserting it, so the residual is a measured fact and not a sentence. Against the standing beta
+ruling ("nothing is dark") the gap is narrower after 0347 than before it — the question is on the
+checklist, marked correctly, for every firm — but it is not closed, and it wants the owner's ruling
+on that one question.
+
+**Redo-safe by construction (#957).** `create or replace function` and a backfill that is
+`insert … where not exists`; the prestate decides FIRST vs REDO from the ONE marker only this file
+writes (the verb's own name in the catalog) and the tail's arithmetic holds on both branches,
+because on a redo the prestate's committed-without-tin count and the run's row count are both zero.
+Both branches were exercised on the lane database: the FIRST APPLY through `pnpm db:migrate`,
+against a rig where five firm-setup plans had deliberately been driven into the pre-0311 shape
+first (committed above the threshold, committed below it, committed with `tin` already answered,
+open, and cancelled), and the REDO through
+`CLARA_MIGRATION_REDO=0347_firm_setup_committed_tin_backfill`.
+
+**Gate:** `tests/firm-setup-committed-tin-backfill.test.mjs`, frontier-gated on the stable stem
+`firm_setup_committed_tin_backfill$` with
+`tests/firm-setup-committed-tin-backfill-preintegration-gate.mjs`.
