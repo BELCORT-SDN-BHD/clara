@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  getPayrollPostingState, isNotAPayrollSummary, toPayrollPostingState,
+  blocksOnThisDocumentsOwnEntry, getPayrollPostingState, isNotAPayrollSummary, toPayrollPostingState,
 } from "./payroll-posting-state";
 import { isDoorRefusal } from "../doors";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -150,4 +150,53 @@ test("isNotAPayrollSummary: every OTHER refusal is somebody else's to render", a
   );
   assert.equal(isNotAPayrollSummary(new Error("transport")), false, "a transport failure is not a refusal");
   assert.equal(isNotAPayrollSummary(null), false);
+});
+
+// #1148 FIX ROUND (SPEC-01 / ADV-02) — WHOSE ENTRY THE TENTH RUNG IS TALKING ABOUT.
+//
+// `no_duplicate_entry` fires for four scopes, and the first is `same_document`: the payslip's OWN
+// entry. 0343's sentence for it is written for a re-file attempt made from somewhere else ("This
+// payslip was not posted again -- open that entry to decide whether this is a correction or a
+// re-upload"), so on the document's own page it invites a person to decide something about their
+// own entry. The rule lives HERE, once, rather than as a condition inside the component, because it
+// is a fact about the door's answer and two surfaces must not each spell it their own way.
+//
+// THE ANSWERS BELOW ARE THE DATABASE'S, transcribed from the db cell `p1148.read.posted`.
+const POSTED = {
+  document_id: "11111111-1111-4111-8111-111111111111",
+  sentence:
+    "Payroll run September 2026 is already posted (Payroll run September 2026, 2026-09-30). "
+    + "This payslip was not posted again -- open that entry to decide whether this is a correction "
+    + "or a re-upload.",
+  verdict: "blocked",
+  rung: "no_duplicate_entry",
+  reason: "duplicate_entry",
+  duplicate_scope: "same_document",
+  completeness: { parked: false, rows_read: 2, gross_sum_cents: 500000, net_sum_cents: 425570 },
+};
+
+test("toPayrollPostingState: the duplicate's scope crosses the boundary, and an absent one is null", () => {
+  assert.equal(toPayrollPostingState(POSTED).duplicate_scope, "same_document");
+  assert.equal(toPayrollPostingState(PARKED).duplicate_scope, null,
+    "no duplicate, no scope -- and null rather than undefined, so a caller never reads a hole");
+});
+
+test("blocksOnThisDocumentsOwnEntry: true only for the tenth rung on THIS document's own entry", () => {
+  assert.equal(blocksOnThisDocumentsOwnEntry(toPayrollPostingState(POSTED)), true,
+    "a payslip whose own entry stands is not a payslip that 'was not posted again'");
+
+  // ANOTHER DOCUMENT'S ENTRY on the same rung IS this page's business: it is the re-upload case
+  // 0343 wrote the sentence for, and the reader has no other way to learn it.
+  for (const scope of ["same_filing", "same_month_payroll_run", "payroll_obligation"]) {
+    assert.equal(
+      blocksOnThisDocumentsOwnEntry(toPayrollPostingState({ ...POSTED, duplicate_scope: scope })),
+      false, `scope ${scope} is somebody else's entry and the sentence about it must be shown`);
+  }
+
+  // …and no other rung is silenced, whatever the scope says.
+  assert.equal(blocksOnThisDocumentsOwnEntry(toPayrollPostingState(PARKED)), false);
+  assert.equal(
+    blocksOnThisDocumentsOwnEntry(
+      toPayrollPostingState({ ...PARKED, duplicate_scope: "same_document" })),
+    false, "the scope alone must not silence a rung that is not about a duplicate");
 });

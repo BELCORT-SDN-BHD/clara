@@ -30,9 +30,10 @@ export type PayrollPostingCompleteness = {
   readonly net_sum_cents: number | null;
 };
 
-/** What `clara.get_payroll_posting_state` answers: five of the verdict's keys and the caller's own
- *  document id. NOT the `rung_vector` — that is the evaluator's internal ladder, and 0363 does not
- *  project it, so nothing downstream can render it by accident. */
+/** What `clara.get_payroll_posting_state` answers: five of the verdict's keys, the caller's own
+ *  document id, and (fix round) the duplicate's scope. NOT the `rung_vector` — that is the
+ *  evaluator's internal ladder, and 0363 does not project it, so nothing downstream can render it
+ *  by accident — and not `detail`, of which only the one token below crosses. */
 export type PayrollPostingState = {
   readonly document_id: string | null;
   /** The database's own sentence, built in ONE body so the words on this page and the decision the
@@ -45,6 +46,12 @@ export type PayrollPostingState = {
   /** That rung's own refusal token. Null when ready. */
   readonly reason: string | null;
   readonly completeness: PayrollPostingCompleteness | null;
+  /** #1148 FIX ROUND — WHOSE ENTRY THE TENTH RUNG FOUND. `no_duplicate_entry` fires for four
+   *  scopes (`same_document`, `same_filing`, `same_month_payroll_run`, `payroll_obligation`) and
+   *  0363 §A(3b) projects the verdict's own token for the one it matched. Null on every other rung,
+   *  and null rather than absent so a surface never has to tell "nothing is duplicated" from "the
+   *  door did not say". See `blocksOnThisDocumentsOwnEntry` below. */
+  readonly duplicate_scope: string | null;
 };
 
 const num = (v: unknown): number | null =>
@@ -73,7 +80,26 @@ export function toPayrollPostingState(raw: unknown): PayrollPostingState {
           net_sum_cents: num(c.net_sum_cents),
         }
       : null,
+    duplicate_scope: str(r.duplicate_scope),
   };
+}
+
+/** #1148 FIX ROUND (review findings SPEC-01 / ADV-02) — IS THE BLOCK THIS DOCUMENT'S OWN ENTRY?
+ *
+ *  `clara._payroll_posting_verdict`'s tenth rung stops a SECOND entry, and its first scope is the
+ *  payslip's own: a payroll summary that posted perfectly well reads `blocked /
+ *  no_duplicate_entry`, with the sentence 0343 wrote for a re-file attempt made from somewhere else
+ *  — "… is already posted (…). This payslip was not posted again -- open that entry to decide
+ *  whether this is a correction or a re-upload." On the document's own page, printed under the very
+ *  entry it means, that sentence asks a person to decide something there is nothing to decide
+ *  about.
+ *
+ *  THE SENTENCE IS NOT REWORDED AND NOT REPLACED — one body owns the words. What the page does with
+ *  this predicate is render NOTHING, because the entries list above it already says what stands on
+ *  the document. Every OTHER scope is a different document's entry, which is exactly the re-upload
+ *  the sentence is for and which the reader has no other way to learn. */
+export function blocksOnThisDocumentsOwnEntry(state: PayrollPostingState): boolean {
+  return state.rung === "no_duplicate_entry" && state.duplicate_scope === "same_document";
 }
 
 /**

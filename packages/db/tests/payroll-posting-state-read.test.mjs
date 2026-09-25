@@ -229,11 +229,18 @@ test("p1148.read.projection: five verdict keys and the caller's own id -- and NO
 
   const r = await readState(world.users.carol, doc.documentId);
 
+  // SEVEN, not six, since the fix round: `duplicate_scope` is the one token of `detail` the page
+  // needs in order NOT to show 0343's re-file sentence over a payslip whose own entry is what the
+  // tenth rung found (§A(3b); `p1148.read.posted`). Null on every rung but that one, as here.
   assert.deepEqual(Object.keys(r).sort(),
-    ["completeness", "document_id", "reason", "rung", "sentence", "verdict"],
-    `the door projects exactly six keys (got ${JSON.stringify(r)})`);
+    ["completeness", "document_id", "duplicate_scope", "reason", "rung", "sentence", "verdict"],
+    `the door projects exactly seven keys (got ${JSON.stringify(r)})`);
+  assert.equal(r.duplicate_scope, null, "nothing is duplicated on this rung, so nothing is scoped");
   assert.equal("rung_vector" in r, false,
     "the rung ladder is the evaluator's internal working and is not a person's business");
+  // …and `detail` itself stays behind: the entry id, its status, its memo and its posting date are
+  // the posting lane's internals, and the one token above is not a door onto them.
+  assert.equal("detail" in r, false, "the verdict's whole detail object reached the caller");
 
   // AND THE FIVE IT DOES CARRY ARE THE VERDICT'S OWN, for the state #1048 exists for.
   assert.equal(r.verdict, "blocked");
@@ -248,6 +255,75 @@ test("p1148.read.projection: five verdict keys and the caller's own id -- and NO
   assert.equal(r.completeness.parked, true,
     "`completeness` is projected because it is what the page must show beside the question");
   assert.equal(Number(r.completeness.rows_read), 2, "the two employee lines the person is being asked about");
+});
+
+// =================================================================================================
+// S3b — THE SUCCESS PATH, AND THE ONE PROJECTION IT FORCED (FIX ROUND, SPEC-01 / ADV-02).
+//
+// WHAT WAS WRONG. `clara._payroll_posting_verdict`'s tenth rung, `no_duplicate_entry`, fires for
+// FOUR scopes, and the FIRST of them is `same_document` — the payslip's OWN entry, reached through
+// `clara._document_posting_entry(client, document)` (0343:1673). A payslip that posted perfectly
+// well therefore reads `verdict: blocked, rung: no_duplicate_entry` with the sentence "… is already
+// posted (…). This payslip was not posted again -- open that entry to decide whether this is a
+// correction or a re-upload.", which is a sentence written for a RE-FILE attempt from somewhere
+// else. Said on the document's own accounting tab, immediately under the list of the entries that
+// document produced, it tells a person to decide something about their own entry that there is
+// nothing to decide about.
+//
+// WHAT THE DOOR OWES THE PAGE. Not a second sentence — the estate builds the sentence in ONE body
+// and nothing above it may reword it. What the page cannot work out for itself is WHOSE entry the
+// verdict is talking about, and that is one token the verdict already decided: `detail.duplicate.
+// scope`. 0363 projects it as `duplicate_scope`, null on every other rung, and the page renders
+// nothing when the block is this document's own entry (`components/documents/payroll-posting-
+// section.tsx`). It leaks strictly less than the sentence the same caller already reads, which
+// names that entry's memo and posting date.
+//
+// THE MONTH IS THIS CELL'S OWN (2026-09): the `same_month_payroll_run` scope means two cells
+// sharing a month on one client would measure each other rather than the door.
+// =================================================================================================
+test("p1148.read.posted: a payslip that DID post is told which entry blocks a second one -- and the scope says it is its own", async (t) => {
+  if (await gate(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  // The default envelope prints every run total, and the chart resolves, so the unattended lane
+  // posts from it: this is the ordinary success path, not a state assembled by hand.
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, { month: "2026-09" });
+
+  const posted = (await rootQuery(
+    `select id, status from clara.journal_entries where document_id = $1 order by created_at`,
+    [doc.documentId])).rows;
+  assert.equal(posted.length, 1,
+    `premise: the run posted one entry from this document (got ${JSON.stringify(posted)})`);
+  assert.equal(posted[0].status, "approved", "premise: and it is posted, not drafted");
+
+  const r = await readState(world.users.carol, doc.documentId);
+
+  // THE DOOR STILL SAYS WHAT THE DATABASE DECIDED, verbatim: this cell does not ask for the
+  // sentence to change.
+  assert.equal(r.verdict, "blocked", `the tenth rung blocks a second post (got ${JSON.stringify(r)})`);
+  assert.equal(r.rung, "no_duplicate_entry");
+  assert.equal(r.reason, "duplicate_entry");
+  assert.match(r.sentence, /was not posted again/,
+    "0343's re-file sentence is what the verdict answers here -- the defect is WHERE it is shown");
+
+  // …AND THE ONE FACT THE PAGE NEEDS IN ORDER NOT TO SHOW IT: whose entry that is.
+  assert.equal(r.duplicate_scope, "same_document",
+    `the door does not say the block is this document's OWN entry: ${JSON.stringify(r)}`);
+});
+
+test("p1148.read.duplicate_scope_is_null_off_that_rung: a verdict blocked for any other reason carries no scope", async (t) => {
+  if (await gate(t)) return;
+
+  // A filed payslip nobody has read: rung `facts_read`, nothing duplicated, nothing to scope.
+  const doc = await payrollDoc(world.users.alice, world.clients.A1);
+  const r = await readState(world.users.carol, doc.documentId);
+
+  assert.equal(r.rung, "facts_read", "premise: the second rung, far above the duplicate rung");
+  assert.equal(r.duplicate_scope, null,
+    `a scope was projected for a verdict with no duplicate: ${JSON.stringify(r)}`);
+  // …and the key is ALWAYS PRESENT, so a surface never has to tell "no duplicate" from "the door
+  // did not say" -- the same reason 0362's plans_still_posting is always present.
+  assert.equal("duplicate_scope" in r, true, "the key is absent rather than null");
 });
 
 // =================================================================================================

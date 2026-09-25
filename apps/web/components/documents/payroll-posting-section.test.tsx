@@ -171,3 +171,81 @@ test("PayrollPostingSection: any OTHER refusal is a banner, because a person is 
     },
   );
 });
+
+// #1148 FIX ROUND (review findings SPEC-01 / ADV-02) — THE SUCCESS PATH IS NOT A REFUSAL.
+//
+// `clara._payroll_posting_verdict`'s tenth rung stops a SECOND entry, and its FIRST scope is the
+// payslip's own (`same_document`). So a payroll summary that posted perfectly well answers
+// `blocked / no_duplicate_entry` with 0343's re-file sentence, and this section used to print it —
+// on the accounting tab, directly under the entries list that already shows the very entry it
+// names, and directly under "A posted entry of <client> currently stands on this document."
+//
+// THE SENTENCE IS NOT REWORDED HERE, and no second one is invented: the panel renders NOTHING in
+// that one state, because the page above it has already said what stands on the document. Every
+// other scope is somebody ELSE's entry — the re-upload the sentence was written for — and stays.
+//
+// THE ANSWERS ARE THE DATABASE'S, transcribed from the db cell `p1148.read.posted`.
+
+/** A payslip whose OWN entry stands on it: posted, and nothing is wrong. */
+const POSTED_FROM_THIS_DOCUMENT = {
+  document_id: "11111111-1111-4111-8111-111111111111",
+  sentence:
+    "Payroll run September 2026 is already posted (Payroll run September 2026, 2026-09-30). "
+    + "This payslip was not posted again -- open that entry to decide whether this is a correction "
+    + "or a re-upload.",
+  verdict: "blocked",
+  rung: "no_duplicate_entry",
+  reason: "duplicate_entry",
+  duplicate_scope: "same_document",
+  completeness: { parked: false, rows_read: 2, gross_sum_cents: 500000, net_sum_cents: 425570 },
+};
+
+test("PayrollPostingSection: a payslip that DID post is not told it 'was not posted again'", async () => {
+  await mount({ answer: POSTED_FROM_THIS_DOCUMENT }, async (text, calls) => {
+    assert.equal(calls(), 1, "it still asks -- the page cannot know the verdict without asking");
+    assert.equal(text().trim(), "",
+      `a payslip whose own entry stands was invited to decide whether it is a correction or a `
+      + `re-upload (got ${JSON.stringify(text())})`);
+  });
+});
+
+test("PayrollPostingSection: another document's entry on the SAME rung is still said -- that is the re-upload the sentence is for", async () => {
+  await mount(
+    {
+      answer: {
+        ...POSTED_FROM_THIS_DOCUMENT,
+        duplicate_scope: "same_month_payroll_run",
+        sentence:
+          "Payroll run September 2026 is already posted (Payroll run September 2026, 2026-09-30). "
+          + "This payslip was not posted again -- open that entry to decide whether this is a "
+          + "correction or a re-upload.",
+      },
+    },
+    async (text) => {
+      assert.ok(text().includes("This payslip was not posted again"),
+        `the one case the sentence was written for was silenced too (got ${JSON.stringify(text())})`);
+    },
+  );
+});
+
+test("PayrollPostingSection: a payslip that is READY but unposted still says so -- that is a fact the page has nowhere else", async () => {
+  // DELIBERATELY NOT SILENCED. `verdict: ready` means every rung passed and no entry exists yet;
+  // 0297 §D's sentence for it names the remedy, and the entries list above can only show that
+  // nothing stands. Nothing here is false, so nothing here is hidden.
+  await mount(
+    {
+      answer: {
+        document_id: "11111111-1111-4111-8111-111111111111",
+        sentence:
+          "Payroll run September 2026 is ready to post but no entry exists yet -- re-file the "
+          + "payslip to post it.",
+        verdict: "ready", rung: null, reason: null, duplicate_scope: null,
+        completeness: { parked: false, rows_read: 2, gross_sum_cents: 500000, net_sum_cents: 425570 },
+      },
+    },
+    async (text) => {
+      assert.ok(text().includes("ready to post but no entry exists yet"),
+        `a ready-but-unposted payslip says nothing at all (got ${JSON.stringify(text())})`);
+    },
+  );
+});

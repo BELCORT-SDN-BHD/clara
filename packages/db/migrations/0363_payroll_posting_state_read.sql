@@ -28,8 +28,12 @@
 --     being true, and the tail re-reads it after applying. A wrapper on top of a body the caller
 --     could already execute would be a second, weaker story about the same wall.
 --   · It does not change what the verdict DECIDES, or any posting behaviour. This is a read: it is
---     STABLE, so PostgreSQL itself refuses an INSERT, UPDATE or DELETE inside it, and the tail
---     re-derives that from the catalog rather than trusting the declaration.
+--     STABLE, so PostgreSQL refuses a data-modifying STATEMENT written inside it, and the tail
+--     re-derives that volatility from the catalog rather than trusting the declaration. (FIX
+--     ROUND, ADV-03: STABLE is not by itself a write WALL -- a non-volatile body may still call a
+--     VOLATILE one that writes, proven on clara_c01 inside a rolled-back transaction. What makes
+--     this body a read is that its whole text is one `select` into the verdict, which the tail
+--     pins by name.)
 --   · It does not touch the Needs-you queue's own rows or the five sync points a row kind carries.
 --     `clara.list_review_queue` is byte-unchanged and keeps answering exactly as it does.
 --   · It does not answer the completeness question. That is a professional judgement behind a human
@@ -181,10 +185,33 @@ $c0363_pre$;
 --          are internals of the posting lane that a page asking "why did this not post" has no act
 --          to spend on.
 --
---      IT IS STABLE, AND THAT IS A WALL RATHER THAN A HINT. PostgreSQL refuses every INSERT,
---      UPDATE and DELETE inside a non-volatile function, so a later edit that tried to make this
---      read write would fail to create. The body it wraps is STABLE too (0297 §D: "THE GATE WRITES
---      NOTHING"), so nothing is given up by saying so.
+--      (3b) …AND ONE TOKEN MORE, WHICH THE FIX ROUND FORCED: `duplicate_scope` (SPEC-01 / ADV-02).
+--          The tenth rung, `no_duplicate_entry`, fires for FOUR scopes and the FIRST of them is
+--          `same_document` — the payslip's OWN entry, reached through
+--          `clara._document_posting_entry(client, document)` (0343:1673). So a payslip that posted
+--          PERFECTLY WELL reads `verdict: blocked, rung: no_duplicate_entry` with 0343:1846's
+--          sentence "… is already posted (…). This payslip was not posted again -- open that entry
+--          to decide whether this is a correction or a re-upload.", which is written for a re-file
+--          attempt made from somewhere else. Rendered on the document's own accounting tab,
+--          immediately under the list of the entries that document produced, it invites a person
+--          to decide something about their own entry that there is nothing to decide about
+--          (DRIVEN: `p1148.read.posted`).
+--
+--          THE FIX IS NOT A SECOND SENTENCE. The estate builds the sentence in ONE body and
+--          nothing above it may reword it; what the page cannot work out for itself is WHOSE entry
+--          the verdict means, and the verdict already decided that. So this door projects that one
+--          token — `detail.duplicate.scope`, null on every other rung — and the page renders
+--          NOTHING when the block is this document's own entry. It discloses strictly less than
+--          the sentence the same caller already reads, which names that entry's memo and posting
+--          date; `detail.duplicate`'s `entry_id`, `status`, `memo` and `posting_date` stay behind.
+--
+--      IT IS STABLE, AND THAT IS WORTH SAYING PRECISELY. PostgreSQL refuses a data-modifying
+--      STATEMENT written directly inside a non-volatile function, so a later edit that put an
+--      INSERT, UPDATE or DELETE in this body would fail to create. It does NOT stop a non-volatile
+--      body CALLING a volatile one that writes (FIX ROUND, ADV-03: proven on clara_c01 inside a
+--      transaction that was rolled back), so the declaration is a guard against the careless edit
+--      and not a proof of purity. The proof is the body itself, which is four statements long and
+--      pinned by the tail. The body it wraps is STABLE too (0297 §D: "THE GATE WRITES NOTHING").
 --
 --      NO CORE, AND THAT IS LAW 31 RATHER THAN AN OMISSION. 0320, 0352 and 0353 each split a read
 --      into one ungranted core with two entrances because a HUMAN door and a MODEL door compute
@@ -234,14 +261,19 @@ begin
     'verdict',     v->'verdict',
     'rung',        v->'rung',
     'reason',      v->'reason',
-    'completeness', coalesce(v->'completeness', 'null'::jsonb));
+    'completeness', coalesce(v->'completeness', 'null'::jsonb),
+    -- FIX ROUND (SPEC-01 / ADV-02): WHOSE ENTRY THE TENTH RUNG IS TALKING ABOUT. See §A(3b).
+    -- ONE token out of `detail`, never the object: `scope` is 0343:1711's own word, and it is null
+    -- on every rung but `no_duplicate_entry`. Always present, so a surface never has to tell "no
+    -- duplicate" from "the door did not say".
+    'duplicate_scope', coalesce(v->'detail'->'duplicate'->'scope', 'null'::jsonb));
 end $c1148_posting_state$;
 
 revoke all on function clara.get_payroll_posting_state(uuid) from public;
 grant execute on function clara.get_payroll_posting_state(uuid) to clara_authenticated;
 
 comment on function clara.get_payroll_posting_state(uuid) is
-  '#1148 [0363]: the granted, DOCUMENT-SCOPED read of the payroll posting verdict. clara_authenticated only, VIEWER floor through clara._human_ctx, firm-scoped on clara.documents.firm_id -- another firm''s document and an id that is no document answer the SAME CLR11, so this read is no existence oracle. A document that IS this firm''s but is not a payroll summary is refused CLR10 / not_a_payroll_summary rather than answered about, because the verdict would otherwise say "This payroll summary has not been read yet." over a supplier bill. It projects clara._payroll_posting_verdict''s sentence, verdict, rung, reason and completeness and NOTHING else: rung_vector is the evaluator''s internal ladder, and the lane internals (detail, plan, filing, extraction, entry, dates) are not a person''s business on a page that is asking why a payslip did not post. STABLE, so PostgreSQL itself refuses a write inside it. The internal it wraps stays ungranted; this door is the first granted way to reach its answer, and before it the only way to see the verdict was a Needs-you queue row or the entry''s own receipt.';
+  '#1148 [0363]: the granted, DOCUMENT-SCOPED read of the payroll posting verdict. clara_authenticated only, VIEWER floor through clara._human_ctx, firm-scoped on clara.documents.firm_id -- another firm''s document and an id that is no document answer the SAME CLR11, so this read is no existence oracle. A document that IS this firm''s but is not a payroll summary is refused CLR10 / not_a_payroll_summary rather than answered about, because the verdict would otherwise say "This payroll summary has not been read yet." over a supplier bill. It projects clara._payroll_posting_verdict''s sentence, verdict, rung, reason and completeness, plus duplicate_scope -- the one token of `detail` a page needs in order NOT to show the re-file sentence over a payslip whose OWN entry is what the tenth rung found (scope same_document), null on every other rung -- and NOTHING else: rung_vector is the evaluator''s internal ladder, and the lane internals (detail, plan, filing, extraction, entry, dates) are not a person''s business on a page that is asking why a payslip did not post. STABLE, so PostgreSQL refuses a data-modifying statement written inside it (which is a guard against a careless edit, not a proof of purity: a non-volatile body may still call a volatile one). The internal it wraps stays ungranted; this door is the first granted way to reach its answer, and before it the only way to see the verdict was a Needs-you queue row or the entry''s own receipt.';
 
 reset role;
 
@@ -262,7 +294,9 @@ begin
   select count(*) into v_n from pg_proc p
    where p.oid = 'clara.get_payroll_posting_state(uuid)'::regprocedure
      and p.prosecdef
-     and p.provolatile = 's'                              -- STABLE: it cannot write
+     and p.provolatile = 's'                              -- STABLE: no write statement may be
+                                                          -- written inside it (not a proof of
+                                                          -- purity -- see §A, ADV-03)
      and pg_get_userbyid(p.proowner) = 'clara_fn_owner'
      and p.proconfig @> array['search_path=clara, pg_temp']
      and p.prosrc like '%#1148 [0363]%'
@@ -270,6 +304,7 @@ begin
      and p.prosrc like '%d.firm_id = h.firm%'
      and p.prosrc like '%CLR11%'
      and p.prosrc like '%not_a_payroll_summary%'
+     and p.prosrc like '%duplicate_scope%'    -- the one token of `detail` §A(3b) projects
      and p.prosrc not like '%rung_vector%';   -- the ladder is NOT projected, read off the body
   if v_n <> 1 then
     raise exception '0363 tail: the read door is not SECURITY DEFINER + STABLE + clara_fn_owner + pinned search_path with the viewer floor, the firm wall, the payroll-summary subject and no rung ladder'

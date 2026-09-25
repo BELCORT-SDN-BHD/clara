@@ -22,6 +22,20 @@
 // A question printed with no way to answer it is a dead end, so the page SAYS where the answer is
 // given — it does not grow a second button for the same door.
 //
+// IT DOES NOT SPEAK ON THE SUCCESS PATH (fix round, review findings SPEC-01 / ADV-02). The tenth
+// rung of the posting gate stops a SECOND entry, and its first scope is the payslip's OWN: a
+// payroll summary that posted perfectly well answers `blocked / no_duplicate_entry` with a sentence
+// written for a re-file attempt made from somewhere else — "This payslip was not posted again --
+// open that entry to decide whether this is a correction or a re-upload." Printed here, directly
+// under the entries list that already shows that entry and under "A posted entry of <client>
+// currently stands on this document.", it asks a person to decide something there is nothing to
+// decide about. So this section renders NOTHING in that one state — not a reworded sentence and not
+// a second one, because the page above it has already said what stands. Every other scope names
+// somebody ELSE's entry, which IS the re-upload the sentence is for and which the reader learns
+// nowhere else; and a `ready` verdict still speaks, because "ready to post but no entry exists yet"
+// is true and is a fact this page has no other way to show. `blocksOnThisDocumentsOwnEntry` holds
+// the rule, in the module that owns the door's answer.
+//
 // IT COSTS A NON-PAYROLL PAGE NOTHING. The gate is the document's own kind, which the detail bundle
 // has already read, so an invoice page makes no door call at all. The kind can still move under the
 // page (a correction, a re-classification), and the door refuses that by name; the honest answer on
@@ -32,7 +46,8 @@ import { useTranslations } from "next-intl";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import {
-  getPayrollPostingState, isNotAPayrollSummary, type PayrollPostingState,
+  blocksOnThisDocumentsOwnEntry, getPayrollPostingState, isNotAPayrollSummary,
+  type PayrollPostingState,
 } from "@/lib/documents/payroll-posting-state";
 import { SectionHeader } from "@/components/common/section-header";
 import { DoorFeedback } from "./door-feedback";
@@ -80,6 +95,18 @@ export function PayrollPostingSection({
   if (!state) {
     // Either nothing has settled yet, or the door said this is not a payslip. Neither is a sentence
     // a person needs; a genuine failure is, and `part.err` is it.
+    return part.err ? (
+      <div data-testid="payroll-posting-error">
+        <DoorFeedback err={part.err} clr={part.clr} />
+      </div>
+    ) : null;
+  }
+
+  // THE SUCCESS PATH IS NOT A REFUSAL: see the header. The door was still asked (the page cannot
+  // know the verdict without asking); this is the one ANSWER the panel has nothing to add to. A
+  // standing failure alongside it is still a banner, exactly as in the branch above — silence is
+  // for a sentence that would be wrong, never for a failure a person is owed.
+  if (blocksOnThisDocumentsOwnEntry(state)) {
     return part.err ? (
       <div data-testid="payroll-posting-error">
         <DoorFeedback err={part.err} clr={part.clr} />
