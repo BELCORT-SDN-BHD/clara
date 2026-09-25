@@ -152,26 +152,75 @@ cut of this fix polled the TAG and then re-read `document.activeElement` in a se
 `evaluate` for its text and tabindex, which left the identity check racing the very movement the
 poll exists to wait out (review round, ADV-L06-10).
 
-**Reproduction, honestly reported — and the window MEASURED instead.** The defect is genuinely rare
-(the ticket's own rate is once in three whole-suite runs), and this host could not force it:
+**Reproduction: ten runs red before the fix, ten green after — under a PAINT load.** Fix round 1
+could not force this red and said so; fix round 2 can, and the lever turns out not to be the one two
+earlier attempts reached for.
 
-- CDP `Emulation.setCPUThrottlingRate`, armed only around the "submit the answer" step, at rate 6
-  (5 runs) and rate 20 (1 run): 6 attempts, 0 catches. Rate 50 across the whole walk crashed the
-  renderer instead of usefully widening anything.
-- The ticket's own instrument, run verbatim in the fix round: the PRE-FIX cell, **ten runs beside a
-  parallel `node scripts/run-tests.mjs`** of the whole web unit suite — `10 green / 0 red of 10`.
-  The same ten runs against the fixed cell: `10 green / 0 red of 10`.
-- A whole-suite run with the PRE-FIX cell in place: 589 passed, no B4 red.
+**The window, measured.** A temporary in-page sampler (one sample per animation frame and one per
+macrotask beat, a `MutationObserver` on the row, and the driver's own read timestamp) on an
+otherwise quiet host, 5 runs, all times in ms from the submit click:
 
-So the red was not reproduced on demand, and this document says so rather than implying otherwise.
-**What WAS established, directly:** an in-page sampler recording every change of
-`document.activeElement` (one per animation frame and one per macrotask beat) across the answer
-submission shows the transient the instant read was reading. **Four independent runs on this host
-all recorded the same sequence, `["BUTTON", "BODY", "H2"]`** — focus leaves the submit button,
-spends a tick on `<body>` while the row is unmounted, and only then lands on the heading. That
-`<body>` tick is the state the old unwaited read could observe; it is not hypothetical, and it is
-why no amount of extra timeout on an instant read would have helped. (The sampler was a temporary,
-uncommitted edit of this cell; it was reverted immediately, `git status` clean.)
+| focus leaves the button, `<body>` | the row node is removed | focus lands on the heading | the PRE-FIX cell's instant read |
+|---|---|---|---|
+| 39.0 – 47.9 | 50.3 – 61.1 | 59.3 – 74.3 | 65.6 – 81.3 |
+
+The instant read landed **5.0 – 7.4 ms after** the heading took focus in all five runs. The old cell
+was not winning that race comfortably; it was winning it by about a third of a frame.
+
+**Which is why the load that matters is PAINT, not host CPU.** `nextPaint()` is one
+`requestAnimationFrame` plus one `setTimeout(0)`, so the landing runs in a macrotask AFTER that
+frame's rendering steps — while the driver's `toHaveCount(0)` resolves inside the frame's rAF
+callbacks and its `evaluate` is already on the wire. Anything that makes a frame's own RENDERING
+expensive delays the landing without delaying the read; anything that slows the whole main thread
+delays both, which is why these did NOT reproduce it:
+
+- 24 busy-loop node processes saturating all 24 cores of this host, PRE-FIX cell,
+  `--repeat-each=20`: **20 green / 0 red**. The load was real — the cell's own wall time rose from
+  ~8 s to ~12 s.
+- CDP `Emulation.setCPUThrottlingRate` at 6 (5 runs) and 20 (1 run), armed around the submit step:
+  0 catches. Rate 50 across the whole walk crashed the renderer instead.
+- The ticket's own instrument — the PRE-FIX cell, ten runs beside a parallel
+  `node scripts/run-tests.mjs` of the whole web unit suite: **10 green / 0 red**, and the same ten
+  against the fixed cell: 10 green. A whole-suite run with the PRE-FIX cell in place: 589 passed, no
+  B4 red.
+
+**The load that does reproduce it** is 400 fixed-position 320x240 tiles under `filter: blur(24px)`,
+driven by a 33 ms CSS keyframe animation — paint work only, no script of their own — appended to the
+page immediately before the submit click. Measured frame gap under it: median 17.5 – 19.5 ms, max
+~167 ms.
+
+| the cell, under the same 400-tile paint load | runs | result |
+|---|---|---|
+| PRE-FIX (`7bc5a710f`: one unwaited `page.evaluate`) | 10 | **10 red**, every one `focus was dumped onto the document body when the row disappeared` |
+| the committed fix (`expect.poll` over the whole landing) | 10 | **10 green** (1.5 m) |
+
+The sampler run under that same load says what the red is: the row is removed at 240 – 255 ms, the
+driver's instant read lands at 248 – 283 ms and reads `BODY`, and the heading's landing is still
+queued behind the frame's rendering. That is the ticket's own AC1 loop, on this host, in both
+directions.
+
+To re-run it, inject this immediately before `await page.getByTestId("work-question-submit").click();`
+— a temporary, uncommitted edit; the spec was restored byte for byte afterwards (`sha256` compared,
+`git status` clean), and nothing about the load belongs in the committed cell:
+
+```ts
+await page.evaluate((tiles) => {
+  const style = document.createElement("style");
+  style.textContent =
+    "@keyframes b4load { from { transform: translateX(0) rotate(0deg); } to { transform: translateX(7px) rotate(3deg); } }"
+    + " .b4load { position: fixed; top: 0; left: 0; width: 320px; height: 240px; pointer-events: none; z-index: -1;"
+    + " filter: blur(24px); background: linear-gradient(45deg, #f00, #00f); animation: b4load 33ms linear infinite alternate; }";
+  document.head.appendChild(style);
+  const host = document.createElement("div");
+  for (let i = 0; i < tiles; i++) {
+    const d = document.createElement("div");
+    d.className = "b4load";
+    d.style.animationDelay = (i % 7) + "ms";
+    host.appendChild(d);
+  }
+  document.body.appendChild(host);
+}, 400);
+```
 
 And the cell's own discrimination is proven by the vacuity control the work order requires for a
 test-only ticket: `restoreFocusAfterRow`'s final `landmark.focus()` call was temporarily dropped, and
