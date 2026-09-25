@@ -1154,13 +1154,16 @@ runbook's next re-derivation. `clara.onboarding_plan_items` unchanged at 29 (0 c
 plans existed, so 0347's backfill wrote nothing, confirmed twice, pre-window and again in section
 (f)'s dedicated L7 read: `0 | 0 | 0`); `clara.document_capabilities` unchanged at 240 rows, every row
 rewritten twice (`registry_version` 6 → 7 → 8); the two new relations present and empty.
-**One pair of counts moved that the draft did not anticipate and this record cannot explain**:
+**One pair of counts moved that the draft did not anticipate, and the migrate log explains it**:
 `clara.confirmation_attempts` read 4 pre-window and **0** post-migrate; `clara.invite_preview_attempts`
-read 1 pre-window and **0** post-migrate. Both relations carry append-only AND no-truncate triggers
-(`t_confirmation_attempts_append_only`, `t_confirmation_attempts_no_truncate`,
-`t_invite_preview_attempts_append_only`, `t_invite_preview_attempts_no_truncate`, all `[O]`/enabled
-in both reads), and 0348 only builds indexes and installs prune verbs in this window; it calls
-neither of them. This is recorded as an open finding for the owner rather than diagnosed here.
+read 1 pre-window and **0** post-migrate. 0348's own apply step (the file's lines 394 to 395) runs the two
+retention verbs once as the retention's first sweep, `prune_confirmation_attempts(now() - interval '2 hours')`
+and `prune_invite_preview_attempts(now() - interval '2 hours')`, and its notice in `migrate.log` records
+`attempts_deleted: 4` and `attempts_deleted: 1` with `pruned_before 2026-09-25T13:00:55Z` and
+`trigger_posture: O` (the append-only trigger disabled for the sweep and restored, which is why both
+triggers still read `[O]`/enabled afterwards). The five rows were rate-wall evidence older than the
+wall's own 15-minute window, so nothing the wall reads was lost; the draft's step 3c named the index
+builds on these relations but not the first sweep, which is a gap in the draft, not in the file.
 The eight lane questions (L1's one-predicate wall, L2's two relations and two doors, L3's claim
 validator and work reads, L4's registry and witness, L5's correcting door (its own knowledge-key
 half unmeasured per the 42703 finding above), L7's backfill and retention verbs, L8's twins and cores)
@@ -1178,9 +1181,9 @@ have anticipated: (1) the post-migrate section (f) read for L5's knowledge-key/a
 (#1090, #1092) errored `42703 undefined_column` on a `retired_at` column that does not exist on
 `clara.knowledge_keys`, so that question is unmeasured as written even though the correct count (15)
 is recoverable from elsewhere in the same read; (2) `clara.confirmation_attempts` and
-`clara.invite_preview_attempts` read 4 and 1 rows before the window and 0 and 0 after, on two
-append-only, no-truncate-triggered tables this release does not itself write to, an unexplained drop
-flagged for the owner rather than diagnosed; (3) `step7.log`'s own boot-line capture truncates after
+`clara.invite_preview_attempts` read 4 and 1 rows before the window and 0 and 0 after: 0348's own
+first retention sweep, disclosed in its apply notice (`attempts_deleted` 4 and 1, threshold
+`now() - 2 hours`), which the draft's step 3c had not named; (3) `step7.log`'s own boot-line capture truncates after
 ten of the fourteen pins (a capture-length artefact, not a boot defect: `bodies=60` and the ten
 visible pins are unmoved, and the full 14-pin string is corroborated identically by both the pre- and
 post-window reads of the unchanged `registry.ts`). Everything else read exactly as the draft
