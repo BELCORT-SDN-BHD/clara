@@ -228,16 +228,41 @@ test("p977.definition.one both doors READ clara._authority_ref_refusal — as do
     + "integer,text,date,date,jsonb)";
   const oboTwinLive = (await rootQuery(
     "select to_regprocedure($1) is not null as ok", [OBO_TWIN_SIG])).rows[0].ok;
+  // THE FOURTH READER, AND WHY IT IS ONE (riders sweep wave, #1137/0353). The owner's ruling of
+  // 2026-09-25 on #1137 lets Clara confirm a TENANCY rent plan on a named bookkeeper's behalf from
+  // the conversation, and that confirmation ends in a plan — so it needs a plan step for the same
+  // reason #915's and #941's did: `clara.create_accounting_plan` resolves its actor through
+  // `clara._human_ctx` -> `clara.jwt_sub()`, which a `clara_runtime` connection cannot satisfy.
+  // `clara._tenancy_plan_core` is `clara._obo_plan_core`'s body with the kind fixed to
+  // `recurring_journal`, and it READS the shared definition rather than carrying an inline copy —
+  // which is #977's rule holding on one more machine lane, not escaping it. 0353's own
+  // `p1137.obo.refusals_match` (tenancy-agent-twins.test.mjs) MEASURES the copy: seven shared
+  // refusals driven through BOTH entrances and compared on sqlstate, sentence and typed detail.
+  //
+  // It is a THIRD instance of a body the estate is de-duplicating, and 0353 says so out loud: it
+  // belongs in `clara._obo_plan_core` as a two-line widening of that body's closed kind set, and is
+  // separate only because lane L1 of the same wave recuts that body (#1051, #1080). The follow-up
+  // that merges them is recorded in `packages/db/README.md` § 0353; when it lands, this entry goes
+  // away with the body and the roster shrinks back.
+  //
+  // MEASURED, never assumed, on the same terms as the twin above: the roster stays an EXACT closed
+  // world, and a reader this cell does not name still reds it.
+  const TENANCY_STEP_SIG = "clara._tenancy_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,"
+    + "integer,text,date,date,jsonb)";
+  const tenancyStepLive = (await rootQuery(
+    "select to_regprocedure($1) is not null as ok", [TENANCY_STEP_SIG])).rows[0].ok;
   const readers = bodies.rows
     .filter((r) => r.proname !== "_authority_ref_refusal" && r.prosrc.includes(REFUSAL_CALL))
     .map((r) => r.proname);
   assert.deepEqual(readers,
     // `order by p.proname` above is the catalog's own C ordering (proname is `name`), so the
-    // underscore-led twin sorts first.
+    // underscore-led bodies sort first, and `_o` before `_t`.
     [...(oboTwinLive ? ["_obo_plan_core"] : []),
+      ...(tenancyStepLive ? ["_tenancy_plan_core"] : []),
       "create_accounting_plan", "sign_depreciation_authority"],
-    "…and exactly the two doors the ruling names — plus #941's on-behalf twin of the plan door, "
-    + "which carries that door's authority shape verbatim — read the one definition");
+    "…and exactly the two doors the ruling names — plus #941's on-behalf twin of the plan door and "
+    + "#1137's tenancy plan step, each of which carries that door's authority shape verbatim — "
+    + "read the one definition");
 });
 
 // ===========================================================================================
