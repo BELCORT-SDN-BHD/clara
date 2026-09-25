@@ -3395,7 +3395,13 @@
       "colAmount": "Amount",
       "colAccept": "Accept",
       "accept": "Accept",
-      "acceptAria": "Accept {description} as this run's settlement"
+      "acceptAria": "Accept {description} as this run's settlement",
+      "justSettled": "{period} — settled for {amount}. Accepted the wrong candidate? Reverse it here.",
+      "reverseSettlement": "Reverse settlement",
+      "reverseAria": "Reverse the {period} settlement",
+      "reverseReasonLabel": "Reason",
+      "reverseReasonPlaceholder": "Why is this being reversed?",
+      "confirmReverseSettlement": "Confirm reverse"
     },
     "rentSettlements": {
       "heading": "Tenancy rent and deposits",
