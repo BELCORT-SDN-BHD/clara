@@ -170,6 +170,7 @@ components/firm-admin/firm-settings-a11y.test.tsx
 components/firm-admin/firm-settings-panel.test.tsx
 components/firm-admin/legal-standing-card.test.tsx
 components/firm-admin/processing-capacity-card.test.tsx
+components/firm-admin/standing-instructions-card.test.tsx
 components/firm-admin/vendor-binding-ceremony.test.tsx
 components/firm-setup/firm-setup-a11y.test.tsx
 components/firm-setup/firm-setup-checklist.test.tsx

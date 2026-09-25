@@ -3497,6 +3497,30 @@ export const SCHEDULE_TERM_CORRECTION_0317_COHORT = [
   ...SCHEDULE_TERM_CORRECTION_0317_HUMAN_FNS, ...SCHEDULE_TERM_CORRECTION_0317_UNGRANTED_FNS,
 ];
 // #941 END
+// #1050 [0338, the clocked prepayment lane gets a directing human: a named member of the firm
+// records a firm-level standing instruction] — its own cohort, the same "wholly present or wholly
+// absent" reason 0317's carries: the `db-slice-frontiers` matrix runs this package against
+// databases pinned at earlier frontiers where 0315 has applied and 0338 has not.
+//
+//   the TWO human doors — clara_authenticated ONLY, ADMIN-floored in their own bodies. The act the
+//   instruction authorises is bookkeeper work; STANDING it for every client of the firm until
+//   somebody withdraws it is firm-level governance, which sits at admin here (0055's own floor).
+//   clara_runtime, both agent read roles and all four wake lanes gain ZERO and there is NO wake
+//   wrapper and NO obo twin: an instruction a machine recorded would name nobody, which is the
+//   whole point of the ticket. 0338's own tail asserts the absence by has_function_privilege.
+const FIRM_STANDING_INSTRUCTION_0338_HUMAN_FNS = [
+  "record_firm_standing_instruction",
+  "withdraw_firm_standing_instruction",
+];
+//   …and the UNGRANTED closure: the relation's withdraw-only trigger. Granted to NOBODY — reached
+//   only from the write path, exactly as `_tf_pae_retire_only` (0306) is.
+const FIRM_STANDING_INSTRUCTION_0338_UNGRANTED_FNS = [
+  "_tf_fsi_withdraw_only",
+];
+export const FIRM_STANDING_INSTRUCTION_0338_COHORT = [
+  ...FIRM_STANDING_INSTRUCTION_0338_HUMAN_FNS, ...FIRM_STANDING_INSTRUCTION_0338_UNGRANTED_FNS,
+];
+// #1050 END
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -3823,6 +3847,11 @@ export const ALLOWED = {
     // read roles and all four wake lanes gain ZERO, and neither an OBO twin nor a wake wrapper
     // exists for either of them anywhere in the catalog.
     ...SCHEDULE_TERM_CORRECTION_0317_HUMAN_FNS,
+    // #1050 [0338] the firm-level standing-instruction doors -- see the block above.
+    // clara_authenticated ONLY, admin-floored in their own bodies; clara_runtime, both agent read
+    // roles and all four wake lanes gain ZERO, and neither an OBO twin nor a wake wrapper exists
+    // for either of them anywhere in the catalog.
+    ...FIRM_STANDING_INSTRUCTION_0338_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -4509,6 +4538,13 @@ export async function grantMatrixFailures() {
   if (correctionLive.length !== 0) {
     failures.push(...cohortFailures("#939 AC4 / #941 AC3 0317 schedule term correction",
       SCHEDULE_TERM_CORRECTION_0317_COHORT, liveNames));
+  }
+  // #1050 [0338] -- bimodal, same reasoning as 0317's above: wholly present once 0338 applies,
+  // wholly absent before it.
+  const standingLive = FIRM_STANDING_INSTRUCTION_0338_COHORT.filter((n) => liveNames.has(n));
+  if (standingLive.length !== 0) {
+    failures.push(...cohortFailures("#1050 0338 firm standing instruction",
+      FIRM_STANDING_INSTRUCTION_0338_COHORT, liveNames));
   }
   // #812
   failures.push(...cohortFailures("#812 0211 accounting_work egress recovery door", EGRESS_RECOVERY_0211_COHORT, liveNames));

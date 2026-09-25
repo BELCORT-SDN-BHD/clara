@@ -115,12 +115,15 @@ async function mountPanel(loaders: FirmSettingsLoaders) {
   return h;
 }
 
-test("p635.web.panel_composition five cards plus the two pinned legacy ones, from three reads and no more", async () => {
+test("p635.web.panel_composition six cards plus the two pinned legacy ones, from four reads and no more (ticket 1050 added the sixth and the fourth)", async () => {
   let calls = 0;
   const h = await mountPanel({
     legalStanding: async () => { calls += 1; return STANDING; },
     commercialState: async () => { calls += 1; return COMMERCIAL; },
     aiUsage: async () => { calls += 1; return { rows: USAGE, dropped: 0 }; },
+    // #1050 - the standing-instruction read. `null` is the legitimate state "this firm has
+    // instructed nothing", which is what every cell here is about unless it says otherwise.
+    standingInstruction: async () => { calls += 1; return null; },
   });
   try {
     const text = h.text();
@@ -132,7 +135,8 @@ test("p635.web.panel_composition five cards plus the two pinned legacy ones, fro
     // THE TWO LEGACY CARDS, rendered from the untouched SettingsPanel and not re-typed.
     assert.match(text, /The Change-threshold control is retired/);
     assert.match(text, /grant_firm_capability and revoke_firm_capability are live/);
-    assert.equal(calls, 3, "one read per door — capacity and the firm's created-at ride the commercial answer");
+    assert.match(text, /Standing instructions to Clara/);
+    assert.equal(calls, 4, "one read per door — capacity and the firm's created-at ride the commercial answer, and ticket 1050's standing instruction is its own relation");
     // ONE READ, THREE RENDERERS: the capacity numbers and the created-at both come from it.
     assert.match(text, /In Clara since/);
     assert.match(text, /2,500/, "the capacity card renders the same answer the plan card did");
@@ -146,6 +150,10 @@ test("p635.web.revocation_clears a demotion mid-session clears the figures on th
     legalStanding: async () => STANDING,
     commercialState: async () => { if (demoted) throw clr04(); return COMMERCIAL; },
     aiUsage: async () => { if (demoted) throw clr04(); return { rows: USAGE, dropped: 0 }; },
+    // #1050 - the standing-instruction read. `null` is the legitimate
+    // state "this firm has instructed nothing", which is what every
+    // cell below is about except the ones that say otherwise.
+    standingInstruction: async () => null,
   });
   try {
     assert.match(h.text(), /MYR 199\.00/, "the figures are on screen");
@@ -178,6 +186,10 @@ test("p635.web.panel_denied_at_low_rank the commercial and usage cards render th
     legalStanding: async () => ({ ...STANDING, masked: true, canAcceptForFirm: false }),
     commercialState: async () => { throw clr04(); },
     aiUsage: async () => { throw clr04(); },
+    // #1050 - the standing-instruction read. `null` is the legitimate
+    // state "this firm has instructed nothing", which is what every
+    // cell below is about except the ones that say otherwise.
+    standingInstruction: async () => null,
   });
   try {
     const text = h.text();
@@ -194,6 +206,10 @@ test("p635.web.panel_failed_is_not_denied a transport failure offers a retry and
     legalStanding: async () => STANDING,
     commercialState: async () => { throw new Error("fetch failed"); },
     aiUsage: async () => ({ rows: USAGE, dropped: 0 }),
+    // #1050 - the standing-instruction read. `null` is the legitimate
+    // state "this firm has instructed nothing", which is what every
+    // cell below is about except the ones that say otherwise.
+    standingInstruction: async () => null,
   });
   try {
     const text = h.text();
@@ -241,6 +257,10 @@ test("p635.web.usage_period_change a new window is never stamped on the previous
       period === "2026-09-01"
         ? { rows: SEPTEMBER, dropped: 0 }
         : new Promise<FirmUsageTable>(() => {}),
+    // #1050 - the standing-instruction read. `null` is the legitimate
+    // state "this firm has instructed nothing", which is what every
+    // cell below is about except the ones that say otherwise.
+    standingInstruction: async () => null,
   };
 
   const h = await renderComponent(panelElement(loaders, "2026-09"));
@@ -292,6 +312,10 @@ test("p960.web.save_rereads a cap save re-reads the commercial state, whatever t
               legalStanding: async () => STANDING,
               commercialState: async () => { commercialReads += 1; return COMMERCIAL; },
               aiUsage: async () => ({ rows: USAGE, dropped: 0 }),
+              // #1050 - the standing-instruction read. `null` is the legitimate
+              // state "this firm has instructed nothing", which is what every
+              // cell below is about except the ones that say otherwise.
+              standingInstruction: async () => null,
             },
             setCaps: async (edits: unknown) => { sent.push(edits); return outcome; },
             now: NOW,

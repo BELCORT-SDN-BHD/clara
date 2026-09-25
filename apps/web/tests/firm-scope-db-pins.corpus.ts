@@ -376,4 +376,15 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "95c8bdd5507710f59fc6d7219be50320c813cc094cf92e980b36a30a745a5857",
     },
   ],
+  // #1078 fix round [0361] (riders sweep wave, lane 02) — the SAME 0041/0042 splice family,
+  // and the same body: the opening-balance carry-down is edited the only way it has ever been
+  // edited, by a counted replacement inside pg_get_functiondef's own output.
+  [
+    "0361_reservation_release_advice.sql",
+    {
+      reason:
+        "Reviewed pg_get_functiondef splice recuts exactly ONE FUNCTION — clara._draft_opening_item_core(uuid,uuid,uuid,uuid,jsonb,jsonb,uuid,uuid,text), read at a literal signature and re-installed with TWO additive edits inside the reservation refusal 0042 §5.15c put there: the remedy clause's two-door literal becomes one `%` fed by clara._reservation_release_advice, and the detail's hard-coded `coa_account_advance_reserved` becomes that same map's token for the domain that actually holds the code. Both anchors are counted and must occur EXACTLY once before anything is replaced, each is a single dollar-quoted literal so the statement stays reconstructible (no concatenation chain), and the block detects its own marker in the INSTALLED body and no-ops on a redo. The function returns jsonb, so it cannot emit a view definition of any kind, and the file contains no `create view` of any spelling at all — static or spliced — so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) is reachable, by construction rather than by inspection of a rendered string. Same family as 0041 §4.5's and 0042 §5.15c's own splices of this same body, which is the only way it has ever been edited: it is a 445-line body written out whole only in 0017. Every other section of this migration is STATIC DDL the lexer inspects directly — one new ungranted internal (clara._reservation_release_advice) and three whole recut bodies at literal signatures (clara._fa_assert_code_unreserved, clara.upsert_fa_account_profile, clara._fa_role_claim_conflict), each EMBEDDED in full rather than spliced. The prestate pins every recut body at its measured pre-image OR at this file's own output and refuses anything else; the tail re-reads the committed bodies, drives the map over all three domains and over one it does not know, and re-asserts the one grant this file must not move (clara.upsert_fa_account_profile's clara_authenticated EXECUTE).",
+      sha256: "4572e5d30a3f025bff5a39853290991f77df7b432a1946c5dce89b2ec178b1b6",
+    },
+  ],
 ]);

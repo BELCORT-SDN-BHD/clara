@@ -25,7 +25,9 @@ import {
   readPrepaymentSourceFor, readPrepaymentSourceForAs, prepaymentLaneGrants,
   READ_SIG, READ_REASON,
   OBO_REASON, TWIN_SIG, HUMAN_SIG, AMORTISATION_KIND, PREPAY_BASIS,
+  PREPAY_REASON, PREPAID_NOT_ENROLLED_AXIS,
 } from "./prepayment-schedule-obo-fixtures.mjs";
+import { callerContractCode } from "./internal-refusal-errcode-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
@@ -156,7 +158,12 @@ async () => {
 
   // 1 — A NULL AUTHOR is its own mistake, and it is answered before the client is even read, so it
   //     can leak nothing about which clients exist.
-  const nullAuthor = await assertPair(CLR.badRequest, OBO_REASON.invalidAuthor,
+  //
+  //     #1114 — AND IT IS NOT A `bad-request`. The only caller of this door is a `clara_runtime`
+  //     body that always holds the actor, so a null here is the calling PROGRAM's fault, has no
+  //     sentence to show anyone and no remedy to offer. It carries CLR44, the caller-contract
+  //     class, and the distinctness from the renderable roster refusal is asserted below.
+  const nullAuthor = await assertPair(await callerContractCode(), OBO_REASON.invalidAuthor,
     () => call({ author: null }), "an OBO configuration naming no human at all");
   assert.equal(nullAuthor.detail.field, "author");
   assert.equal(nullAuthor.detail.constraint, "present");
@@ -411,6 +418,25 @@ async () => {
   }), "the human door against the same unenrolled account");
   assert.deepEqual(humanSide.detail, refused.detail);
 
+  // 1b — #1114's WHOLE ACCEPTANCE CRITERION, at ONE door, in ONE cell: the refusal a bookkeeper
+  //      acts on and the internal wiring error are told apart BY ERRCODE ALONE. Driven here rather
+  //      than asserted from a catalog read, because the claim is about what the door answers.
+  //      `prepayment_source_unfit` keeps CLR10 -- it carries a remedy and a panel and the
+  //      Prepayments form renders it -- while a null author, which the estate's own successor
+  //      contract calls "an internal wiring error, never shown", answers CLR44.
+  const wiring = await assertPair(await callerContractCode(), OBO_REASON.invalidAuthor,
+    () => createPrepaymentScheduleFor({
+      client: scene.client, author: null, sourceEntry: plain.entry,
+      expenseAccount: scene.target, authorityRef: ref, opKey: opk("p915-roster-null"),
+    }), "the same door, handed no author at all");
+  assert.equal(refused.err.code, CLR.badRequest,
+    "the account-not-enrolled refusal is the one a surface renders, and it stays on CLR10");
+  assert.notEqual(wiring.err.code, refused.err.code,
+    "#1114 AC1: the invalid-author refusal and the account-not-enrolled refusal must be "
+    + "distinguishable by errcode alone, not only by the reason inside the detail payload");
+  assert.equal(PREPAY_REASON.sourceUnfit, refused.detail.reason);
+  assert.equal(PREPAID_NOT_ENROLLED_AXIS, refused.detail.axis);
+
   // 2 — ENROL IT AND THE SAME OBO CALL SUCCEEDS. A gate cell that only ever measured the refusal
   //     could not tell a gate from a ban.
   await enrolPrepaymentAccount(scene.bob, { client: scene.client, account: plain.code });
@@ -433,20 +459,33 @@ async () => {
   assert.equal(both.detail.axis, "prepaid_account_not_enrolled",
     "the ROSTER answers first, and names where to go");
 
-  // …and the WALL is still live behind it on this lane too: the scene's OWN prepaid account is
-  // enrolled, and binding it as a bank account makes the next configuration answer the wall.
-  await bindBankAccount(scene.alice, {
-    client: scene.client, coaAccountCode: scene.prepaid, accountNumber: "915000112233" });
+  // 4 — …and the machine lane is NOT a second set of rules.
+  //
+  // [#1078, migration 0337_prepayment_account_reservation] THIS STEP USED TO EXPLOIT THE HOLE #1078
+  // CLOSED. It bound the scene's OWN enrolled prepaid account as a registered bank account and
+  // watched the next OBO configuration answer the shared wall. A live prepayment enrolment now
+  // RESERVES its code in `clara._acct_role_reserved`, so the bank belt refuses that binding
+  // outright — which is the point of the ticket, is driven at the belt in `p1078.claim.bank`, and
+  // makes `prepaid_account_ineligible` unreachable for an enrolled account on BOTH lanes (the human
+  // door's own cell, `p940.schedule.roster_gate`, carries the full reasoning).
+  //
+  // What the twin owes this battery is that it did not become a second set of rules, so both halves
+  // are driven here: the belt refuses the binding on this lane's scene too, and the twin still
+  // configures the next recognition on that same enrolled account afterwards.
+  await assertRaises(CLR.badRequest,
+    () => bindBankAccount(scene.alice, {
+      client: scene.client, coaAccountCode: scene.prepaid, accountNumber: "915000112233" }),
+    "binding the scene's enrolled prepaid account as a registered bank account");
   const extra = await extraRecognition(scene, { cents: 24000, tag: "obo-wall" });
   await recordPeriod(scene.bob, {
     document: extra.document, start: scene.termStart, end: scene.termEnd });
-  const walled = await assertPair(CLR.badRequest, "prepayment_source_unfit",
-    () => createPrepaymentScheduleFor({
-      client: scene.client, author: scene.bob, sourceEntry: extra.entry,
-      expenseAccount: scene.target, authorityRef: ref, opKey: opk("p915-roster-wall"),
-    }), "an OBO configuration against an enrolled account that has since been bound as a bank account");
-  assert.equal(walled.detail.axis, "prepaid_account_ineligible");
-  assert.equal(walled.detail.breach.axis, "bank_account");
+  const after1078 = await createPrepaymentScheduleFor({
+    client: scene.client, author: scene.bob, sourceEntry: extra.entry,
+    expenseAccount: scene.target, authorityRef: ref, opKey: opk("p915-roster-wall"),
+  });
+  assert.ok(after1078.schedule_id,
+    "the reservation closed the bank door and cost the OBO lane nothing on its own enrolled account");
+  assert.equal(after1078.prepaid_account_code, scene.prepaid);
 });
 
 // ===========================================================================================
@@ -549,7 +588,12 @@ async () => {
 
   // 5 — THE SCOPE IS REQUIRED, and a missing one is its own refusal rather than a null-shaped
   //     answer that a caller might read as "nothing is recorded".
-  await assertPair(CLR.badRequest, READ_REASON.scopeRequired,
+  //
+  //     #1114 — UNDER CLR44, NOT CLR10. The scope is three explicit arguments a run always holds,
+  //     so a null is a mis-wired caller and never a person's mistake; the successor contract
+  //     already calls it "an internal wiring error, never shown". It is the same class the null
+  //     author above carries, and a different class from the roster refusal a person acts on.
+  await assertPair(await callerContractCode(), READ_REASON.scopeRequired,
     () => readPrepaymentSourceFor({ firm: null, client: scene.client, sourceEntry: scene.entry }),
     "a read with no firm");
 

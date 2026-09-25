@@ -62,6 +62,14 @@ export const CLR = {
   badRequest: "CLR10", // malformed args / unknown account / bad lifecycle
   notFound: "CLR11", // not-found-in-your-firm (NO existence oracle)
   stale: "CLR12", // stale context / books-version freshness gate (Slice 3, §2.5)
+  // #1114 [0335] — CALLER-CONTRACT VIOLATION, and it is the one code in this catalog that names a
+  // mistake made by a PROGRAM rather than by a person. A `clara_runtime`-only door whose own
+  // contract guarantees an argument (the human an on-behalf-of act names; the firm/client/entry a
+  // machine-lane read is scoped by) and is handed a null has been mis-wired by its caller: there
+  // is no sentence to show anyone and no remedy to offer. It is SEPARATE from `badRequest`
+  // precisely so a surface, a log or a retry policy that branches on the CODE alone can tell an
+  // internal fault from a real refusal a person can act on — CLR10 now means only the latter.
+  callerContract: "CLR44",
 };
 
 /** Standard Postgres SQLSTATEs the rig asserts directly. */

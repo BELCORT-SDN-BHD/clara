@@ -129,9 +129,16 @@ test("p940.panel.empty — an empty roster says no prepayment on this client can
   const { h, teardown } = await mountPanel([[]]);
   try {
     const text = h.text();
-    assert.match(text, /Prepayment accounts/);
+    assert.match(text, /Prepayment and deferred-revenue accounts/,
+      "ticket 1079: the heading must name both purposes this panel administers, not only the first");
     assert.match(text, /no prepayment here can be amortised/i,
       "the empty state names the CONSEQUENCE, which is what a firm needs to read");
+    // #1079 fix round (ADV-L02-08 / L02-SPEC-04): the heading named both purposes while the
+    // rest of the panel still named one, so a firm enrolling a customer-advance liability
+    // read an empty state, a dialog and a field that all called it a prepayment account
+    // under a title saying otherwise. The consequence sentence now names BOTH outcomes.
+    assert.match(text, /no customer advance can be recognised as revenue/i,
+      "ticket 1079: the empty state still names only the first of the two purposes");
     assert.equal(findAll(h.container as never, (n) => String(reactProps(n)["data-testid"] ?? "") === "prepayment-account-row").length, 0);
   } finally {
     await teardown();
