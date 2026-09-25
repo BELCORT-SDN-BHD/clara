@@ -2341,6 +2341,18 @@ export const FYE_PAIR_WALL_0310_COHORT = [...FYE_PAIR_WALL_0310_UNGRANTED_FNS];
 const PLAN_AUTHORITY_WALL_0330_UNGRANTED_FNS = ["_assert_plan_authority"];
 export const PLAN_AUTHORITY_WALL_0330_COHORT = [...PLAN_AUTHORITY_WALL_0330_UNGRANTED_FNS];
 
+// #1074 [0332, a reversal reverses what its own occurrence POSTED] — its own cohort, for the same
+// "wholly present or wholly absent" reason 0330's carries: the `db-slice-frontiers` matrix runs
+// this package against earlier frontiers where 0308 has applied and 0332 has not.
+// `_plan_posted_entry_lines` is UNGRANTED, the same posture its two siblings
+// `_plan_amortisation_period_line` (0223) and `_plan_accrual_period_line` (0303) carry — it reads
+// every client's `clara.journal_lines` under a SECURITY DEFINER, so the main sweep fails the moment
+// a grant appears on it, and 0332's own tail fails if it ever stops being reached from
+// `_plan_admit_occurrence`. ONE name, because 0332 mints exactly one: the admission core it recuts
+// has existed since 0193.
+const PLAN_REVERSAL_POSTED_BASIS_0332_UNGRANTED_FNS = ["_plan_posted_entry_lines"];
+export const PLAN_REVERSAL_POSTED_BASIS_0332_COHORT = [...PLAN_REVERSAL_POSTED_BASIS_0332_UNGRANTED_FNS];
+
 // #979 [0251, the depreciation authority read tells "never had one" apart from "had one, and it
 // was retired"] — NO COHORT, NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed, for
 // the same reason #797's (0212) and #720's (0198) blocks state theirs. 0251 creates no function:
@@ -4245,6 +4257,11 @@ export async function grantMatrixFailures() {
   const planAuthorityWallLive = PLAN_AUTHORITY_WALL_0330_COHORT.filter((n) => liveNames.has(n));
   if (planAuthorityWallLive.length !== 0) {
     failures.push(...cohortFailures("#1051 0330 shared plan authority wall", PLAN_AUTHORITY_WALL_0330_COHORT, liveNames));
+  }
+  // #1074 [0332] — bimodal like 0330's: wholly present once 0332 applies, wholly absent before it.
+  const postedReversalBasisLive = PLAN_REVERSAL_POSTED_BASIS_0332_COHORT.filter((n) => liveNames.has(n));
+  if (postedReversalBasisLive.length !== 0) {
+    failures.push(...cohortFailures("#1074 0332 posted-entry reversal basis", PLAN_REVERSAL_POSTED_BASIS_0332_COHORT, liveNames));
   }
   // #652 [0222] — bimodal like F-A6's: wholly present once 0222 applies, wholly absent before it,
   // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.
