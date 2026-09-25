@@ -1,0 +1,93 @@
+// @frozen
+//
+// FROZEN — part of the chatTurn_v23 closure. THE REFUSAL ENVELOPE THE SEVEN NEW TOOLS SHARE.
+//
+// ONE MODULE RATHER THAN TWO COPIES, and the reason is the estate's own: the three reads of #1136
+// and the four tenancy tools of #1137 land in separate modules (they are separate subjects with
+// separate doors), and a second copy of an envelope is how two tools in one version come to
+// disagree about what a refusal looks like. `chatTurn.v23.tools.ts` imports BOTH modules to build
+// the map, so the shared helpers cannot live in either of them without a cycle.
+//
+// THE SHAPE IS v22's, BY REFERENCE. `ToolRefusalV23` is `ToolRefusalV22`, which is v21's, which is
+// v20's: this cut adds no field to a refusal and renames nothing.
+
+import { authoringRefusal } from "./chatTurn.v11.tools.js";
+import type { ToolRefusalV22 } from "./chatTurn.v22.tools.js";
+
+/** v22's refusal envelope, unchanged and reached by reference. */
+export type ToolRefusalV23 = ToolRefusalV22;
+
+/** The shape node-postgres hands a caught door error. */
+export type DbErrorV23 = { code?: string; message?: string; detail?: string };
+
+/** A GOVERNED REFUSAL IS A CLR SQLSTATE, AND NOTHING ELSE IS — v22's `isGovernedRefusalV22`,
+ *  carried. Anything else is a fault this lane owns, not a sentence a person should read. */
+export function isGovernedRefusalV23(code: unknown): boolean {
+  return typeof code === "string" && /^CLR\d{2}$/.test(code);
+}
+
+/** A fault of this lane's own making. It carries no CLR code because the database did not refuse:
+ *  something in the tool's own wiring did. */
+export function internalFaultV23(message: string): ToolRefusalV23 {
+  return { ok: false, code: "internal", reason: null, fix: null, message, details: {} };
+}
+
+/** The conversation is bound to no client at all. v22's sentence shape and v22's fix, carried. */
+export function noClientRefusalV23(reason: string, message: string): ToolRefusalV23 {
+  return {
+    ok: false,
+    code: "CLR03",
+    reason,
+    fix: "Open this conversation from the client workspace whose books this belongs to.",
+    message,
+    details: {},
+  };
+}
+
+/**
+ * The model named a client that is not the one this conversation is pinned to.
+ *
+ * REFUSED RATHER THAN SILENTLY RESOLVED, and #1137's contract says why in one line: a tool that
+ * quietly preferred one of two client ids would be deciding whose books an act lands in.
+ */
+export function clientMismatchRefusalV23(reason: string, message: string, clientId: string): ToolRefusalV23 {
+  return {
+    ok: false,
+    code: "CLR03",
+    reason,
+    fix: "Open this conversation from the client whose books you mean, then ask again.",
+    message,
+    details: { client_id: clientId },
+  };
+}
+
+/**
+ * The database's typed refusal, handed back with this cut's own sentence when the estate knows
+ * the reason and with the door's own message verbatim when it does not.
+ *
+ * `sentence(reason, detail)` is the caller's map; returning null from it means "this cut has no
+ * sentence for that token", and the door's own message is then carried verbatim rather than
+ * replaced by a generic one.
+ *
+ * A refusal whose code is not a CLR sqlstate is a FAULT rather than a refusal: the door did not
+ * govern it, so nobody wrote a sentence for it and nobody should read one.
+ */
+export function governedRefusalV23(
+  error: unknown,
+  sentence: (reason: string, detail: Record<string, unknown>) => string | null,
+  internalMessage: string,
+): ToolRefusalV23 {
+  const refused = authoringRefusal(error as DbErrorV23);
+  if (refused.ok !== false) return internalFaultV23(internalMessage);
+  if (!isGovernedRefusalV23(refused.code)) return internalFaultV23(internalMessage);
+  const reason = typeof refused.reason === "string" ? refused.reason : null;
+  const mapped = reason === null ? null : sentence(reason, refused.details);
+  return {
+    ok: false,
+    code: refused.code,
+    reason: refused.reason,
+    fix: refused.fix,
+    message: mapped === null ? refused.message : mapped,
+    details: refused.details,
+  };
+}
