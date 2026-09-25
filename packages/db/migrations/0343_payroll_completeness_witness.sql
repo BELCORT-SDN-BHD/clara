@@ -1986,3 +1986,399 @@ comment on function clara._post_payroll_run(uuid) is
   '#946, widened by #1048: the UNATTENDED post for a payroll summary. Asks clara._payroll_posting_verdict and acts: ready means one document-bound, filing-bound approved entry with its legs, its clara.entry_post_receipts row (via_wake_kind `payroll_facts`, approval_arm `payroll_unattended`) and an entry.posted event; blocked means NOTHING is written and the verdict is returned so the caller can record it. #1048: the entry''s own `flags->payroll_run->posting_basis` and the receipt''s rationale both name what the figures came from -- a printed run total, or the evaluator''s row sum over N witnessed lines and the witness that admitted it -- because an auditor reading the LEDGER must be able to tell a figure the document states from one this estate computed. It RETURNS rather than raises, because it runs inside the payroll read''s own transaction and a raise would lose the facts a person needs in order to clear the block. Ungranted: reached from clara.persist_payroll_facts and from clara.answer_payroll_completeness.';
 
 reset role;
+
+-- =====================================================================================
+-- SectionJ  NEEDS YOU -- clara.list_review_queue gains row_kind='payroll_completeness_question'
+--     and the blocked row stands down for it (AC2).
+--
+--     "the gate parks a Needs-you question (`this summary prints no total; is this every employee
+--     for the month?`) whose yes from a named person becomes the basis" (the brief). This is that
+--     appearance, and it is the SEVENTEENTH row kind this read projects.
+--
+--     TWO SPLICES, NOT ONE, AND THE SECOND IS THE POINT. A parked question and a posting block are
+--     the same document in the same state: if both arms fired, one payroll summary would produce
+--     TWO Needs-you rows saying the same thing, one of them actionable and one of them not. So
+--     #946's `payroll_rows` gains ONE predicate -- stand down when the verdict says the question is
+--     parked -- and the new arm takes exactly the rows it stood down from. The split is on
+--     `completeness.parked`, which clara._payroll_posting_verdict computes once and both arms read,
+--     so the two can never both claim a row or both miss one.
+--
+--     THE ROW IS DERIVED, STORES NOTHING AND CLEARS ITSELF, like every other payroll row kind: the
+--     CTE asks the gate the same question the poster asked, about the estate as it is NOW. Answer
+--     the question and the row is gone (a `yes` posts the run, a `no` hands it back to
+--     `payroll_posting_blocked` naming who declined); re-read the page and the question is asked
+--     again about the new reading, because the ANSWER is bound to the reading and not to the
+--     document. There is no dismissal act and nothing to reconcile.
+--
+--     WHY THE PARKED ROW IS A DIFFERENT KIND AND NOT A FLAG ON THE OLD ONE. Every other
+--     `payroll_posting_blocked` row is cleared somewhere ELSE -- add the missing account, fix the
+--     page, open the duplicate entry -- and the posting lane deliberately has no "post it anyway"
+--     door. This row is the opposite: it is cleared HERE, by answering, and it is the only payroll
+--     row in the estate that carries an act. A shared kind would have made the affordance
+--     conditional on a field, which is exactly the shape lib/firm/needs-you.ts's own extension note
+--     warns against.
+--
+--     `amount_cents` IS THE GROSS THE ANSWER WOULD POST, so a person sees the size of the decision
+--     on the row itself. `period` is the run's own month, `id`/`filing_id` the filing and
+--     `document_id` the payslip -- every one of them a column the shared vector already has, so
+--     this splice adds NO json key and no row-builder gate (the #629/#946 shape).
+--
+--     SECTION `needs_you`, LANE `needs_you`, like open_question / work_question /
+--     payroll_posting_blocked: a person must act before this month can be booked at all. NO new
+--     counts.* key is minted -- the `lane='needs_you'` filter folds it into counts.needs_you
+--     already.
+--
+--     SPLICED, NEVER RE-TYPED, and additive: the postcheck re-reads the committed body and asserts
+--     every pre-existing row kind survives at its exact pre-splice count and the new one appears
+--     exactly once.
+-- =====================================================================================
+do $w1048_lrq$
+declare
+  v_sig text := 'clara.list_review_queue(jsonb,jsonb,integer)';
+  v_def text; v_next text; v_code text; v_anchor text; v_repl text;
+  v_n int; v_raw_n int; v_pre_cols int; v_post_cols int; r record;
+  v_pre_owner text; v_pre_acl text; v_post_owner text; v_post_acl text;
+  v_pre_sha text; v_post_sha text;
+begin
+  select pg_get_functiondef(p.oid), p.proowner::regrole::text, p.proacl::text,
+         encode(sha256(pg_get_functiondef(p.oid)::bytea),'hex')
+    into v_def, v_pre_owner, v_pre_acl, v_pre_sha
+    from pg_proc p where p.oid = v_sig::regprocedure;
+  v_code := regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+
+  if position('payroll_completeness_question' in v_code) <> 0 then
+    raise notice '#1048 SectionJ: the queue already projects payroll_completeness_question -- splice already applied, nothing to do (redo)';
+  else
+    -- The shared column vector's own trailing column, counted BEFORE so the postcheck can assert
+    -- this file added exactly one more occurrence rather than a remembered number.
+    v_pre_cols := (length(v_code) - length(replace(v_code, 'null::int open_proposal_count', '')))
+                  / length('null::int open_proposal_count');
+
+    -- SPLICE (1): #946's OWN ARM STANDS DOWN for a parked question. One predicate, at the end of
+    -- its WHERE clause, so nothing else about that arm moves.
+    v_anchor := $q1048a$      and not exists(select 1 from clara.journal_entries pj where pj.filing_id=pf.id
+        and (pj.status='draft' or (pj.status='approved' and pj.reversed_by is null)))
+  ), payroll_settlement_rows as ($q1048a$;
+    v_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 then
+      raise exception '#1048 SectionJ splice (1): the payroll_rows tail anchor appears % time(s), expected 1 -- re-derive this splice against the LIVE body', v_n
+        using errcode = 'CLR10';
+    end if;
+    v_repl := $q1048b$      and not exists(select 1 from clara.journal_entries pj where pj.filing_id=pf.id
+        and (pj.status='draft' or (pj.status='approved' and pj.reversed_by is null)))
+      -- #1048 (0343): a PARKED completeness question is the payroll_witness_rows arm's row, not
+      -- this one. One document, one row: the split is on the verdict's own `completeness.parked`,
+      -- which both arms read, so neither can claim a row the other also claims.
+      and coalesce((pv.v->'completeness'->>'parked')::boolean, false) = false
+  ), payroll_settlement_rows as ($q1048b$;
+    v_next := replace(v_def, v_anchor, v_repl);
+
+    -- SPLICE (2): the new arm, and its union.
+    v_anchor :=
+      '  ), all_rows as (' || chr(10) ||
+      '    select * from draft_rows union all select * from filing_rows' || chr(10) ||
+      '    union all select * from question_rows union all select * from task_rows' || chr(10) ||
+      '    union all select * from compliance_rows union all select * from lint_rows' || chr(10) ||
+      '    union all select * from fa_rows union all select * from adv_rows' || chr(10) ||
+      '    union all select * from work_question_rows' || chr(10) ||
+      '    union all select * from authority_rows' || chr(10) ||
+      '    union all select * from payroll_rows' || chr(10) ||
+      '    union all select * from payroll_settlement_rows' || chr(10) ||
+      '    union all select * from agreement_rows' || chr(10) ||
+      '    union all select * from rent_settlement_rows' || chr(10) ||
+      '    union all select * from rent_escalation_rows' || chr(10) ||
+      '    union all select * from bill_rows' || chr(10) ||
+      '  ), keyed as (';
+    v_n := (length(v_next) - length(replace(v_next, v_anchor, ''))) / length(v_anchor);
+    v_raw_n := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
+    if v_n <> 1 or v_raw_n <> v_n then
+      raise exception '#1048 SectionJ splice (2): the all_rows union block appears % time(s) IN THE REWRITTEN BODY / % in the ORIGINAL (expected 1/1) -- re-derive this splice against the LIVE body', v_n, v_raw_n
+        using errcode = 'CLR10';
+    end if;
+    v_repl := $q1048c$  ), payroll_witness_rows as (
+    -- #1048 (0343): A PAYROLL SUMMARY THAT PRINTS NO TOTAL AND WITNESSES NOTHING -- the PARKED
+    -- QUESTION. DERIVED, stores nothing, clears itself: clara._payroll_posting_verdict is asked
+    -- about the estate as it is NOW, and the sentence shown is that body's own, so the words a
+    -- person reads and the decision the lane took can never drift apart. Section `needs_you`, lane
+    -- `needs_you`. Unlike every other payroll row kind, this one is cleared HERE, by answering:
+    -- clara.answer_payroll_completeness records a named yes (which posts the run from its own row
+    -- sum) or a named no (which hands the document back to the payroll_rows arm above). `id` is
+    -- the filing's id; `amount_cents` is the gross the answer would post, so the size of the
+    -- decision is on the row. The active-client guard mirrors the other kinds (0017 R1-F5).
+    select 1 section_rank,'payroll_completeness_question'::text row_kind,'needs_you'::text section,
+      pw.client_id,null::uuid counterparty_id,pw.id filing_id,
+      null::uuid entry_id,
+      null::uuid question_id,null::uuid task_id,pw.document_id,'needs_you'::text lane,
+      false auto,false rule_backed,false high_stakes,pw.filed_at aged_since,
+      nullif(pwv.v->'completeness'->>'gross_sum_cents','')::bigint amount_cents,
+      nullif(pwv.v->'plan'->>'period_month','') period,
+      pwv.v->>'sentence' question_text,
+      pw.filed_at created_at,pw.id,''::text vendor_group,
+      null::text coding_kind,null::uuid watch_id,null::text tier,null::uuid finding_id,
+      null::text client_name,null::uuid[] batch_ids,null::int open_proposal_count
+    from clara.document_filings pw
+    join clara.clients active_payroll_witness_client on active_payroll_witness_client.id=pw.client_id and active_payroll_witness_client.status='active'
+    join clara.documents pwd on pwd.id=pw.document_id and pwd.document_kind='payroll_summary'
+    cross join lateral (select clara._payroll_posting_verdict(pw.document_id) v) pwv
+    where pw.firm_id=c.firm and pw.retired_at is null
+      and (v_client is null or pw.client_id=v_client)
+      and exists(select 1 from clara.document_extractions pwe
+                  where pwe.document_id=pw.document_id and pwe.engine_kind='payroll_text_facts'
+                    and pwe.status='done')
+      and not exists(select 1 from clara.journal_entries pwj where pwj.filing_id=pw.id
+        and (pwj.status='draft' or (pwj.status='approved' and pwj.reversed_by is null)))
+      and coalesce((pwv.v->'completeness'->>'parked')::boolean, false) = true
+  ), all_rows as (
+    select * from draft_rows union all select * from filing_rows
+    union all select * from question_rows union all select * from task_rows
+    union all select * from compliance_rows union all select * from lint_rows
+    union all select * from fa_rows union all select * from adv_rows
+    union all select * from work_question_rows
+    union all select * from authority_rows
+    union all select * from payroll_rows
+    union all select * from payroll_settlement_rows
+    union all select * from agreement_rows
+    union all select * from rent_settlement_rows
+    union all select * from rent_escalation_rows
+    union all select * from bill_rows
+    union all select * from payroll_witness_rows
+  ), keyed as ($q1048c$;
+    v_next := replace(v_next, v_anchor, v_repl);
+    if position('union all select * from payroll_witness_rows' in v_next) = 0 then
+      raise exception '#1048 SectionJ splice (2): the all_rows anchor did not rewrite' using errcode = 'CLR10';
+    end if;
+    if v_next = v_def then
+      raise exception '#1048 SectionJ splice: no byte moved -- refusing a no-op apply' using errcode = 'CLR10';
+    end if;
+
+    execute v_next;
+
+    select p.proowner::regrole::text, p.proacl::text,
+           encode(sha256(pg_get_functiondef(p.oid)::bytea),'hex')
+      into v_post_owner, v_post_acl, v_post_sha
+      from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_post_owner is distinct from v_pre_owner or v_post_acl is distinct from v_pre_acl then
+      raise exception '#1048 SectionJ postcheck: list_review_queue changed owner (% -> %) or ACL (% -> %)',
+        v_pre_owner, v_post_owner, v_pre_acl, v_post_acl using errcode = 'CLR10';
+    end if;
+    if v_post_sha = v_pre_sha then
+      raise exception '#1048 SectionJ postcheck: prosrc sha256 did not change -- the splice was a no-op'
+        using errcode = 'CLR10';
+    end if;
+
+    v_code := regexp_replace(regexp_replace(
+      (select pg_get_functiondef(p.oid) from pg_proc p where p.oid = v_sig::regprocedure),
+      '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+    v_post_cols := (length(v_code) - length(replace(v_code, 'null::int open_proposal_count', '')))
+                   / length('null::int open_proposal_count');
+    if v_post_cols <> v_pre_cols + 1 then
+      raise exception '#1048 SectionJ postcheck: the shared column vector appears % time(s), expected % (one more than before the splice)', v_post_cols, v_pre_cols + 1
+        using errcode = 'CLR10';
+    end if;
+    raise notice '#1048 SectionJ: clara.list_review_queue spliced -- one payroll_witness_rows CTE (needs_you/needs_you, active-client-guarded, derived from clara._payroll_posting_verdict) and one union arm, and #946''s own arm stands down for a parked question; owner (%) and ACL byte-unchanged. prosrc sha256: % -> %.', v_post_owner, v_pre_sha, v_post_sha;
+  end if;
+
+  -- BOTH BRANCHES: every pre-existing row kind survives at EXACTLY one projection site, the new
+  -- one is present exactly once, and the two arms' split predicate is present exactly twice (once
+  -- standing #946's arm down, once claiming the row here). Re-read from the COMMITTED catalog so a
+  -- redo proves it too.
+  v_code := regexp_replace(regexp_replace(
+    (select pg_get_functiondef(p.oid) from pg_proc p where p.oid = v_sig::regprocedure),
+    '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+  for r in select * from (values
+      ($$'draft'::text row_kind$$, 1),
+      ($$'uncoded_filing'::text row_kind$$, 1),
+      ($$'open_question'::text row_kind$$, 1),
+      ($$'coding_task'::text row_kind$$, 1),
+      ($$'compliance_watch'::text row_kind$$, 1),
+      ($$'lint_finding'::text row_kind$$, 1),
+      ($$'fixed_asset_incomplete'::text row_kind$$, 1),
+      ($$'staff_advance_incomplete'::text row_kind$$, 1),
+      ($$'work_question'::text row_kind$$, 1),
+      ($$'depreciation_authority_pending'::text row_kind$$, 1),
+      ($$'payroll_posting_blocked'::text row_kind$$, 1),
+      ($$'payroll_net_pay_unsettled'::text row_kind$$, 1),
+      ($$'agreement_posting_blocked'::text row_kind$$, 1),
+      ($$'rent_payable_unsettled'::text row_kind$$, 1),
+      ($$'rent_escalation_pending'::text row_kind$$, 1),
+      ($$'accrual_bill_conflict'::text row_kind$$, 1),
+      ($$'payroll_completeness_question'::text row_kind$$, 1),
+      ('_is_codeable_kind', 1),
+      ('_autodraft_attempt_budget', 1),
+      ($$->'completeness'->>'parked'$$, 2)
+      ) as t(marker, want) loop
+    v_n := (length(v_code) - length(replace(v_code, r.marker, ''))) / length(r.marker);
+    if v_n <> r.want then
+      raise exception '#1048 SectionJ postcheck: marker "%" appears % time(s), expected % -- the splice was not additive', r.marker, v_n, r.want
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+  -- SEVENTEEN row kinds, counted the same way the prestate counted sixteen.
+  select count(*)::int into v_n from (
+    select 1 from regexp_matches(v_code, '''([a-z_]+)''::text row_kind', 'g')) x;
+  if v_n <> 17 then
+    raise exception '#1048 SectionJ postcheck: the queue projects % row kinds, expected 17', v_n
+      using errcode = 'CLR10';
+  end if;
+end
+$w1048_lrq$;
+
+-- =====================================================================================
+-- SectionK  THE ANSWER DOOR -- clara.answer_payroll_completeness(uuid, text, text, text) (AC2).
+--
+--     "whose yes from a named person becomes the basis, with the answer as evidence; a no or no
+--     answer keeps the document unposted" (the brief). This is that door, and it is the ONLY human
+--     write this whole payroll lane has ever had -- #945 and #946 both added none, deliberately,
+--     because everything else in the lane is machine-decided. This one is not: it is a
+--     professional judgement about completeness, and the standing owner ruling is that Clara asks
+--     for those rather than guessing them.
+--
+--     BOOKKEEPER FLOOR, the same rank clara.resolve_open_question and every other queue act takes.
+--     A completeness assertion is an ordinary day's bookkeeping judgement, not a partner-level
+--     approval, and floors above the act's own weight are how a queue stops being used.
+--
+--     IT REFUSES A QUESTION THAT WAS NEVER ASKED. The gate is asked FIRST and must say
+--     `completeness.parked`; anything else is `no_parked_completeness_question` by name. That is
+--     not defensiveness, it is the same rule the rest of the estate follows: a door that recorded
+--     a judgement about a page that prints its own totals would be manufacturing evidence for a
+--     decision nobody needed. It also makes the second answer to one question impossible, because
+--     the first answer un-parks it -- the UNIQUE on extraction_id is the belt behind that.
+--
+--     A YES POSTS IN THE SAME CALL, and that is a deliberate choice rather than a convenience.
+--     The alternative -- record the answer and wait for something to notice -- would leave a run
+--     that everyone has agreed about sitting unposted until the next read, with nothing on any
+--     surface explaining the gap. The post goes through clara._post_payroll_run, the SAME body the
+--     unattended lane uses, so the entry, its legs, its receipt and its event are identical to a
+--     printed-total post except for the basis they name. If that post is refused for any other
+--     reason (a closed period, an account since removed, a duplicate), the ANSWER still stands --
+--     it is a fact about what a person said -- and the refusal comes back in this door's own
+--     result rather than rolling the answer back.
+--
+--     A NO IS A ROW TOO. It writes no entry and posts nothing, and the document returns to
+--     `payroll_posting_blocked` with a sentence naming who declined -- so the next person to look
+--     is told the page is known incomplete rather than being asked the same question again.
+--
+--     REDO-SAFE: `create or replace function`.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create or replace function clara.answer_payroll_completeness(p_document uuid, p_answer text,
+    p_note text, p_op_key text)
+  returns jsonb language plpgsql security definer
+  set search_path = clara, pg_temp as $apc$
+declare
+  c record; v_dedupe jsonb; v jsonb;
+  v_answer text; v_note text; v_sha text;
+  v_filing uuid; v_client uuid; v_firm uuid; v_extraction uuid; v_rows int;
+  v_id uuid; v_post jsonb;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10';
+  end if;
+  v_answer := lower(btrim(coalesce(p_answer,'')));
+  if v_answer not in ('yes','no') then
+    raise exception 'the answer must be yes or no -- there is no third answer to "is this every employee for the month?"'
+      using errcode = 'CLR10', detail = '{"reason":"payroll_completeness_answer_invalid"}';
+  end if;
+  v_note := nullif(btrim(coalesce(p_note,'')),'');
+  v_dedupe := clara._reserve_op(c.firm, 'answer_payroll_completeness', p_op_key,
+    clara._hash(jsonb_build_object('document', p_document, 'answer', v_answer, 'note', v_note)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  -- THE DOCUMENT IS THIS FIRM'S. CLR11 rather than a leakier message: a document id that is not
+  -- this firm's must not be distinguishable from one that does not exist.
+  select d.sha256 into v_sha from clara.documents d
+   where d.id = p_document and d.firm_id = c.firm;
+  if v_sha is null then
+    raise exception 'payroll summary not found' using errcode = 'CLR11';
+  end if;
+  select f.id, f.client_id into v_filing, v_client from clara.document_filings f
+   where f.document_id = p_document and f.retired_at is null
+   order by f.filed_at desc limit 1;
+  if v_filing is null then
+    raise exception 'this payroll summary is not filed under a client, so there is nothing to answer about'
+      using errcode = 'CLR10', detail = '{"reason":"not_filed"}';
+  end if;
+  -- The estate's own filing-provenance lock, exactly as clara.resolve_open_question takes it for a
+  -- document-scoped question: the filing must be live and the bytes verified, and it is held for
+  -- the rest of this transaction so a retirement cannot race the answer.
+  perform clara._active_document_filing(p_document, v_sha, v_client, true);
+
+  -- THE QUESTION MUST ACTUALLY BE PARKED. One body decides that -- the same one the queue row and
+  -- the poster read -- so this door can never record an answer to a question no surface asked.
+  v := clara._payroll_posting_verdict(p_document);
+  if coalesce((v->'completeness'->>'parked')::boolean, false) is not true then
+    raise exception 'there is no parked completeness question on this payroll summary (the gate says: %)',
+      coalesce(v->>'rung', v->>'verdict')
+      using errcode = 'CLR10',
+        detail = '{"reason":"no_parked_completeness_question"}';
+  end if;
+  v_extraction := (v->>'extraction_id')::uuid;
+  v_firm := (v->>'firm_id')::uuid;
+  v_rows := coalesce(nullif(v->'completeness'->>'rows_read','')::int, 0);
+
+  -- THE ANSWER IS THE EVIDENCE. Bound to the READING (unique), carrying the line count the person
+  -- was shown, their note and their identity.
+  insert into clara.payroll_completeness_answers(firm_id, client_id, document_id, extraction_id,
+      rows_read, answer, note, answered_by)
+    values (v_firm, v_client, p_document, v_extraction, v_rows, v_answer, v_note, c.actor)
+    returning id into v_id;
+
+  perform clara._audit(c.firm, c.actor, null, null, 'answer_payroll_completeness', null,
+    jsonb_build_object('document', p_document, 'answer', v_answer, 'answer_id', v_id,
+      'extraction', v_extraction, 'rows_read', v_rows, 'op_key', p_op_key));
+  perform clara._append_event(v_firm, 'document.payroll_completeness_answered', v_client, c.actor,
+    null, null, null, p_document, null,
+    jsonb_build_object('answer_id', v_id, 'answer', v_answer, 'rows_read', v_rows,
+      'extraction_id', v_extraction));
+
+  -- A YES POSTS, THROUGH THE SAME BODY THE UNATTENDED LANE USES. The verdict is re-derived inside
+  -- it, and it now sees this answer, so the row sum is admitted and the entry names
+  -- `answered_question` as its witness.
+  if v_answer = 'yes' then
+    v_post := clara._post_payroll_run(p_document);
+  end if;
+
+  return clara._finish_op(c.firm, 'answer_payroll_completeness', p_op_key,
+    jsonb_build_object(
+      'answer_id', v_id,
+      'answer', v_answer,
+      'document_id', p_document,
+      'extraction_id', v_extraction,
+      'rows_read', v_rows,
+      'posted', coalesce((v_post->>'posted')::boolean, false),
+      'entry_id', coalesce(v_post->'entry_id','null'::jsonb),
+      'reason', coalesce(v_post->'reason','null'::jsonb),
+      'rung', coalesce(v_post->'rung','null'::jsonb)));
+end $apc$;
+
+revoke all on function clara.answer_payroll_completeness(uuid, text, text, text) from public;
+grant execute on function clara.answer_payroll_completeness(uuid, text, text, text) to clara_authenticated;
+
+comment on function clara.answer_payroll_completeness(uuid, text, text, text) is
+  '#1048: the ONE human write the payroll lane has. A named bookkeeper answers "this summary prints no total; is this every employee for the month?" about the NEWEST reading of one payroll summary. A `yes` becomes the posting basis and the run posts in the SAME call, through clara._post_payroll_run -- the same body the unattended lane uses -- with the entry naming `answered_question` as its witness and pointing at the answer row. A `no` writes no entry and hands the document back to the payroll_posting_blocked row with a sentence naming who declined. It refuses `no_parked_completeness_question` unless clara._payroll_posting_verdict says the question is actually parked, so no judgement is ever recorded about a page that did not ask for one; the UNIQUE on extraction_id is the belt behind that. bookkeeper+, op-keyed, audited, and it emits document.payroll_completeness_answered.';
+
+reset role;
+
+-- =====================================================================================
+-- SectionK.1  THE EVENT THE LANE SPEAKS. clara.domain_events carries a foreign key onto
+--       clara.event_types, so an unregistered type is an INSERT failure, not a silent drop. It is
+--       client-scoped (a payroll summary is filed to exactly one client by the time it can be
+--       answered) and routed at the ACTIVE taxonomy version with decision `ignore`: no router wake
+--       is wanted, because the door already did everything the answer implies, inside its own
+--       transaction. Both tables are append-only (t_event_types_append_only /
+--       t_trigger_taxonomy_append_only), so these are INSERTs with `on conflict do nothing` --
+--       never an UPDATE, which those triggers would refuse.
+-- =====================================================================================
+insert into clara.event_types (name, client_scoped, description) values
+  ('document.payroll_completeness_answered', true,
+   '#1048: a named person answered whether a payroll summary that prints no run total covers every employee for the month. The payload carries the answer, the answer row''s id, the line count affirmed and the reading it was about. A `yes` posts the run in the same transaction (entry.posted follows it); a `no` posts nothing. No router wake: the door is the whole consumer.')
+on conflict (name) do nothing;
+
+insert into clara.trigger_taxonomy (version, event_type, decision, note)
+  select a.version, e.name, 'ignore',
+         '#1048: clara.answer_payroll_completeness does everything the answer implies inside its own transaction; no router wake.'
+    from clara.taxonomy_active a
+    cross join (values ('document.payroll_completeness_answered')) e(name)
+on conflict (version, event_type) do nothing;

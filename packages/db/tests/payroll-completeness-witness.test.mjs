@@ -38,7 +38,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, ensureReady, endPool, buildWorld, upsertAccount } from "./rig-fixtures.mjs";
+import { rootQuery, ensureReady, endPool, buildWorld, upsertAccount, human, humanQuery } from "./rig-fixtures.mjs";
 import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts, claimTask } from "./a21-helpers.mjs";
 import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
 import { listReviewQueue } from "./wave-a-reads.mjs";
@@ -653,4 +653,216 @@ test("W6 · AC3: a summary whose printed headcount disagrees with its lines is R
   assert.match(v.sentence, /3/, "the sentence names the printed headcount");
   assert.match(v.sentence, /2/, "…and the number of lines read");
   assert.match(v.sentence, /March 2026/, "…and the month it is about");
+});
+
+// ---------------------------------------------------------------------------
+// W7 / W8 / W9 / W10 — Needs you, and the answer door (AC2)
+// ---------------------------------------------------------------------------
+
+async function queueRows(sub, client) {
+  const env = await listReviewQueue(human(sub), { scope: { client_id: client }, limit: 200 });
+  return env.rows;
+}
+
+const escapeRe = (s) => s.replace(/[.*+?^$()|[\]\\{}]/g, "\\$&");
+
+const answerCompleteness = (sub, { document, answer, note = null }) =>
+  humanQuery(sub, "select clara.answer_payroll_completeness($1,$2,$3,$4) as r", [
+    document,
+    answer,
+    note,
+    opk("answer"),
+  ]);
+
+test("W7 · AC2: a summary that witnesses nothing PARKS a question under Needs you, and the blocked row stands down", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, { answers: noTotals("2026-04") });
+  assert.equal(doc.receipt.posting.posted, false, "mandatory setup: nothing posted on an unwitnessed page");
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.rung, "completeness_witness");
+  assert.equal(v.reason, "completeness_unwitnessed");
+  assert.equal(v.completeness.parked, true, "…and this one a person CAN settle by answering");
+
+  const rows = (await queueRows(world.users.alice, world.clients.A1)).filter(
+    (r) => r.document_id === doc.documentId,
+  );
+  const parked = rows.filter((r) => r.row_kind === "payroll_completeness_question");
+  const blocked = rows.filter((r) => r.row_kind === "payroll_posting_blocked");
+  assert.equal(parked.length, 1, "exactly one parked-question row for this reading");
+  assert.equal(
+    blocked.length,
+    0,
+    "…and NO blocked row beside it: one document never produces two rows about one question",
+  );
+
+  const row = parked[0];
+  assert.equal(row.section, "needs_you");
+  assert.equal(row.lane, "needs_you");
+  assert.equal(row.period, "2026-04-01", "the row names the month it is about");
+  // The sentence on screen is the DATABASE's own, built in clara._payroll_posting_verdict and
+  // rendered verbatim -- so the words a person reads and the decision the lane took are one body.
+  assert.equal(row.question_text, v.sentence);
+  assert.match(row.question_text, /prints no total; is this every employee for the month\?/);
+  assert.match(row.question_text, /2 employee line/, "…with the line count a person is affirming");
+  assert.match(row.question_text, /RM 5,000\.00 gross/, "…and the gross it would post");
+  assert.match(row.question_text, /RM 4,255\.70 net/, "…and the net");
+});
+
+test("W8 · AC2: a named YES becomes the basis, posts the run in the same call, and is recorded as the evidence", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, { answers: noTotals("2026-05") });
+  assert.equal(doc.receipt.posting.posted, false, "mandatory setup: parked, not posted");
+
+  const r = (
+    await answerCompleteness(world.users.alice, {
+      document: doc.documentId,
+      answer: "yes",
+      note: "Checked against the EPF submission: two employees in May.",
+    })
+  ).rows[0].r;
+
+  assert.equal(r.answer, "yes");
+  assert.equal(r.posted, true, `the run posts in the same call: ${JSON.stringify(r)}`);
+  assert.ok(r.entry_id, "…and the door hands back the entry it made");
+
+  const entries = await entriesOf(doc.documentId);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].status, "approved");
+  assert.equal(entries[0].posting_date, "2026-05-31");
+  assert.equal(entries[0].flags.payroll_run.posting_basis.kind, "row_sum");
+  assert.equal(
+    entries[0].flags.payroll_run.posting_basis.witness,
+    "answered_question",
+    "the basis names the ANSWER as the witness, not a page that printed nothing",
+  );
+  assert.equal(
+    entries[0].flags.payroll_run.posting_basis.answer.answer_id,
+    r.answer_id,
+    "…and points at the answer row itself, which is the evidence",
+  );
+
+  // The answer row: who, what they affirmed, and the reading it was about.
+  const stored = (
+    await rootQuery(
+      `select a.answer, a.note, a.rows_read, a.answered_by, a.extraction_id, u.display_name
+         from clara.payroll_completeness_answers a join clara.users u on u.id = a.answered_by
+        where a.id = $1`,
+      [r.answer_id],
+    )
+  ).rows[0];
+  assert.equal(stored.answer, "yes");
+  assert.equal(stored.rows_read, 2, "the line count the person affirmed is frozen on the row");
+  assert.equal(stored.note, "Checked against the EPF submission: two employees in May.");
+  assert.equal(
+    stored.extraction_id,
+    (await verdict(doc.documentId)).extraction_id,
+    "bound to the READING, so a re-read asks again rather than inheriting this yes",
+  );
+
+  // …and the receipt a person reads says the same thing in words, naming them.
+  const receipt = (
+    await rootQuery("select rationale from clara.entry_post_receipts where entry_id=$1", [entries[0].id])
+  ).rows[0];
+  assert.match(receipt.rationale, /ROW SUM/);
+  assert.match(receipt.rationale, new RegExp(escapeRe(stored.display_name)));
+
+  // The question is settled, so the row is gone -- and no blocked row replaced it.
+  const rows = (await queueRows(world.users.alice, world.clients.A1)).filter(
+    (r2) => r2.document_id === doc.documentId,
+  );
+  assert.deepEqual(
+    rows.map((r2) => r2.row_kind).sort(),
+    // #947's own row, and it SHOULD be here: the run is posted, so the net pay is now owed and
+    // has not left the bank yet. What must be gone is the question and any block.
+    ["payroll_net_pay_unsettled"],
+    "the parked question is settled and no posting block replaced it -- only #947's settlement row remains",
+  );
+
+  // AND IT CANNOT BE ANSWERED TWICE: the question is no longer parked, and the door says so.
+  await assert.rejects(
+    () => answerCompleteness(world.users.alice, { document: doc.documentId, answer: "no" }),
+    /no parked completeness question/i,
+    "a settled question is not answerable again",
+  );
+});
+
+test("W9 · AC2: a NO leaves the document unposted and the row says who said so", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, { answers: noTotals("2026-06") });
+
+  const r = (
+    await answerCompleteness(world.users.alice, {
+      document: doc.documentId,
+      answer: "no",
+      note: "Page 2 of the summary is missing.",
+    })
+  ).rows[0].r;
+  assert.equal(r.answer, "no");
+  assert.equal(r.posted, false, "a no posts nothing");
+  assert.deepEqual(await entriesOf(doc.documentId), [], "…and writes no entry at all");
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.rung, "completeness_witness");
+  assert.equal(v.reason, "completeness_declined");
+  assert.equal(v.completeness.parked, false, "the question is answered, so it is no longer parked");
+
+  const rows = (await queueRows(world.users.alice, world.clients.A1)).filter(
+    (r2) => r2.document_id === doc.documentId,
+  );
+  assert.deepEqual(
+    rows.map((r2) => r2.row_kind).sort(),
+    // `uncoded_filing` rides beside it, which is 0297 §H's own recorded model: before the entry
+    // exists the payslip IS an uncoded filing, and the payroll row sits beside it saying why.
+    ["payroll_posting_blocked", "uncoded_filing"],
+    "the parked question is gone and the ordinary blocked row takes its place -- a declined run is still a run nobody has booked",
+  );
+  const name = (
+    await rootQuery(
+      "select u.display_name from clara.users u join clara.payroll_completeness_answers a on a.answered_by=u.id where a.id=$1",
+      [r.answer_id],
+    )
+  ).rows[0].display_name;
+  assert.match(rows[0].question_text, new RegExp(escapeRe(name)));
+  assert.match(rows[0].question_text, /not every employee for the month/);
+});
+
+test("W10 · the answer door refuses a question that was never asked, and an answer that is neither yes nor no", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  // A page that prints its totals has no completeness question at all -- it posted. Answering it
+  // would be recording a judgement nobody was asked for.
+  const posted = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: { ...PRINTED, "payroll.run.period": value("2026-07") },
+  });
+  assert.equal(posted.receipt.posting.posted, true, "mandatory setup: this one posted on its printed totals");
+  await assert.rejects(
+    () => answerCompleteness(world.users.alice, { document: posted.documentId, answer: "yes" }),
+    /no parked completeness question/i,
+  );
+
+  const parkedDoc = await readPayrollDoc(world.users.alice, world.clients.A1, { answers: noTotals("2026-09") });
+  await assert.rejects(
+    () => answerCompleteness(world.users.alice, { document: parkedDoc.documentId, answer: "maybe" }),
+    /yes.*no|answer must be/i,
+    "there are two answers to this question and no third",
+  );
+  await assert.rejects(
+    () =>
+      humanQuery(world.users.alice, "select clara.answer_payroll_completeness($1,$2,$3,$4) as r", [
+        parkedDoc.documentId,
+        "yes",
+        null,
+        "  ",
+      ]),
+    /op_key is required/i,
+    "…and the door is a governed act, so it needs an op key like any other",
+  );
 });
