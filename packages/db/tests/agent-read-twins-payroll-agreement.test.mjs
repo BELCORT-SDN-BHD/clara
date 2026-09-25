@@ -314,3 +314,188 @@ test("p1136.settlement.same_rows — the model lane's door answers, for one clie
     `exactly one exact, in-window candidate reaches the model lane: ${JSON.stringify(mine.candidates)}`);
   assert.equal(mine.candidates[0].description, "SALARY GIRO");
 });
+
+// ===========================================================================================
+// S2 — THE QUEUE TWIN ANSWERS THE SAME ENVELOPE, AND #946'S ROW TRAVELS ON IT.
+// ===========================================================================================
+
+const QUEUE_SPECS = [
+  { name: "p_scope", cast: "jsonb" }, { name: "p_cursor", cast: "jsonb" },
+  { name: "p_limit", cast: "integer" },
+];
+
+async function humanQueue(sub, { scope = null, cursor = null, limit = 200 } = {}) {
+  const r = await humanQuery(sub, namedCall("list_review_queue", QUEUE_SPECS),
+    [scope === null ? null : JSON.stringify(scope), cursor === null ? null : JSON.stringify(cursor), limit]);
+  return r.rows[0].result;
+}
+
+async function wakeQueueRead(secret, { scope = null, cursor = null, limit = 200 } = {}) {
+  const r = await wakeQuery(ROLES.agentRo, secret, namedCall("wake_list_review_queue", QUEUE_SPECS),
+    [scope === null ? null : JSON.stringify(scope), cursor === null ? null : JSON.stringify(cursor), limit]);
+  return r.rows[0].result;
+}
+
+test("p1136.queue.payroll_blocked_row_travels — a payroll run that did not post reaches the model lane as the SAME row, carrying the gate's own sentence verbatim, inside an envelope identical to the bookkeeper's", async (t) => {
+  if (unready(t)) return;
+  // A client with NO payroll chart at all: the run is blocked on an account it does not hold,
+  // which is #946's own worked block and a condition a person can actually clear.
+  const client = await freshClient();
+  const run = await readPayrollRun(ALICE(), client, { answers: { "payroll.run.period": value("2026-03") } });
+  assert.equal(run.posting.posted, false, `mandatory setup: the run is blocked (got ${JSON.stringify(run.posting)})`);
+
+  const humanEnv = await humanQueue(BOB(), { scope: { client_id: client } });
+  const { secret } = await chatCredential();
+  const machineEnv = await wakeQueueRead(secret, { scope: { client_id: client } });
+
+  // THE WHOLE ENVELOPE, not just the row: counts, watermark, sweep, the two staleness flags and
+  // the cursor. This read samples nothing per call, so any difference is a difference in what the
+  // two lanes are being told about the same firm.
+  assert.deepEqual(machineEnv, humanEnv,
+    "the model lane's queue envelope differs from the bookkeeper's for the same scope");
+
+  const rows = machineEnv.rows.filter(
+    (r) => r.row_kind === "payroll_posting_blocked" && r.document_id === run.documentId);
+  assert.equal(rows.length, 1, "exactly one blocked row for this run reaches the model lane");
+  const row = rows[0];
+  assert.equal(row.section, "needs_you");
+  assert.equal(row.lane, "needs_you");
+  assert.equal(row.client_id, client);
+  assert.equal(row.period, "2026-03-01", "the month the payslip covers travels with the row");
+  // THE SENTENCE IS THE DATABASE'S OWN. #946's contract says a tool reports `question_text`
+  // VERBATIM because rewording it would put a reason on screen nobody decided; that is only true
+  // while both lanes read it from ONE body, which is what this assertion pins.
+  assert.match(row.question_text, /account/i, `the row NAMES the condition: ${row.question_text}`);
+  assert.match(row.question_text, /6000/, "…down to the account code a person must add");
+  const humanRow = humanEnv.rows.find(
+    (r) => r.row_kind === "payroll_posting_blocked" && r.document_id === run.documentId);
+  assert.equal(row.question_text, humanRow.question_text,
+    "the words Clara would say and the words the person reads are the same body's, byte for byte");
+});
+
+// ---------------------------------------------------------------------------
+// #948's OWN worked example, reused verbatim from agreement-contract-acquisition.test.mjs as an
+// independent source of truth: a hire-purchase agreement for a lorry — cash price 120,000.00,
+// deposit 20,000.00, financed 100,000.00, charges 8,400.00, payable 108,400.00 over 36 months at
+// 3,011.11, with a three-row printed schedule that reconciles to those figures by hand.
+// ---------------------------------------------------------------------------
+
+const AGREEMENT_RUN_FIELDS = [
+  "contract.agreement.kind", "contract.agreement.financier", "contract.agreement.agreement_date",
+  "contract.agreement.asset_description", "contract.agreement.cash_price",
+  "contract.agreement.deposit", "contract.agreement.amount_financed",
+  "contract.agreement.total_charges", "contract.agreement.total_payable",
+  "contract.agreement.term_months", "contract.agreement.instalment_amount",
+];
+const AGREEMENT_PRINTED = {
+  "contract.agreement.kind": value("Hire Purchase Agreement"),
+  "contract.agreement.financier": value("Maybank Islamic Berhad"),
+  "contract.agreement.agreement_date": value("2026-03-14"),
+  "contract.agreement.asset_description": value("Isuzu NLR77 3.0 lorry, chassis JAANLR77LP7100123"),
+  "contract.agreement.cash_price": value("120,000.00"),
+  "contract.agreement.deposit": value("20,000.00"),
+  "contract.agreement.amount_financed": value("100,000.00"),
+  "contract.agreement.total_charges": value("8,400.00"),
+  "contract.agreement.total_payable": value("108,400.00"),
+  "contract.agreement.term_months": value("36"),
+  "contract.agreement.instalment_amount": value("3,011.11"),
+};
+
+function scheduleRow(rowNo, { due, instalment, principal, interest }) {
+  return {
+    row_no: rowNo,
+    cells: {
+      "contract.schedule.due_date": value(due),
+      "contract.schedule.instalment": value(instalment),
+      "contract.schedule.principal": value(principal),
+      "contract.schedule.interest": value(interest),
+    },
+  };
+}
+const AGREEMENT_SCHEDULE = () => [
+  scheduleRow(1, { due: "2026-04-14", instalment: "43,400.00", principal: "40,000.00", interest: "3,400.00" }),
+  scheduleRow(2, { due: "2026-05-14", instalment: "38,000.00", principal: "35,000.00", interest: "3,000.00" }),
+  scheduleRow(3, { due: "2026-06-14", instalment: "27,000.00", principal: "25,000.00", interest: "2,000.00" }),
+];
+
+function agreementEnvelope(channel) {
+  const a = {};
+  for (const f of AGREEMENT_RUN_FIELDS) a[f] = AGREEMENT_PRINTED[f];
+  return { contract: { channel, answers: a, rows: AGREEMENT_SCHEDULE() } };
+}
+
+/** Files, routes, claims and READS an agreement contract through the (already-landed) #948 lane,
+ *  through the estate's OWN doors. A client with no chart cannot post the acquisition, which is
+ *  exactly the `agreement_posting_blocked` state #948's tool has to report. */
+async function readAgreementContract(sub, client) {
+  const firm = await firmOf(client);
+  await ensureConsent(sub, client);
+  const doc = await filedDocument(sub, { firm, client, kind: "agreement_contract" });
+  const extractionId = await seedExtraction({ firm, document: doc.documentId, engineKind: "ocr", status: "done" });
+  await seedRegion({
+    firm, extraction: extractionId, fieldPath: "contract.agreement.cash_price", textContent: "120,000.00",
+  });
+  await enqueueInvoiceFacts(doc.documentId);
+  const task = (
+    await rootQuery(
+      `select id from clara.document_processing_tasks
+        where document_id=$1 and lane='contract_facts' and status='queued'
+        order by version_n desc limit 1`,
+      [doc.documentId],
+    )
+  ).rows[0];
+  assert.ok(task, "mandatory setup: the router queued a contract_facts task");
+  const claimed = await claimTask(task.id, { egressApproved: true });
+  assert.equal(claimed.status, "running", `mandatory setup: the task is claimable (got ${JSON.stringify(claimed)})`);
+  const sha = (await rootQuery("select sha256 from clara.documents where id=$1", [doc.documentId])).rows[0].sha256;
+  const receipt = (
+    await rootQuery("select clara.persist_agreement_facts($1,$2::jsonb,$3::jsonb,$4) as receipt", [
+      task.id,
+      JSON.stringify({ input_pin: extractionId, prompt_hash: "p1136-agreement-text", envelope: agreementEnvelope("text"), citations: [] }),
+      JSON.stringify({ input_pin: sha, prompt_hash: "p1136-agreement-vision", envelope: agreementEnvelope("vision"), citations: [] }),
+      1,
+    ])
+  ).rows[0].receipt;
+  assert.equal(receipt.status, "done", `mandatory setup: the agreement read settled (got ${JSON.stringify(receipt)})`);
+  return { ...doc, receipt };
+}
+
+test("p1136.queue.agreement_blocked_row_travels — an agreement that was read and did not post reaches the model lane as the SAME row, carrying the GATE'S own sentence, while clara._agreement_posting_verdict stays granted to nobody", async (t) => {
+  if (unready(t)) return;
+  const client = await freshClient();
+  const doc = await readAgreementContract(ALICE(), client);
+  assert.equal(doc.receipt.posting.posted, false,
+    `mandatory setup: the acquisition is blocked (got ${JSON.stringify(doc.receipt.posting)})`);
+
+  const humanEnv = await humanQueue(BOB(), { scope: { client_id: client } });
+  const { secret } = await chatCredential();
+  const machineEnv = await wakeQueueRead(secret, { scope: { client_id: client } });
+  assert.deepEqual(machineEnv, humanEnv,
+    "the model lane's queue envelope differs from the bookkeeper's for the same scope");
+
+  const rows = machineEnv.rows.filter(
+    (r) => r.row_kind === "agreement_posting_blocked" && r.document_id === doc.documentId);
+  assert.equal(rows.length, 1, "exactly one row for this agreement, never one per condition");
+  const row = rows[0];
+  assert.equal(row.section, "needs_you");
+  assert.equal(row.lane, "needs_you");
+  assert.equal(row.client_id, client);
+  assert.ok(row.filing_id, "…pointing at the filing the agreement was filed under");
+
+  // THE SENTENCE IS clara._agreement_posting_verdict's OWN, and the model lane reads it the same
+  // way a person does — through the queue. This is the whole reason #948's contract forbids
+  // calling the verdict body from a tool, and why this ticket minted no third door for it.
+  const verdict = (
+    await rootQuery("select clara._agreement_posting_verdict($1) as v", [doc.documentId])
+  ).rows[0].v;
+  assert.equal(row.question_text, verdict.sentence,
+    "the words Clara would say are the GATE's own, verbatim — one body, so they cannot drift");
+
+  // …and the verdict body itself is still reachable from NO application role, so there is no
+  // second path to that sentence for anyone to drift from.
+  const acl = await rootQuery(
+    `select bool_or(has_function_privilege(r, 'clara._agreement_posting_verdict(uuid)', 'EXECUTE')) as any_role
+       from unnest(array['clara_agent_ro','clara_runtime','clara_authenticated','clara_wake_interactive']) r`);
+  assert.equal(acl.rows[0].any_role, false,
+    "#1136 opened a queue door, never the verdict body 0299 granted to nobody");
+});
