@@ -219,6 +219,25 @@ a small Markdown table there: pass, fail, skip, cells and the declared floor/ski
 held to. A dispatch run's summary page therefore carries every leg's real numbers next to what
 they were checked against, with no raw log to open.
 
+**The weekly schedule's own failure is now a visible notification, not only a raw run log
+(#1127).** The bounds and the step summary above both prove something about a RUN that already
+happened; neither one tells anyone the schedule went red at all unless they open the Actions tab.
+This wave's own evidence is that nobody reliably did: a test-corpus retarget and a census
+widening each moved a number `db-slice-frontiers` depends on, and neither was caught for a
+stretch of time. `.github/workflows/ci.yml`'s `notify-schedule-failure` job depends on `ci` — the
+terminal meta-gate above, never an individual leg directly, so it can never disagree with what the
+gate already decided — and fires only when `github.event_name == 'schedule'` and `needs.ci.result
+!= 'success'`; a `workflow_dispatch` run is excluded because a human who just triggered it is
+already watching, and a `pull_request`/`push` failure is already visible to its author on the PR.
+No Slack, email or webhook channel exists anywhere in this repo's `.github/` today, so the job
+posts a `gh issue comment` onto the standing tracking issue (#1127) instead, carrying the run's
+own result and a link back to it (`github.run_id`) rather than a bare "it failed." The job
+declares its own job-level `permissions: issues: write`; the workflow itself still carries no
+top-level `permissions:` block, so every other job keeps its present (lesser) default token scope.
+`ci-schedule-notify.test.mjs` holds the job's existence, its `needs`/`if` wiring, its
+least-privilege grant, and that the terminal `ci` job's own `needs` list stays exactly the ten
+legs it already had — this ticket adds a job that reacts to `ci`, not a new leg `ci` waits on.
+
 **A fixture that runs at two frontiers is not a gate.** A gate lets a cell stand down; a
 FRONTIER-COMPAT fixture keeps the cell running on both sides of the migration that changed a
 door's grammar. `fa-authority-sign-compat.mjs` holds both of the x41 rig's:

@@ -626,3 +626,35 @@ jobs:
           fi
           if [ "$fail" != "0" ]; then exit 1; fi
           echo "gate: every leg green or lawfully skipped (event=$GITHUB_EVENT_NAME code=$OUT_CODE db=$OUT_DB)"
+
+  # ===========================================================================
+  # #1127 — the weekly schedule's own failure must be VISIBLE somewhere other than
+  # a raw run log. This wave's own evidence is that it was not: a test-corpus
+  # retarget and a census widening each moved a number `db-slice-frontiers`
+  # depends on, and neither was caught for a stretch of time — which only happens
+  # if nobody is regularly reading the scheduled run's result. No notification
+  # channel (Slack, email, a webhook) exists anywhere in this repo today, so this
+  # posts a comment on the standing tracking issue instead, per the ticket's own
+  # recommendation. Scoped to `schedule` alone: a `workflow_dispatch` run was just
+  # triggered by a human who is already watching it, and a pull_request/push
+  # failure is already visible to its author on the PR itself. Depends on `ci`
+  # ALONE — the one job that already decides "every leg green or lawfully
+  # skipped" — so this can never disagree with the terminal gate's own verdict.
+  # ===========================================================================
+  notify-schedule-failure:
+    needs: ci
+    if: always() && github.event_name == 'schedule' && needs.ci.result != 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Comment the weekly sweep's failure onto the tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CI_RESULT: ${{ needs.ci.result }}
+        run: |
+          gh issue comment 1127 --repo "$REPO" \
+            --body "Weekly scheduled CI sweep: \`ci\` reported **${CI_RESULT}**. Run: ${RUN_URL}"
