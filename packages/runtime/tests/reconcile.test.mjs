@@ -5,7 +5,7 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { reconcileTasks, expireClarifies, pruneTraces, heartbeat } from "../lib/reconciler.mjs";
 import * as rig from "./rig.mjs";
 
@@ -190,21 +190,31 @@ test("reconcile: rate-wall attempt prune rides the trace-prune lane, deletes pas
   // backdates `attempted_at` either, so a superuser insert is the only way to reach "a row past
   // the retention margin" without waiting an hour in real time — the db-level
   // rate-wall-attempts-retention.test.mjs precedent.
-  const staleToken = randomUUID().replace(/-/g, "").padEnd(64, "0");
-  const freshToken = randomUUID().replace(/-/g, "").padEnd(64, "1");
+  //
+  // Every key below is FRESH per run (randomBytes, never a fixed literal): the
+  // invite-preview-public.test.mjs precedent — a fixed literal would let one run's rows collide
+  // with a re-run's inside the same 15-minute window over an unprunable-by-anything-but-margin
+  // table, and re-running this file against a lane database that already carries an earlier run's
+  // "fresh" row under the SAME literal would silently inflate the survivor count.
+  const staleToken = randomBytes(32).toString("hex");
+  const freshToken = randomBytes(32).toString("hex");
+  const staleOrigin1 = randomBytes(32);
+  const freshOrigin1 = randomBytes(32);
   await rig.rootQuery(
     "insert into clara.invite_preview_attempts (token_hash, origin_digest, attempted_at) values " +
-    "(sha256(decode($1,'hex')), decode($2,'hex'), now() - interval '2 hours'), " +
-    "(sha256(decode($3,'hex')), decode($4,'hex'), now() - interval '5 minutes')",
-    [staleToken, "aa".repeat(32), freshToken, "bb".repeat(32)],
+    "(sha256(decode($1,'hex')), $2, now() - interval '2 hours'), " +
+    "(sha256(decode($3,'hex')), $4, now() - interval '5 minutes')",
+    [staleToken, staleOrigin1, freshToken, freshOrigin1],
   );
-  const staleEmail = "cc".repeat(32);
-  const freshEmail = "dd".repeat(32);
+  const staleEmail = randomBytes(32);
+  const freshEmail = randomBytes(32);
+  const staleOrigin2 = randomBytes(32);
+  const freshOrigin2 = randomBytes(32);
   await rig.rootQuery(
     "insert into clara.confirmation_attempts (email_digest, origin_digest, attempted_at) values " +
-    "(decode($1,'hex'), decode($2,'hex'), now() - interval '2 hours'), " +
-    "(decode($3,'hex'), decode($4,'hex'), now() - interval '5 minutes')",
-    [staleEmail, "ee".repeat(32), freshEmail, "ff".repeat(32)],
+    "($1, $2, now() - interval '2 hours'), " +
+    "($3, $4, now() - interval '5 minutes')",
+    [staleEmail, staleOrigin2, freshEmail, freshOrigin2],
   );
 
   const res = await rig.asRuntime((c) => pruneTraces(c, { rateWallRetentionMinutes: 60, rateWallBatchSize: 100 }));
@@ -212,10 +222,10 @@ test("reconcile: rate-wall attempt prune rides the trace-prune lane, deletes pas
   assert.ok(res.prunedConfirmationAttempts >= 1, "at least the 2-hour-old confirmation row pruned");
 
   const ipaFreshKept = await rig.rootQuery(
-    "select count(*)::int n from clara.invite_preview_attempts where token_hash = sha256(decode($1,'hex'))", [freshToken]);
+    "select count(*)::int n from clara.invite_preview_attempts where origin_digest = $1", [freshOrigin1]);
   assert.equal(ipaFreshKept.rows[0].n, 1, "the 5-minute-old invite-preview row, inside the window, survives");
   const caFreshKept = await rig.rootQuery(
-    "select count(*)::int n from clara.confirmation_attempts where email_digest = decode($1,'hex')", [freshEmail]);
+    "select count(*)::int n from clara.confirmation_attempts where origin_digest = $1", [freshOrigin2]);
   assert.equal(caFreshKept.rows[0].n, 1, "the 5-minute-old confirmation row, inside the window, survives");
 });
 
