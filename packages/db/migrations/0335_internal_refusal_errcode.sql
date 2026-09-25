@@ -219,4 +219,65 @@ begin
     p_purpose => p_purpose, p_authority_ref => p_authority_ref, p_op_key => p_op_key);
 end $c0335_cpsf$;
 
--- (vertical-slice loop: sections 1 only; the tail lands last.)
+-- =====================================================================================
+-- §B — clara.create_revenue_recognition_schedule_for (0308 §E2). VERBATIM except the same wall.
+-- =====================================================================================
+create or replace function clara.create_revenue_recognition_schedule_for(
+  p_client uuid, p_author uuid, p_source_entry uuid, p_revenue_account text,
+  p_revenue_basis text, p_purpose text, p_authority_ref jsonb, p_op_key text,
+  p_pattern text default 'straight_line')
+returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $c0335_crrsf$
+declare v_firm uuid; v_client_status text; v_role text; v_member_status text;
+begin
+  -- #941 — THE FOUR WALLS THIS ENTRANCE OWNS. Everything after them is the shared core.
+  if p_op_key is null or p_op_key ~ '^\s*$' then
+    raise exception 'configuring a revenue recognition schedule requires its idempotency key'
+      using errcode='CLR10', detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
+  end if;
+  -- A NULL AUTHOR IS ITS OWN REFUSAL, not a `client_not_found` in disguise: "no human was named"
+  -- and "the human named is nobody here" are different mistakes, and only the first one is the
+  -- caller's own shape. It cannot leak anything — it is answered before the client is read.
+  -- #1114 [0335] — AND THE CODE IS CLR44, NOT CLR10. The only caller of this door is a
+  -- `clara_runtime` body that always holds the actor (the successor contract says so:
+  -- reports/wave4-lane04-ticket915.md line 359, "an internal wiring error, never shown"), so a
+  -- null here is the calling PROGRAM's own fault. CLR10 is the code a surface renders — the
+  -- roster's `prepayment_source_unfit` carries a remedy and a panel under it — and a generic
+  -- handler that branched on the code alone could not tell the two apart while they shared one.
+  if p_author is null then
+    raise exception 'an on-behalf-of configuration names the human it acts for' using errcode='CLR44',
+      detail='{"reason":"invalid_author","field":"author","constraint":"present"}';
+  end if;
+  select c.firm_id, c.status into v_firm, v_client_status from clara.clients c where c.id = p_client;
+  if v_firm is null then
+    raise exception 'client not found in your firm' using errcode='CLR11',
+      detail='{"reason":"client_not_found"}';
+  end if;
+  select m.role, m.status into v_role, v_member_status from clara.firm_memberships m
+   where m.user_id = p_author and m.firm_id = v_firm
+   order by (m.status = 'active') desc, m.created_at desc limit 1;
+  if v_role is null then
+    raise exception 'client not found in your firm' using errcode='CLR11',
+      detail='{"reason":"client_not_found"}';
+  end if;
+  if v_member_status <> 'active' then
+    raise exception 'the human this configuration acts for is no longer an active member of this firm'
+      using errcode='CLR04',
+        detail='{"reason":"authority_lost","field":"author"}';
+  end if;
+  if clara.role_rank(v_role) < clara.role_rank('bookkeeper') then
+    raise exception 'configuring a revenue recognition schedule requires a bookkeeper or above'
+      using errcode='CLR04', detail='{"reason":"insufficient_role"}';
+  end if;
+  if v_client_status <> 'active' then
+    raise exception 'client is not active -- no new revenue recognition schedule'
+      using errcode='CLR10', detail='{"reason":"client_inactive"}';
+  end if;
+
+  return clara._revenue_recognition_core(p_firm => v_firm, p_client => p_client,
+    p_actor => p_author, p_lane => 'obo', p_source_entry => p_source_entry,
+    p_revenue_account => p_revenue_account, p_revenue_basis => p_revenue_basis,
+    p_purpose => p_purpose, p_authority_ref => p_authority_ref, p_op_key => p_op_key,
+    p_pattern => p_pattern);
+end $c0335_crrsf$;
+
+-- (vertical-slice loop: sections 12 only; the tail lands last.)

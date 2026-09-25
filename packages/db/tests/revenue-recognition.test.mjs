@@ -37,6 +37,7 @@ import {
   replaceRecognitionSchedule, recognitionScheduleSupersession, liveRecognitionScheduleCountFor,
   DR_CORRECTION_REASON, DR_CORRECTION_AXIS, DR_REPLACE_SIG,
 } from "./revenue-recognition-fixtures.mjs";
+import { callerContractCode } from "./internal-refusal-errcode-fixtures.mjs";
 // THE STANDARD-CHART CELL's own doors, from the chart batteries that own them: a client born
 // through clara.create_client and the onboarding commit, and clara.apply_coa_template against
 // the estate's CURRENT published template. No surgery, and no chart row minted here.
@@ -652,7 +653,12 @@ cell("p941.obo.authority — the twin refuses a null author by name, answers a N
 
   // 1 — A NULL AUTHOR is its own mistake, answered before the client is read, so it can leak
   //     nothing about which clients exist.
-  const nullAuthor = await assertPair(CLR.badRequest, "invalid_author",
+  //
+  //     #1114 — AND IT IS NOT A `bad-request`. This door is `clara_runtime` ONLY and its caller
+  //     always holds the actor, so a null is the calling PROGRAM's fault: nothing to show anyone,
+  //     no remedy to offer. CLR44, the caller-contract class, and the distinctness from this
+  //     lane's own renderable roster refusal is asserted at the end of the cell.
+  const nullAuthor = await assertPair(await callerContractCode(), "invalid_author",
     () => call({ author: null }), "an OBO configuration naming no human at all");
   assert.equal(nullAuthor.detail.field, "author");
 
