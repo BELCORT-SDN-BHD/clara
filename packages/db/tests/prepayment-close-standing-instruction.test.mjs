@@ -1088,15 +1088,40 @@ async (t) => {
     assert.equal(row[0].secdef, true);
   }
 
-  // NO TWIN AND NO WRAPPER, by NAME across the whole schema -- the stronger claim.
+  // NO WRITE TWIN AND NO WRITE WRAPPER, by NAME across the whole schema -- the stronger claim,
+  // and the one this ticket actually owns.
+  //
+  // AMENDED BY #1147 [0362], and the amendment is the point rather than an exemption. This cell
+  // used to refuse EVERY `wake_%firm_standing_instruction%` name, which was exact while the whole
+  // family was write-only: nothing machine-shaped existed here at all. #1147 mints ONE READ --
+  // `clara.wake_get_firm_standing_instruction`, clara_agent_ro only, one `interactive` allowlist
+  // row, no firm argument -- because a chat model asked "does this firm let Clara do this?" had no
+  // door and no relation it may read (#1050's own follow-up 3). What #1050 owns is that no machine
+  // lane may RECORD or WITHDRAW one; so the roster below names the ONE lawful machine reader and
+  // still refuses every other machine-shaped name in the family, including a `wake_record_…` or a
+  // `wake_withdraw_…` that a later file might add by reflex. Its own battery is
+  // standing-instruction-agent-read.test.mjs.
+  // The exemption is not a NAME ROSTER, which would go stale on the frontier this file gates at
+  // (0338, not 0362) and would excuse a future function that merely borrowed the name. It is the
+  // two catalog facts that make a body a READ and nothing else: STABLE (Postgres refuses every
+  // INSERT/UPDATE/DELETE inside a non-volatile function, so such a body CANNOT write) and granted
+  // to the read role alone.
   const kin = await rootQuery(
-    `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    `select p.proname,
+            p.provolatile = 's' as is_read,
+            has_function_privilege('clara_agent_ro', p.oid, 'EXECUTE') as agent,
+            (has_function_privilege('clara_runtime', p.oid, 'EXECUTE')
+             or has_function_privilege('clara_wake_interactive', p.oid, 'EXECUTE')
+             or has_function_privilege('clara_wake_proactive', p.oid, 'EXECUTE')
+             or has_function_privilege('public', p.oid, 'EXECUTE')) as writers
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'clara'
         and (p.proname like '%firm_standing_instruction%_for'
              or p.proname like 'wake_%firm_standing_instruction%'
              or p.proname like '%firm_standing_instruction%_wake')`);
-  assert.deepEqual(kin.rows, [],
-    `a machine twin of the standing-instruction doors exists: ${JSON.stringify(kin.rows)}`);
+  const unlawful = kin.rows.filter((r) => !r.is_read || !r.agent || r.writers);
+  assert.deepEqual(unlawful, [],
+    `a machine twin of the standing-instruction WRITE doors exists: ${JSON.stringify(unlawful)}`);
 
   // THE RELATION. Forced RLS, SELECT for the human lane, no write grant to anybody, no grant at
   // all to any machine role.

@@ -50,7 +50,8 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { humanQuery, wakeQuery, rootQuery, ROLES, opk } from "./rig-helpers.mjs";
+import { humanQuery, wakeQuery, roleQuery, rootQuery, assertRaises, ROLES, PG, opk }
+  from "./rig-helpers.mjs";
 import { mintWake5 } from "./wave-a-fixtures.mjs";
 import { ensurePrepay, prepayGate, prepaidScene, recordPeriod, wake12, caught }
   from "./f-a4-pr2a-fixtures.mjs";
@@ -180,4 +181,169 @@ async (t) => {
   const closed = await readInstruction(s3);
   assert.equal(closed.active, false, "the door still reports a withdrawn instruction as standing");
   assert.equal(closed.reason, null, "a withdrawn instruction's sentence still reaches the model lane");
+});
+
+// =============================================================================================
+// S1b — AND IT IS NOT AN EXISTENCE ORACLE FOR ANOTHER FIRM'S ROW.
+// =============================================================================================
+
+test("p1147.read.no_oracle -- a firm that has instructed nothing and a caller whose SIBLING firm "
+  + "holds a live instruction are answered IDENTICALLY, byte for byte: the door takes no firm "
+  + "argument at all, so there is nothing to probe with",
+async (t) => {
+  if (await readGate(t)) return;
+  const sc = await prepaidScene("p1147oracle");
+
+  // FIRM A INSTRUCTS. This is the row the other two firms must not be able to detect.
+  const si = await record(sc.alice, { opKey: opk("p1147-oracle") });
+  assert.ok(si.instruction_id, "the recording door answered with no instruction");
+
+  // FIRM B — a sibling firm of the same estate, whose OWNER is a bookkeeper+ and therefore a
+  // lawful on-behalf-of human. Firm A's live row exists while this read runs.
+  const { secret: sB } = await chatCredential(sc.w.firms.B, sc.w.users.dave);
+  const answerB = await readInstruction(sB);
+
+  // FIRM S — a third firm, also with nothing of its own. Its answer is the CONTROL: "absent"
+  // with no neighbour holding one is what "absent" has to look like.
+  const { secret: sS } = await chatCredential(sc.w.firms.S, sc.w.users.erin);
+  const answerS = await readInstruction(sS);
+
+  assert.deepEqual(answerB, answerS,
+    `firm B's answer differs from a firm with no neighbour holding one -- the door is an oracle: `
+    + `${JSON.stringify(answerB)} vs ${JSON.stringify(answerS)}`);
+  assert.equal(answerB.active, false, "a sibling firm is told firm A's instruction stands");
+  assert.equal(answerB.reason, null, "another firm's sentence reached this caller");
+  assert.equal(answerB.recorded_by, null, "another firm's member was named to this caller");
+  assert.equal(answerB.recorded_at, null, "another firm's timestamp reached this caller");
+
+  // …AND FIRM A ITSELF STILL SEES ITS OWN. Without this half the cell above would pass on a door
+  // that answers `active:false` to everybody.
+  const { secret: sA } = await chatCredential(sc.firm, sc.bob);
+  const answerA = await readInstruction(sA);
+  assert.equal(answerA.active, true,
+    `the firm that instructed is no longer told so: ${JSON.stringify(answerA)}`);
+  assert.equal(answerA.recorded_by, sc.alice);
+});
+
+// =============================================================================================
+// S1c — THE CEREMONY: what the read door asks for before it reads anything, and who may ask.
+// =============================================================================================
+
+const READ_SQL = `select clara.${READ_DOOR}(p_instruction_key => $1) as result`;
+
+test("p1147.read.acl -- clara_agent_ro alone holds the read door; every other application role is "
+  + "refused 42501 on it; the relation itself stays unreadable by every machine role; and the two "
+  + "WRITE doors are still closed to the machine lane, driven rather than read off the catalog",
+async (t) => {
+  if (await readGate(t)) return;
+  const sc = await prepaidScene("p1147acl");
+
+  // DRIVEN: the role that is supposed to hold it does.
+  const { secret } = await chatCredential(sc.firm, sc.bob);
+  assert.ok(await readInstruction(secret), "clara_agent_ro cannot call the read door");
+
+  // …and nobody else can, including the WRITE pool and the human lane (a member reads the
+  // relation directly under RLS and needs no door at all).
+  for (const role of [ROLES.runtime, ROLES.authenticated, ROLES.wakeInteractive, ROLES.wakeProactive]) {
+    await assertRaises(PG.insufficientPrivilege,
+      () => roleQuery(role, READ_SQL, [KEY]), `${role} on ${READ_DOOR}`);
+  }
+
+  // THE RELATION IS STILL NO MACHINE ROLE'S TO READ. This is 0338's own tail assertion, which
+  // #1147's acceptance criterion asks be proved to still hold: the door exists PRECISELY because
+  // the machine lane holds nothing here, so if this ever flipped the door would be redundant and
+  // the wall would be gone at the same moment.
+  const rel = (await rootQuery(
+    `select has_table_privilege('clara_authenticated','clara.firm_standing_instructions','SELECT') as human,
+            has_table_privilege('clara_agent_ro','clara.firm_standing_instructions','SELECT') as agent,
+            has_table_privilege('clara_runtime','clara.firm_standing_instructions','SELECT') as runtime,
+            has_table_privilege('clara_wake_interactive','clara.firm_standing_instructions','SELECT') as wakei,
+            has_table_privilege('clara_wake_proactive','clara.firm_standing_instructions','SELECT') as wakep,
+            has_table_privilege('public','clara.firm_standing_instructions','SELECT') as pub,
+            has_table_privilege('clara_authenticated','clara.firm_standing_instructions','INSERT') as h_ins,
+            has_table_privilege('clara_authenticated','clara.firm_standing_instructions','UPDATE') as h_upd,
+            has_table_privilege('clara_authenticated','clara.firm_standing_instructions','DELETE') as h_del`)).rows[0];
+  assert.deepEqual(
+    [rel.human, rel.agent, rel.runtime, rel.wakei, rel.wakep, rel.pub, rel.h_ins, rel.h_upd, rel.h_del],
+    [true, false, false, false, false, false, false, false, false],
+    "the standing-instruction relation's grants moved -- 0338's tail assertion no longer holds");
+
+  // AND NO ACT CAME WITH THE READ. Giving the instruction and taking it back are firm governance
+  // and must NAME the member who did it, which is #1050's whole point.
+  for (const door of ["record_firm_standing_instruction", "withdraw_firm_standing_instruction"]) {
+    for (const role of [ROLES.agentRo, ROLES.runtime, ROLES.wakeInteractive, ROLES.wakeProactive]) {
+      await assertRaises(PG.insufficientPrivilege,
+        () => roleQuery(role, `select clara.${door}($1,$2,$3)`, [KEY, "never", opk("p1147-never")]),
+        `${role} on the ${door} ACT`);
+    }
+  }
+});
+
+test("p1147.read.ceremony -- the read door refuses without a credential, refuses a wake kind its "
+  + "one allowlist row does not name, refuses a credential that names no person, and refuses an "
+  + "instruction key outside 0338's closed set in 0338's own vocabulary",
+async (t) => {
+  if (await readGate(t)) return;
+  const sc = await prepaidScene("p1147ceremony");
+  await record(sc.alice, { opKey: opk("p1147-ceremony") });
+
+  // (a) NO CREDENTIAL AT ALL: the read role alone proves nothing.
+  const bare = await caught(() => roleQuery(ROLES.agentRo, READ_SQL, [KEY]));
+  assert.ok(bare, "the read door answered a connection carrying no wake credential");
+  assert.equal(bare.code, "CLR03", `expected CLR03 without a credential, got ${bare.code}: ${bare.message}`);
+
+  // (b) A REAL CREDENTIAL OF A KIND THE ALLOWLIST DOES NOT NAME. `close_prep` is the clocked lane
+  //     that RESOLVES this instruction inside clara._prepayment_schedule_core (0338 §F) and has no
+  //     business ASKING about the firm's governance posture with nobody at the keyboard. The
+  //     credential is real, minted for a real task by the real minter.
+  const wrongKind = await caught(() => readInstruction(sc.s.secret));
+  assert.ok(wrongKind, "a close_prep credential reached a door allowlisted for `interactive` alone");
+  assert.equal(wrongKind.code, "CLR03",
+    `expected CLR03 from the allowlist, got ${wrongKind.code}: ${wrongKind.message}`);
+  assert.match(wrongKind.message, /close_prep/,
+    `the allowlist refusal does not name the kind it refused: ${wrongKind.message}`);
+
+  // (c) A CREDENTIAL THAT NAMES NOBODY. This read rides a named person's authority: an
+  //     `interactive` credential minted with no on_behalf_of is refused by name.
+  const { secret: nameless } = await mintWake5({ kind: "interactive", firm: sc.firm, onBehalfOf: null });
+  const anon = await caught(() => readInstruction(nameless));
+  assert.ok(anon, "a credential naming nobody read the firm's standing instruction");
+  assert.equal(anon.code, "CLR03");
+  assert.equal(JSON.parse(anon.detail ?? "{}").reason, "wake_authority_absent",
+    `the refusal does not carry its reason token: ${anon.detail}`);
+
+  // (d) AN UNKNOWN KEY, answered in 0338's own vocabulary so a surface and a model read ONE
+  //     refusal for this family rather than two spellings of it.
+  const { secret } = await chatCredential(sc.firm, sc.bob);
+  const unknown = await caught(() => readInstruction(secret, "let_clara_do_anything"));
+  assert.ok(unknown, "the read door admitted an instruction key outside 0338's closed set");
+  assert.equal(unknown.code, "CLR10");
+  const d = JSON.parse(unknown.detail ?? "{}");
+  assert.equal(d.reason, "firm_standing_instruction_invalid");
+  assert.equal(d.axis, "instruction_key_unknown");
+});
+
+test("p1147.read.floor_is_the_credential -- the read's OWN floor is viewer (every member may see "
+  + "what their firm instructed Clara to do), and the credential's floor is strictly ABOVE it: a "
+  + "credential on behalf of a viewer cannot be minted at all, so the door can never be reached "
+  + "below bookkeeper",
+async (t) => {
+  if (await readGate(t)) return;
+  const sc = await prepaidScene("p1147floor");
+  await record(sc.alice, { opKey: opk("p1147-floor") });
+
+  // CAROL is a VIEWER of this firm (buildWorld's own roster). She may read the relation herself…
+  const carol = sc.w.users.carol;
+  const own = await humanQuery(carol,
+    `select count(*)::int as n from clara.firm_standing_instructions
+      where instruction_key = $1 and withdrawn_at is null`, [KEY]);
+  assert.equal(own.rows[0].n, 1,
+    "a viewer of the firm cannot read what their own firm instructed -- the read's floor moved");
+
+  // …but no wake credential may RIDE her: clara.mint_wake_credential refuses below bookkeeper, so
+  // the door's effective floor is the credential's and is strictly narrower than the read's own.
+  const refused = await caught(() => mintWake5({ kind: "interactive", firm: sc.firm, onBehalfOf: carol }));
+  assert.ok(refused, "an interactive credential was minted on behalf of a VIEWER");
+  assert.equal(refused.code, "CLR10",
+    `expected the minter's CLR10 authority_lost, got ${refused.code}: ${refused.message}`);
 });
