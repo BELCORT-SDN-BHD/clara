@@ -1162,3 +1162,37 @@ test("W14 · ADV-02: a HIGH-STAKES run posted from a person's answer is left a D
     await rootQuery("update clara.firms set high_stakes_amount_cents=$2 where id=$1", [firm, restore]);
   }
 });
+
+test("W15 · ADV-06: the parked question names the employer cost the entry a yes books will NOT book", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, { answers: noTotals("2027-03") });
+  assert.equal(doc.receipt.posting.posted, false, "mandatory setup: parked");
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.completeness.parked, true);
+  // The question asked is still the brief's own; what is added is the CONSEQUENCE of answering it,
+  // which is what makes the answer a professional judgement rather than a guess.
+  assert.match(v.sentence, /is this every employee for the month\?/);
+  assert.match(v.sentence, /prints no figure for/, `got: ${v.sentence}`);
+  assert.match(v.sentence, /employer's EPF/, `got: ${v.sentence}`);
+  assert.match(v.sentence, /employer's SOCSO/);
+  assert.match(v.sentence, /employer's EIS/);
+  assert.match(v.sentence, /HRDF levy/);
+  assert.match(v.sentence, /books none of those/);
+
+  // …and the sentence is TRUE, driven rather than asserted: the entry a yes actually books carries
+  // no employer-side leg and no levy leg on either side.
+  const r = (await answerCompleteness(world.users.alice, { document: doc.documentId, answer: "yes" })).rows[0].r;
+  assert.equal(r.posted, true, `${JSON.stringify(r)}`);
+  const legs = await legsOf(r.entry_id);
+  assert.deepEqual(
+    legs.map((l) => l.account_code),
+    ["6000", "2100", "2110", "2120", "2130", "2040"],
+    "gross, the four EMPLOYEE deductions and the net -- and nothing else",
+  );
+  for (const code of ["6010", "6020", "6030", "6040", "2140"]) {
+    assert.equal(legs.filter((l) => l.account_code === code).length, 0, `no ${code} leg`);
+  }
+});

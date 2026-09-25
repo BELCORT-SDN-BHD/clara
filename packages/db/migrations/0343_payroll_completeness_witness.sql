@@ -1062,6 +1062,7 @@ declare
   v_comp jsonb; v_answer jsonb; v_cverdict text; v_rows_read int;
   v_admit_sum boolean := false; v_needs_sum boolean := false; v_witness_used text;
   v_summed text[] := '{}'; v_fstate text; v_fsum bigint; v_sum1 boolean; v_sum2 boolean;
+  v_unbookable text[] := '{}';
   v_b1 text; v_b2 text;
 begin
   -- #1048: BOTH STATE VERSIONS ARE ADMITTED BY NAME. A v1 state is a reading banked before 0343;
@@ -1149,6 +1150,33 @@ begin
           'reason', coalesce(v_comp->>'reason','the reading predates the completeness witness')));
     end if;
   end if;
+
+  -- 2c . #1048 FIX ROUND (ADV-06) . WHAT THIS PAGE CAN NEVER BOOK, whatever the completeness
+  --      verdict turns out to be. A question is UNBOOKABLE when no figure exists for it from
+  --      either source -- the page does not print it AND the evaluator computed no row sum for it.
+  --      On a page with no totals row that is exactly the employer's own EPF, SOCSO and EIS cost
+  --      and the HRDF levy: a payslip ROW has no employer column, so there is nothing to sum.
+  --
+  --      IT IS COMPUTED HERE, NOT IN THE SENTENCE, and it is deliberately independent of
+  --      `v_admit_sum`: the gate needs it while the question is still PARKED, which is precisely
+  --      when the sum has not been admitted and `unprinted` (below) therefore names all eleven
+  --      questions. A person is asked to make a professional judgement; the standing owner ruling
+  --      is that Clara asks for those, and a judgement given without its material consequence is
+  --      not one. One body decides what the page can book, and the sentence reads it.
+  select coalesce(array_agg(q.x order by q.ord), '{}') into v_unbookable
+    from (
+      select f.x, min(f.ord) as ord
+        from (
+          select (t.x->>'f1') as x, t.ord from jsonb_array_elements(v_spec) with ordinality t(x, ord)
+          union all
+          select (t.x->>'f2'), t.ord from jsonb_array_elements(v_spec) with ordinality t(x, ord)
+        ) f
+       where f.x is not null
+         and coalesce(nullif(p_state->'facts'->f.x->>'printed_cents','')::bigint, 0) = 0
+         and coalesce(case when jsonb_typeof(p_state->'facts'->f.x->'computed_cents') = 'number'
+                           then (p_state->'facts'->f.x->>'computed_cents')::bigint end, 0) = 0
+       group by f.x
+    ) q;
 
   -- 3 . THE LEGS.
   for r in select (t.x->>'a') acc, (t.x->>'side') side, (t.x->>'f1') f1, (t.x->>'f2') f2,
@@ -1249,6 +1277,9 @@ begin
     'debit_cents', v_dr,
     'credit_cents', v_cr,
     'unprinted', to_jsonb(v_unprinted),
+    -- #1048 FIX ROUND (ADV-06): the questions this page can never book, whatever the completeness
+    -- verdict says. Distinct from `unprinted`, which is about what THIS plan drew from.
+    'unbookable', to_jsonb(v_unbookable),
     'missing_accounts', to_jsonb(v_missing),
     -- #1048 AC1: the plan says WHAT its figures came from, so the entry it becomes can say it too.
     'posting_basis', jsonb_build_object(
@@ -1756,10 +1787,42 @@ begin
         else
           -- THE PARKED QUESTION, in the brief's own words, with the figures a person needs in order
           -- to answer it. RM and two decimals, because that is how a payslip prints money.
-          format('This payroll summary for %s prints no total; is this every employee for the month? Clara read %s employee line(s), totalling RM %s gross and RM %s net. Answer yes and the run posts from those lines; answer no and it stays unposted.',
+          --
+          -- FIX ROUND (ADV-06): AND WHAT A YES DOES NOT BOOK. The entry a yes books carries gross,
+          -- the four EMPLOYEE deductions and the net, and nothing else -- the per-employee rows
+          -- have no employer column to sum, so the employer's own statutory cost and the HRDF levy
+          -- are accrued nowhere, on either side. The migration header and the README said so; the
+          -- screen where the click happens did not. A bookkeeper answering yes reasonably believes
+          -- the month's payroll is booked, and in Malaysia the employer side is remitted against a
+          -- filed return. The standing owner ruling is that Clara asks for a professional
+          -- judgement; a judgement given without its material consequence is not one.
+          format('This payroll summary for %s prints no total; is this every employee for the month? Clara read %s employee line(s), totalling RM %s gross and RM %s net. Answer yes and the run posts from those lines; answer no and it stays unposted.%s',
             coalesce(v_month_label, 'an unestablished month'), v_rows_read,
             coalesce(to_char(v_gross_sum / 100.0, 'FM999,999,990.00'), 'an unreadable amount'),
-            coalesce(to_char(v_net_sum / 100.0, 'FM999,999,990.00'), 'an unreadable amount'))
+            coalesce(to_char(v_net_sum / 100.0, 'FM999,999,990.00'), 'an unreadable amount'),
+            -- The list is built HERE, from the plan's own `unbookable`, and nowhere else: no new
+            -- catalog name for a label map, and no second body deciding what the page can book.
+            coalesce(
+              (select format(' The page prints no figure for %s, so an entry posted from these lines books none of those -- they must be booked another way.',
+                        regexp_replace(
+                          string_agg(
+                            case q.x
+                              when 'payroll.run.epf_employer'   then 'the employer''s EPF'
+                              when 'payroll.run.socso_employer' then 'the employer''s SOCSO'
+                              when 'payroll.run.eis_employer'   then 'the employer''s EIS'
+                              when 'payroll.run.hrdf_levy'      then 'the HRDF levy'
+                              when 'payroll.run.epf_employee'   then 'employee EPF'
+                              when 'payroll.run.socso_employee' then 'employee SOCSO'
+                              when 'payroll.run.eis_employee'   then 'employee EIS'
+                              when 'payroll.run.pcb'            then 'PCB'
+                              when 'payroll.run.gross_pay'      then 'gross pay'
+                              when 'payroll.run.net_pay'        then 'net pay'
+                              else q.x end, ', ' order by q.ord),
+                          ', ([^,]*)$', ' or \1'))
+                 from jsonb_array_elements_text(coalesce(v_plan->'unbookable','[]'::jsonb))
+                        with ordinality q(x, ord)
+                having count(*) > 0),
+              ''))
       end
     when 'accounts_resolve' then
       format('Payroll run %s was not posted: this client''s chart of accounts has no %s. Add the account(s) and re-file the payslip.',
