@@ -409,6 +409,61 @@ afterward and probe every configured runtime lane. Existing platform roles can a
 with historical migration census assertions. A green local chain does not prove that a live
 cluster can be replayed without a target-specific preflight.
 
+## Collation and pinned order (#1047)
+
+**The house rule.** A value that is **pinned** — compared against a literal, or digested and
+compared against a digest literal — and that was produced by an aggregate **ordered by a text
+expression** must spell `collate "C"` on that ORDER BY. Without it the pin records the server's
+`lc_collate`, not the data.
+
+Under glibc's `en_US.UTF-8` — CI's `postgres:17` container and hosted Supabase — punctuation
+carries no primary weight and case is not a primary weight either, so `taxation` sorts **before**
+`tax_liabilities` and `clara_x` before `PUBLIC`; under `C`, which is defined by code point, both
+sort the other way round. 0295's first cut pinned a digest over rows ordered that way, was green on
+every `C.UTF-8` rig, and stopped the chain on CI (run 35954298990). Its own section below records
+that fix; this section is the rule the estate follows from now on.
+
+**Most ORDER BYs do not need it, and the reason is the TYPE, not luck.** PostgreSQL's `name` type
+carries collation `C` in the type itself, so a census ordered by a catalog identifier —
+`proname`, `relname`, `conname`, `tgname`, `polname`, `rolname`, `attname`, and
+`information_schema`'s `grantee` / `table_name` / `column_name`, which ARE `name` — sorts by code
+point on every server. So does an expression that merely *contains* one: a `name` cast to `text`
+keeps `C`, and in `proname || '=' || <text>` the `name`'s non-default collation wins over the
+default (0020:2304's ACL pin has always been portable for exactly this reason).
+
+These do NOT keep it, and are the shapes to look at:
+
+| shape | collation | why |
+|---|---|---|
+| `oid::regprocedure::text`, `::regrole::text`, `::regclass::text` | database default | `reg*` carries no collation, so the cast takes the default |
+| `privilege_type` | database default | `information_schema.character_data` is a domain over `character varying`, not over `name` |
+| `aclitem::text` | database default | same |
+| any ordinary `text` / `varchar` column (`family_key`, `account_code`, `wake_kind`, …) | database default | |
+
+`select pg_collation_for(<expr>)` answers this on the live server for any expression; it is what
+`tests/collation-pin-portability.test.mjs` measures rather than asserting from memory.
+
+**The record and the guard.** `tests/collation-pin-scan.mjs` holds `RECORDED_SITES`: every pinned,
+text-ordered site in `migrations/` and `tests/` as of #1047 — 66 movable keys over 37 files, of
+which 22 keys in 16 **applied** migrations, each with the reason it cannot flip. Applied migrations
+are never edited, so for those the entry is the proof. `tests/collation-pin-scan.test.mjs` scans the
+corpus on every run and refuses a site the record does not hold, naming the file and saying what to
+write; it needs no database, so it runs on every leg. A NEW site is fixed with `collate "C"`, never
+added to the record.
+
+**The live proof.** `tests/collation-pin-portability.test.mjs` re-measures, on whatever server the
+suite runs on: it builds a comparator (the real glibc `en_US.UTF-8` where the OS has the locale,
+otherwise an ICU `ka-shifted` collation), makes it prove it reorders 0295's own pair, and then
+orders each recorded site's live value set under both `C` and that comparator.
+
+**Portable today, fragile by construction.** The orderings the estate pins do not move — but the
+name space they draw on does. Measured on the lane rig at 309 migrations:
+`clara.bank_accounts`' index names already sort differently under the two collations
+(`uq_bank_accounts_id_firm_client` against `uq_bank_accounts_identity_active`, because `_` sorts
+before `e` under `C` and carries no primary weight under the other). Nothing pins that relation's
+index names today. One new `clara._x` landing beside an unprefixed `clara.x_y` does the same to a
+function census, which is why the rule is a rule and not a case-by-case judgement.
+
 ## Member doors: the lock order other migrations depend on
 
 `clara.set_member_role`, `clara.remove_member` and `clara.revoke_invite` take `clara.firms` (or a
