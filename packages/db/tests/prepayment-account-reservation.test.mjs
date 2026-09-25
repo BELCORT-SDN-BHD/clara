@@ -30,7 +30,7 @@ import {
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 3;
+const EXPECTED_CELLS = 4;
 
 before(async () => { ready = await reservationApplied().catch(() => false); });
 
@@ -201,4 +201,45 @@ cell("p1078.claim.bank — the ticket's own headline: an account the prepayment 
     client: scene.client, coaAccountCode: code, accountNumber: "5141078003" });
   assert.ok(bound, "a retired enrolment no longer holds the code");
   assert.equal(await bankBindingCount(scene.client, code), 1, "…and the binding really happened");
+});
+
+cell("p1078.claim.fixed_asset — an account the prepayment roster holds cannot be enrolled in the FIXED-ASSET register, and the refusal names the door that actually releases the claim rather than the staff-advance one", async () => {
+  const { scene, code } = await enrolledScene("fa", { code: "19000105" });
+  assert.equal(await faProfileCount(scene.client, code), 0, "mandatory setup: no profile yet");
+
+  const refused = await assertPair(CLR37, "fa_profile_invalid",
+    () => reserveAsFixedAssetCost(scene.alice, { client: scene.client, assetAccount: code }),
+    "enrolling an account the prepayment roster holds into the fixed-asset register");
+  assert.equal(refused.detail.axis, "role_reserved",
+    "the refusal rides 0041's own axis rather than a new vocabulary");
+  assert.equal(refused.detail.reserved_domain, RESERVED_DOMAIN.prepayment,
+    "…and names the register that holds the code");
+  assert.equal(refused.detail.reserved_role, RESERVED_ROLE.prepayment);
+  assert.equal(refused.detail.account_code, code);
+  // THE REMEDY IS THE ONE THAT WORKS. Until 0337 §D this sentence named retire_staff_advance_account
+  // whatever register held the code, which for a roster claim is a dead end: that door cannot
+  // release an enrolment it does not own.
+  assert.match(refused.err.message, /retire_prepayment_account/,
+    `the refusal names the door that releases THIS claim: ${refused.err.message}`);
+  assert.doesNotMatch(refused.err.message, /retire_staff_advance_account/,
+    `…and does not send the person to a door that cannot: ${refused.err.message}`);
+  assert.equal(await faProfileCount(scene.client, code), 0, "the refusal enrolled no profile");
+
+  // AND THE REMEDY REALLY IS THE REMEDY, driven rather than promised.
+  await retirePrepaymentAccount(scene.bob, { client: scene.client, account: code });
+  const enrolled = await reserveAsFixedAssetCost(scene.alice, {
+    client: scene.client, assetAccount: code });
+  assert.ok(enrolled, "the named door releases the claim and the profile then enrols");
+  assert.equal(await faProfileCount(scene.client, code), 1);
+
+  // THE ADVANCE BRANCH'S WORDS ARE UNCHANGED, measured on the same client.
+  const advCode = await account(scene.alice, {
+    client: scene.client, code: "19000106", name: "#1078 advance for fa", type: "asset" });
+  await enrolStaffAdvanceAccount(scene.alice, { client: scene.client, account: advCode });
+  const adv = await assertPair(CLR37, "fa_profile_invalid",
+    () => reserveAsFixedAssetCost(scene.alice, { client: scene.client, assetAccount: advCode }),
+    "enrolling an enrolled staff-advance account into the fixed-asset register");
+  assert.equal(adv.detail.reserved_domain, RESERVED_DOMAIN.staffAdvance);
+  assert.match(adv.err.message, /retire_staff_advance_account, which needs every advance on it settled/,
+    `the advance branch still says what it always said: ${adv.err.message}`);
 });

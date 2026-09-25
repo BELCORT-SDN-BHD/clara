@@ -7499,6 +7499,7 @@ staff-advance siblings already do.
 | A | `clara._acct_role_reserved` | a third arm: LIVE prepayment-roster enrolments, `domain = 'prepayment'`, `role = ` the enrolment's purpose, `owner_ref = ` the code |
 | B | `clara._adj_line_eligibility_breach` | its reservation read SKIPS the new domain, so every answer this wall gives is the answer it gave before 0337 |
 | C | `clara._fa_assert_code_unreserved` | the bank belt's machine reason names the register that actually holds the code |
+| D | `clara.upsert_fa_account_profile` | its shared-union refusal names `retire_prepayment_account` for a roster claim |
 
 §A is the whole of the reservation: the bank belt (`clara._fa_assert_code_unreserved`, reached from
 the `t_bank_accounts_fa_reserved` trigger), the fixed-asset discriminator
@@ -7521,6 +7522,15 @@ already domain-driven ("reserved by the *%* register"); its machine `reason` was
 `coa_account_advance_reserved` whatever domain held the code. A prepayment claim now answers
 `coa_account_prepayment_reserved`, and the advance token is unchanged byte for byte, which
 `p1078.claim.bank` drives on both domains on one client.
+
+**§D — the fixed-asset profile door.** It asks `clara._fa_role_claim_conflict`, which returns any
+reservation that is not the FA role being claimed, so §A alone makes it refuse a roster-held code.
+Its refusal then told the person to "retire that enrolment first (retire_staff_advance_account,
+which needs every advance on it settled)" — a door that cannot release a roster enrolment, which is
+the dead end the WDB-R2 ruling of 2026-08-03 ordered eradicated from exactly this family of
+sentences. The remedy clause is now per domain and the advance branch's words are unchanged.
+`p1078.claim.fixed_asset` drives the refusal, then drives the named remedy and watches the profile
+enrol, so the sentence is not a promise.
 
 ### §B is the load-bearing half, and it is not a softening
 

@@ -110,7 +110,9 @@ declare
     ['clara._adj_line_eligibility_breach(uuid,jsonb)',
      '727fceade766c85a8fc4753d03e6e071a9008334e149266488e5d5232dd98021'],
     ['clara._fa_assert_code_unreserved(uuid,text)',
-     '816f9c24c6cf36b876c7fa3ec1df8a6eac4d492e5f139a8d64755caef534203b']
+     '816f9c24c6cf36b876c7fa3ec1df8a6eac4d492e5f139a8d64755caef534203b'],
+    ['clara.upsert_fa_account_profile(uuid,text,text,text,text)',
+     '14cba9a309642dafa8a39131a3b850f9663b5b7d64e3fea8632852c11af0e41c']
   ];
   -- …AND THE NEIGHBOURS THIS FILE DEPENDS ON AND MUST NOT MOVE.
   --
@@ -407,6 +409,210 @@ begin
 end $c0337_c$;
 revoke all on function clara._fa_assert_code_unreserved(uuid, text) from public;
 
+-- =====================================================================================
+-- §D — clara.upsert_fa_account_profile — THE FIXED-ASSET PROFILE DOOR. 0041's body VERBATIM except
+--      the release door its shared-union refusal names.
+--
+-- The refusal itself needs no edit: the door asks `clara._fa_role_claim_conflict`, which asks the
+-- union, so §A already makes it refuse a code the prepayment roster holds. What it needed is the
+-- REMEDY: it named retire_staff_advance_account whatever register held the code.
+-- =====================================================================================
+create or replace function clara.upsert_fa_account_profile(p_client uuid, p_asset_account text,
+    p_accum_account text, p_depr_expense_account text, p_op_key text)
+  returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $c0337_d$
+declare c record; v_dedupe jsonb; v_firm uuid; v_existing record; v_id uuid; v_changed boolean;
+        v_clash text; v_had_live boolean; d record;
+        v_res_domain text; v_res_role text; v_res_owner text;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10';
+  end if;
+  v_dedupe := clara._reserve_op(c.firm, 'upsert_fa_account_profile', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'asset', p_asset_account,
+      'accum', p_accum_account, 'expense', p_depr_expense_account)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  select cl.firm_id into v_firm from clara.clients cl where cl.id = p_client;
+  if v_firm is null or v_firm <> c.firm then
+    raise exception 'client is not in your firm' using errcode = 'CLR11';
+  end if;
+  if nullif(btrim(p_asset_account), '') is null then
+    raise exception 'an FA account profile needs a cost account'
+      using errcode = 'CLR37', detail = '{"reason":"fa_profile_invalid","axis":"asset_account"}';
+  end if;
+  -- THE PAIR IS A PAIR. Half a profile is a register that can never depreciate and never say
+  -- why -- so it refuses here, by name, rather than surfacing as silence three months later.
+  if (p_accum_account is null) <> (p_depr_expense_account is null) then
+    raise exception 'state BOTH the accumulated-depreciation and the depreciation-expense account, or NEITHER (neither = a non-depreciable profile, e.g. land)'
+      using errcode = 'CLR37', detail = '{"reason":"fa_profile_invalid","axis":"pair"}';
+  end if;
+  -- TYPING. The cost and accumulated codes are asset-typed, the expense code expense-typed,
+  -- and none of the three may be a control account: a control-class leg in this family would
+  -- put a second receivable/payable movement on an entry the subledger classifier also reads.
+  if not exists (select 1 from clara.coa_accounts a
+                 where a.client_id = p_client and a.account_code = p_asset_account
+                   and a.is_active and a.account_type = 'asset' and a.account_class is null) then
+    raise exception 'the fixed-asset cost account must be an active, asset-typed, non-control account on this chart'
+      using errcode = 'CLR37', detail = '{"reason":"fa_profile_invalid","axis":"asset_account"}';
+  end if;
+  if p_accum_account is not null then
+    if not exists (select 1 from clara.coa_accounts a
+                   where a.client_id = p_client and a.account_code = p_accum_account
+                     and a.is_active and a.account_type = 'asset' and a.account_class is null) then
+      raise exception 'the accumulated-depreciation account must be an active, asset-typed, non-control account on this chart'
+        using errcode = 'CLR37', detail = '{"reason":"fa_profile_invalid","axis":"accum_account"}';
+    end if;
+    if not exists (select 1 from clara.coa_accounts a
+                   where a.client_id = p_client and a.account_code = p_depr_expense_account
+                     and a.is_active and a.account_type = 'expense' and a.account_class is null) then
+      raise exception 'the depreciation-expense account must be an active, expense-typed, non-control account on this chart'
+        using errcode = 'CLR37', detail = '{"reason":"fa_profile_invalid","axis":"expense_account"}';
+    end if;
+  end if;
+  if p_asset_account = coalesce(p_accum_account, '')
+     or p_asset_account = coalesce(p_depr_expense_account, '')
+     or (p_accum_account is not null and p_accum_account = p_depr_expense_account) then
+    raise exception 'the three enrolled accounts must be pairwise distinct'
+      using errcode = 'CLR37', detail = '{"reason":"fa_profile_invalid","axis":"distinct"}';
+  end if;
+
+  -- ---------------------------------------------------------------------------------
+  -- CLIENT-WIDE ROLE TOPOLOGY [round-3 fold F5c]. Pairwise distinctness WITHIN one profile is
+  -- not enough: profiles (cost=A, accum=B) and (cost=B, accum=C) were both lawful, and then a
+  -- debit to B (an ordinary disposal clearing accumulated depreciation) soft-birthed a PHANTOM
+  -- register row on the second profile -- probed, with a fabricated cost -- while the tie
+  -- compared the first profile's register accumulation against B's whole GL balance. Sharing
+  -- ONE accumulated account across two profiles makes both per-pair ties arithmetically
+  -- impossible. The three roles are therefore disjoint across a client's ACTIVE profiles.
+  -- ---------------------------------------------------------------------------------
+  --
+  -- ...AND THE FACTS ARE READ WHEREVER THEY LIVE [round-3.5 fold G4]. The checks below used to
+  -- read fa_account_profiles WHERE active, which is only half the world: a register row bakes
+  -- its three codes at birth and keeps posting to them after the profile that named them is
+  -- version-forwarded or retired. Probed consequence: version-forward the accumulated code,
+  -- re-enrol the FREED code as another profile's COST account (admitted!), then dispose the old
+  -- asset -- its accumulated-debit leg soft-birthed a phantom register row with a fabricated
+  -- cost. clara._fa_reserved_roles is the ONE predicate over both worlds; the leaf rung above
+  -- it makes the read-then-write honest against a concurrent bank binding of the same code.
+  perform clara._fa_lock_roles(p_client);
+  if p_accum_account is not null then
+    select rr.owner_asset_code into v_clash from clara._fa_reserved_roles(p_client) rr
+      where rr.account_code = p_accum_account and rr.fa_role = 'accum'
+        and rr.owner_asset_code <> p_asset_account
+      limit 1;
+    if v_clash is not null then
+      raise exception 'another enrolled profile or register row for this client already uses % as its accumulated-depreciation account (cost account %); the register ties per (cost, accumulated) pair and cannot share one accumulated account', p_accum_account, v_clash
+        using errcode = 'CLR37',
+          detail = jsonb_build_object('reason', 'fa_profile_invalid', 'axis', 'accum_shared',
+            'account_code', p_accum_account, 'other_profile_asset_account', v_clash)::text;
+    end if;
+  end if;
+  for d in select * from (values ('cost', p_asset_account), ('accum', p_accum_account),
+                                 ('expense', p_depr_expense_account)) as t(want_role, code) loop
+    if d.code is null then continue; end if;
+    select rr.owner_asset_code || ' (' || rr.fa_role || ')' into v_clash
+      from clara._fa_reserved_roles(p_client) rr
+      where rr.account_code = d.code and rr.fa_role <> d.want_role
+      limit 1;
+    if v_clash is not null then
+      raise exception 'account % is already spoken for in a DIFFERENT fixed-asset role for this client (%); cost, accumulated-depreciation and depreciation-expense roles must not overlap -- and a role ANY register row of this client carries counts, whatever the profile now says', d.code, v_clash
+        using errcode = 'CLR37',
+          detail = jsonb_build_object('reason', 'fa_profile_invalid', 'axis', 'role_overlap',
+            'account_code', d.code, 'other_profile_asset_account', v_clash)::text;
+    end if;
+  end loop;
+  -- RESERVED ACCOUNTS [round-3 fold F5c / INT-M3]. A bank account passes every typing test
+  -- above (asset-typed, no account_class), and one mis-typed code in the enrolment form would
+  -- (i) birth a bogus register row on every receipt into that bank and (ii) refuse EVERY
+  -- payment out of it at approval, with a remedy ("reverse the acquisition and re-book it")
+  -- that is meaningless for a bank movement. The FA profile is the one enrolment act in this
+  -- wave with unbounded blast radius; it gets the same shape of guard as the control-class one.
+  select ba.coa_account_code into v_clash from clara.bank_accounts ba
+    where ba.client_id = p_client
+      and ba.coa_account_code in (p_asset_account, coalesce(p_accum_account, ''),
+                                  coalesce(p_depr_expense_account, ''))
+    limit 1;
+  if v_clash is not null then
+    raise exception 'account % is a registered bank account for this client and cannot be enrolled in the fixed-asset register', v_clash
+      using errcode = 'CLR37',
+        detail = jsonb_build_object('reason', 'fa_profile_invalid', 'axis', 'reserved_account',
+          'account_code', v_clash)::text;
+  end if;
+  -- 0042 (owner ruling 2026-08-03, WDB-R3): THE SHARED RESERVATION UNION, CONSULTED FROM THIS
+  -- SIDE TOO. clara.enrol_staff_advance_account has always read the full union and refused a
+  -- code the fixed-asset family owns; this door read only the FA-side reader, so the same
+  -- collision approached from the other direction was ADMITTED and both registers ended up
+  -- believing they owned one account. The FA-granular arms above stay first and unchanged --
+  -- they can name the offending sister profile, which a cross-domain read cannot -- and this
+  -- arm asks the SHARED DISCRIMINATOR (0042 S5.15b) rather than restating its rule, so it
+  -- fires on everything those arms structurally cannot see and cannot drift from them.
+  -- The leaf taken above covers this read as well, so a concurrent enrolment of the same code
+  -- is serialised rather than raced.
+  select q.code, cf.res_domain, cf.res_role, cf.res_owner
+    into v_clash, v_res_domain, v_res_role, v_res_owner
+    from (values ('cost', p_asset_account), ('accum', p_accum_account),
+                 ('expense', p_depr_expense_account)) as q(want_role, code)
+    cross join lateral clara._fa_role_claim_conflict(p_client, q.code, q.want_role) cf
+    where q.code is not null
+    limit 1;
+  if v_res_domain is not null then
+    -- #1078 [0337] THE RELEASE DOOR IS PER DOMAIN. This sentence named retire_staff_advance_account
+    -- whatever register held the code, which was true while `staff_advance` was the only domain
+    -- this arm could see. The prepayment roster is a third, and a refusal that names a door which
+    -- does not release the claim is the dead end WDB-R2 ruled out in 2026-08-03. The advance
+    -- branch's words are UNCHANGED, character for character.
+    raise exception 'account % is already reserved by the % register (% role, owner %) for this client and cannot be enrolled in the fixed-asset register; %, or enrol this profile on a different account', v_clash, v_res_domain, v_res_role, coalesce(v_res_owner, '(unnamed)'),
+      case when v_res_domain = 'prepayment'
+           then 'retire that prepayment-account enrolment first (retire_prepayment_account, which closes the account to new schedules and leaves any running one posting to term end)'
+           else 'retire that enrolment first (retire_staff_advance_account, which needs every advance on it settled)' end
+      using errcode = 'CLR37',
+        detail = jsonb_build_object('reason', 'fa_profile_invalid', 'axis', 'role_reserved',
+          'account_code', v_clash, 'reserved_domain', v_res_domain,
+          'reserved_role', v_res_role, 'reserved_owner', v_res_owner)::text;
+  end if;
+
+  -- ---------------------------------------------------------------------------------
+  -- VERSION-FORWARD, NEVER MUTATE [round-3 fold F5b]. An enrolment interval is a historical
+  -- fact the belt reads at approved_at; re-pointing an enrolled pair in place would rewrite
+  -- history (and, probed, immediately created old/new pairs measuring against the same full
+  -- cost-account GL). A real change therefore RETIRES the live row and inserts a fresh one; an
+  -- unchanged re-upsert is idempotent and must not move the belt's horizon under live history.
+  -- ---------------------------------------------------------------------------------
+  select * into v_existing from clara.fa_account_profiles
+    where client_id = p_client and asset_account_code = p_asset_account and active
+    limit 1 for update;
+  v_had_live := found;
+  v_changed := (not v_had_live)
+            or v_existing.accum_depr_account_code is distinct from p_accum_account
+            or v_existing.depr_expense_account_code is distinct from p_depr_expense_account;
+  if not v_changed then
+    v_id := v_existing.id;
+  else
+    if v_had_live then
+      update clara.fa_account_profiles
+        set active = false, retired_by = c.actor, retired_at = now()
+        where id = v_existing.id;
+    end if;
+    insert into clara.fa_account_profiles(firm_id, client_id, asset_account_code,
+        accum_depr_account_code, depr_expense_account_code, active, enrolled_at, created_by)
+      values (c.firm, p_client, p_asset_account, p_accum_account, p_depr_expense_account,
+        true, now(), c.actor)
+      returning id into v_id;
+  end if;
+  perform clara._audit(c.firm, c.actor, null, null, 'upsert_fa_account_profile', null,
+    jsonb_build_object('client', p_client, 'asset_account', p_asset_account,
+      'accum_account', p_accum_account, 'expense_account', p_depr_expense_account,
+      'op_key', p_op_key));
+  return clara._finish_op(c.firm, 'upsert_fa_account_profile', p_op_key,
+    jsonb_build_object('profile_id', v_id, 'client_id', p_client,
+      'asset_account_code', p_asset_account,
+      'depreciable', p_accum_account is not null, 'active', true));
+end $c0337_d$;
+revoke all on function clara.upsert_fa_account_profile(uuid, text, text, text, text) from public;
+grant execute on function clara.upsert_fa_account_profile(uuid, text, text, text, text)
+  to clara_authenticated;
+
 reset role;
 
 -- =====================================================================================
@@ -419,7 +625,8 @@ declare
   v_mine text[] := array[
     'clara._acct_role_reserved(uuid,text)',
     'clara._adj_line_eligibility_breach(uuid,jsonb)',
-    'clara._fa_assert_code_unreserved(uuid,text)'
+    'clara._fa_assert_code_unreserved(uuid,text)',
+    'clara.upsert_fa_account_profile(uuid,text,text,text,text)'
   ];
 begin
   -- 1 · THE SHARED CENSUS CARRIES THREE DOMAINS AND LOST NEITHER OF THE TWO IT HAD. Gaining the
@@ -516,6 +723,19 @@ begin
       using errcode='CLR10';
   end if;
 
+  -- 5 · THE FIXED-ASSET PROFILE DOOR NAMES THE DOOR THAT RELEASES *THIS* CLAIM, and still names the
+  --     advance one for an advance claim.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.upsert_fa_account_profile(uuid,text,text,text,text)'::regprocedure;
+  if position('retire_prepayment_account' in v_src) = 0
+     or position('retire_staff_advance_account' in v_src) = 0 then
+    raise exception '0337 tail: the fixed-asset profile door does not name both release doors'
+      using errcode='CLR10';
+  end if;
+  if position('clara._fa_role_claim_conflict' in v_src) = 0 then
+    raise exception '0337 tail: the fixed-asset profile door no longer asks the shared discriminator'
+      using errcode='CLR10';
+  end if;
 
 
 
@@ -540,6 +760,24 @@ begin
       end if;
     end if;
   end loop;
+  if not has_function_privilege('clara_authenticated',
+       'clara.upsert_fa_account_profile(uuid,text,text,text,text)'::regprocedure, 'EXECUTE') then
+    raise exception '0337 tail: clara_authenticated lost EXECUTE on the fixed-asset profile door'
+      using errcode='CLR10';
+  end if;
+  if has_function_privilege('clara_runtime',
+       'clara.upsert_fa_account_profile(uuid,text,text,text,text)'::regprocedure, 'EXECUTE')
+     or has_function_privilege('clara_agent_ro',
+       'clara.upsert_fa_account_profile(uuid,text,text,text,text)'::regprocedure, 'EXECUTE')
+     or has_function_privilege('clara_wake_interactive',
+       'clara.upsert_fa_account_profile(uuid,text,text,text,text)'::regprocedure, 'EXECUTE')
+     or has_function_privilege('clara_wake_proactive',
+       'clara.upsert_fa_account_profile(uuid,text,text,text,text)'::regprocedure, 'EXECUTE')
+     or has_function_privilege('public',
+       'clara.upsert_fa_account_profile(uuid,text,text,text,text)'::regprocedure, 'EXECUTE') then
+    raise exception '0337 tail: a machine lane reached the fixed-asset profile door'
+      using errcode='CLR10';
+  end if;
 
   -- 9 · THE THREE CLAIM-SIDE CONSUMERS STILL REACH THE CENSUS, counted. 0042 S5.14(6) is a
   --     migration-time gate that could not see a door a later file adds; this is the same
