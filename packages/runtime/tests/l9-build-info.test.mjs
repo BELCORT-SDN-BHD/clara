@@ -253,6 +253,12 @@ test("CB-035: the route is mounted under /api and takes the same authenticate ga
   // their hooks. This census GROWS at every cut by design; that is what makes a forgotten identity
   // a red cell rather than a payload an operator cannot trust.
   assert.match(src, /import \{ claraWorkBundleIdentityV6 \} from "\.\.\/workflows\/claraWork\.v6\.bundle\.js"/, "the route imports the v6 bundle identity");
+  // CLOSING WAVE 2026-09-26 (#1144) — SEVEN identities now, PINNED FIRST. Same reason, one version
+  // on. This census is one of the four the LAST cut's own record names as having caught a real
+  // miss ("l9-build-info's `bundles: [...]` census"), which is why it grows by hand at every cut
+  // rather than deriving itself: a forgotten identity is a red cell here rather than a payload an
+  // operator cannot trust.
+  assert.match(src, /import \{ claraWorkBundleIdentityV7 \} from "\.\.\/workflows\/claraWork\.v7\.bundle\.js"/, "the route imports the v7 bundle identity");
   // THE ARRAY, READ AS AN ORDERED LIST RATHER THAN AS A LITERAL STRING. The previous form pinned
   // the exact one-line spelling, so it reds on a REFORMAT as loudly as on a missing bundle — and
   // this cut's addition pushed the line past the width limit, which is how that was found. What
@@ -265,8 +271,8 @@ test("CB-035: the route is mounted under /api and takes the same authenticate ga
   const identities = [...bundlesArg.matchAll(/claraWorkBundleIdentity(V\d+)?\(\)/g)].map((m) => m[1] ?? "V1");
   assert.deepEqual(
     identities,
-    ["V6", "V5", "V4", "V3", "V2", "V1"],
-    "...and passes all SIX into the payload, NEWEST FIRST, so one read answers which bundles this image serves",
+    ["V7", "V6", "V5", "V4", "V3", "V2", "V1"],
+    "...and passes all SEVEN into the payload, NEWEST FIRST, so one read answers which bundles this image serves",
   );
   // #637 — the SAME import-here-pass-in shape for the registry's provenance exports. Without
   // these two the payload could name the bundles but not the BODIES, and a rollback preflight

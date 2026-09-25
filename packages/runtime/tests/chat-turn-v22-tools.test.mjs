@@ -489,7 +489,8 @@ test("v22.identity: the engine stamp is this closure's, and the registry pins th
   // What #985's cell can still say honestly is that the CHAT cut did not move it: this assertion
   // therefore names the class it owns and leaves claraWork's pin to `tests/clara-work-v6.test.mjs`,
   // rather than carrying a literal that goes stale the moment a sibling ticket lands.
-  assert.equal(registry.workflowPins.claraWork, "claraWork_v6", "claraWork's pin is #1030's, not this cut's");
+  assert.equal(registry.workflowPins.claraWork, "claraWork_v7",
+    "claraWork's pin is the CLOSING wave's #1144, and it was #1030's before that — never this cut's");
   // The SAME trap one lane boundary further out, and it fired at the integration gate: lane C2 of
   // this same cut phase cut `statementFacts_v4` (#1037) and repointed that class, so the literal
   // written on lane C1 — `statementFacts_v3`, with the message "statementFacts_v4 is lane C2's" —
