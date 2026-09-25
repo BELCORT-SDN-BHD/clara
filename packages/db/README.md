@@ -7478,6 +7478,17 @@ ledger outranks all of them on the one question a reversal asks. In particular a
 `clara._plan_accrual_period_line` reads the HIGHEST revision of the accrual detail, which a
 correction supersedes — and one mechanism closes both.
 
+**How wide the blast radius actually is, measured rather than inherited.** The plan of record says
+the defect reaches every plan kind because the body is shared, which is true of the CODE. It is
+narrower in the live estate, and the narrowing is a CHECK rather than a convention:
+`ck_plan_revisions_auto_reverse` (0193:561) is `auto_reverse = (plan_kind = 'reversing_journal')`,
+so only a reversing journal can produce a reversal leg at all — on this rig every one of the 136
+`amortisation_schedule` and 64 `revenue_recognition_schedule` revisions carries
+`auto_reverse = false`, and every one of the 374 `reversing_journal` revisions carries true. So what
+shipped broken was the accrual lane, on BOTH sides and under BOTH calculation rules; the other two
+kinds are fixed in advance, for free, because the fix sits in the shared body and is gated on a
+posted entry rather than on a kind.
+
 **It clears a refusal a correction could previously create.** Before 0332, a correction that
 dropped the stated amount for a period already on the books left that period's reversal refused
 `CLR10 accrual_period_amount_missing` — a posted balance with no lawful way to come off the books.
