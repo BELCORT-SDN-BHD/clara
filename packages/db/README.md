@@ -7612,21 +7612,43 @@ admission core's own answer, verbatim>}`. bookkeeper+, `clara_authenticated` alo
 agent lane, no wake wrapper — the posture `clara.skip_plan_occurrence` and
 `clara.correct_accrual_adjustment` already carry.
 
-### Why it is not "reverse now" under another name
+### Why it is not "reverse now" under another name — and one claim this section withdrew
 
-`clara._plan_reversal_date(p_due)` is the first day of the month AFTER `p_due`'s, whatever the
-plan's frequency. On a monthly schedule with `day_rule='day_of_month'` and `day_of_month=1` — a
-shape `ck_plan_revisions_day_of_month` admits and the accrual form offers (1..28) — the NEXT primary
-due date falls on exactly that reversal date. "Reverse now" therefore sends a window whose last day
-carries two due events and admits the next period's ACCRUAL beside the reversal the person asked
-for. Driven on the rig, both sides, by `p1073.scope.only_the_reversal`.
+The first draft of 0333's header argued that the window is WIDER than one period: on a monthly
+schedule due on the 1st, `clara._plan_reversal_date` of period k would be period k+1's own due date,
+so a catch-up would admit the next accrual beside the reversal. **That schedule does not exist in
+this estate.** `clara._assert_plan_schedule` (0193:1611, restated by 0223:512) refuses
+`monthly + day_of_month + 1` on a `reversing_journal` plan by name,
+`reversal_collides_with_next_occurrence`, precisely so period k's reversal never lands on period
+k+1's accrual day (`unique (plan_id, due_date)` would otherwise refuse the collision as a bare
+23505). The refusal is driven by `p1073.scope.one_occurrence_only`'s first assertion, and the claim
+it disproves is recorded here rather than quietly dropped.
 
-That is not a defect in `clara.request_plan_catch_up`, which is doing exactly what a catch-up is
-defined to do. It is the reason the ticket asks for a remedy that is not a catch-up. The two
-existing remedies are untouched: both are `sha256(prosrc)`-pinned in 0333's prestate AND re-pinned,
-with their ACLs, at its tail, and the tail also refuses a body that mentions
-`clara._plan_due_events(`, `clara.request_plan_catch_up(` or `clara.skip_plan_occurrence(` — so
-"it never walks a window" is structural rather than prose.
+So on every reversing schedule this estate admits, the window "reverse now" sends carries exactly
+two due events — the flagged period's own primary, which CONVERGES because it has already posted,
+and its reversal. **The two remedies admit the same occurrence on this lane**, which is exactly what
+the ticket predicts when it asks for "the same net state", and the battery measures it on two
+identical scenes rather than assuming it.
+
+What the third remedy adds is therefore not a different set of occurrences. It is a different kind
+of act:
+
+* it takes a PERIOD and resolves that period's scheduled reversal date in the database. The web
+  layer mirrors `clara._plan_reversal_date` by hand today (`accrualReversalDate` in
+  `apps/web/lib/accruals/api.ts`) purely in order to build "reverse now"'s window; a remedy that
+  names a period does not need it to, and a schedule rule with two homes eventually has two answers;
+* it carries its own receipt (`clara.op_receipts`, fn `reverse_plan_occurrence`) and its own audit
+  verb, so the firm's history records what the person actually did rather than "a catch-up over a
+  two-day window";
+* it refuses PER OCCURRENCE — a window that is not yet due refuses `catch_up_in_future` naming the
+  window's end, while this door passes the admission core's own `not_yet_due` naming the occurrence;
+* and "exactly one occurrence" is STRUCTURAL rather than a property of today's schedules: the tail
+  refuses a body that so much as mentions `clara._plan_due_events(`,
+  `clara.request_plan_catch_up(` or `clara.skip_plan_occurrence(`, so no future schedule shape and
+  no future catch-up cap can widen this act.
+
+The two existing remedies are untouched: both are `sha256(prosrc)`-pinned in 0333's prestate AND
+re-pinned, with their ACLs, at its tail.
 
 ### Why the net ledger state agrees, and how that is known
 

@@ -276,3 +276,90 @@ test("p1073.one_period.nets_like_reverse_now — the new remedy books exactly th
     conflictRows(await listReviewQueue(BOB(), { scope: { client_id: b.client } })).length, 0,
     "the derived row cleared itself the moment a reversal for the period was admitted");
 });
+
+// ===========================================================================================
+// p1073.scope — "SCOPED TO EXACTLY THE CONFLICTING PERIOD", MEASURED RATHER THAN CLAIMED.
+//
+// The first draft of this cell tried to show the window admitting MORE than the reversal, on a
+// monthly schedule due on the 1st (where `clara._plan_reversal_date` of period k IS period k+1's
+// own due date). The estate refuses that schedule outright — `clara._assert_plan_schedule`
+// (0193:1611, restated by 0223:512) raises `reversal_collides_with_next_occurrence` for exactly
+// that shape, because `unique (plan_id, due_date)` would otherwise refuse the collision as a bare
+// 23505. The first assertion below drives that refusal, because it is the REASON the two remedies
+// agree on this lane: on every reversing schedule this estate admits, the window "reverse now"
+// sends carries exactly two due events, the flagged period's own primary (which converges) and its
+// reversal.
+//
+// So this cell claims what is true: the new remedy adds EXACTLY ONE occurrence, leaves the
+// flagged period's own primary row untouched, and the existing remedy adds the same one — and the
+// "never a window" guarantee is STRUCTURAL, read off the catalog, rather than a difference visible
+// on today's schedules.
+// ===========================================================================================
+
+/** Every occurrence of a plan as `leg@due`, sorted — the plan's own record of what it has. */
+async function occurrenceKeys(plan) {
+  return (await occurrenceRows(plan)).map((o) => `${o.leg}@${o.due_date}`).sort();
+}
+
+/** The flagged primary's own identity row, so "untouched" is a comparison of values. */
+async function primaryIdentity(plan, due) {
+  const o = (await occurrenceRows(plan)).find((x) => x.leg === "primary" && x.due_date === due);
+  return o ? { work_id: o.work_id, attempt: o.attempt, revision: o.revision } : null;
+}
+
+test("p1073.scope.one_occurrence_only — the new remedy adds EXACTLY the flagged period's reversal, leaves its primary untouched, and never walks a window", async (t) => {
+  if (await gate1073(t)) return;
+
+  // 0 · WHY THE TWO REMEDIES AGREE ON THIS LANE AT ALL. The one schedule shape whose reversal
+  //     would land on the next accrual's own day is refused by the estate before a plan exists, so
+  //     a reversing plan's [due, reversal_date] window can never carry a second primary.
+  const probe = await freshAccrualClient(ALICE(), "p1073-scope-probe");
+  const probeRef = await instructionRef({ client: probe, author: BOB() });
+  const pFrom = monthStart(await shiftMonths(today, -2));
+  await assertPair(CLR.badRequest, "reversal_collides_with_next_occurrence",
+    () => createAccrualAdjustment(BOB(), {
+      client: probe, authorityRef: probeRef,
+      accrual: accrual({ servicePeriodStart: pFrom, servicePeriodEnd: monthStart(today) }),
+      frequency: "monthly", dayRule: "day_of_month", dayOfMonth: 1,
+      timezone: ACCRUAL_TZ, effectiveFrom: pFrom, effectiveTo: monthStart(today),
+    }),
+    "a monthly reversing accrual due on the 1st");
+
+  // 1 · THE NEW REMEDY ADDS ONE ROW.
+  const b = await conflictScene({ tag: "scope-door" });
+  const revDue = monthStart(today);
+  assert.deepEqual(await occurrenceKeys(b.plan_id), [`primary@${b.dueDate}`],
+    "the scene starts with the flagged period's accrual and nothing else");
+  const beforeIdentity = await primaryIdentity(b.plan_id, b.dueDate);
+
+  await reversePlanOccurrence(BOB(), { plan: b.plan_id, due: b.row.period });
+  assert.deepEqual(await occurrenceKeys(b.plan_id),
+    [`primary@${b.dueDate}`, `reversal@${revDue}`].sort(),
+    "…and gains exactly one: the flagged period's own reversal");
+  assert.deepEqual(await primaryIdentity(b.plan_id, b.dueDate), beforeIdentity,
+    "the flagged period's ACCRUAL row is untouched — same Work, same attempt, same revision");
+
+  // 2 · AND THE EXISTING REMEDY ADDS THE SAME ONE, measured on an identical scene rather than
+  //     assumed from the ticket's own sentence.
+  const a = await conflictScene({ tag: "scope-catchup" });
+  await requestPlanCatchUp(BOB(), {
+    plan: a.plan_id, from: a.dueDate, to: revDue, opKey: opk("p1073-scope-window"),
+  });
+  assert.deepEqual(await occurrenceKeys(a.plan_id), await occurrenceKeys(b.plan_id),
+    "the window and the single act leave the same occurrence set on this lane");
+
+  // 3 · THE GUARANTEE ITSELF IS STRUCTURAL, not a property of today's schedules: the door's body
+  //     reaches no window walker and neither existing remedy, so a future schedule shape or a
+  //     future catch-up cap cannot widen it.
+  const src = await rootQuery(
+    "select p.prosrc as src from pg_proc p where p.oid = $1::regprocedure",
+    ["clara.reverse_plan_occurrence(uuid,date,text)"]);
+  const body = src.rows[0].src;
+  for (const forbidden of ["clara._plan_due_events(", "clara.request_plan_catch_up(",
+                           "clara.skip_plan_occurrence("]) {
+    assert.equal(body.includes(forbidden), false,
+      `the one-period remedy must not reach ${forbidden}`);
+  }
+  assert.ok(body.includes("clara._plan_admit_occurrence("),
+    "…it admits its one occurrence through the shared core rather than writing a row itself");
+});

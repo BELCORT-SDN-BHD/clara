@@ -35,18 +35,42 @@
 -- named" from a human. This file is the sixth and it is the only one that does.
 --
 -- =====================================================================================
--- THE SECOND MEASUREMENT: THE WINDOW REALLY IS WIDER THAN ONE PERIOD, on schedules this estate
--- admits today.
+-- THE SECOND MEASUREMENT, AND A CLAIM THIS HEADER WITHDREW WHEN IT WAS MEASURED.
 --
--- `clara._plan_reversal_date(p_due)` (0193:837) is the first day of the month AFTER `p_due`'s,
--- whatever the plan's frequency. On a monthly schedule with `day_rule='day_of_month'` and
--- `day_of_month=1` — a shape `ck_plan_revisions_day_of_month` admits and the accrual form offers
--- (1..28) — the next PRIMARY due date falls on exactly that reversal date. "Reverse now" therefore
--- sends a window whose last day carries two due events, and admits the next period's ACCRUAL
--- beside the reversal the person asked for. That is not a defect in `clara.request_plan_catch_up`,
--- which is doing precisely what a catch-up is defined to do; it is the reason the ticket asks for a
--- remedy that is not a catch-up. The battery drives both sides of that comparison
--- (`packages/db/tests/plan-occurrence-reversal-door.test.mjs`, `p1073.scope`).
+-- This file's first draft argued that the window is WIDER than one period: `clara._plan_reversal_date`
+-- (0193:837) answers the first day of the month AFTER `p_due`'s, so on a monthly schedule due on
+-- the 1st the next PRIMARY due date would fall on exactly that reversal date and a catch-up would
+-- admit the next period's accrual beside the reversal. THAT SCHEDULE DOES NOT EXIST IN THIS
+-- ESTATE. `clara._assert_plan_schedule` (0193:1611, restated by 0223:512) refuses
+-- `monthly + day_of_month + 1` on a `reversing_journal` plan by name —
+-- `reversal_collides_with_next_occurrence` — precisely so period k's reversal never lands on
+-- period k+1's accrual day, because `unique (plan_id, due_date)` would otherwise refuse the
+-- collision as a bare 23505. The refusal is DRIVEN by the battery
+-- (`packages/db/tests/plan-occurrence-reversal-door.test.mjs`, `p1073.scope`, first assertion), and
+-- the claim it disproves is recorded here rather than quietly dropped.
+--
+-- So on every reversing schedule this estate admits, the window "reverse now" sends carries
+-- exactly two due events: the flagged period's own primary (which CONVERGES, since it has already
+-- posted) and its reversal. THE TWO REMEDIES ADMIT THE SAME OCCURRENCE ON THIS LANE — which is
+-- exactly what the ticket predicts when it asks for "the same net state" — and the battery
+-- MEASURES that on two identical scenes rather than assuming it.
+--
+-- WHAT THE THIRD REMEDY ADDS IS THEREFORE NOT A DIFFERENT SET OF OCCURRENCES. It is a different
+-- kind of act:
+--   * it takes a PERIOD, and resolves that period's scheduled reversal date IN THE DATABASE. The
+--     web layer mirrors `clara._plan_reversal_date` by hand today (`accrualReversalDate` in
+--     `apps/web/lib/accruals/api.ts`) purely in order to build "reverse now"'s window; a remedy
+--     that names a period does not need it to, and a schedule rule with two homes eventually has
+--     two answers;
+--   * it carries its own receipt (`clara.op_receipts`, fn `reverse_plan_occurrence`) and its own
+--     audit verb, so the firm's history records what the person actually did rather than "a
+--     catch-up over a two-day window";
+--   * it refuses PER OCCURRENCE. A window that is not yet due refuses `catch_up_in_future` naming
+--     the window's end; this door passes the admission core's own `not_yet_due` naming the
+--     occurrence;
+--   * and the "exactly one occurrence" guarantee is STRUCTURAL rather than a property of today's
+--     schedules: the tail refuses a body that so much as mentions `clara._plan_due_events(`, so no
+--     future schedule shape and no future catch-up cap can widen this act.
 --
 -- =====================================================================================
 -- THE THIRD MEASUREMENT: "THE SAME NET STATE" IS ONLY TRUE BECAUSE OF 0332 (#1074), AND IT IS A
