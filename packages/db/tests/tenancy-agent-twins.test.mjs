@@ -135,7 +135,6 @@ const DEPOSIT_CENTS = 720_000;
 const TERM_START = "2026-01-05";
 const TERM_END = "2028-01-04";
 const ESCALATED_CENTS = 396_000;
-const ESCALATION_FROM = "2027-01-05";
 
 const value = (raw) => ({ state: "value", raw });
 const notPrinted = () => ({ state: "not_printed" });
@@ -392,7 +391,7 @@ test("p1137.draft.same_answer — the rent-plan draft the model lane reads is th
 
 test("p1137.proposal.same_answer — what Clara CAN read off the banked tenancy, and what she cannot, reach the model lane unchanged", async (t) => {
   if (unready(t)) return;
-  const { client, doc } = await tenancyFor(ALICE());
+  const { doc } = await tenancyFor(ALICE());
   const { secret } = await chatCredential();
 
   const humanAnswer = await humanRead("propose_contract_terms", CAROL(), doc.documentId);
@@ -688,7 +687,8 @@ test("p1137.obo.same_receipt_as_the_human_door — the two entrances produce the
   assert.deepEqual(op.basis, hp.basis, "the two lanes' plans post different journals");
   // `framework_record_id` names the knowledge row THIS client's framework was read from, so it
   // legitimately differs between two clients; everything else in the treatment must not.
-  const treatmentOf = (r) => { const { framework_record_id: _drop, ...rest } = r.treatment; return rest; };
+  const treatmentOf = (r) => Object.fromEntries(
+    Object.entries(r.treatment).filter(([k]) => k !== "framework_record_id"));
   assert.deepEqual(treatmentOf(o), treatmentOf(h), "the two lanes recorded different treatments");
 
   // THE ONE DIFFERENCE, and it is deliberate: the human lane's plan step is
