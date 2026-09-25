@@ -160,8 +160,9 @@
 -- =====================================================================================
 
 set local statement_timeout = '20min';  -- PRECAUTIONARY, not load-bearing: this file creates
-                                        -- seventeen functions, replaces eleven, and writes six
-                                        -- rows. It runs no backfill and scans no table.
+                                        -- EIGHTEEN functions (plus fourteen surgery helpers it
+                                        -- drops again in §Z), replaces NINE, and writes six rows.
+                                        -- It runs no backfill and scans no table.
 
 -- =====================================================================================
 -- §-1 — THE SURGERY, SPELLED ONCE. §0 and §TAIL both need the SAME anchors, the SAME forward
@@ -2183,7 +2184,9 @@ begin
     end if;
   end loop;
 
-  -- (2) TWENTY-EIGHT OBJECTS, ONE OWNER, THE PINNED search_path, SECURITY DEFINER ON ALL.
+  -- (2) EVERY OBJECT THIS FILE INSTALLS OR ASSERTS: ONE OWNER, THE PINNED search_path, SECURITY
+  --     DEFINER ON ALL. The count is REPORTED from the rosters rather than typed into the notice,
+  --     so a roster that grows can never leave a stale number behind it.
   for v_sig in select unnest(v_cores || v_humans || v_wakes || v_obo) loop
     if to_regprocedure(v_sig) is null then
       raise exception '#1137 tail: % is absent', v_sig using errcode='CLR10';
@@ -2361,7 +2364,9 @@ begin
     null;
   end;
 
-  raise notice '#1137 tail: OK -- nine bodies committed at the shas §0 derived and reversing to their pinned pre-images byte for byte; twenty-eight objects owned by clara_fn_owner, SECURITY DEFINER, search_path pinned; ten cores reachable by nobody; eleven human doors still clara_authenticated-only and closed to all seven machine roles (clara.settle_rent_payable and clara.record_contract_terms included); six new reads clara_agent_ro-only with one `interactive` allowlist row each; two OBO acts clara_runtime-only with no allowlist row at all; all six read cores driven and answering 0300''s own CLR11 for a tenant they do not hold.';
+  raise notice '#1137 tail: OK -- nine bodies committed at the shas §0 derived and reversing to their pinned pre-images byte for byte; % object(s) owned by clara_fn_owner, SECURITY DEFINER, search_path pinned; % core(s) reachable by nobody; % human door(s) still clara_authenticated-only and closed to all seven machine roles (clara.settle_rent_payable and clara.record_contract_terms included); % new read(s) clara_agent_ro-only with one `interactive` allowlist row each; % OBO act(s) clara_runtime-only with no allowlist row at all; all six read cores driven and answering 0300''s own CLR11 for a tenant they do not hold.',
+    array_length(v_cores, 1) + array_length(v_humans, 1) + array_length(v_wakes, 1) + array_length(v_obo, 1),
+    array_length(v_cores, 1), array_length(v_humans, 1), array_length(v_wakes, 1), array_length(v_obo, 1);
 end
 $t1137_tail$;
 
