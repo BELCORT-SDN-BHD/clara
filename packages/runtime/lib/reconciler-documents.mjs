@@ -252,9 +252,18 @@ async function documentTaskIndex(client, deps) {
     // different run, writing that task's OWN sidecar while this sweep is mid-loop) used
     // to let this sweep write a stale merge back over it, silently erasing `lastError`.
     // mergeTaskMeta's read-then-write narrows that window to one fs read + one fs write
-    // per task — the same granularity every other sidecar mutator already uses. It does
-    // NOT eliminate the race (a write landing in that exact gap still loses); a hard
-    // guarantee needs real locking or a version/mtime CAS, out of scope here.
+    // per task — the same granularity every other sidecar mutator already uses. That
+    // narrowing did NOT eliminate the race (a write landing in that exact gap still lost),
+    // and #1044 is the ticket that closed it: `mergeTaskMeta` now holds `withSidecarLock`
+    // across its read AND its rename, so no other mutation of THAT sidecar — a write or a
+    // `removeTaskMeta` — can land between them. WHAT IS STILL TRUE, because this loop is
+    // where it bites: the lock is IN-PROCESS, so the guarantee holds exactly as far as
+    // "one spool directory belongs to one runtime process" does; and it orders this merge
+    // against a mutation ALREADY RUNNING, never against one that has not started — a task
+    // that goes terminal and is cleaned up BEFORE this loop reaches its row is merged onto
+    // `{}` and re-created here, and nothing ever collects that file (`SPOOL_REAPABLE` in
+    // lib/spool.mjs is intake-only). See lib/spool.mjs's `withSidecarLock` and
+    // `removeIntakeSpool` headers, and packages/runtime/README.md "#1044".
     //
     // Q2: a corrupt/unreadable ONE sidecar (a malformed task-<id>.json — JSON.parse
     // throws) must not abort the WHOLE sweep — the bulk `listTaskMetas()` path this

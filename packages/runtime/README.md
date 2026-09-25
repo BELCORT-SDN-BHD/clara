@@ -1108,6 +1108,25 @@ Adding a rule is one row in `FRONTIER_RULES`, and adding a marker is one entry i
 instead of lying to a preflight, and `tests/rollback-preflight.test.mjs` fails any rule that names
 a migration the chain does not contain.
 
+The two rosters can drift apart in one direction with nothing catching it: a marker can be minted
+in `RUNTIME_CONTRACTS` before the migration that will require it lands a row in `FRONTIER_RULES` —
+deliberately legal, because a contract can ship ahead of the migration that makes reading it
+mandatory — but nothing reminded anyone a rule might still be owed, and a roster entry could sit
+forever with no rule ever added (#1129). `contractsMissingFrontierRule` (`lib/rollback-preflight.mjs`)
+is the guard: it names every `RUNTIME_CONTRACTS` entry with neither a `FRONTIER_RULES` row nor a
+listed exception in `CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE`, and
+`tests/rollback-preflight.test.mjs` fails by name the moment one exists. Today's roster is fully
+ruled, so the exception list is empty; adding a contract ahead of its rule on purpose means adding
+its id there, with a reason, not leaving the guard red.
+
+**The exception list is held at BOTH ends** (review round, ADV-L06-09). An entry is listed there
+precisely because its rule has not landed yet, so the normal end of its life is the migration that
+lands the rule — and a guard that only looks for unruled roster entries would never say the entry
+had become dead, which is the same "sits forever, silently" failure moved onto the list that
+excuses it. `deadContractRuleExceptions` names every excepted id that now HAS a `FRONTIER_RULES`
+row, so the PR that adds a contract's rule is the PR that has to drop its exception, and a
+`CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE` entry can never quietly outlive its reason.
+
 ### The release runbook's step 9, since #1035
 
 Every wave's release runbook has a **step 9 — rollback preflight demonstration, READ ONLY**. Before
@@ -1199,6 +1218,34 @@ cannot park the run instead. See *Why the boot census is the ONLY guard* above (
 predecessor image, admits Work to it, stops it, releases this tree's build, admits Work to the
 successor, and resumes the first Work on its ORIGINAL body inside the second image, with two
 distinct bundle digests and one receipt each. It is wired into the per-PR `db-live-gates` job.
+
+**Its own CLI-level leg is what proves the exit code, not only the object.** Everything above this
+paragraph proves `preflight()`'s object shape; a release script reads an exit code and stderr, and
+those are a SEPARATE thing to get right (the CLI's own arg parsing, its `--supported` /
+`--supported-contracts` doors, its refusal-line rendering). The drill spawns
+`scripts/rollback-preflight.mjs` as a real subprocess and asserts its real exit code for BOTH rule
+kinds: a pre-`claraWork_v3` roster exits 1 naming `frontier_requires_body` (#637), and — since
+#1131 — a roster that carries every required body but declares NO contract at all exits 1 naming
+`frontier_requires_contract` for both `0254_intake_refusal_record` and `0279_fa_closed_year_arrears`.
+Before #1131 the second proof existed only as a hand-run invocation against a disposable WDK World
+clone, on nobody's schedule; now it runs on every PR, through the same `db-live-gates` job as the
+body-rule leg.
+
+> **Executed, not only written** (review round, SPEC-1131-UNRUN / STD-1). The cell shipped without
+> the whole drill ever having been run end to end, which for a cell that lives inside a required
+> per-PR gate is the risk of reddening that gate for the whole repo. It has since been run the way
+> `db-live-gates` runs it — `node scripts/ci/world-gate.mjs tests/two-build-cutover-e2e.mjs` against
+> a bootstrapped WDK World — and printed its own line:
+> `[tb-e2e] preflight CLI: --supported <body-complete roster>, no --supported-contracts, exits 1
+> naming frontier_requires_contract for intake_refusal_record_v1, fa_parked_run_v1`, with
+> `TWO-BUILD CUTOVER E2E: ALL PASS`, exit 0. **The vacuity control was then taken against the
+> committed cell inside its real file, twice.** (a) Emptying both `requiresContracts` rows in
+> `lib/rollback-preflight.mjs` reds the block's own control —
+> `control: a database at 0318_… must carry at least one frontier CONTRACT rule; got []`.
+> (b) Sharper, on the deliverable assertion itself: suppressing only the contract line in the CLI's
+> refusal output reds `…naming the reason`, i.e. `assert.match(cliC.stderr,
+> /frontier_requires_contract/)`. Each subject was restored byte for byte (`git status` clean, sha256
+> unchanged) and the drill re-run green afterwards.
 <!-- #794 -->
 **Since #794 it has a SECOND leg, on the lane that has no Work row.** The same file builds a second
 scratch image with `className: "chatTurn"` and its own scratch-image `name`, derives
@@ -2437,12 +2484,16 @@ shapes still end in `.tmp`, so `SPOOL_REAPABLE` and `listJsonEntries` ignore the
 into place, so two probes colliding on one millisecond just overwrite and doubly-remove the same
 inode, which costs nothing.
 
-**What is still true after it, stated.** Two writers of one sidecar still race on the rename itself,
-and the last rename wins: a full transport write and a DB-row merge landing together can still leave
-the merge's shorter body on disk, which is the read-then-write residual `mergeTaskMeta`'s own header
-already names (task #28, P4), and which is now tracked as its own defect, #1044. What changed is that
-no reader ever sees a body no writer wrote, and no writer is told its write failed because a sibling
-won.
+**What was still true after it, stated — and CLOSED since, by #1044 (read the section below before
+this paragraph).** Two writers of one sidecar still raced on the rename itself, and the last rename
+won: a full transport write and a DB-row merge landing together could still leave the merge's
+shorter body on disk, which is the read-then-write residual `mergeTaskMeta`'s own header named
+(task #28, P4), and which was then tracked as its own defect, #1044. **That residual is no longer
+live**: `mergeTaskMeta` holds `withSidecarLock` across its read and its rename, so a write can no
+longer land inside a merge. What #1043 itself changed is that no reader ever sees a body no writer
+wrote, and no writer is told its write failed because a sibling won; the two plain `writeTaskMeta`
+calls of `p1043.collide` still settle in whatever order the filesystem picks, deliberately, because
+the lock's scope is the rename rather than the whole write.
 
 **Evidence.** `tests/intake-sidecar-race.test.mjs`'s `p1043.collide` — 200 rounds of the two real
 writer shapes against one task sidecar, asserting that no write is rejected, that the body on disk is
@@ -2454,6 +2505,106 @@ every time; on this Windows rig, 6 and 116. After the fix, 0 and 0 on both. In t
 `#633` admission e2e's very first upload failed
 `ENOENT … rename '/tmp/clara-intake-admission-AdS9Jw/spool/task-c6245da9-….json.7113.1790191021685.tmp'`
 1.8 s after the world booted.
+
+## #1044 — one sidecar, one mutation at a time: the reconciler's merge can no longer drop the intake's transport
+
+**The defect, and why it is not #1043.** #1043 gave every write its own temp file, so no reader ever
+sees a body no writer wrote. It left the LOST UPDATE, and said so: "a full transport write and a
+DB-row merge landing together can still leave the merge's shorter body on disk". `mergeTaskMeta`
+read its base, computed, and renamed; a write landing between the read and the rename was simply
+erased, because the merge's body was computed from a base that no longer existed. On the ordinary
+document path the erased keys are the transport ones — `storageKey`, `sha256`, `mime`, `format` —
+because `lib/reconciler-documents.mjs`'s per-sweep merge carries the `clara.document_processing_tasks`
+row, which has none of them, while `lib/intake.mjs:439` carries all of them, and the row is
+committed BEFORE that write runs.
+
+**Nothing restored them.** The runtime holds no SELECT on `clara.documents` (PIN-AB-6), so the
+storage key cannot be read back from Postgres. What follows is either the belt refusing to dispatch
+the run (`ingest task … has no transport metadata in its sidecar`, with no preceding
+`task sidecar unreadable` line — that preceding line was #1043's defect) or `documentIngest_v2`
+manufacturing a `storage_error` on a run that is already enqueued. Either can red the required
+`db-live-gates` job.
+
+**Measured against the pre-fix code**, 100 rounds of the two real writer shapes per arm, both launch
+orders, and the runner's platform is again the worse one: at the natural body size **95 and 99 of
+100 rounds lost the storage key on this Windows rig, 97 and 99 of 100 under WSL**. It is a lost
+update by construction, not a corner.
+
+**The fix: `withSidecarLock`, in `lib/spool.mjs`.** One in-process queue per sidecar PATH.
+`mergeTaskMeta` holds that lock across its read AND its rename, so no other mutation of that
+sidecar can land between them — the "real locking" `mergeTaskMeta`'s own header used to name as out
+of scope. **The lock's scope is the rename, not the whole write**, and that is deliberate: a
+mutation is only observable when its rename lands, so serialising the renames of one path is all
+the exclusion a read-modify-write needs, and the two temp writes still run in parallel — which is
+why the order two plain `writeTaskMeta` calls settle in is still decided by the filesystem rather
+than by which call was made first. `p1043.collide`'s own non-vacuity control ("both writers must win
+rounds") depends on that, and it still holds: measured at 42/158 on this rig and 7/193 under WSL
+after the change, against 8/192 under WSL before it — the distribution did not move.
+
+**Every mutator of one sidecar takes the same turn — the delete included** (review round,
+ADV-L06-01). The first cut of this ticket put every WRITE of a sidecar through the lock and left
+`removeTaskMeta` outside it as a bare `rm`, so a terminal cleanup's delete landing between a merge's
+read and its rename was simply undone by that rename: **measured at 50 of 50 rounds**
+(`p1044.delete`). The ordering is the production one — `lib/reconciler-documents.mjs` snapshots
+every row still queued/held_egress/running and merges each onto its own sidecar in a sequential
+loop, while `workflows/parts/documentIngest.behavior_v2.mjs` calls `removeTaskMeta` the moment a
+task goes terminal — so a delete routinely lands inside a later task's merge window. Both removers
+(`removeTaskMeta`, and `removeIntakeSpool`'s metadata `rm`) now take their path's own lock.
+
+**The residual, stated.** This is an in-process lock, so the guarantee is exactly as strong as "one
+spool directory belongs to one runtime process" — which is how the spool is deployed: the default
+`CLARA_SPOOL_DIR` is a Fly volume, and a Fly volume is attached to one machine. Two processes
+sharing one directory would still need an on-disk compare-and-swap or an advisory file lock.
+
+**And the lock orders a delete against a mutation already running, never against one that has not
+started.** A `mergeTaskMeta` first called AFTER a delete has landed is lenient by contract: it merges
+onto `{}` and writes, so it RE-CREATES the sidecar. That is correct for the task with no sidecar yet
+which leniency exists for, and indistinguishable from the task whose sidecar was just collected — so
+a reconciler sweep whose snapshot predates a task going terminal can still leave a stray
+`task-<id>.json`. **Nothing collects it**: `SPOOL_REAPABLE` matches `intake-*` only, so the TTL sweep
+never touches a task sidecar, and widening it is not safe — a live task's sidecar can legitimately
+sit untouched for longer than the TTL, and reaping it would lose the transport fields the DB row does
+not carry. What a stray one costs is bounded but real: the reconciler's degraded arm
+(`listTaskMetas()` when the `clara.documents` SELECT is unavailable) reads it back as a live queued
+task. Out of this ticket's scope, recorded here because it is the one thing the lock does not close.
+
+Also
+unchanged, and out of this ticket's scope: `lib/intake.mjs:442`'s post-enqueue write rebuilds its
+body from the `task` snapshot taken BEFORE the enqueue, so a status or `lastError` the reconciler
+wrote during the enqueue is still overwritten by it. It can no longer cost the transport (that body
+carries it), which is what #1044 is about.
+
+**Evidence.** `tests/intake-sidecar-race.test.mjs`, five cells:
+
+- `p1044.lost_update` — both launch orders, one round each, reproduced by construction with a
+  widened `engineConfig` rather than a sleep, plus a non-vacuity arm in which the merge is the last
+  writer and must keep the keys it was not given.
+- `p1044.sweep` — the REAL `reconcileDocumentTasks` merge against the real intake write shape, the
+  write launched from inside the fake client at the moment the snapshot resolves: the transport
+  survives, and the NEXT sweep dispatches the task (`documentTransportless: 0`,
+  `documentReenqueued: 1`) where before the fix both sweeps refused it.
+- `p1044.rounds` — 200 rounds at the NATURAL body size, alternating launch orders, zero losses;
+  per round a settling merge must still land its patch AND keep the keys it was not given (without
+  it the cell would pass against a `mergeTaskMeta` that wrote nothing, because the intake's own
+  body is a legal outcome of the race); and the lock map must be empty at the end, because a
+  runtime mints a new task id for every document it ever ingests
+  (`_sidecarLockCountForTest`, the same shape as `_resetIntakeGateForTest`).
+- `p1044.one_path` — the merge reads at the path it LOCKED. `mergeTaskMeta` resolves
+  `taskMetaPath(id)` once and reads, locks and writes that one string; the cell repoints
+  `CLARA_SPOOL_DIR` between the call and the locked turn and asserts the transport survives. Red
+  against the first cut (which read through `readTaskMeta(id)`, resolving the environment a third
+  time inside the turn): `the merge answered without ["storageKey","sha256","mime","format"]`.
+- `p1044.delete` — 50 rounds of a terminal cleanup against an in-flight merge, the delete launched
+  the way the reconciler's sweep and `documentIngest` interleave in production. Red at **50 of 50**
+  against a bare `rm`, green with both removers on the path's own lock, and the lock map is empty
+  at the end so a delete's turn is collected like every other.
+
+Vacuity control for the first three: with `withSidecarLock` reduced to `return fn()` — the
+pre-#1044 behaviour — `p1044.lost_update` reds on `merge first: the sidecar lost 'storageKey'`,
+`p1044.sweep` on `the sweep's merge dropped 'storageKey' (documentTransportless=1)`, and
+`p1044.rounds` at **169 of 200 rounds**. `spool.mjs` was restored byte for byte afterwards. The two
+later cells were each written RED against the shipped code and turned green by the one-line change
+they name.
 
 ## #981 — one structured-detail carrier on a durable-Work refusal, instead of a fold per refusal
 

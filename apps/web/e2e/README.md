@@ -127,6 +127,108 @@ Three rules the budgets do not replace:
 - **Never spend a budget where a condition will do.** Wait for the state — `expect.poll` on the element that must become `document.activeElement`, on the animation count, on the row that must appear — not for a number of milliseconds. Use [`settleForScan`](helpers.ts) before every `AxeBuilder.analyze()` and [`ensureRealFocus`](helpers.ts) before the first key press after any navigation.
 - **Read a lone red as timing only when the budget says so.** A cell that exceeds a budget sized like the table above has stalled; it is not evidence that the host was busy.
 
+### The B4 focus-landing instant-read flake (#1141)
+
+`work-question-walk.spec.ts`'s B4 cell asserts that answering the Needs-you `work_question` row
+inline moves focus to the section heading once the row leaves, rather than dropping it on `<body>`.
+The PRODUCTION behaviour was already correct (`work-question-affordance.tsx`'s `focusAfterRowReload`
+— reload first, focus second, landed for #629) — the CELL was the defect: it read
+`document.activeElement` with a single unwaited `page.evaluate` immediately after
+`expect(row).toHaveCount(0, ...)`, rather than waiting for the state. `nextPaint()` (one
+`requestAnimationFrame` plus one macrotask) runs AFTER the row's unmount commits, so there is a real,
+if usually short, tick during which `document.activeElement` is transiently `<body>` (the browser's
+own behaviour when a focused descendant is removed from the DOM) before focus lands on the heading —
+exactly the window an instant read can catch. Measured (the ticket's own evidence): red once in each
+of three whole-suite runs across two gates (riders wave 4 gate B, the cut-phase gate), green on every
+other run and on every isolated re-run.
+
+The fix is the rule two bullets up, applied: the instant read became an `expect.poll` over the
+whole landing — `{ tag, text, tabindex }` returned from ONE `page.evaluate` inside the poll, asserted
+with `toEqual({ tag: "H2", text: expect.stringContaining("Needs you"), tabindex: "-1" })`. A widened
+timeout on an instant read would NOT have been a fix — it would still read whatever
+`document.activeElement` holds at one arbitrary instant, just later. Only waiting for the SETTLED
+state closes the race. **All three facts come back from inside the poll**, deliberately: the first
+cut of this fix polled the TAG and then re-read `document.activeElement` in a second, unwaited
+`evaluate` for its text and tabindex, which left the identity check racing the very movement the
+poll exists to wait out (review round, ADV-L06-10).
+
+**Reproduction: ten runs red before the fix, ten green after — under a PAINT load.** Fix round 1
+could not force this red and said so; fix round 2 can, and the lever turns out not to be the one two
+earlier attempts reached for.
+
+**The window, measured.** A temporary in-page sampler (one sample per animation frame and one per
+macrotask beat, a `MutationObserver` on the row, and the driver's own read timestamp) on an
+otherwise quiet host, 5 runs, all times in ms from the submit click:
+
+| focus leaves the button, `<body>` | the row node is removed | focus lands on the heading | the PRE-FIX cell's instant read |
+|---|---|---|---|
+| 39.0 – 47.9 | 50.3 – 61.1 | 59.3 – 74.3 | 65.6 – 81.3 |
+
+The instant read landed **5.0 – 7.4 ms after** the heading took focus in all five runs. The old cell
+was not winning that race comfortably; it was winning it by about a third of a frame.
+
+**Which is why the load that matters is PAINT, not host CPU.** `nextPaint()` is one
+`requestAnimationFrame` plus one `setTimeout(0)`, so the landing runs in a macrotask AFTER that
+frame's rendering steps — while the driver's `toHaveCount(0)` resolves inside the frame's rAF
+callbacks and its `evaluate` is already on the wire. Anything that makes a frame's own RENDERING
+expensive delays the landing without delaying the read; anything that slows the whole main thread
+delays both, which is why these did NOT reproduce it:
+
+- 24 busy-loop node processes saturating all 24 cores of this host, PRE-FIX cell,
+  `--repeat-each=20`: **20 green / 0 red**. The load was real — the cell's own wall time rose from
+  ~8 s to ~12 s.
+- CDP `Emulation.setCPUThrottlingRate` at 6 (5 runs) and 20 (1 run), armed around the submit step:
+  0 catches. Rate 50 across the whole walk crashed the renderer instead.
+- The ticket's own instrument — the PRE-FIX cell, ten runs beside a parallel
+  `node scripts/run-tests.mjs` of the whole web unit suite: **10 green / 0 red**, and the same ten
+  against the fixed cell: 10 green. A whole-suite run with the PRE-FIX cell in place: 589 passed, no
+  B4 red.
+
+**The load that does reproduce it** is 400 fixed-position 320x240 tiles under `filter: blur(24px)`,
+driven by a 33 ms CSS keyframe animation — paint work only, no script of their own — appended to the
+page immediately before the submit click. Measured frame gap under it: median 17.5 – 19.5 ms, max
+~167 ms.
+
+| the cell, under the same 400-tile paint load | runs | result |
+|---|---|---|
+| PRE-FIX (`7bc5a710f`: one unwaited `page.evaluate`) | 10 | **10 red**, every one `focus was dumped onto the document body when the row disappeared` |
+| the committed fix (`expect.poll` over the whole landing) | 10 | **10 green** (1.5 m) |
+
+The sampler run under that same load says what the red is: the row is removed at 240 – 255 ms, the
+driver's instant read lands at 248 – 283 ms and reads `BODY`, and the heading's landing is still
+queued behind the frame's rendering. That is the ticket's own AC1 loop, on this host, in both
+directions.
+
+To re-run it, inject this immediately before `await page.getByTestId("work-question-submit").click();`
+— a temporary, uncommitted edit; the spec was restored byte for byte afterwards (`sha256` compared,
+`git status` clean), and nothing about the load belongs in the committed cell:
+
+```ts
+await page.evaluate((tiles) => {
+  const style = document.createElement("style");
+  style.textContent =
+    "@keyframes b4load { from { transform: translateX(0) rotate(0deg); } to { transform: translateX(7px) rotate(3deg); } }"
+    + " .b4load { position: fixed; top: 0; left: 0; width: 320px; height: 240px; pointer-events: none; z-index: -1;"
+    + " filter: blur(24px); background: linear-gradient(45deg, #f00, #00f); animation: b4load 33ms linear infinite alternate; }";
+  document.head.appendChild(style);
+  const host = document.createElement("div");
+  for (let i = 0; i < tiles; i++) {
+    const d = document.createElement("div");
+    d.className = "b4load";
+    d.style.animationDelay = (i % 7) + "ms";
+    host.appendChild(d);
+  }
+  document.body.appendChild(host);
+}, 400);
+```
+
+And the cell's own discrimination is proven by the vacuity control the work order requires for a
+test-only ticket: `restoreFocusAfterRow`'s final `landmark.focus()` call was temporarily dropped, and
+the poll-based B4 cell then failed with `Timeout 15000ms exceeded while waiting on the predicate`
+(the poll never sees the landing), proving the new assertion discriminates a real regression rather
+than passing vacuously; the subject was restored byte-for-byte immediately after (`git diff` empty)
+and the cell green again.
+
 ## Coverage map
 
 The checked-in suite currently contains 54 specs. The table below describes 28 of them; the remaining 26 have no row yet and are named under [Specs with no coverage-map row](#specs-with-no-coverage-map-row) beneath it — so neither number here contradicts what a reader can count in the table or on disk. Writing the missing descriptions is deliberately outside [#1019](https://github.com/BELCORT-SDN-BHD/clara/issues/1019), whose Out of scope is "rewriting or auditing the individual per-spec description text in the coverage-map table"; it is carried as that ticket's follow-up.

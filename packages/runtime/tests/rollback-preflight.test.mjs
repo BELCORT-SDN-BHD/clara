@@ -51,6 +51,7 @@ import { BANK_DUE_TYPE, registerSource, plantHeldWakeTask, plantQueuedClosePrepT
 import {
   AGENT_TASK_KIND_CLASSES,
   AGENT_TASK_KINDS_FROM_SOURCES,
+  CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE,
   DOCUMENT_LANE_CLASSES,
   DOCUMENT_LANES_WITHOUT_WORKFLOW,
   FRONTIER_RULES,
@@ -62,6 +63,8 @@ import {
   censusNonTerminalRuns,
   censusUnboundTasks,
   classOfBody,
+  contractsMissingFrontierRule,
+  deadContractRuleExceptions,
   frontierRefusalLines,
   frontierRuleViolations,
   frontierViolationPhrase,
@@ -1066,6 +1069,51 @@ test("#1035: THIS image satisfies every rule its own table carries — a build t
   const missing = frontierRuleViolations("9999_far_future", { bodies: [], contracts: [...RUNTIME_CONTRACT_IDS] })
     .filter((v) => v.requirement === "contract");
   assert.deepEqual(missing, [], `this image declares ${JSON.stringify([...RUNTIME_CONTRACT_IDS])} and the rule table wants more`);
+});
+
+test("#1129: every runtime-contract roster entry has a frontier rule, or is named as declared ahead of it", () => {
+  // THE OTHER DIRECTION of the previous cell. That one asks "does every FRONTIER_RULES row name a
+  // contract THIS image declares"; this one asks "does every RUNTIME_CONTRACTS entry have a rule
+  // (or an explicit, reviewed exception) at all" — the gap #1035's own follow-up report named:
+  // a roster entry with no rule is legal (a contract can ship before its rule) but was never
+  // caught if it sat forever with no rule ever added.
+  const missing = contractsMissingFrontierRule(RUNTIME_CONTRACTS, FRONTIER_RULES, CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE);
+  assert.deepEqual(missing, [],
+    `${JSON.stringify(missing)} carries no FRONTIER_RULES row naming it and no `
+      + "CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE entry — add the missing rule, or list the id there as a "
+      + "deliberate, reviewed exception");
+});
+
+test("#1129: a roster entry with neither a rule nor a listed exception fails the guard, BY NAME", () => {
+  // A synthetic roster + rule table, so this cell proves the guard actually CATCHES the gap it
+  // exists for, rather than passing vacuously because today's real roster happens to be clean.
+  const contracts = [{ id: "unruled_marker_v1" }, { id: "ruled_marker_v1" }, { id: "excepted_marker_v1" }];
+  const rules = [{ migration: "0999_placeholder", requires: [], requiresContracts: ["ruled_marker_v1"] }];
+  const exceptions = ["excepted_marker_v1"];
+  assert.deepEqual(
+    contractsMissingFrontierRule(contracts, rules, exceptions),
+    ["unruled_marker_v1"],
+    "the guard must name the one entry with neither a rule nor an exception, and only that one",
+  );
+});
+
+test("#1129: an exception that now HAS its rule is named too — the list cannot quietly outlive its reason", () => {
+  // ADV-L06-09. The guard above was write-only: once the migration that requires a contract lands
+  // its FRONTIER_RULES row — the NORMAL end state of a declared-ahead entry — the exception stops
+  // being needed and nothing said so, so the list could accumulate dead entries exactly the way an
+  // unruled roster entry could sit forever. Both directions are now closed, and the PR that adds
+  // the rule is the PR that has to drop the exception.
+  const rules = [{ migration: "0999_placeholder", requires: [], requiresContracts: ["now_ruled_v1", "never_excepted_v1"] }];
+  assert.deepEqual(
+    deadContractRuleExceptions(rules, ["now_ruled_v1", "still_ahead_v1"]),
+    ["now_ruled_v1"],
+    "the guard must name the excepted id that has since gained a rule, and only that one",
+  );
+  assert.deepEqual(
+    deadContractRuleExceptions(FRONTIER_RULES, CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE),
+    [],
+    "…and this image's own exception list carries no dead entry",
+  );
 });
 
 test("#1035: NO SCOPE CLEARS A CONTRACT REFUSAL EITHER — it counts no rows, so it cannot be narrowed away", async () => {

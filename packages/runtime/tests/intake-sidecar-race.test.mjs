@@ -50,10 +50,11 @@ after(async () => {
 });
 
 const {
-  intakePaths, listIntakeMetaEntries, listIntakeMetas, readIntakeMeta, readTaskMeta, spoolConfig, sweepSpoolTtl,
-  taskMetaPath, writeIntakeMeta, writeTaskMeta,
+  _sidecarLockCountForTest, intakePaths, listIntakeMetaEntries, listIntakeMetas, mergeTaskMeta, readIntakeMeta,
+  readTaskMeta, removeTaskMeta, spoolConfig, sweepSpoolTtl, taskMetaPath, writeIntakeMeta, writeTaskMeta,
 } = await import("../lib/spool.mjs");
 const { recoverPendingDocumentIntakes } = await import("../lib/intake.mjs");
+const { reconcileDocumentTasks } = await import("../lib/reconciler.mjs");
 
 /** A sidecar body shaped like a live, mid-flight upload. `n` is the write counter the race cell
  *  reads back, so "the last write is the one on disk" is a positive assertion. */
@@ -293,6 +294,255 @@ test(`p1043.collide: ${COLLIDE_ROUNDS} rounds of TWO writers on ONE sidecar leav
     `both writers must win rounds — otherwise nothing raced (intake=${wins.intake}, reconciler=${wins.reconciler})`);
   assert.equal((await readTaskMeta(taskId)).taskId, taskId,
     "…and the sidecar is still a readable sidecar at the end, not a temp file left in its place");
+});
+
+// ---------------------------------------------------------------------------
+// 2b · THE LOST UPDATE — ONE sidecar, one writer at a time (#1044).
+// ---------------------------------------------------------------------------
+//
+// WHAT #1043 LEFT BEHIND, in the README's own words: "Two writers of one sidecar still race on the
+// rename itself, and the last rename wins: a full transport write and a DB-row merge landing
+// together can still leave the merge's shorter body on disk." That is not a splice — every reader
+// still sees a body some writer wrote, WHOLE — it is a LOST UPDATE, and the loss is not
+// recoverable: the DB task row carries no transport, the runtime holds no SELECT on
+// `clara.documents` (PIN-AB-6), so a sidecar left without `storageKey` cannot be repaired from
+// Postgres. What follows is the belt refusing to dispatch the run ("has no transport metadata in
+// its sidecar") or `documentIngest_v2` manufacturing a `storage_error` on an already-enqueued run.
+//
+// THE INTERLEAVE, in the order the ticket names it: `mergeTaskMeta` reads its base (nothing on disk
+// yet — `clara.finalize_document_intake` commits the row BEFORE `lib/intake.mjs:439` writes the
+// sidecar), the intake path's write lands, and the merge renames its stale body over it.
+//
+// MEASURED AGAINST THE PRE-FIX CODE, both launch orders, both platforms, 100 rounds each: at the
+// natural body size 95 and 99 of 100 rounds lost the storage key on this Windows rig, 97 and 99 of
+// 100 under WSL (the runner's platform). With the widener below, 100 of 100 on both. That is why
+// this cell is ONE round per arm and not a loop — the interleave is reproduced by construction.
+// `p1044.rounds` below keeps the loop, at the natural size, for the same property.
+//
+// THE WIDENER IS A CLOCK, NOT THE DEFECT. `engine_config` is a jsonb column `documentTaskSnapshot`
+// carries verbatim onto the merge's patch; a megabyte of it makes the merge's own temp write long
+// enough that the intake's short write always lands inside the merge's read-to-rename window. The
+// window exists at any size — the 95-of-100 figure above is the natural one — and the widener only
+// removes the need for a sleep.
+const WIDENER_BYTES = 1024 * 1024;
+
+/** `reconcilerShapedTask`, widened: the same DB-row patch with a megabyte of `engineConfig`. */
+const widenedRow = (taskId, n) => ({
+  ...reconcilerShapedTask(taskId, n),
+  engineConfig: { model: "prebuilt-layout", widener: "x".repeat(WIDENER_BYTES) },
+});
+
+const TRANSPORT_KEYS = ["storageKey", "sha256", "mime", "format"];
+
+test("p1044.lost_update: a merge cannot drop the transport fields a concurrent writer put on disk", async (t) => {
+  await ownSpool(t);
+
+  // Both launch orders, because the defect does not care which call was made first: what decides
+  // it is which RENAME lands last, and before the fix that was whichever body took longer to write.
+  for (const [label, mergeFirst] of [["merge first", true], ["intake write first", false]]) {
+    const taskId = randomUUID();
+    const intake = intakeShapedTask(taskId, 1);
+    const startMerge = () => mergeTaskMeta(taskId, widenedRow(taskId, 1));
+    const startWrite = () => writeTaskMeta(taskId, intake);
+    await Promise.all(mergeFirst ? [startMerge(), startWrite()] : [startWrite(), startMerge()]);
+
+    const onDisk = await readTaskMeta(taskId);
+    for (const key of TRANSPORT_KEYS) {
+      assert.equal(onDisk?.[key], intake[key],
+        `${label}: the sidecar lost '${key}'. A merge may only change the keys it was given — `
+        + `the DB task row carries no transport, and nothing can put it back (the runtime holds no `
+        + `SELECT on clara.documents), so this sidecar can never be dispatched (#1044)`);
+    }
+  }
+
+  // NON-VACUITY. Without this arm the cell would pass against a `mergeTaskMeta` that wrote nothing
+  // at all: the two arms above end with the intake's own body on disk. Here the merge is the LAST
+  // writer, so its write is the one on disk, and it must carry BOTH what it was given and what it
+  // was not.
+  const taskId = randomUUID();
+  const intake = intakeShapedTask(taskId, 1);
+  await writeTaskMeta(taskId, intake);
+  await mergeTaskMeta(taskId, reconcilerShapedTask(taskId, 2));
+  const merged = await readTaskMeta(taskId);
+  assert.equal(merged.writer, "reconciler", "the merge really did write — otherwise the cell proves nothing");
+  assert.equal(merged.n, 2, "…with its OWN values for the keys it was given");
+  for (const key of TRANSPORT_KEYS) {
+    assert.equal(merged[key], intake[key], `…and it kept '${key}', a key it was not given`);
+  }
+});
+
+test("p1044.sweep: the REAL sweep's merge keeps the transport a concurrent intake write put on disk", async (t) => {
+  await ownSpool(t);
+  const taskId = randomUUID();
+  const intake = intakeShapedTask(taskId, 1);
+  // The `clara.document_processing_tasks` row `documentTaskSnapshot` selects — task columns only,
+  // no transport (the runtime holds no SELECT on clara.documents, PIN-AB-6), widened as above.
+  const row = {
+    task_id: taskId,
+    document_id: intake.documentId,
+    firm_id: intake.firmId,
+    engine_id: intake.engineId,
+    engine_config: { model: "prebuilt-layout", widener: "x".repeat(WIDENER_BYTES) },
+    version_n: 1,
+    lane: "ocr",
+    status: "queued",
+    run_id: null,
+    created_at: new Date(Date.now() - 60_000).toISOString(),
+  };
+  const dispatched = [];
+  let intakeWrite = null;
+  const client = {
+    async query(sql) {
+      if (/select t\.id as task_id/.test(sql)) {
+        // THE INTAKE'S WRITE, launched at the one moment the ticket names: the DB row exists (this
+        // snapshot IS it, and `clara.finalize_document_intake` committed it before the intake path
+        // got here), and `lib/intake.mjs:439` has not written the sidecar yet. It lands while the
+        // sweep's own merge is between its read and its rename.
+        if (!intakeWrite) intakeWrite = writeTaskMeta(taskId, intake);
+        return { rows: [row], rowCount: 1 };
+      }
+      if (/count\(\*\)::int as running/.test(sql)) return { rows: [], rowCount: 0 };
+      throw new Error(`p1044.sweep drives no other statement: ${sql.slice(0, 60)}`);
+    },
+  };
+  const deps = {
+    graceMs: 0,
+    enqueueDocumentIngest: async (id) => (dispatched.push(id), { runId: "run-1044" }),
+    getRun: refuse("a run probe — this task carries no run id"),
+  };
+
+  const first = await reconcileDocumentTasks(client, deps);
+  await intakeWrite;
+  // Whether THIS sweep dispatches is a genuine coin toss and is not asserted: a merge that ran
+  // entirely before the intake's write legitimately saw no transport, and refusing to dispatch is
+  // then the correct fail-closed answer (0051 §2). What must never happen is the sidecar LOSING
+  // what the intake wrote, because nothing can put it back.
+  const afterSweep = await readTaskMeta(taskId);
+  for (const key of TRANSPORT_KEYS) {
+    assert.equal(afterSweep?.[key], intake[key],
+      `the sweep's merge dropped '${key}' (documentTransportless=${first.documentTransportless}) — `
+      + `this task can now never be dispatched (#1044)`);
+  }
+
+  // …and because it survived, the NEXT sweep dispatches it. Before the fix the key was gone for
+  // good, so this second sweep refused too: documentTransportless=1, documentReenqueued=0.
+  const second = await reconcileDocumentTasks(client, deps);
+  assert.equal(second.documentTransportless, 0, "the second sweep must not refuse a task whose transport is on disk");
+  assert.equal(second.documentReenqueued, 1, "…it dispatches it");
+  assert.ok(dispatched.includes(taskId), `…through the ingest enqueue (dispatched=${JSON.stringify(dispatched)})`);
+});
+
+// The two cells above reproduce the interleave by construction, with a widened body. This one keeps
+// the loop `p1043.collide` uses, at the size production actually writes: the window is not an
+// artefact of the widener, and 95 of 100 rounds at THIS size lost the storage key before the fix on
+// this rig (97 of 100 under WSL). It also holds the two things a lock is easy to get wrong: a
+// merge that lands on a settled body still merges, and a settled queue leaves no entry behind.
+const LOST_UPDATE_ROUNDS = 200;
+
+test(`p1044.rounds: ${LOST_UPDATE_ROUNDS} rounds at the NATURAL body size keep every transport field`, async (t) => {
+  await ownSpool(t);
+  const lost = [];
+  const unmerged = [];
+  for (let i = 1; i <= LOST_UPDATE_ROUNDS; i += 1) {
+    const taskId = randomUUID();
+    const intake = intakeShapedTask(taskId, i);
+    const startMerge = () => mergeTaskMeta(taskId, reconcilerShapedTask(taskId, i));
+    const startWrite = () => writeTaskMeta(taskId, intake);
+    // Both launch orders, alternating, because the defect never cared which call was made first.
+    await Promise.all(i % 2 === 1 ? [startMerge(), startWrite()] : [startWrite(), startMerge()]);
+
+    const raced = await readTaskMeta(taskId);
+    const missing = TRANSPORT_KEYS.filter((key) => raced?.[key] !== intake[key]);
+    if (missing.length > 0) lost.push({ round: i, missing });
+
+    // NON-VACUITY, per round: a `mergeTaskMeta` that wrote nothing at all would pass every
+    // assertion above, because the intake's own body is a legal outcome of the race. A merge over
+    // the SETTLED body must land, and must keep the keys it was not given.
+    const settled = await mergeTaskMeta(taskId, reconcilerShapedTask(taskId, -i));
+    const wrong = TRANSPORT_KEYS.filter((key) => settled[key] !== intake[key]);
+    if (settled.n !== -i || settled.writer !== "reconciler" || wrong.length > 0) {
+      unmerged.push({ round: i, n: settled.n, writer: settled.writer, wrong });
+    }
+  }
+
+  assert.deepEqual(lost, [],
+    `a merge may only change the keys it was given: ${lost.length} of ${LOST_UPDATE_ROUNDS} rounds lost a `
+    + `transport field (${JSON.stringify(lost.slice(0, 3))}). The DB task row carries none of them and `
+    + `nothing can put them back, so each one is a document that can never be dispatched (#1044)`);
+  assert.deepEqual(unmerged, [],
+    `…and the merge still MERGES: ${unmerged.length} rounds came back without the patch or without the `
+    + `keys the patch did not name (${JSON.stringify(unmerged.slice(0, 3))})`);
+  assert.equal(_sidecarLockCountForTest(), 0,
+    `every queue must be collected when it drains — ${_sidecarLockCountForTest()} left after `
+    + `${LOST_UPDATE_ROUNDS} distinct sidecars, and a runtime mints a new task id for every document `
+    + `it ever ingests`);
+});
+
+// ONE PATH, NOT THREE READS OF THE ENVIRONMENT (review round, ADV-L06-05). `mergeTaskMeta`'s own
+// header says the lock's key and the write's target are "the same string by construction, never
+// two reads of `CLARA_SPOOL_DIR` that a test could change in between" — and then read through
+// `readTaskMeta(id)`, which computes `taskMetaPath(id)` a THIRD time. The lock is taken and the
+// merge's turn runs in a later microtask, so anything that repoints the spool between the call and
+// that turn made the merge read one directory and write another: a lost update with the same
+// consequence #1044 exists to prevent, through the one door the header claimed was closed.
+test("p1044.one_path: a merge reads the sidecar at the path it locked, not at whatever the environment says later", async (t) => {
+  const dirA = await ownSpool(t);
+  const dirB = await mkdtemp(join(root, "spool-elsewhere-"));
+  const taskId = randomUUID();
+  const intake = intakeShapedTask(taskId, 1);
+  await writeTaskMeta(taskId, intake);
+
+  // Synchronous, so it lands before the locked turn's own read — no sleep and no race.
+  const merging = mergeTaskMeta(taskId, reconcilerShapedTask(taskId, 1));
+  process.env.CLARA_SPOOL_DIR = dirB;
+  const merged = await merging;
+  process.env.CLARA_SPOOL_DIR = dirA;
+
+  const missing = TRANSPORT_KEYS.filter((key) => merged?.[key] !== intake[key]);
+  assert.deepEqual(missing, [],
+    `the merge answered without ${JSON.stringify(missing)} — it read an EMPTY base out of ${dirB} and wrote the `
+    + `result back to the path it locked in ${dirA}, so the transport fields on disk were dropped by the merge `
+    + "that was supposed to preserve them (#1044)");
+  const onDisk = await readTaskMeta(taskId);
+  assert.deepEqual(TRANSPORT_KEYS.filter((key) => onDisk?.[key] !== intake[key]), [],
+    "…and the body left on disk at the locked path carries them too");
+  assert.equal(onDisk.n, 1, "…and the patch landed");
+});
+
+// THE DELETE IS A MUTATION TOO (review round, ADV-L06-01). `withSidecarLock` closed the merge
+// against every WRITE of the same sidecar and left the one remaining mutator — `removeTaskMeta` —
+// outside it, so a terminal cleanup's delete could land between a merge's read and its rename and
+// be undone by it. THE ORDERING IS THE PRODUCTION ONE, not a contrivance:
+// `reconciler-documents.mjs` snapshots the rows whose status is still queued/held_egress/running
+// and then merges each onto its own sidecar in a sequential loop, while
+// `documentIngest.behavior_v2.mjs` calls `services.removeTaskMeta` the moment a task goes terminal
+// — so the delete routinely lands inside a LATER task's merge window. The orphan it leaves is
+// permanent: `SPOOL_REAPABLE` matches `intake-*` only, so no TTL sweep ever collects a
+// `task-<id>.json`, and the reconciler's degraded arm (`listTaskMetas()` when the document SELECT
+// is unavailable) would read it back as a live queued task.
+const DELETE_ROUNDS = 50;
+
+test(`p1044.delete: ${DELETE_ROUNDS} rounds of a terminal cleanup against an in-flight merge leave the sidecar GONE`, async (t) => {
+  await ownSpool(t);
+  const resurrected = [];
+  for (let i = 1; i <= DELETE_ROUNDS; i += 1) {
+    const taskId = randomUUID();
+    await writeTaskMeta(taskId, intakeShapedTask(taskId, i));
+    // The widener is the same instrument the lost-update cells use: it lengthens the merge's own
+    // temp write so the delete lands INSIDE the window rather than needing a sleep to get there.
+    const merge = mergeTaskMeta(taskId, widenedRow(taskId, i));
+    const cleanup = removeTaskMeta(taskId);
+    await Promise.all([merge, cleanup]);
+    if (await readTaskMeta(taskId) !== null) resurrected.push(i);
+  }
+  assert.deepEqual(resurrected, [],
+    `a delete that has been ordered must stay done: ${resurrected.length} of ${DELETE_ROUNDS} rounds came back `
+    + `with the sidecar the terminal cleanup deleted (rounds ${JSON.stringify(resurrected.slice(0, 5))}). Nothing `
+    + `ever collects it — SPOOL_REAPABLE is intake-only — and the reconciler's degraded arm reads a stray `
+    + `task-<id>.json as a live queued task, so each one is a document that can be dispatched again (#1044)`);
+  assert.equal(_sidecarLockCountForTest(), 0,
+    `…and the delete's own turn is collected like every other: ${_sidecarLockCountForTest()} queue(s) left after `
+    + `${DELETE_ROUNDS} distinct sidecars`);
 });
 
 // ---------------------------------------------------------------------------

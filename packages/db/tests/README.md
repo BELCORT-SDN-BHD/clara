@@ -196,6 +196,90 @@ declarations, the drill floor against the drill's own cell count, and the action
 them; `partition-total` refuses a missing declaration on the PR itself, days before anyone
 dispatches the legs.
 
+**A declared `#!cells-floor:` is itself checked against the corpus on disk (#1126).** The bounds
+above prove a RUN met its declared numbers; they never proved the declared numbers were still
+correct, so a corpus retarget or a census widening could move the true cell count without moving
+the declared one — the `-ge` floor check stays satisfied either way, and that happened twice,
+unnoticed for a stretch. Every file in this corpus is a flat battery of top-level `test(...)`
+calls (no file nests a subtest inside another), so the true cell count is re-derivable from disk
+the same way the gate chain already is: `p1126.floor.corpus` and `p1126.floor.roster` in
+`ci-frontier-leg-contract.test.mjs` sum top-level cell registrations across each slice list's own
+files (and the roster's) and assert the sum equals the list's declared `#!cells-floor:` — on every
+PR, with no database and no dispatch run needed. Raise or lower the declared number in the SAME PR
+that changes the corpus; this cell is what now refuses the PR that forgets to.
+
+> **What counts as one cell here, and the two shapes this corpus does not admit.** The leg's own
+> number is `CELLS=$((PASS + SKIP))` over the TAP summary, so the derivation counts `^test(` **and
+> `^test.skip(`** — quarantining a cell with `test.skip` is exactly the case where the leg's count
+> does not move, and a derivation that missed it would force the declared floor DOWN by one for a
+> cell that is still there. Two shapes are refused outright by `assertCountableCorpus`, because a
+> declared floor over them would stop meaning what it says: a registration at **non-zero indent**
+> (inside a loop, a helper or a `describe` — the leg runs and counts it, a top-level scan does not),
+> and **`test.todo(`** (measured on node 22: `# tests 3 / # pass 1 / # skipped 1 / # todo 1`, so a
+> todo cell lands in neither `# pass` nor `# skipped` and is bounded by neither `#!cells-floor:` nor
+> `#!skips-max:`). `p1126.floor.derivation` pins the counting rule against a known-good literal.
+>
+> **`#!skips-max:` stays hand-declared, deliberately.** Only the cell FLOOR is re-derived. A skip
+> count is not a property of the corpus on disk: it is how many of those cells stand down at ONE
+> frontier, which depends on which preintegration gates the frontier grants, so nothing static can
+> compute it. It remains a number someone measured and typed, bounded at run time by the leg and by
+> nothing else. Deriving it would need a run at each frontier; that half is a recorded residual of
+> #1126, not an oversight.
+
+**Every measured run in the leg also writes its own counts to the dispatch run's summary
+(#1126).** The bounds above prove a run met its declared numbers; before #1126 they printed the
+actual pass/fail/skip/cells nowhere but the step's raw log, so noticing a leg whose measured
+count drifted from its declared floor took a human reading that log. `db-slice-frontiers` is a
+matrix of separate jobs, and GitHub groups every job's `$GITHUB_STEP_SUMMARY` writes onto the
+SAME workflow run's summary page (in job-completion order), so each of the leg's three measured
+steps — the slice list, the cross-slice contract roster, the isolated deploy drill — now appends
+a small Markdown table there: pass, fail, skip, cells and the declared floor/skip-max it was
+held to. A dispatch run's summary page therefore carries every leg's real numbers next to what
+they were checked against, with no raw log to open.
+
+**`ci.yml` now WIRES the weekly schedule's own failure to a visible notification (#1127).** The
+bounds and the step summary above both prove something about a RUN that already happened; neither
+one tells anyone the schedule went red at all unless they open the Actions tab.
+This wave's own evidence is that nobody reliably did: a test-corpus retarget and a census
+widening each moved a number `db-slice-frontiers` depends on, and neither was caught for a
+stretch of time. `.github/workflows/ci.yml`'s `notify-schedule-failure` job depends on `ci` — the
+terminal meta-gate above, never an individual leg directly, so it can never disagree with what the
+gate already decided — and fires only when `github.event_name == 'schedule'` and `needs.ci.result
+!= 'success'`; a `workflow_dispatch` run is excluded because a human who just triggered it is
+already watching, and a `pull_request`/`push` failure is already visible to its author on the PR.
+No Slack, email or webhook channel exists anywhere in this repo's `.github/` today, so the job
+posts a `gh issue comment` onto a standing CI-health issue instead, carrying the run's own result
+and a link back to it (`github.run_id`) rather than a bare "it failed." The job declares its own
+job-level `permissions: issues: write`; the workflow itself still carries no top-level
+`permissions:` block, so every other job keeps its present (lesser) default token scope.
+`ci-schedule-notify.test.mjs` holds the job's existence, its `needs`/`if` wiring, its
+least-privilege grant, and that the terminal `ci` job's own `needs` list stays exactly the ten
+legs it already had — this ticket adds a job that reacts to `ci`, not a new leg `ci` waits on.
+
+> **The channel is RESOLVED, never a number pinned in the workflow.** The first cut hardcoded
+> `gh issue comment 1127`; #1127 is the ticket that asked for the notification, and the wave that
+> delivers it closes the ticket — so the standing channel for every future weekly red would have
+> been a closed issue nobody has reason to reopen, which is the ticket's own failure mode
+> re-created by its own fix. The job looks up the OPEN issue whose title is exactly
+> `CI health: the weekly scheduled sweep` and opens one when none exists, so the channel can
+> neither be closed out from under it nor need a human to create it first.
+>
+> **What is HELD, and what the first scheduled run is still what proves.** Held by cells: the job's
+> wiring, its grant, that it pins no issue number, that it resolves by title and creates when it
+> finds nothing, and that the failure reaches `$GITHUB_STEP_SUMMARY` — which needs no token scope at
+> all — BEFORE any API call, so a refused grant cannot take the notice down with it. Driven, not
+> only read: the resolution command itself was run against this repository (`gh issue list --state
+> open --search 'in:title "…"'` returns nothing for the standing title and returns #1131 for an
+> existing issue's exact title), and the step's own shell was executed end to end against a stubbed
+> `gh` in both branches. **NOT driven: the live API write.** The repository's default workflow
+> permission is `read` (`gh api repos/:owner/:repo/actions/permissions/workflow` →
+> `"default_workflow_permissions":"read"`), which a job-level `permissions:` block is documented to
+> widen ("Anyone with write access to a repository can modify the permissions granted to the
+> `GITHUB_TOKEN`, adding or removing access as required, by editing the `permissions` key in the
+> workflow file" — docs.github.com, *Managing GitHub Actions settings for a repository*). The first
+> scheduled run after this merges is what proves a comment actually posts, and belongs in the
+> release evidence.
+
 **A fixture that runs at two frontiers is not a gate.** A gate lets a cell stand down; a
 FRONTIER-COMPAT fixture keeps the cell running on both sides of the migration that changed a
 door's grammar. `fa-authority-sign-compat.mjs` holds both of the x41 rig's:

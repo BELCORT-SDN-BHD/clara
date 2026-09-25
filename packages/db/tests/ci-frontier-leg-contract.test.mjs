@@ -24,7 +24,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -252,4 +252,195 @@ test("p1041.total.declared the PR-time totality gate refuses a missing declarati
       `.github/actions/partition-total does not check for '${directive}' — the frontier legs are dispatch-only, `
       + "so a declaration missing from a list or from the roster would not be noticed until someone dispatched them");
   }
+});
+
+// #1126 — a DECLARED floor is a number someone typed into a comment; nothing on this branch
+// checked it against a MEASURED source of truth, so a corpus retarget or a census widening could
+// move the true cell count without moving the declared one, and the `-ge` floor check in
+// `.github/actions/frontier-leg` (never `=`) stays satisfied either way. That happened twice,
+// unnoticed for a stretch, per this ticket's own Agent Brief (follow-up 2 of
+// wave4-lane07-ticket1041.md, originating ticket #1041).
+//
+// THE MEASURED SOURCE OF TRUTH IS ALREADY ESTABLISHED, by `p1041.drill.floor` above: every file in
+// this corpus is a FLAT battery of top-level `test(...)` calls (no file nests a subtest inside
+// another), so `#!drill-cells-floor:` already equals a static count of `^test\(` lines in the
+// drill file it bounds, no database and no test run required. The SAME re-derivation, summed
+// across a whole list's files rather than one drill file, is exactly what the Agent Brief asks
+// for ("the same way the gate chain is already derived rather than hand-copied" — `#!cells-floor:`
+// is now derived the same way `scripts/print-gate-chain.mjs` derives the gate chain: from what is
+// literally on disk, not from a number someone typed and never rechecked).
+
+function listedFiles(text) {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+}
+
+/**
+ * ONE CELL REGISTRATION, counted the way the LEG counts it (review round, ADV-L06-06).
+ *
+ * The leg's own number is `CELLS=$((PASS + SKIP))` over the TAP summary
+ * (`.github/actions/frontier-leg/action.yml`, `# pass` + `# skipped`), so a SKIPPED cell is one of
+ * the cells the floor bounds. The first cut of this derivation matched `/^test\(/gm` alone, which
+ * is NOT that number: converting an existing cell to `test.skip(` — the ordinary way to quarantine
+ * one — left the leg's `CELLS` where it was and dropped this count by one, so the corpus cell went
+ * red until somebody LOWERED `#!cells-floor:`, and the `-ge` check silently lost a unit of the
+ * protection the ticket exists to give it.
+ *
+ * `test.todo(` is deliberately NOT counted and is refused outright by `assertCountableCorpus`
+ * below: MEASURED on node 22 (`test("a"); test.skip("b"); test.todo("c")` → `# tests 3 / # pass 1
+ * / # skipped 1 / # todo 1`), a todo cell lands in NEITHER `# pass` NOR `# skipped`, so the leg's
+ * `CELLS` does not count it and no bound in the corpus would.
+ */
+const CELL_REGISTRATION = /^test(?:\.skip)?\(/gm;
+
+function countCells(text) {
+  return (text.match(CELL_REGISTRATION) ?? []).length;
+}
+
+/** The two shapes this derivation cannot count, refused where they would be written rather than
+ *  assumed away: a registration at non-zero indent (inside a loop, a helper or a `describe`) is a
+ *  cell the leg runs and a `^test` count misses, and a `test.todo(` is a cell neither the leg's
+ *  `CELLS` nor this count includes. Both are legal node:test; neither is permitted in THIS corpus,
+ *  because a declared floor over it would stop meaning what it says. */
+function assertCountableCorpus(file, text) {
+  const indented = /^[ \t]+test(?:\.[a-z]+)?\(/m.exec(text);
+  assert.equal(indented, null,
+    `${file} registers a cell at non-zero indent (${JSON.stringify(indented?.[0])}) — the frontier leg RUNS it and `
+    + "counts it in `# pass`/`# skipped`, but a declared `#!cells-floor:` is derived here from top-level "
+    + "registrations alone, so the two numbers would stop meaning the same thing; keep every cell in this corpus "
+    + "a flat top-level `test(` (#1126)");
+  const todo = /^test\.todo\(/m.exec(text);
+  assert.equal(todo, null,
+    `${file} registers a \`test.todo(\` cell — node:test reports it in \`# todo\`, which the frontier leg's own `
+    + "`CELLS=$((PASS + SKIP))` does not count, so it is bounded by neither `#!cells-floor:` nor `#!skips-max:`; "
+    + "quarantine with `test.skip(`, which both this count and the leg's own do include (#1126)");
+}
+
+function staticCellCount(file) {
+  const text = readFileSync(path.join(TESTS_DIR, file), "utf8");
+  assertCountableCorpus(file, text);
+  return countCells(text);
+}
+
+test("p1126.floor.derivation the static cell count is the leg's own CELLS rule: a quarantined cell still counts", () => {
+  // A KNOWN-GOOD LITERAL, not a re-computation of what the corpus happens to hold: three top-level
+  // registrations of which one is skipped, one nested registration, one commented-out line.
+  const fixture = [
+    'import { test } from "node:test";',
+    'test("plain", () => {});',
+    'test.skip("quarantined — still a cell the leg runs and counts in # skipped", () => {});',
+    '// test("commented out", () => {});',
+    "function helper() {",
+    '  test("nested — not a top-level registration", () => {});',
+    "}",
+    "",
+  ].join("\n");
+  assert.equal(countCells(fixture), 2,
+    "a `test.skip(` cell is one of the cells `CELLS=$((PASS + SKIP))` counts, so the derivation must count it too; "
+    + "a commented-out or nested registration is not a top-level one (#1126)");
+});
+
+test("p1126.floor.corpus each slice list's declared #!cells-floor: equals the static test( count summed across its own listed files", () => {
+  for (const slice of SLICES) {
+    const listPath = path.join(TESTS_DIR, "split-lists", `test-list-${slice}.txt`);
+    const text = readFileSync(listPath, "utf8");
+    const floor = /^#!cells-floor:\s*(\d+)\s*$/m.exec(text);
+    assert.ok(floor, `test-list-${slice}.txt declares no '#!cells-floor:'`);
+    const files = listedFiles(text);
+    assert.ok(files.length > 0, `test-list-${slice}.txt lists no files`);
+    let total = 0;
+    for (const f of files) {
+      assert.ok(existsSync(path.join(TESTS_DIR, f)),
+        `test-list-${slice}.txt names a file that does not exist on disk: ${f}`);
+      total += staticCellCount(f);
+    }
+    assert.equal(total, Number(floor[1]),
+      `test-list-${slice}.txt declares a floor of ${floor[1]} while its own listed files carry ${total} top-level `
+      + "test( cell(s) on disk right now — the corpus moved (a cell was added or removed inside a listed file, or "
+      + "a file joined or left the list) without the declared floor moving with it; raise or lower #!cells-floor: "
+      + "in the SAME PR that changes the corpus, never separately (#1126)");
+  }
+});
+
+test("p1126.floor.roster the cross-slice contract roster's declared #!cells-floor: equals the static test( count summed across its own files", () => {
+  const rosterPath = path.join(TESTS_DIR, "split-lists", "test-list-contracts.txt");
+  const text = readFileSync(rosterPath, "utf8");
+  const floor = /^#!cells-floor:\s*(\d+)\s*$/m.exec(text);
+  assert.ok(floor, "test-list-contracts.txt declares no '#!cells-floor:'");
+  const files = listedFiles(text);
+  assert.ok(files.length > 0, "test-list-contracts.txt lists no files");
+  let total = 0;
+  for (const f of files) {
+    assert.ok(existsSync(path.join(TESTS_DIR, f)),
+      `test-list-contracts.txt names a file that does not exist on disk: ${f}`);
+    total += staticCellCount(f);
+  }
+  assert.equal(total, Number(floor[1]),
+    `test-list-contracts.txt declares a floor of ${floor[1]} while its own listed files carry ${total} top-level `
+    + `test( cell(s) on disk right now (#1126)`);
+});
+
+// #1126 AC1 — the run's own measured pass/fail/skip/cells, recorded where a human can see them
+// without reading a raw log. The floor/skip-bound checks above prove the run met its DECLARED
+// numbers; they print nothing anywhere a dispatch run's own SUMMARY PAGE shows it. Each matrix
+// leg is its own job, and GitHub groups every job's $GITHUB_STEP_SUMMARY writes onto the SAME
+// run's summary page ("summaries from multiple jobs are ordered by job completion time" —
+// docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands), so a leg that
+// writes its counts there makes them visible on the dispatch run itself, not only in its raw log.
+
+/** The `{ ... } >> "$GITHUB_STEP_SUMMARY"` group inside one step's `run:` block, so a cell can
+ *  check exactly what that write contains rather than whether the six-letter names it needs
+ *  happen to appear anywhere else in the step (every one of PASS/FAIL/SKIP/CELLS already does,
+ *  for the floor check above it — a loose match would pass before any write existed at all).
+ *
+ *  ANCHORED TO THE GROUP'S OWN TWO LINES, not to any `{`/`}` pair in the step (review round,
+ *  ADV-L06-02). The first cut was `/\{([\s\S]*?)\}\s*>>\s*"\$GITHUB_STEP_SUMMARY"/`, whose
+ *  FIRST `{` is the one inside the step NAME's own `${{ inputs.slice }}` — so it captured 6350 of
+ *  the slice-list step's 7966 characters, `node --test` invocation and pre-existing `$PASS`/
+ *  `$FLOOR` references included, and the three cells below passed a write that emitted its heading
+ *  and NO COUNT ROWS AT ALL. A group opens on its own line as `{` and closes as
+ *  `} >> "$GITHUB_STEP_SUMMARY"`, so both ends are anchored to a line start here, and
+ *  `assertSummaryWrite` re-checks that every captured line really is an `echo` — the property the
+ *  loose cut lost. */
+function summaryBlock(step) {
+  const m = /\n[ \t]*\{\n([\s\S]*?)\n[ \t]*\} >> "\$GITHUB_STEP_SUMMARY"/.exec(step);
+  return m ? m[1] : null;
+}
+
+/** One step's `$GITHUB_STEP_SUMMARY` write, checked: the group is nothing but `echo` lines (so the
+ *  cut really is the write and not a swathe of the surrounding step), and every name the leg has
+ *  measured by that point reaches it. */
+function assertSummaryWrite(block, names, label) {
+  assert.ok(block,
+    `the ${label} has no \`{ ... } >> "$GITHUB_STEP_SUMMARY"\` block — a dispatch run's summary page carries `
+    + "none of its measured counts, so a stale declared floor is visible only to someone reading raw CI logs "
+    + "(#1126)");
+  for (const line of block.split("\n").map((l) => l.trim()).filter(Boolean)) {
+    assert.match(line, /^echo\b/,
+      `the ${label}'s captured $GITHUB_STEP_SUMMARY group carries a line that is not an echo — the cut is not `
+      + `the write group itself, so what this cell checks is not what the step writes: ${line}`);
+  }
+  for (const v of names) {
+    assert.ok(block.includes(v), `the ${label}'s $GITHUB_STEP_SUMMARY write is missing ${v}`);
+  }
+}
+
+test("p1126.summary.list the slice-list step records its measured pass/fail/skip/cells and its declared floor to $GITHUB_STEP_SUMMARY", () => {
+  const yaml = readFileSync(FRONTIER_ACTION, "utf8");
+  const step = stepBlock(yaml, "Run the ${{ inputs.slice }} test list");
+  assertSummaryWrite(summaryBlock(step), ["$PASS", "$FAIL", "$SKIP", "$CELLS", "$FLOOR", "$SKIPMAX"], "slice-list step");
+});
+
+test("p1126.summary.roster the contract-roster step records its measured pass/fail/skip/cells and its declared floor to $GITHUB_STEP_SUMMARY", () => {
+  const yaml = readFileSync(FRONTIER_ACTION, "utf8");
+  const step = stepBlock(yaml, "Run the cross-slice contract roster at the ${{ inputs.slice }} frontier");
+  assertSummaryWrite(summaryBlock(step), ["$PASS", "$FAIL", "$SKIP", "$CELLS", "$FLOOR", "$SKIPMAX"], "contract-roster step");
+});
+
+test("p1126.summary.drill the isolated-drill step records its measured pass/fail/skip/cells and its declared floor to $GITHUB_STEP_SUMMARY", () => {
+  const yaml = readFileSync(FRONTIER_ACTION, "utf8");
+  const step = stepBlock(yaml, "${{ inputs.slice }} upgrade drill (isolated DB)");
+  assertSummaryWrite(summaryBlock(step), ["$PASS", "$FAIL", "$SKIP", "$CELLS", "$DFLOOR", "$DSKIPMAX"], "isolated-drill step");
 });

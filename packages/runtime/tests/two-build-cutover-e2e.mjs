@@ -1064,6 +1064,76 @@ async function main() {
         + `--target-bundle B carries ${requiredBodies.join(", ")} and clears the rule`,
     );
 
+    // #1131 — THE SAME PROOF, FOR THE CONTRACT RULE. `cliA` above is the CLI's real exit code for a
+    // target missing a REQUIRED BODY. Nothing before this ticket proved the CLI's real exit code for
+    // a target missing a REQUIRED CONTRACT anywhere this drill (or any regular gate) runs — the
+    // Agent Brief's own words: the only place it was ever driven was a hand-run CLI invocation
+    // against a disposable WDK World clone, on nobody's schedule. The isolation mirrors `withRequired`
+    // / `cliA` exactly, the other way round: the roster CARRIES every required BODY (so
+    // `frontier_requires_body` cannot fire — this is `withRequired`'s own roster, unchanged) and
+    // declares NO CONTRACT AT ALL (so the exit is the contract rule's alone) — the honest
+    // self-description of every image built before #1035 existed, which is exactly the target the
+    // contract rules exist to refuse (RELEASE-W2-RUNBOOK.md / RELEASE-W3-RUNBOOK.md, both § RESULTS
+    // step 9: ALLOWED, and it should not have been).
+    const bodyCompleteRoster = [...new Set([...preRuleBodies, ...requiredBodies])];
+    const noContracts = await preflight({
+      query,
+      supported: bodyCompleteRoster,
+      contracts: [],
+      scope: { workIds: [w1.work_id, w2.work_id] },
+    });
+    // THE CONTROL, read from the rule table rather than assumed, the same discipline `requiredBodies`
+    // above already follows: every CONTRACT the applied schema demands at THIS frontier.
+    const requiredContracts = [...new Set(
+      noContracts.frontier.violations.filter((v) => v.requirement === "contract").map((v) => v.contract),
+    )];
+    assert.ok(
+      requiredContracts.length > 0,
+      `control: a database at ${frontierVersion} must carry at least one frontier CONTRACT rule; got ${JSON.stringify(requiredContracts)}`,
+    );
+    assert.ok(
+      requiredContracts.includes("intake_refusal_record_v1"),
+      `control: 0254's contract rule is one of them; got ${JSON.stringify(requiredContracts)}`,
+    );
+    assert.ok(
+      requiredContracts.includes("fa_parked_run_v1"),
+      `control: 0279's contract rule is one of them too; got ${JSON.stringify(requiredContracts)}`,
+    );
+    assert.equal(
+      noContracts.reasons.includes("frontier_requires_body"), false,
+      "…and the body reason is NOT among them — the roster carries every required body (withRequired's own roster)",
+    );
+    assert.ok(
+      noContracts.reasons.includes("frontier_requires_contract"),
+      `…only the contract reason (got ${JSON.stringify(noContracts.reasons)})`,
+    );
+
+    // THE COMMAND ITSELF, the same door as `cliA` (`--supported`) and, deliberately,
+    // `--supported-contracts` OMITTED ENTIRELY rather than passed empty: an operator's image built
+    // before #1035's flag existed is the actual target these two rules exist to stop, and omitting
+    // the flag is what that image looks like from the CLI's own point of view (resolveSupported's
+    // own fallback — an absent `--supported-contracts` reads as "declares none", never as "could not
+    // tell", exactly like a bundle or build-info target that predates the marker).
+    const cliC = await runPreflightCli(["--supported", bodyCompleteRoster.join(",")]);
+    assert.equal(
+      cliC.code, 1,
+      `rollback-preflight --supported <body-complete roster>, no --supported-contracts, must exit 1 (got ${cliC.code})\n${cliC.stdout}\n${cliC.stderr}`,
+    );
+    assert.match(cliC.stderr, /frontier_requires_contract/, "…naming the reason");
+    assert.match(cliC.stderr, /0254_intake_refusal_record/, "…the first contract migration whose rule is in force");
+    assert.match(cliC.stderr, /0279_fa_closed_year_arrears/, "…and the second");
+    for (const contract of requiredContracts) {
+      assert.match(cliC.stderr, new RegExp(contract), `…and ${contract}, the contract the target does not declare`);
+    }
+    // AND NOT THE BODY REASON — the same isolation `cliA`'s own comment states, mirrored: this
+    // roster carries every required body, so if this ever matched, the two rules had stopped being
+    // independent of each other.
+    assert.doesNotMatch(cliC.stderr, /frontier_requires_body/, "…and NOT the body reason — every required body is carried");
+    console.log(
+      `[tb-e2e] preflight CLI: --supported <body-complete roster>, no --supported-contracts, exits ${cliC.code} `
+        + `naming frontier_requires_contract for ${requiredContracts.join(", ")}`,
+    );
+
     // --- STOP B, then the UNBOUND-WORK leg --------------------------------
     // With no engine running, an admitted Work's task never acquires a workflow run — the state
     // nothing counted before #637, and the one a run census cannot see by construction.

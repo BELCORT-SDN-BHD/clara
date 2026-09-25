@@ -193,6 +193,22 @@ runs:
           echo "the ${{ inputs.slice }} run printed no TAP summary (pass='${PASS:-}' fail='${FAIL:-}' skipped='${SKIP:-}')"; exit 1; }
         CELLS=$((PASS + SKIP))
         echo "--- ${{ inputs.slice }}: $PASS pass / $FAIL fail / $SKIP skip = $CELLS cells · declared floor $FLOOR, skips-max $SKIPMAX ---"
+        # (3b-i) RECORD THE MEASURED COUNTS WHERE A HUMAN CAN SEE THEM, WITHOUT READING RAW
+        # LOGS [#1126]. The floor/skip-bound checks above (and 3c-i/4b below) prove the run met
+        # its DECLARED numbers; none of them puts what was actually MEASURED anywhere but a raw
+        # log. GitHub groups every job's $GITHUB_STEP_SUMMARY writes onto the SAME workflow run's
+        # summary page, in job-completion order, so writing the counts here makes every leg's
+        # actual pass/fail/skip/cells visible on the dispatch run itself — the other half of what
+        # a stale declared floor needs to be noticed without a human diffing logs (AC1; AC2, the
+        # declared-floor check itself, is `p1126.floor.corpus`/`p1126.floor.roster` in
+        # ci-frontier-leg-contract.test.mjs, which needs no CI step at all).
+        {
+          echo "### db-slice-frontiers — ${{ inputs.slice }} test list"
+          echo "| pass | fail | skip | cells | declared floor | skips-max |"
+          echo "|---:|---:|---:|---:|---:|---:|"
+          echo "| $PASS | $FAIL | $SKIP | $CELLS | $FLOOR | $SKIPMAX |"
+          echo
+        } >> "$GITHUB_STEP_SUMMARY"
         test "$FAIL" = "0" || { echo "the ${{ inputs.slice }} list is not green"; exit 1; }
         [ "$CELLS" -ge "$FLOOR" ] || {
           echo "CELL FLOOR BREACHED: the ${{ inputs.slice }} list ran $CELLS cells, floor $FLOOR — a cell was DELETED inside a still-listed file"; exit 1; }
@@ -257,6 +273,14 @@ runs:
           echo "the contract roster printed no TAP summary (pass='${PASS:-}' fail='${FAIL:-}' skipped='${SKIP:-}')"; exit 1; }
         CELLS=$((PASS + SKIP))
         echo "--- contracts at the ${{ inputs.slice }} frontier: $PASS pass / $FAIL fail / $SKIP skip = $CELLS cells · declared floor $FLOOR, skips-max $SKIPMAX ---"
+        # Same $GITHUB_STEP_SUMMARY write as step (3b-i) above, for this step's own run. [#1126]
+        {
+          echo "### db-slice-frontiers — ${{ inputs.slice }} cross-slice contract roster"
+          echo "| pass | fail | skip | cells | declared floor | skips-max |"
+          echo "|---:|---:|---:|---:|---:|---:|"
+          echo "| $PASS | $FAIL | $SKIP | $CELLS | $FLOOR | $SKIPMAX |"
+          echo
+        } >> "$GITHUB_STEP_SUMMARY"
         test "$FAIL" = "0" || { echo "a cross-slice contract is RED at the ${{ inputs.slice }} frontier"; exit 1; }
         [ "$CELLS" -ge "$FLOOR" ] || {
           echo "CELL FLOOR BREACHED: the contract roster ran $CELLS cells at the ${{ inputs.slice }} frontier, floor $FLOOR — a contract cell was DELETED"; exit 1; }
@@ -345,6 +369,14 @@ runs:
           echo "the ${{ inputs.slice }} drill printed no TAP summary (pass='${PASS:-}' fail='${FAIL:-}' skipped='${SKIP:-}')"; exit 1; }
         CELLS=$((PASS + SKIP))
         echo "--- ${{ inputs.slice }} drill: $PASS pass / $FAIL fail / $SKIP skip = $CELLS cells · declared floor $DFLOOR, skips-max $DSKIPMAX ---"
+        # Same $GITHUB_STEP_SUMMARY write as step (3b-i) above, for this step's own run. [#1126]
+        {
+          echo "### db-slice-frontiers — ${{ inputs.slice }} isolated upgrade drill"
+          echo "| pass | fail | skip | cells | declared floor | skips-max |"
+          echo "|---:|---:|---:|---:|---:|---:|"
+          echo "| $PASS | $FAIL | $SKIP | $CELLS | $DFLOOR | $DSKIPMAX |"
+          echo
+        } >> "$GITHUB_STEP_SUMMARY"
         test "$FAIL" = "0" || { echo "the ${{ inputs.slice }} drill is not green"; exit 1; }
         [ "$CELLS" -ge "$DFLOOR" ] || {
           echo "DRILL FLOOR BREACHED: the ${{ inputs.slice }} drill ran $CELLS cells, floor $DFLOOR — a cell was DELETED inside the drill"; exit 1; }

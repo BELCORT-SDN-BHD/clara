@@ -44,6 +44,35 @@ Database env for every db command or test (Bash form):
   host contention: retry once (#869).
 - `pnpm typecheck` (~4 min) and `pnpm lint` from the worktree root.
 
+**The durable home for the next paragraph is the repository's own `README.md`, under "Develop"**
+— this plan folder is archived when the wave closes, and a rig note that dies with its wave is how
+this guidance went stale in the first place (#1124, review round). The root README carries the
+symptom and the fix for every wave after this one; what follows is this wave's copy, with the
+evidence that produced it. **Whoever cuts the next wave's RIG.md: point at the README rather than
+re-deriving this.**
+
+A worktree's `node_modules` can go stale relative to `pnpm-lock.yaml` and look exactly like a code
+defect. `node_modules` is installed once when a worktree is set up; if `pnpm-lock.yaml` later gains a
+package (on `main` before your lane's base, or from an earlier ticket on your own branch), your
+worktree does not pick it up by itself. Five wave-4 lanes independently hit and separately diagnosed
+this same gap for `@shadcn/react`, each spending a cycle before finding the same one-line fix
+(`reports/wave4-lane01-ticket945.md`, `wave4-lane02-ticket930.md`, `wave4-lane05-ticket933.md`,
+`wave4-lane06-ticket1031.md`, `wave4-lane07-ticket1041.md`; #1124). The symptom: `pnpm typecheck`
+fails with `Cannot find module '@shadcn/react/message-scroller'`, web unit test files fail with
+`Cannot find package '@shadcn/react'`, and `next build` (so every browser walk) fails with `Module
+not found: Can't resolve '@shadcn/react/...'` — all on code your ticket never touched. **Before you
+treat the first `pnpm typecheck` / `pnpm lint` / build / test failure of a session as a real defect,
+rule this out** by running once from the worktree root:
+`CI=true pnpm install --frozen-lockfile --prefer-offline`. It is side-effect-free when nothing was
+missing (0 packages added, `pnpm-lock.yaml` and `git status` unchanged — the wave-4 evidence, every
+time); when something was missing it installs only that, still touching neither the lockfile nor any
+tracked file. This repo pins `pnpm@10.33.0` (`packageManager` in the root `package.json`), which has
+no `install --dry-run`, so there is no side-effect-free way to check first short of running the
+install itself. (Verified rather than recalled: `pnpm install --help` on the pinned 10.33.0 prints no
+`--dry-run`, and the option landed in
+[pnpm v11.8.0](https://github.com/pnpm/pnpm/releases/tag/v11.8.0), 2026-06-18 — "Added a `--dry-run`
+option to `pnpm install`… writes nothing to disk", pnpm/pnpm#12449.)
+
 Known Windows-only reds you must not "fix" unless your ticket IS that defect: #707 (x56-rest-c shells
 out to grep), the Defender/EICAR skip, no `pg_dump` on PATH (four runtime files), the
 `thread-live-clarify.test.tsx` load flake under the whole-suite run (re-run alone, report both), and
