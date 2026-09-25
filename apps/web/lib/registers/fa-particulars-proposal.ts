@@ -124,10 +124,10 @@ export function readFaParticularsProposal(
  */
 type PendingQuestionRow = { id: string; source_ref: Record<string, unknown> | null };
 
-/** How many of a client's pending questions are read before the asset's own is looked for. A
- *  client parks at most a handful at a time (`clara.open_work_question` admits ONE pending
- *  question per Work), and a bound is what keeps a surface's convenience read from becoming a
- *  page-sized one. */
+/** The `limit` on the server-filtered read — a bound on rows that already match this asset's own
+ *  `source_ref->>asset_id` and `source_ref->>kind` (#1093), not a scan over the client's whole
+ *  pending roster. `clara.open_work_question` admits at most ONE pending question per Work, so
+ *  this bounds a data anomaly rather than the ordinary case, which is 0 or 1 rows. */
 const PENDING_QUESTION_SCAN = 50;
 
 /**
@@ -139,6 +139,16 @@ const PENDING_QUESTION_SCAN = 50;
  * and no question id at all (`lib/firm/needs-you.ts`), and the register's own read says nothing
  * about Work. So the parked question is found by its `source_ref`, under the caller's own
  * firm-scoped policy.
+ *
+ * THE FILTER IS SERVER-SIDE, ON `source_ref->>asset_id` AND `source_ref->>kind` TOGETHER — never
+ * a client-side scan over the client's whole pending roster (#1093 AC1). PostgREST's jsonb-path
+ * filter syntax on a query-string key (`col->>key=eq.value`) is lawful here — measured against a
+ * live database by `p933.read.by_asset`'s own "AND THE NARROWER SERVER-SIDE FORM IS LAWFUL TOO"
+ * cell (`packages/db/tests/fa-particulars-proposal.test.mjs`), which runs the identical predicate
+ * as a raw SQL `where` under the human role. Filtering `kind` ALONGSIDE `asset_id` (#1093 item 2)
+ * closes a narrower gap the asset-id-alone filter would still have: a pending question of some
+ * OTHER kind that happens to carry the same `asset_id` key in an unrelated part of its own
+ * `source_ref` must never be read as this asset's fixed-asset particulars proposal.
  *
  * IT NEVER THROWS, AND THAT IS THE POINT. A proposal is a convenience laid over a form that works
  * without it. A read that fails, a client with nothing parked and a question carrying no block all
@@ -152,7 +162,12 @@ export async function loadAssetParticularsProposal(
   try {
     const rows = await getRows<PendingQuestionRow>("agent_interruptions", {
       select: "id,source_ref",
-      filters: { status: "eq.pending", client_id: `eq.${clientId}` },
+      filters: {
+        status: "eq.pending",
+        client_id: `eq.${clientId}`,
+        "source_ref->>asset_id": `eq.${assetId}`,
+        "source_ref->>kind": "eq.fixed_asset",
+      },
       order: "created_at.desc",
       limit: PENDING_QUESTION_SCAN,
       session,
@@ -163,11 +178,11 @@ export async function loadAssetParticularsProposal(
     // pre-fill that threw would leave a person unable to complete particulars AT ALL, which is a
     // far worse outcome than not seeing a suggestion.
     if (!Array.isArray(rows)) return null;
+    // The server has already narrowed to this asset's own kind and id; this loop is defence in
+    // depth against a MATCHED row whose block itself does not read (a version this build does not
+    // know, a malformed shape) — never a second identity check, which the filter above now owns.
     for (const row of rows) {
-      const ref = row?.source_ref;
-      if (!isObject(ref)) continue;
-      if (ref.asset_id !== assetId) continue;
-      const proposal = readFaParticularsProposal(ref);
+      const proposal = readFaParticularsProposal(row.source_ref);
       if (proposal !== null) return proposal;
     }
     return null;

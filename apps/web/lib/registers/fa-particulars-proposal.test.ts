@@ -127,22 +127,28 @@ test("readFaParticularsProposal: a long description is read WHOLE — the partic
 // `p933.read.by_asset` and `p933.read.firm_walled` drive on a live database.
 // ------------------------------------------------------------------------------------------
 
-test("loadAssetParticularsProposal: reads the client's PENDING work questions and returns the block for this asset", async () => {
-  const { impl, urls } = captureRead([
-    { id: "q-other", source_ref: { kind: "fixed_asset", asset_id: "other", proposal: { ...WIRE, useful_life_months: 120 } } },
-    { id: "q-mine", source_ref: sourceRef() },
-  ]);
+test("loadAssetParticularsProposal: filters source_ref->>asset_id and source_ref->>kind SERVER-SIDE (#1093 AC1) — the query, not a client-side scan, is what proves it is this asset's own", async () => {
+  // The mock returns exactly what a real PostgREST filtered on these two params would: the one row
+  // this asset's own kind-and-id match. A sibling question's block is never even fetched, which is
+  // the point — `p933.read.by_asset`'s own "AND THE NARROWER SERVER-SIDE FORM IS LAWFUL TOO" cell
+  // (packages/db/tests/fa-particulars-proposal.test.mjs) is what proves the estate admits this.
+  const { impl, urls } = captureRead([{ id: "q-mine", source_ref: sourceRef() }]);
   await withMockedFetch(impl, async () => {
     const p = await loadAssetParticularsProposal(fakeSession("tok"), {
       clientId: "c1", assetId: "11111111-1111-4111-8111-111111111111",
     });
     assert.ok(p, "the asset's own parked question is the one that is read");
-    assert.equal(p.useful_life_months, 60, "…and never a sibling question's block");
+    assert.equal(p.useful_life_months, 60);
   });
   assert.equal(urls.length, 1, "one read, not one per row");
   assert.match(urls[0]!, /agent_interruptions/);
   assert.match(urls[0]!, /status=eq\.pending/, "a settled question is not a proposal anybody can still confirm");
   assert.match(urls[0]!, /client_id=eq\.c1/, "scoped to the client the surface is on");
+  assert.match(urls[0]!, /source_ref-%3E%3Easset_id=eq\.11111111-1111-4111-8111-111111111111/,
+    "AC1: the jsonb-path filter on source_ref->>asset_id is sent, replacing the old JS scan over up to 50 rows");
+  assert.match(urls[0]!, /source_ref-%3E%3Ekind=eq\.fixed_asset/,
+    "AC1/#2: kind is filtered ALONGSIDE asset id — a question of a different kind carrying the same "
+    + "asset_id in an unrelated field must not match");
 });
 
 test("loadAssetParticularsProposal: no parked question means no proposal, and a refused read means no proposal either — never a thrown page", async () => {
