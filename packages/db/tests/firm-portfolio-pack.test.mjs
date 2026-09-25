@@ -602,7 +602,7 @@ test("p659.portfolio.catalog — SECURITY INVOKER, STABLE, both GUCs pinned, EXE
   assert.equal(n.rows[0].n, 1, "exactly one pg_proc row — an overload would be a second surface");
 
   const moved = await rootQuery(
-    "select string_agg(format('%s:%s', table_name, privilege_type), ',' order by table_name, privilege_type) as bad "
+    "select string_agg(format('%s:%s', table_name, privilege_type), ',' order by table_name, privilege_type collate \"C\") as bad "
     + "from information_schema.role_table_grants where table_schema = 'clara' "
     + "and grantee = 'clara_authenticated' and table_name in ('accounting_work','operation_receipts','clients') "
     + "and privilege_type <> 'SELECT'");

@@ -449,7 +449,7 @@ test("#960 cell 9 · the enforcing doors are unmoved, and the new surface is exa
 
   // (b) The table's application-role grant matrix.
   const grants = await rootQuery(
-    `select coalesce(string_agg(grantee || ':' || privilege_type, ',' order by grantee, privilege_type), '') as m
+    `select coalesce(string_agg(grantee || ':' || privilege_type, ',' order by grantee, privilege_type collate "C"), '') as m
        from information_schema.role_table_grants
       where table_schema = 'clara' and table_name = 'firm_document_limits'
         and grantee in ('clara_authenticated','clara_runtime','clara_agent_ro',

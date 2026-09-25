@@ -313,7 +313,7 @@ test("p625.preview.no_leak: token_hash is in no key and no value of the answer",
 test("p625.preview.no_leak: clara_authenticated still holds ZERO table privilege on clara.firm_invites -- 0141 §B is untouched", async (t) => {
   if (unready(t)) return;
   const r = await rootQuery(
-    `select coalesce(string_agg(privilege_type, ',' order by privilege_type), '') as privs
+    `select coalesce(string_agg(privilege_type, ',' order by privilege_type collate "C"), '') as privs
        from information_schema.role_table_grants
       where table_schema = 'clara' and table_name = 'firm_invites' and grantee = 'clara_authenticated'`,
   );
