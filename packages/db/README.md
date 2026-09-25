@@ -7407,10 +7407,12 @@ supported redo mode; post-image sha
 
 ## 0341 — the Work card names how many advances a staff expense claim discharges (#1069, riders sweep wave, lane 03)
 
-`0341_work_claim_allocation_count.sql` recuts exactly one body, `clara.get_work_claim_origin(uuid)`,
-at its 0221 pre-image byte for byte plus one new projected key, `allocation_count`. It creates no
-relation, drops nothing, grants nothing and mints no new name, so it carries no `rig-meta.mjs`
-cohort; its frontier is the stem `work_claim_allocation_count$` and its sweep escape hatch is
+`0341_work_claim_allocation_count.sql` recuts three bodies — `clara.get_work_claim_origin(uuid)` at
+its 0221 pre-image, `clara.list_accounting_work(...)` at its 0267 pre-image and
+`clara.get_accounting_work_row(uuid)` at its 0266 pre-image — each byte for byte plus one new
+projected key, `allocation_count` (the fix round below says why the two list-surface bodies joined
+the file). It creates no relation, drops nothing, grants nothing and mints no new name, so it
+carries no `rig-meta.mjs` cohort; its frontier is the stem `work_claim_allocation_count$` and its sweep escape hatch is
 `tests/work-claim-allocation-count-preintegration-gate.mjs`
 (`CLARA_ALLOW_MISSING_WORK_CLAIM_ALLOCATION_COUNT=1`), last in the gate chain, in migration order.
 
@@ -7443,6 +7445,34 @@ This is a new pattern in this migration family — earlier tickets in this lane 
 basis` directly rather than the admission door — introduced here because `allocation_count`'s
 correctness is a property of ADMITTED rows, not of the validator alone.
 
+**Fix round (review finding L03-SPEC-01): the LIST surface, which is what the ticket asked for.**
+The first cut projected `allocation_count` on `clara.get_work_claim_origin` alone and rendered it on
+the Work DETAIL view. #1069's AC2 is "the Work LIST card renders that count when it is greater than
+1", and its stated value is giving a reviewer that information *without opening the claim* — which a
+detail-view line cannot deliver. The Work list renders from `clara.list_accounting_work`'s own
+projection (0266 put `claim_id`/`claimant_label` there for exactly this reason, deliberately without
+a second per-row call to the detail read), so the count belongs there, and on
+`clara.get_accounting_work_row` beside it: 0266's own comment calls that door "ONE Work in the SAME
+projection clara.list_accounting_work emits", `tests/work-list.test.mjs`'s wl.13 asserts it, and
+`apps/web/lib/work/work-list.ts` types both doors' answers as one `WorkListRow`, so widening the
+list alone would have made all three false at once and left a deep-linked claim silently without its
+count.
+
+Both list doors are SECURITY INVOKER (the detail read is DEFINER), so the new subquery is read by
+the signed-in role rather than by a definer. That is safe and deliberate:
+`clara.staff_expense_claim_allocations` is FORCE-RLS, `SELECT` is granted to `clara_authenticated`
+alone, and its one read policy is `p_sec_allocations_read … for select to clara_authenticated using
+(firm_id = clara.jwt_firm())` (0301, re-measured on the lane rig before the file was written) — so a
+caller can only ever count allocations of their own firm's claims, and the row the count hangs off
+is already firm-scoped by `clara.accounting_work`'s own RLS. Tail T.2f/T.2g DRIVE both list doors
+**as `clara_authenticated`** under the probe's faked JWT (`set_config('role', …)` inside the same
+rolled-back sub-transaction), so the count is proved through RLS rather than around it: 0 for the
+reimbursement, 1 for the single-advance claim, 2 for the two-advance one on the list page, the same
+2 on the addressed row, and the `allocation_count` key present on every row of the page. Tail
+T.1g/T.1h additionally pin both doors' owner, INVOKER posture, `search_path`, `plan_cache_mode`,
+PUBLIC-revoked/`clara_authenticated`-only ACL, this file's marker, the `{rows, next_cursor,
+truncated}` envelope and that each body reads the register **exactly once**.
+
 **What this file does not touch, and pins.** `clara._claim_allocations` (the normaliser whose
 single-advance branch is why a legacy claim's row exists at all) and
 `clara.admit_staff_expense_claim_work` (SECTION 8a, the writer of every row this count reads) —
@@ -7458,7 +7488,12 @@ advances}}"`, `data-testid="work-claim-allocation-count"`) beside the existing c
 line only when `allocation_count > 1` — a single-advance claim's card is byte-identical to today's.
 `apps/web/e2e/staff-expense-claim-mock.mjs`'s `get_work_claim_origin` handler was widened the same
 way, for the same reason 0266's own header gives for restating a mock: an inaccurate mock is a
-silent hole a real regression could hide in.
+silent hole a real regression could hide in. The fix round adds the LIST half:
+`apps/web/lib/work/work-list.ts`'s `WorkListRow` gains `allocation_count: number | null` (null for a
+Work that is not a claim, the same honest absence `claim_id` already carries), and
+`apps/web/components/work/accounting-work-list.tsx`'s `workRowClaimLabel` names the count on the
+claim label it already renders on every row — again only when it is greater than 1, so a
+single-advance claim's row is byte-identical to today's.
 
 **Redo (#957) and the first-apply branch.** The single statement is a `create or replace function`
 and the prestate detects its own redo by the marker `#1069 (0341` in the live door. Both branches
@@ -7467,3 +7502,18 @@ TRUE first apply ran through `pnpm db:migrate` (`#1069 prestate: clean (FIRST ap
 three DRIVEN shapes all green), and `CLARA_MIGRATION_REDO=0341_work_claim_allocation_count`
 re-applied it over its own post-image (`#1069 prestate: clean (REDO apply)`, same tail green
 again), post-image sha `f7d1b9944349da60a0a8e9e8f7fd2418ace8fc2b08084cee0009578b280a99e2`.
+
+The fix round then edited this same unmerged file and re-applied it the supported way,
+`CLARA_MIGRATION_REDO=0341_work_claim_allocation_count` (ledger checksum
+`6fac2a872e965baa00215e5fd304ea937c4eab89e3698a413e1183524bb6741f`, 312 files, max `0341`). Because
+`CLARA_MIGRATION_REDO` only ever takes the redo branch, the two NEW prestate pins (the 0267 and 0266
+pre-images, each with its own marker-tolerant redo branch) had their FIRST-APPLY branch proved by
+hand: inside one transaction that was rolled back, 0267's and 0266's own `create or replace`
+statements were re-run to restore the pre-images, the `$p1069_pre$` block was run verbatim and
+passed against them, and a negative control that drifted `get_accounting_work_row`'s pre-image by
+one comment was refused `CLR10 … has DRIFTED from its pinned pre-image`. Post-image shas after the
+redo: `clara.get_work_claim_origin`
+`4c0dad6effd1883eaad3bbdff489fdcbf03e26228c80ea5e11a12b718c9771e4`, `clara.list_accounting_work`
+`fc679a2d4d96341d664d881b9e43da54ed1d8d2e5fe04f4ca45351ff7dbf8dbc`,
+`clara.get_accounting_work_row`
+`28aba20bdb39b0f6f5deb2ddf24937f1fa847c0b1128c3d6a4eeaae08781713e`.
