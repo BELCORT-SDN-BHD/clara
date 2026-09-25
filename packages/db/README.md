@@ -7543,3 +7543,60 @@ a RUN-level count of lines, and no `document_regions` row is minted for a witnes
 monetary fact a person clicks on the page, and `clara._assert_field_path` would have to learn two
 paths for no reader). The prompt stanza that starts asking the two witness questions is a SUCCESSOR
 CONTRACT in the ticket report, because `payrollFacts_v1` is frozen.
+
+### 0343 — the fix round (riders sweep wave, lane 04 review)
+
+Seven findings from the lane's own review, all inside this unmerged file and all re-applied through
+the #957 redo path. They are recorded here rather than in a successor because 0343 has not merged:
+an applied migration is immutable, an unmerged one is not.
+
+**A completeness witness never vetoes a page that prints its own totals (ADV-01, blocker).** The
+first cut folded a witness the two channels read differently into the gate's `channels_agree` rung.
+Driven on the rig, that refused a fully printed #946 page — all eleven run totals, both channels
+agreeing, the arithmetic holding — because one channel quoted a "Total employees" label the other
+read as `not_printed`. The witness is a FALLBACK FOR SILENCE, so its failure now belongs only to the
+rung that is reached when the page IS silent, where it becomes the parked question. The evaluator
+also names a value-against-a-`not_printed` `one_channel_printed` rather than `channels_disagree`:
+one reading and one silence is not two readings of one number.
+
+**A human-initiated post meets the maker-checker ladder (ADV-02, blocker).** `clara._post_payroll_run`
+now knows who authorised a post — nobody for the unattended arm, exactly one named person when the
+witness is `answered_question`. That person is written to `last_human_editor`, and a HIGH-STAKES
+entry they authorised is left a DRAFT for `clara.approve_entry`, which is 0298:494's own posture and
+`clara.reverse_entry`'s before it. The unattended arm is untouched. The gate's duplicate sentence now
+distinguishes a draft awaiting a checker from a run already posted.
+
+**The entry names the evaluator it was judged by (ADV-04).** The plan carries `state_version` beside
+`plan_version`, and the entry's flag is written from it. The two were the same string by accident
+while only one state version existed.
+
+**The published capability claim catches up (ADV-05).** SectionL republishes the six payroll_summary
+pdf/image rows at `registry_version` 8 with a basis that names the completeness witness, the parked
+question and the row-sum entry's own six-leg shape. #1061's 0342 is not edited; a correction to an
+applied migration is published by its successor.
+
+**The parked question says what a yes does not book (ADV-06).** The plan reports `unbookable` — the
+questions no figure exists for from either source, computed independently of whether the sum was
+admitted — and the sentence names them. The affordance component is deliberately untouched: the
+sentence is the database's own.
+
+**A second answer is a refusal, not a 23505 (ADV-07).** The door takes
+`pg_advisory_xact_lock(203431048, hashtext(document))` before it reads the verdict (0006:952's house
+idiom), so the loser of a race waits, re-reads and is refused `no_parked_completeness_question` by
+name. The UNIQUE on `extraction_id` stays as the belt and its violation is converted rather than left
+to escape.
+
+**Two sentences (ADV-11, ADV-12).** A printed page count of zero gets its own reason instead of
+borrowing the truncation one; the declined sentence names the re-read that clears a mis-clicked `no`,
+not only the re-file that clears an incomplete document.
+
+**Battery.** 19 cells (W1–W16 plus W4b/W4c/W4d). **Registry version.** 8 —
+`packages/db/tests/document-capability-registry.test.mjs`'s `PUBLISHED_REGISTRY_VERSION` re-bases
+there with the reason beside the number.
+
+**Rig repair, disclosed.** Redoing this file with a changed evaluator body needs its own
+`clara.evaluator_versions` row gone first: SectionB.1 refuses a re-registration at a different
+closure hash, which is exactly right for a merged file and is an artifact of an earlier apply for an
+unmerged one. The lane database's version-2 row and its member were deleted by hand (append-only
+triggers bypassed as superuser) before each redo that moved the evaluator. The COMMITTED file is
+unchanged in shape and registers the final body on a first apply.

@@ -2574,6 +2574,74 @@ insert into clara.trigger_taxonomy (version, event_type, decision, note)
     cross join (values ('document.payroll_completeness_answered')) e(name)
 on conflict (version, event_type) do nothing;
 -- =====================================================================================
+-- SectionL  THE PUBLISHED CLAIM CATCHES UP WITH THE LANE (fix round, adversarial finding ADV-05).
+--
+--     clara.document_capabilities is the estate's PUBLISHED statement of what it does with a
+--     document kind. #1061's 0342 -- ONE MIGRATION EARLIER, IN THIS SAME LANE -- rewrote the six
+--     payroll_summary pdf/image rows as an exhaustive "Where A, B, C, D and E ... the run posts
+--     unattended", and this file then made that sentence wrong in two ways:
+--
+--       (a) A page satisfying all five of 0342's listed conditions that prints no run totals and
+--           witnesses nothing does NOT post unattended. It parks a question under Needs you that a
+--           named person must answer. Driven in the review: rung `completeness_witness`, reason
+--           `completeness_unwitnessed`, `completeness.parked` true.
+--       (b) The entry a witnessed row sum posts has SIX legs -- gross, the four EMPLOYEE
+--           deductions and the net -- with no employer EPF/SOCSO/EIS debit and no HRDF leg on
+--           either side. The per-employee row vocabulary has no employer column to sum, so 0342's
+--           leg list is structurally false for a whole new class of post.
+--
+--     AN APPLIED MIGRATION IS IMMUTABLE, so 0342 is not edited: the correction is PUBLISHED by its
+--     successor, at a new registry version, which is the only shape this estate allows. What does
+--     NOT move: `business_operation` stays `supported` (an unattended post from printed totals is
+--     still the ordinary outcome), `typed_facts` stays `supported`, `limits` is untouched (the
+--     per-employee strip is unchanged by this file), and the six csv/tsv/xlsx/docx/ofx/xml payroll
+--     rows keep their verdicts because the router's payroll arm never reaches them.
+--
+--     TWO STATEMENTS, IN 0342's OWN ORDER: the content correction first, under the version it is
+--     published at, then the registry-wide raise -- so a failure in the correction cannot leave the
+--     registry at a version whose content never landed, and #846's deferred uniformity wall judges
+--     the transaction on what it LEAVES. `replace()` on a basis that no longer carries 0342's
+--     sentence is a no-op, and the raise is a SET-TO-LITERAL guarded by `<> 8` (0299's redo-safe
+--     form, never `+ 1`, which a redo would carry to 9).
+-- =====================================================================================
+set role clara_fn_owner;
+
+update clara.document_capabilities
+   set basis = replace(
+         basis,
+         'Where both reading channels agree, every arithmetic check passes, every account resolves '
+         || 'in this client''s own chart, the run''s own month is established and no payroll entry '
+         || 'for that client and month is already posted, the run posts unattended: gross pay and '
+         || 'the employer''s own EPF, SOCSO, EIS and HRDF cost are debited, and EPF, SOCSO, EIS, PCB '
+         || 'and HRDF payable plus salaries payable are credited for the net. Anything else appears '
+         || 'under Needs you naming the condition that failed.',
+         'Where both reading channels agree, every arithmetic check passes, every account resolves '
+         || 'in this client''s own chart, the run''s own month is established and no payroll entry '
+         || 'for that client and month is already posted, a run whose page prints its own totals '
+         || 'posts unattended: every figure the page states is debited or credited to its own '
+         || 'account -- gross pay and whichever of the employer''s EPF, SOCSO, EIS and HRDF cost '
+         || 'the page prints are debited, and EPF, SOCSO, EIS, PCB and HRDF payable plus salaries '
+         || 'payable are credited for the net -- and a figure the page does not print gets no leg. '
+         || 'Where the page prints NO run totals, the deterministic evaluator''s own sum over the '
+         || 'employee lines may stand in for them, but only where the reading is witnessed '
+         || 'complete: a printed headcount equal to the lines read, a printed page count of one, '
+         || 'or a named person''s yes to the completeness question Clara parks under Needs you. '
+         || 'Such an entry books gross pay, the four employee deductions (EPF, SOCSO, EIS and PCB) '
+         || 'and the net, and nothing else -- a per-employee row carries no employer figure to sum, '
+         || 'so the employer''s own statutory cost and the HRDF levy are not booked by it and the '
+         || 'question says so before it is answered. A page whose printed headcount contradicts '
+         || 'the lines read posts nothing at all. Anything else appears under Needs you naming the '
+         || 'condition that failed.')
+ where document_kind = 'payroll_summary'
+   and (mime_type = 'application/pdf' or mime_type like 'image/%');
+
+update clara.document_capabilities
+   set registry_version = 8
+ where registry_version <> 8;
+
+reset role;
+
+-- =====================================================================================
 -- SectionZ  TAIL. Everything this file claims to have done, re-derived from the LIVE catalog --
 --     never from its own success text, and never from a variable a section above set.
 --
@@ -2738,16 +2806,43 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- 9 · NO CHART ROW, NO TEMPLATE ROW, NO CAPABILITY ROW. This file reads a page differently; it
-  --     does not change what any account is, and it does not re-derive the registry #1061 (0342)
-  --     just re-derived.
-  select count(*)::int into v_n from clara.document_capabilities where registry_version <> 7;
+  -- 9 · NO CHART ROW AND NO TEMPLATE ROW -- and the CAPABILITY REGISTRY re-derived exactly as
+  --     SectionL says (fix round, ADV-05). The registry publishes ONE version and it is 8; the six
+  --     payroll_summary pdf/image rows carry the corrected sentence (the completeness witness, the
+  --     parked question and the row-sum entry's own leg list) and no longer carry 0342's; no other
+  --     payroll_summary row moved; and no row outside payroll_summary moved.
+  select count(*)::int into v_n from clara.document_capabilities where registry_version <> 8;
   if v_n <> 0 then
-    raise exception '#1048 tail: % capability row(s) sit off version 7 -- this file republishes nothing', v_n
+    raise exception '#1048 tail: % capability row(s) sit off version 8 after SectionL', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capabilities
+   where document_kind = 'payroll_summary'
+     and (mime_type = 'application/pdf' or mime_type like 'image/%')
+     and basis like '%witnessed complete%'
+     and basis like '%completeness question Clara parks under Needs you%'
+     and basis like '%no employer figure to sum%'
+     and basis not like '%the employer''s own EPF, SOCSO, EIS and HRDF cost are debited%';
+  if v_n <> 6 then
+    raise exception '#1048 tail: % of 6 payroll_summary pdf/image rows carry the corrected basis', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capabilities
+   where document_kind = 'payroll_summary'
+     and not (mime_type = 'application/pdf' or mime_type like 'image/%')
+     and (business_operation <> 'stored_only' or basis like '%witnessed complete%');
+  if v_n <> 0 then
+    raise exception '#1048 tail: % non-pdf/image payroll_summary row(s) moved -- SectionL scopes to six', v_n
+      using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_n from clara.document_capabilities
+   where document_kind <> 'payroll_summary' and basis like '%witnessed complete%';
+  if v_n <> 0 then
+    raise exception '#1048 tail: % row(s) outside payroll_summary carry this file''s sentence', v_n
       using errcode = 'CLR10';
   end if;
 
-  raise notice '#1048 tail (1/2): OK -- v1 frozen and unmoved at its registered closure; v2 minted beside it (IMMUTABLE, security invoker, one registered member at version 2); the four recut internals carry this file''s change and are owned by clara_fn_owner; persist calls v2; the queue projects 17 row kinds; the answer table is a clara_fn_owner, RLS-forced, two-policy, two-trigger table with UNIQUE (extraction_id); the door is a SECURITY DEFINER clara_fn_owner body; the event type is registered and routed `ignore`; clara._payroll_period_month is unmoved; and no chart, template or capability row was touched.';
+  raise notice '#1048 tail (1/2): OK -- v1 frozen and unmoved at its registered closure; v2 minted beside it (IMMUTABLE, security invoker, one registered member at version 2); the four recut internals carry this file''s change and are owned by clara_fn_owner; persist calls v2; the queue projects 17 row kinds; the answer table is a clara_fn_owner, RLS-forced, two-policy, two-trigger table with UNIQUE (extraction_id); the door is a SECURITY DEFINER clara_fn_owner body; the event type is registered and routed `ignore`; clara._payroll_period_month is unmoved; no chart or template row was touched; and the capability registry publishes version 8 uniformly with the corrected payroll_summary basis on exactly the six pdf/image pairs.';
 end
 $w1048_tail$;
 

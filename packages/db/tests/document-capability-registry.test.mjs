@@ -155,10 +155,23 @@ const BUSINESS_OPERATION_LEVELS = Object.freeze([...LEVELS, "proposal_only"]);
  *  csv/tsv/xlsx/docx/ofx/xml payroll rows keep their pre-#1061 verdicts because the router's
  *  payroll arm never reaches them, and no row outside `payroll_summary` moves.
  *
+ *  8 since #1048's `0343_payroll_completeness_witness.sql` (riders sweep wave, lane 04, fix round
+ *  ADV-05), which republishes the SAME SIX `payroll_summary` rows once more. #1061 had just
+ *  rewritten their basis as an exhaustive "where X, Y, Z … the run posts unattended", and #1048 --
+ *  in the SAME LANE, one migration later — added a SIXTH condition (the page must witness its own
+ *  completeness, or a named person must) and a new human act, which made that sentence wrong in
+ *  two ways: a page satisfying all five listed conditions that prints no run totals does NOT post
+ *  unattended, it parks a question; and the entry a witnessed row sum posts books gross, the four
+ *  EMPLOYEE deductions and the net and nothing else, because a per-employee row has no employer
+ *  column to sum. 0342 is not edited — the correction is published by its successor, which is the
+ *  only shape an immutable migration allows. `business_operation` stays `supported` (an unattended
+ *  post is still the ordinary outcome), `typed_facts` stays `supported`, the `limits` object is
+ *  untouched, and the six csv/tsv/xlsx/docx/ofx/xml rows keep their verdicts.
+ *
  *  A future republication re-bases HERE, in one place, and says why beside the number — the
  *  precedent for editing this battery in the same commit as the migration is `af3b5955` (#779),
  *  which shipped 0207 and +147 lines of this file together. */
-const PUBLISHED_REGISTRY_VERSION = 7;
+const PUBLISHED_REGISTRY_VERSION = 8;
 
 let live = false;
 let executed = 0;
@@ -470,6 +483,16 @@ cell("a payroll_summary PDF is stored, byte-extracted, facts-readable (#945) and
     "the basis sentence must stop promising the pre-#1061 dead end");
   assert.match(c.basis, /posts unattended/,
     "the basis sentence must say what clara._payroll_posting_verdict actually decides");
+  // #1048 (0343), fix round ADV-05. The published sentence is the estate's own statement of what
+  // it does with a document kind, and #1048 changed that in the same lane: a page that prints no
+  // run totals no longer falls through to "nothing happened", and the entry a witnessed row sum
+  // posts is NOT the eleven-leg entry the sentence describes.
+  assert.match(c.basis, /completeness/i,
+    "the basis must name the completeness witness #1048 added as a sixth condition");
+  assert.match(c.basis, /Needs you/,
+    "…and the parked question a named person answers, which is a new human act on this kind");
+  assert.match(c.basis, /employer/i,
+    "…and that a row-sum entry books no employer statutory cost, because there is none to sum");
   // A format the router's pdf/image branch never reaches keeps its pre-#945 verdict, which is
   // what makes the six-row scope of both re-derivations checkable from outside their migrations.
   const csv = await capability("csv", "payroll_summary");
