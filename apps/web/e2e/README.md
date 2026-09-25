@@ -142,25 +142,43 @@ exactly the window an instant read can catch. Measured (the ticket's own evidenc
 of three whole-suite runs across two gates (riders wave 4 gate B, the cut-phase gate), green on every
 other run and on every isolated re-run.
 
-The fix is the rule two bullets up, applied: the instant read became
-`expect.poll(async () => page.evaluate(() => document.activeElement?.tagName ?? "NONE"), { timeout:
-15_000 }).toBe("H2")`. A widened timeout on an instant read would NOT have been a fix — it would
-still read whatever tag `document.activeElement` holds at one arbitrary instant, just later. Only
-waiting for the SETTLED state closes the race.
+The fix is the rule two bullets up, applied: the instant read became an `expect.poll` over the
+whole landing — `{ tag, text, tabindex }` returned from ONE `page.evaluate` inside the poll, asserted
+with `toEqual({ tag: "H2", text: expect.stringContaining("Needs you"), tabindex: "-1" })`. A widened
+timeout on an instant read would NOT have been a fix — it would still read whatever
+`document.activeElement` holds at one arbitrary instant, just later. Only waiting for the SETTLED
+state closes the race. **All three facts come back from inside the poll**, deliberately: the first
+cut of this fix polled the TAG and then re-read `document.activeElement` in a second, unwaited
+`evaluate` for its text and tabindex, which left the identity check racing the very movement the
+poll exists to wait out (review round, ADV-L06-10).
 
-**Reproduction, honestly reported.** CDP `Emulation.setCPUThrottlingRate` (armed only around the
-"submit the answer" step, to widen `nextPaint()`'s own window without paying the multiplier on the
-whole walk) was tried at rate 6 (5 runs) and rate 20 (1 run, this host, 2026-09-25): the OLD
-instant-read shape did not catch the race in any of those 6 attempts (rate 50 across the WHOLE walk
-crashed the renderer instead of usefully widening anything — too aggressive to be informative). This
-is consistent with the ticket's own "once in three whole-suite runs" rate: genuinely rare, and not
-reliably forced by a single host's synthetic throttle within a bounded session. The property the new
-cell exists to catch was instead proven directly (the vacuity control the work order requires for a
-test-only ticket): `restoreFocusAfterRow`'s final `landmark.focus()` call was temporarily dropped: the
-SAME poll-based B4 cell then failed with `Timeout 15000ms exceeded while waiting on the predicate`
-(the poll never sees `"H2"`), proving the new assertion actually discriminates a real regression
-rather than passing vacuously; the subject was restored byte-for-byte immediately after
-(`git diff` empty) and the cell green again.
+**Reproduction, honestly reported — and the window MEASURED instead.** The defect is genuinely rare
+(the ticket's own rate is once in three whole-suite runs), and this host could not force it:
+
+- CDP `Emulation.setCPUThrottlingRate`, armed only around the "submit the answer" step, at rate 6
+  (5 runs) and rate 20 (1 run): 6 attempts, 0 catches. Rate 50 across the whole walk crashed the
+  renderer instead of usefully widening anything.
+- The ticket's own instrument, run verbatim in the fix round: the PRE-FIX cell, **ten runs beside a
+  parallel `node scripts/run-tests.mjs`** of the whole web unit suite — `10 green / 0 red of 10`.
+  The same ten runs against the fixed cell: `10 green / 0 red of 10`.
+- A whole-suite run with the PRE-FIX cell in place: 589 passed, no B4 red.
+
+So the red was not reproduced on demand, and this document says so rather than implying otherwise.
+**What WAS established, directly:** an in-page sampler recording every change of
+`document.activeElement` (one per animation frame and one per macrotask beat) across the answer
+submission shows the transient the instant read was reading. **Four independent runs on this host
+all recorded the same sequence, `["BUTTON", "BODY", "H2"]`** — focus leaves the submit button,
+spends a tick on `<body>` while the row is unmounted, and only then lands on the heading. That
+`<body>` tick is the state the old unwaited read could observe; it is not hypothetical, and it is
+why no amount of extra timeout on an instant read would have helped. (The sampler was a temporary,
+uncommitted edit of this cell; it was reverted immediately, `git status` clean.)
+
+And the cell's own discrimination is proven by the vacuity control the work order requires for a
+test-only ticket: `restoreFocusAfterRow`'s final `landmark.focus()` call was temporarily dropped, and
+the poll-based B4 cell then failed with `Timeout 15000ms exceeded while waiting on the predicate`
+(the poll never sees the landing), proving the new assertion discriminates a real regression rather
+than passing vacuously; the subject was restored byte-for-byte immediately after (`git diff` empty)
+and the cell green again.
 
 ## Coverage map
 
