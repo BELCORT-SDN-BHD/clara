@@ -248,8 +248,16 @@ async function payrollDoc(sub, client) {
 }
 
 /** Drive a payroll document all the way through the lane: filed, routed, claimed, read. Returns
- *  the document and the persist receipt (whose `posting` object says what the read led to). */
-async function readPayrollDoc(sub, client, { answers = PRINTED, witness = null, rows = null } = {}) {
+ *  the document and the persist receipt (whose `posting` object says what the read led to).
+ *
+ *  `witnessVision` lets the two channels answer the witness questions DIFFERENTLY, which is the
+ *  only way to drive the ADV-01 split (one model finds a small "Total employees:" label the other
+ *  misses) end to end rather than at the evaluator alone. It defaults to `witness`, so every
+ *  existing caller sends the same witness on both channels exactly as before. */
+async function readPayrollDoc(
+  sub, client, { answers = PRINTED, witness = null, witnessVision = undefined, rows = null } = {},
+) {
+  const visionWitness = witnessVision === undefined ? witness : witnessVision;
   const doc = await payrollDoc(sub, client);
   await enqueueInvoiceFacts(doc.documentId);
   const task = (
@@ -276,7 +284,7 @@ async function readPayrollDoc(sub, client, { answers = PRINTED, witness = null, 
       JSON.stringify({
         input_pin: sha,
         prompt_hash: "p1048-vision",
-        envelope: envelope({ channel: "vision", answers, witness, rows }),
+        envelope: envelope({ channel: "vision", answers, witness: visionWitness, rows }),
       }),
       1,
     ])
@@ -919,6 +927,16 @@ test("W4c · the SECOND witness: a page count of one admits the sum, and a page 
   const pb = await plan(world.clients.A1, both);
   assert.equal(pb.ready, false);
   assert.deepEqual(pb.refusals.map((r) => r.reason), ["completeness_contradicted"]);
+
+  // ZERO PAGES (fix round, ADV-11). The count regex admits 0, and the outcome was already safe --
+  // nothing is witnessed -- but the REASON said "the summary names more pages than the one read",
+  // which is not what a page count of zero says. It gets its own reason now.
+  const zeroPages = await evaluate(
+    "v2",
+    ...bothChannels({ answers: NO_TOTALS, witness: { "payroll.run.page_count": value("0") } }),
+  );
+  assert.equal(zeroPages.completeness.verdict, "absent");
+  assert.equal(zeroPages.completeness.reason, "the_summary_prints_a_page_count_of_zero");
 });
 
 test("W4d · a witness neither channel was asked is `not_asked`, and it parks the question rather than blocking the estate", async (t) => {
@@ -963,9 +981,10 @@ test("W4d · a witness neither channel was asked is `not_asked`, and it parks th
   assert.equal(half.witness["payroll.run.employee_count"].reason, "only_one_channel_answered_this_question");
   assert.equal(half.completeness.verdict, "absent");
 
-  // …but a witness BOTH channels read DIFFERENTLY is a reading disagreement like any other, and it
-  // fails the `channels_agree` rung rather than quietly parking a question about a page nobody has
-  // actually read.
+  // …and a witness BOTH channels read DIFFERENTLY is `channels_disagree`, which the completeness
+  // verdict resolves to `absent` -- the parked question -- rather than to a witness. It does NOT
+  // fail the `channels_agree` rung: see W11/W12 and the fix round's ADV-01, which measured what
+  // that fold did to a page printing all eleven of its own run totals.
   const disagree = await evaluate(
     "v2",
     envelope({ channel: "text", answers: NO_TOTALS, witness: { "payroll.run.employee_count": value("2") } }),
@@ -974,4 +993,76 @@ test("W4d · a witness neither channel was asked is `not_asked`, and it parks th
   assert.equal(disagree.witness["payroll.run.employee_count"].state, "channels_disagree");
   assert.equal(disagree.completeness.verdict, "absent");
   assert.equal(disagree.completeness.reason, "printed_headcount_could_not_be_read");
+});
+
+// ---------------------------------------------------------------------------
+// FIX ROUND — the adversarial lens's ADV-01. A completeness witness is a FALLBACK for a page that
+// prints no totals. It must never veto a page that prints them.
+// ---------------------------------------------------------------------------
+
+test("W11 · ADV-01: a witness only ONE channel found never vetoes a page that prints its own run totals", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  // The likely production split, once payrollFacts_v2 asks these two questions: one model spots a
+  // small "Total employees: 2" label and the other does not. Every one of the eleven run totals is
+  // printed, both channels agree on all of them, and the arithmetic holds -- this is a page the
+  // lane has posted unattended since #946.
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: { ...PRINTED, "payroll.run.period": value("2026-10") },
+    witness: { "payroll.run.employee_count": value("2") },
+    witnessVision: { "payroll.run.employee_count": notPrinted() },
+  });
+  assert.equal(
+    doc.receipt.posting.posted, true,
+    `a fully printed page still posts: ${JSON.stringify(doc.receipt.posting)}`,
+  );
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.rung_vector.channels_agree, "pass", "a witness is not a reading of a figure this entry posts");
+  assert.equal(v.rung_vector.completeness_witness, "pass", "…and the rung it does belong to was never reached");
+
+  const entries = await entriesOf(doc.documentId);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].flags.payroll_run.posting_basis.kind, "printed_totals");
+  assert.equal((await legsOf(entries[0].id)).length, 11, "#946's own eleven legs, from the printed figures");
+
+  // And the same for the harder split: two channels that read two DIFFERENT counts off a page whose
+  // totals they agree about. The counts contradict each other, but nothing this entry posts came
+  // from either of them.
+  const twoCounts = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: { ...PRINTED, "payroll.run.period": value("2026-11") },
+    witness: { "payroll.run.employee_count": value("2") },
+    witnessVision: { "payroll.run.employee_count": value("3") },
+  });
+  assert.equal(
+    twoCounts.receipt.posting.posted, true,
+    `…and so does a page whose two channels read the label differently: ${JSON.stringify(twoCounts.receipt.posting)}`,
+  );
+});
+
+test("W12 · ADV-01: a no-totals page whose witness the channels split on PARKS the question instead of refusing", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  const doc = await readPayrollDoc(world.users.alice, world.clients.A1, {
+    answers: noTotals("2026-12"),
+    witness: { "payroll.run.employee_count": value("2") },
+    witnessVision: { "payroll.run.employee_count": notPrinted() },
+  });
+  assert.equal(doc.receipt.posting.posted, false, "no run totals and no readable witness: nothing posts");
+
+  const state = await bankedState(doc.documentId);
+  assert.equal(
+    state.witness["payroll.run.employee_count"].state, "one_channel_printed",
+    "a value against a not_printed is not two readings of one number -- it is one reading and one silence",
+  );
+  assert.equal(state.completeness.verdict, "absent");
+
+  const v = await verdict(doc.documentId);
+  assert.equal(v.rung_vector.channels_agree, "pass", "the eleven answers and every quoted row still agree");
+  assert.equal(v.rung, "completeness_witness");
+  assert.equal(v.reason, "completeness_unwitnessed");
+  assert.equal(v.completeness.parked, true, "a person can settle this by answering, which is the whole point");
+  assert.match(v.sentence, /is this every employee for the month\?/);
 });

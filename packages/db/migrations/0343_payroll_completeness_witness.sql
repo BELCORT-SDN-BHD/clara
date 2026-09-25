@@ -558,6 +558,15 @@ begin
   --      page does not print is `not_printed`; a rendering that is not a whole number is
   --      `unreadable`; two channels that read different numbers is `channels_disagree`. There is
   --      no arm in which a count this body did not parse itself becomes a witness.
+  --
+  --      ONE CHANNEL QUOTING A LABEL THE OTHER DID NOT SEE IS ITS OWN STATE (fix round, ADV-01),
+  --      `one_channel_printed`, and NOT `channels_disagree`. The two are different facts: two
+  --      channels reading 12 and 13 off one line have read the same thing twice and got two
+  --      answers, while a value against a `not_printed` is ONE reading and one silence -- the
+  --      likeliest split of all once the prompts ask these questions, because a small
+  --      "Total employees:" label is exactly what one model finds and the other misses. Both are
+  --      still `absent` to the completeness verdict, so neither ever becomes a witness; the split
+  --      exists so the detail a later reader sees names what actually happened.
   -- -------------------------------------------------------------------------------------
   for v_i in 1 .. array_length(v_witness,1) loop
     v_f := v_witness[v_i];
@@ -575,7 +584,7 @@ begin
     elsif v_t_state is null or v_v_state is null then
       v_state := 'not_asked'; v_wreason := 'only_one_channel_answered_this_question';
     elsif v_t_state <> v_v_state then
-      v_state := 'channels_disagree'; v_wreason := 'one_channel_read_a_witness_the_other_did_not';
+      v_state := 'one_channel_printed'; v_wreason := 'one_channel_read_a_witness_the_other_did_not';
     elsif v_t_state = 'not_printed' then
       v_state := 'not_printed'; v_wreason := 'the_page_prints_no_such_count';
     else
@@ -634,11 +643,16 @@ begin
     v_wreason := 'printed_headcount_equals_lines_read';
   elsif v_ec_state = 'established' then
     v_verdict := 'contradicted'; v_wreason := 'printed_headcount_disagrees_lines_read';
-  elsif v_ec_state in ('channels_disagree','unreadable') then
+  elsif v_ec_state in ('channels_disagree','unreadable','one_channel_printed') then
     v_verdict := 'absent'; v_wreason := 'printed_headcount_could_not_be_read';
   elsif v_pc_state = 'established' and v_pc = 1 then
     v_verdict := 'witnessed'; v_witness_name := 'single_page';
     v_wreason := 'the_page_says_it_is_the_whole_document';
+  elsif v_pc_state = 'established' and v_pc = 0 then
+    -- A PRINTED ZERO IS NOT "more pages than the one read" (fix round, ADV-11). The count regex
+    -- admits 0, and a page that says it is page 0 of 0 has said something this body cannot use
+    -- either way; it gets its own reason rather than borrowing a sentence about truncation.
+    v_verdict := 'absent'; v_wreason := 'the_summary_prints_a_page_count_of_zero';
   elsif v_pc_state = 'established' then
     v_verdict := 'absent'; v_wreason := 'the_summary_names_more_pages_than_the_one_read';
   else
@@ -1509,14 +1523,21 @@ begin
         v_arith := v_arith || f.k;
       end if;
     end loop;
-    -- #1048: a WITNESS the two channels read differently is a reading disagreement like any other,
-    -- and it is folded in HERE rather than left to the completeness rung -- a page whose headcount
-    -- one channel read as 12 and the other as 13 has not been read, whatever the lines say. The
-    -- witness questions live outside `facts` precisely so that an UNANSWERED one (a prompt that
-    -- never asked) is silent here instead of blocking the whole estate.
-    for f in select k, v from jsonb_each(coalesce(v_state->'witness','{}'::jsonb)) as t(k, v) order by k loop
-      if (f.v->>'state') = 'channels_disagree' then v_disagree := v_disagree || f.k; end if;
-    end loop;
+    -- #1048, CORRECTED IN THE FIX ROUND (ADV-01): A WITNESS NEVER FAILS THIS RUNG. The first cut
+    -- folded a witness the two channels read differently into `channels_agree`, on the argument
+    -- that a page whose headcount one channel read as 12 and the other as 13 has not been read.
+    -- Driven on the rig, that argument vetoed a page printing ALL ELEVEN run totals, both channels
+    -- agreeing on every one of them and the arithmetic holding -- a page the lane has posted
+    -- unattended since #946 -- on the strength of a label no leg of that entry comes from. The
+    -- refusal was also unactionable ("check the page and re-file it" re-runs the same two models).
+    --
+    -- A WITNESS IS A FALLBACK FOR SILENCE, so its failure belongs to the rung that is only reached
+    -- when the page IS silent. `clara.evaluate_payroll_run_state_v2` already resolves an unreadable,
+    -- split or contradictory witness to a completeness verdict of `absent`, and SectionE turns that
+    -- into the PARKED QUESTION when -- and only when -- a row sum is actually needed. So a page
+    -- that prints its totals posts as it always did, and a page that does not asks a named person
+    -- instead of refusing. `facts` (the eleven answers) and the quoted employee rows still decide
+    -- this rung, exactly as 0297 wrote it.
     if coalesce(array_length(v_disagree,1),0) > 0 or jsonb_array_length(v_contested) > 0 then
       v_vector := v_vector || jsonb_build_object('channels_agree','channels_disagree');
       v_detail := v_detail || jsonb_build_object('fields', to_jsonb(v_disagree),
