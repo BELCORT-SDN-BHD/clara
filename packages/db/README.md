@@ -7413,3 +7413,64 @@ than completing it. Both branches were exercised on `clara_l01`: the FIRST APPLY
 `pnpm db:migrate`, and the REDO branch through
 `CLARA_MIGRATION_REDO=0320_client_financial_pack_wake_read` after the firm predicate was removed
 from the live core for `p1000.wake.no_oracle`'s vacuity control.
+
+## 0352 — one body, two entrances, twice: the model lane reaches the payroll and agreement reads (#1136, riders sweep wave, lane L8)
+
+Three successor contracts written by riders wave 4 named doors the chat lane could not reach, and
+the cut phase deferred all three rather than ship tools that can only refuse
+(`docs/plan/active/riders-2026-09-20/CUT-PLAN.md` §1.4, class C):
+`read_payroll_posting_state` (#946) and `read_agreement_terms` (#948) read
+`clara.list_review_queue`, and `read_payroll_settlement_state` (#947) reads
+`clara.get_payroll_settlement_candidates`. Both reads resolve their caller through
+`clara._human_ctx`, which reads the JWT; the chat lane runs on pooled credentials that carry no
+`request.jwt.claims` at all (`packages/runtime/lib/pools.mjs`), so granting either door to
+`clara_agent_ro` would have bought a door answering CLR04 on every call.
+
+This file applies #1000's [0320] shape to both reads at once. Each read's computation moves into
+ONE ungranted core that takes the caller's FIRM as an argument
+(`clara._payroll_settlement_candidates_core(p_firm, p_client)`,
+`clara._list_review_queue_core(p_firm, p_scope, p_cursor, p_limit)`); each human door keeps its
+signature, its envelope, its refusal codes and its ACL and becomes that core's own thin audited
+wrapper; and two new audited wrappers — `clara.wake_get_payroll_settlement_candidates` and
+`clara.wake_list_review_queue`, EXECUTE to `clara_agent_ro` alone with one
+`clara.wake_fn_allowlist` row each for the `interactive` kind — are the model lane's doors.
+
+**Two doors serve three tools, and that is the point.** `read_payroll_posting_state` and
+`read_agreement_terms` both read the review queue, the first for its `payroll_posting_blocked` row
+and the second for its `agreement_posting_blocked` row. Each row carries its GATE'S OWN SENTENCE:
+0299's own header says it in words — "`clara._post_agreement_acquisition` acts on it and
+`clara.list_review_queue` DERIVES its `agreement_posting_blocked` row from it, so the decision the
+lane took and the sentence a person reads are the same body and cannot drift". A third, chat-only
+projection of either verdict would have been a second place for those words to drift, and the words
+are the whole of what #946 and #948 ask a tool to report. `clara._agreement_posting_verdict(uuid)`
+stays granted to NOBODY, exactly as 0299 left it, and the tail re-reads that after applying.
+
+**Neither core is retyped.** Each is derived from the LIVE body by anchored string surgery, and
+§TAIL REVERSES that surgery on the COMMITTED core and asserts the result hashes to the pre-image
+§0 pinned — so "the rows did not change" is a checked fact about the live catalog. The settlement
+read takes two substitutions (the `declare c record;` + bookkeeper-floor opener, and
+`cl.firm_id = c.firm`); the queue takes three (the `declare` opener, the viewer-floor line, and
+every `c.firm`, at a MEASURED count of 23 on this frontier rather than a remembered one, because
+eleven migrations have spliced that body and a twelfth arm would bring its own firm predicate).
+The anchors and the reversal live in eight `clara.__t1136_*` helper functions created at the top of
+the file's own transaction and dropped in §Z, so §0, §A, §D and §TAIL cannot drift apart and
+nothing outside the migration can ever call them.
+
+**What it buys the machine side, in full:** two EXECUTEs and two allowlist rows. Not one relation
+grant, not one policy, no act. `clara.settle_payroll_net_pay` is untouched and still
+`clara_authenticated`-only — #947's own report refused to propose an accept-via-chat tool, because
+a person accepts a candidate on the bank surface or in Needs you where every candidate is visible
+side by side. `0011:4210-4213`'s assertion that `clara_agent_ro` must NOT hold
+`clara.list_review_queue` is still literally true and the tail proves it role by role.
+
+**The floors.** Human: VIEWER for the queue, BOOKKEEPER for the settlement read, both through
+`clara._human_ctx`, the estate's one floor body, raising the same three CLR04s the inline calls
+raised. Model: BOOKKEEPER+, and not by this file's choice — `clara.mint_wake_credential` refuses a
+below-bookkeeper `on_behalf_of` (CLR10 `authority_lost`) and `clara.wake_context` re-validates the
+standing on every use, so a demotion mid-conversation makes an outstanding credential inert.
+
+**Redo (#957).** Redo-safe by construction: every object is a `create or replace`, the two
+allowlist rows are `on conflict do nothing`, and each split RECOVERS its pre-image before it
+splices — from the human door on a fresh apply, and by REVERSING the committed core on a redo — so
+the pin is asserted on both paths rather than only on the one `CLARA_MIGRATION_REDO` takes. §0 also
+refuses a HALF-applied file (one core present, one absent) by name rather than completing it.

@@ -376,4 +376,16 @@ export const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlB
       sha256: "95c8bdd5507710f59fc6d7219be50320c813cc094cf92e980b36a30a745a5857",
     },
   ],
+  // #1136 [0352] (riders sweep wave, lane L8) — the model lane's entrance to the payroll and
+  // agreement reads. The SAME 0146/0168/0180/0260/0288/0302/0304 family of dynamic recuts over
+  // clara.list_review_queue, but a SPLIT rather than a splice: the body moves into an ungranted
+  // core that takes the firm as an argument, and the queue door becomes its thin wrapper.
+  [
+    "0352_agent_read_twins_payroll_agreement.sql",
+    {
+      reason:
+        "Reviewed prosrc-derived recuts install exactly TWO FUNCTIONS, each at a literal signature spelled in this file — clara._payroll_settlement_candidates_core(uuid,uuid) and clara._list_review_queue_core(uuid,jsonb,jsonb,integer). Both are built by `execute format('create or replace function <literal signature> … as %L', <derived body>)`, so the STATEMENT is a literal in this file and only the BODY is derived; the derived body is the live prosrc of clara.get_payroll_settlement_candidates(uuid) / clara.list_review_queue(jsonb,jsonb,integer) with a closed roster of anchored `replace()` substitutions (the floor opener, the `declare` opener and the firm predicate), each anchor asserted to occur EXACTLY once and each anchor and replacement returned by one of the eight clara.__t1136_* helper functions this file creates and drops in the same transaction — no concatenation chain and no chr(). Neither target returns anything but jsonb and neither is a view, so neither P4 scope view (clara.caller_context, clara.firm_registration_requests_visible) can be a target, and the file contains no `create view` of any spelling at all, static or spliced, by construction rather than by inspection of a rendered string. Each recut REVERSES its own surgery before installing and refuses unless the reversal is byte-identical to the pinned pre-image, and §TAIL re-reads the COMMITTED catalog and reverses again; the queue recut additionally re-derives every one of the sixteen pre-existing row-kind markers at exactly one projection site each and asserts the firm predicate moved one-for-one at a MEASURED count. Every other object in this migration is static DDL the lexer inspects directly — four `create or replace function` statements at literal signatures (the two human doors recut as thin delegates, the two new wake wrappers), eight `create function` helper statements, their eight drops, eight revoke/grant pairs and one two-row `insert … on conflict do nothing` into clara.wake_fn_allowlist — and the file mints no table, no column, no chart row, no event type and no role.",
+      sha256: "aad4ae944dbe41aba680a2b94ca5bd3afbc6285bb0b982702068eaf5eb3b6f15",
+    },
+  ],
 ]);
