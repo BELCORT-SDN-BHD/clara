@@ -194,7 +194,7 @@ export async function runReadPayrollPostingState(
       error,
       (reason) =>
         reason === "queue_scope_malformed"
-          ? PAYROLL_POSTING_STATE_REFUSALS.client_not_found!
+          ? { reason: "client_not_found", message: PAYROLL_POSTING_STATE_REFUSALS.client_not_found! }
           : null,
       "That payroll summary's posting state could not be read.",
     );
@@ -311,9 +311,9 @@ export async function runReadPayrollSettlementState(
   } catch (error) {
     return governedRefusalV23(
       error,
-      (reason) =>
-        reason === "client_not_found" || reason === "client_not_in_firm"
-          ? PAYROLL_SETTLEMENT_STATE_REFUSALS.client_not_found!
+      (reason, _detail, code) =>
+        reason === "client_not_found" || reason === "client_not_in_firm" || code === "CLR11"
+          ? { reason: "client_not_found", message: PAYROLL_SETTLEMENT_STATE_REFUSALS.client_not_found! }
           : null,
       "That client's payroll settlement state could not be read.",
     );
@@ -452,8 +452,10 @@ export async function runReadAgreementTerms(
     return governedRefusalV23(
       error,
       (reason, _detail, code) => {
-        if (reason === "queue_scope_malformed") return AGREEMENT_TERMS_REFUSALS.client_not_found!;
-        if (code === "CLR16") return AGREEMENT_TERMS_REFUSALS.not_found!;
+        if (reason === "queue_scope_malformed") {
+          return { reason: "client_not_found", message: AGREEMENT_TERMS_REFUSALS.client_not_found! };
+        }
+        if (code === "CLR16") return { reason: "not_found", message: AGREEMENT_TERMS_REFUSALS.not_found! };
         return null;
       },
       "That agreement could not be read.",

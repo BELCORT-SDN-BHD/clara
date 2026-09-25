@@ -16,8 +16,12 @@
 // `runStartPrepaymentScheduleWork` calls `clara.create_prepayment_schedule_for`.
 //
 // NO NEW PART KIND, AND THAT IS A MEASUREMENT RATHER THAN A PREFERENCE (`waveS-lane08-fix.md`
-// §7.2). `work_result` IS declared and emittable, but all six of its construction sites are
-// `claraWork.*.impl.ts`: the chat lane has never emitted it, and the kind means "a Work run
+// §7.2). `work_result` IS declared and emittable, but EVERY ONE of its construction sites is a
+// `claraWork.*.impl.ts` — six when the fix round measured it, seven once this wave's own
+// `claraWork_v7` landed, and not one of them in any `chatTurn.*`
+// (`node packages/runtime/scripts/check-parts-parity.mjs` prints the census on every run, and
+// `tests/p6-1-parts-parity.test.mjs` pins the list by name). The chat lane has never emitted it,
+// and the kind means "a Work run
 // reporting its result", which is not what a tool call inside a turn is. The nearest precedent is
 // not near by analogy, it is the SAME SHAPE — an on-behalf-of act taken from the conversation
 // through a `_for` door on `pools().withRuntime` — so both confirmations return a TYPED TOOL
@@ -167,12 +171,27 @@ export async function runReadTenancyTerms(
       };
     });
   } catch (error) {
-    return governedRefusalV23(
-      error,
-      (_reason, _detail, code) => (code === "CLR11" ? TENANCY_TERMS_REFUSALS.not_found! : null),
-      "That tenancy could not be read.",
-    );
+    return tenancyReadRefusal(error);
   }
+}
+
+/**
+ * The refusal envelope both document-scoped tenancy reads share.
+ *
+ * IT NAMES THE TOOL'S OWN TOKEN, and that is a measurement rather than a nicety: the wake door
+ * answers `CLR11` with a sentence and NO `detail.reason` (driven in `chat-turn-v23-e2e.mjs` against
+ * a document the firm does not hold), so a map that replaced only the message would hand the model
+ * `reason: null` and lose the token #1137's refusal table tells a caller to branch on.
+ */
+export function tenancyReadRefusal(error: unknown): ToolRefusalV23 {
+  return governedRefusalV23(
+    error,
+    (_reason, _detail, code) =>
+      code === "CLR11"
+        ? { reason: "not_found", message: TENANCY_TERMS_REFUSALS.not_found! }
+        : null,
+    "That tenancy could not be read.",
+  );
 }
 
 // =============================================================================================
@@ -271,7 +290,10 @@ export async function runReadRentSettlementCandidates(
   } catch (error) {
     return governedRefusalV23(
       error,
-      (_reason, _detail, code) => (code === "CLR11" ? RENT_CANDIDATES_REFUSALS.client_not_found! : null),
+      (_reason, _detail, code) =>
+        code === "CLR11"
+          ? { reason: "client_not_found", message: RENT_CANDIDATES_REFUSALS.client_not_found! }
+          : null,
       "That client's rent settlement state could not be read.",
     );
   }
@@ -648,7 +670,10 @@ export async function runConfirmTenancyRentPlanRevision(
   } catch (error) {
     return governedRefusalV23(
       error,
-      (_reason, _detail, code) => (code === "CLR11" ? TENANCY_TERMS_REFUSALS.not_found! : null),
+      (_reason, _detail, code) =>
+        code === "CLR11"
+          ? { reason: "not_found", message: TENANCY_TERMS_REFUSALS.not_found! }
+          : null,
       "That tenancy's escalation could not be read.",
     );
   }

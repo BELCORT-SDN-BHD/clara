@@ -100,6 +100,24 @@ test("v23.tenancy_terms: the refusal sentences are #1137's, and a stranger's ten
     "That agreement is not a tenancy, so there is no rent plan to read.");
 });
 
+test("v23.tenancy_terms: a door refusal with NO typed reason still carries THIS cut's token", () => {
+  // MEASURED ON A REAL DOOR rather than imagined: `tests/chat-turn-v23-e2e.mjs` drove
+  // `clara.wake_get_contract_terms` against a document the firm does not hold and the door
+  // answered `CLR11` with a sentence and NO `detail.reason` — so a mapper that only replaced the
+  // MESSAGE handed the model `reason: null`, and the token every caller branches on was lost.
+  // The refusal envelope therefore lets a map name the tool's own token beside its sentence.
+  const mapped = v23Tenancy.tenancyReadRefusal({ code: "CLR11", message: "document x is not a live filing in your firm" });
+  assert.equal(mapped.ok, false);
+  assert.equal(mapped.code, "CLR11");
+  assert.equal(mapped.reason, "not_found", "the TOOL's token, which the door never sent");
+  assert.equal(mapped.message, "I cannot find that agreement under your firm.");
+  // and a door that DOES send a reason keeps its own: this cut renames nothing.
+  const typed = v23Tenancy.tenancyReadRefusal({
+    code: "CLR03", message: "that read is not permitted", detail: JSON.stringify({ reason: "wake_kind_not_allowlisted" }),
+  });
+  assert.equal(typed.reason, "wake_kind_not_allowlisted");
+});
+
 test("v23.tenancy_terms: a draft that is not a tenancy is refused BY CLASS, not by silence", () => {
   // The pure classifier, driven at both arms. The draft answer is the door's own shape: the class
   // it carries, and the refusal list its own branch produced.

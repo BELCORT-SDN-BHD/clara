@@ -50,6 +50,10 @@ export const DRIVERS = Object.freeze([
   // version, on purpose and for the reason each of its predecessors gives: its script is this
   // cut's, and widening v21's would put it in the path of a lane that has nothing to do with it.
   "chat-turn-v22-e2e.mjs",
+  // CLOSING WAVE 2026-09-26 (#1144) — the chatTurn_v23 / claraWork_v7 walk. A separate file per
+  // version, on purpose and for the reason each of its predecessors gives: its script is this
+  // cut's, and widening v22's would put it in the path of a lane that has nothing to do with it.
+  "chat-turn-v23-e2e.mjs",
   "fixed-asset-acquisition-e2e.mjs",
   "work-egress-e2e.mjs",
   "periodic-adjustment-e2e.mjs",

@@ -69,6 +69,13 @@ export function clientMismatchRefusalV23(reason: string, message: string, client
  * no sentence for that token", and the door's own message is then carried verbatim rather than
  * replaced by a generic one.
  *
+ * A MAP MAY ALSO NAME THE TOOL'S OWN TOKEN, by returning `{reason, message}` instead of a bare
+ * string, AND THAT IS A MEASUREMENT RATHER THAN A CONVENIENCE. `tests/chat-turn-v23-e2e.mjs` drove
+ * `clara.wake_get_contract_terms` against a document the firm does not hold: the door answered
+ * `CLR11` with a sentence and NO `detail.reason`, so a mapper that replaced only the MESSAGE handed
+ * the model `reason: null` — losing the very token the contract's refusal table tells a caller to
+ * branch on. A map that names one wins; a door that sent its own keeps it.
+ *
  * THE CODE IS PASSED AS WELL AS THE REASON, and that is not redundancy: some doors refuse with a
  * sqlstate and NO typed reason (`CLR16` on a document that is not what the caller named), so a map
  * keyed on the reason alone could never reach them. The reason is passed as `""` in that case
@@ -77,9 +84,11 @@ export function clientMismatchRefusalV23(reason: string, message: string, client
  * A refusal whose code is not a CLR sqlstate is a FAULT rather than a refusal: the door did not
  * govern it, so nobody wrote a sentence for it and nobody should read one.
  */
+export type MappedRefusalV23 = string | { reason?: string; message: string } | null;
+
 export function governedRefusalV23(
   error: unknown,
-  sentence: (reason: string, detail: Record<string, unknown>, code: string) => string | null,
+  sentence: (reason: string, detail: Record<string, unknown>, code: string) => MappedRefusalV23,
   internalMessage: string,
 ): ToolRefusalV23 {
   const refused = authoringRefusal(error as DbErrorV23);
@@ -87,12 +96,15 @@ export function governedRefusalV23(
   if (!isGovernedRefusalV23(refused.code)) return internalFaultV23(internalMessage);
   const reason = typeof refused.reason === "string" ? refused.reason : null;
   const mapped = sentence(reason ?? "", refused.details, String(refused.code));
+  const message = mapped === null ? refused.message : typeof mapped === "string" ? mapped : mapped.message;
+  const named = mapped === null || typeof mapped === "string" ? null : (mapped.reason ?? null);
   return {
     ok: false,
     code: refused.code,
-    reason: refused.reason,
+    // THE DOOR'S OWN TOKEN WINS where it sent one: this cut renames nothing a door named.
+    reason: reason ?? named,
     fix: refused.fix,
-    message: mapped === null ? refused.message : mapped,
+    message,
     details: refused.details,
   };
 }
