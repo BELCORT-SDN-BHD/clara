@@ -952,3 +952,143 @@ test("p1067.absent a claim carrying NO allocations key, and one carrying JSON nu
       `${label}: …and the claim row's own advance is that head`);
   }
 });
+
+// ===========================================================================================
+// 10 · #1052 [0340] — THE LABEL ARM, UNDER THE OWNER'S TWO CONDITIONS.
+//
+// The owner's ruling of 2026-09-24 on #931 lets arm (b) stand — an advance held under ANOTHER
+// live enrolment of the same client whose `person_label` is the claimant's — on two conditions.
+// The first is this section's: "the label match is exact after normalisation (case and
+// surrounding whitespace only, never a substring or a fuzzy match)".
+//
+// WHERE EACH HALF OF THE NORMALISATION ACTUALLY HAPPENS, measured rather than assumed:
+//   * SURROUNDING WHITESPACE is already normalised AT ENROLMENT. Both enrolment doors store
+//     `nullif(btrim(coalesce(...,'')),'')` (0043's `clara.enrol_staff_advance_account`, and
+//     0221's auto-enrolment inside the claim door), so no stored label carries padding.
+//   * CASE is not normalised anywhere. 0301's wall compared `btrim(person_label)` on both sides,
+//     so `Farah` and `farah` were two people to it. That is the defect #1052 names.
+//
+// The cells below therefore type the padding AND the case difference into the real enrolment
+// door, exactly as an admin would, and judge the claim through `admit_staff_expense_claim_work`.
+// ===========================================================================================
+
+export const SEC_LABEL_CASE_STEM = "staff_expense_claim_label_case$";
+
+let _label = null;
+async function labelLaneReady() {
+  if (_label === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1", [SEC_LABEL_CASE_STEM]);
+      _label = r.rows[0].n > 0;
+    } catch {
+      _label = false;
+    }
+  }
+  return _label;
+}
+
+async function gateLabel(t) {
+  if (await labelLaneReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_SEC_LABEL_CASE === "1") {
+    markSkip();
+    t.skip(`#1052 case-insensitive label arm absent (no ${SEC_LABEL_CASE_STEM} migration applied)`);
+    return true;
+  }
+  assert.fail(
+    "#1052: the case-insensitive claimant-label arm is absent. Apply "
+    + "0340_staff_expense_claim_label_case.sql (or its numbered suite copy), or set "
+    + "CLARA_ALLOW_MISSING_SEC_LABEL_CASE=1 for the package-wide pre-integration sweep.",
+  );
+  return true;
+}
+
+/** The label a live enrolment actually STORES — read straight off the register, so a cell can say
+ *  which half of the normalisation the door already did and which half the wall must still do. */
+async function storedLabel(enrolment) {
+  const r = await rootQuery(
+    "select person_label from clara.staff_advance_accounts where id = $1", [enrolment]);
+  return r.rows[0]?.person_label ?? null;
+}
+
+test("p1052.label.case an advance under ANOTHER live enrolment is this claimant's when the two labels differ only by CASE and surrounding space", async (t) => {
+  if (await gateAlloc(t) || await gateLabel(t)) return;
+  const client = await allocClient("alloclabelcase");
+  // 1190 is enrolled by the rig to "Farah binti Idris". 1191 is enrolled here to THE SAME PERSON,
+  // typed by another admin on another day: padded on both sides and in a different case — the
+  // ruling's own two normalisations, and nothing else.
+  await enrolAdvanceFor(ALICE(), {
+    client, code: SECHART.advanceFresh, person: "  farah BINTI idris  ",
+  });
+  const enrolOne = await liveEnrolment(client, SECHART.advance);
+  const enrolTwo = await liveEnrolment(client, SECHART.advanceFresh);
+  assert.notEqual(enrolOne, enrolTwo, "label.case: two distinct live enrolment rows");
+  assert.equal(await storedLabel(enrolOne), "Farah binti Idris",
+    "label.case: the claimant's own enrolment carries the canonical spelling");
+  assert.equal(await storedLabel(enrolTwo), "farah BINTI idris",
+    "label.case: the enrolment door already btrimmed the padding, so CASE is the only difference "
+    + "left for the wall to see");
+
+  const mine = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const hers = (await seedAdvance(ALICE(), BOB(), {
+    client, code: SECHART.advanceFresh, cents: 30000, issueDate: "2026-02-01",
+  })).advance;
+  assert.equal(hers.enrolment_id, enrolTwo, "label.case: the second advance sits on the OTHER enrolment");
+
+  // THE WORKED EXAMPLE: the rig claim is 60,500 sen (48,000 flight + 12,500 dinner). 40,000 of it
+  // discharges the advance on her own account and 20,500 the advance on the second one.
+  const a = await armed({
+    client,
+    claim: allocClaim({
+      allocations: [
+        { advance_id: mine.id, amount_cents: 40000 },
+        { advance_id: hers.id, amount_cents: 20500, account_code: SECHART.advanceFresh },
+      ],
+    }),
+  });
+  const stored = await getStaffExpenseClaim(ALICE(), a.claim_id);
+  assert.deepEqual(
+    stored.advance_allocations.map((x) => [x.advance_id, Number(x.amount_cents)]),
+    [[mine.id, 40000], [hers.id, 20500]],
+    "label.case: the confirmed list discharges the advance held under the OTHER enrolment, whose "
+    + "label differs from the claimant's only by case and the padding the door already removed",
+  );
+});
+
+test("p1052.label.distinct a label that merely STARTS WITH the claimant's is a different person, and the normalisation never becomes a substring match", async (t) => {
+  if (await gateAlloc(t) || await gateLabel(t)) return;
+  const client = await allocClient("alloclabeldiff");
+  // 1191 is enrolled to a DIFFERENT person whose written name begins with the claimant's: the
+  // ruling admits case and surrounding whitespace and forbids "a substring or a fuzzy match" by
+  // name, so this advance stays hers and the refusal keeps the arm's own word.
+  await enrolAdvanceFor(ALICE(), {
+    client, code: SECHART.advanceFresh, person: "Farah binti Idris B",
+  });
+  const enrolTwo = await liveEnrolment(client, SECHART.advanceFresh);
+  assert.equal(await storedLabel(enrolTwo), "Farah binti Idris B",
+    "label.distinct: the second enrolment's label is the claimant's plus a suffix");
+
+  const mine = (await seedAdvance(ALICE(), BOB(), { client, cents: 40000, issueDate: "2026-01-10" })).advance;
+  const hers = (await seedAdvance(ALICE(), BOB(), {
+    client, code: SECHART.advanceFresh, cents: 30000, issueDate: "2026-02-01",
+  })).advance;
+
+  const r = await refusesAlloc(client, "CLR10", "advance_allocation_mismatch",
+    () => admitStaffExpenseClaimWork({
+      client,
+      author: ALICE(),
+      claim: allocClaim({
+        allocations: [
+          { advance_id: mine.id, amount_cents: 40000 },
+          { advance_id: hers.id, amount_cents: 20500, account_code: SECHART.advanceFresh },
+        ],
+      }),
+    }),
+    "label.distinct");
+  assert.equal(r.detail.constraint, "not_this_claimant",
+    "label.distinct: refused under the arm's own word, not admitted by a looser match");
+  assert.equal(r.detail.field, "claim.advance_allocations[2].advance_id",
+    "label.distinct: …at the allocation that carries the other person's advance");
+  assert.equal(r.detail.advance_id, hers.id,
+    "label.distinct: …naming THAT advance, so the preparer knows which line to change");
+});

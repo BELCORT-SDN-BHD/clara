@@ -7328,3 +7328,79 @@ recut was then restored through the supported redo mode
 (`CLARA_MIGRATION_REDO=0339_staff_expense_claim_empty_allocation`), post-image sha
 `5c55fc8d860bc74c4fd721a81442b4ea19ed66240ef3d20386efd53e2a2cd294`, and a second redo over that
 post-image exercised the prestate's REDO branch (`clean (REDO apply)`).
+
+## 0340 — the #931 label arm matches on `lower(btrim(person_label))`, the first of the owner's two conditions (#1052, riders sweep wave, lane 03)
+
+`0340_staff_expense_claim_label_case.sql` recuts exactly one body,
+`clara._assert_claim_basis(uuid,jsonb,boolean)`, at its LIVE post-image — which on this branch is
+0339's, not 0301's, because #1067 landed earlier in the same lane — byte for byte apart from two
+`lower(...)` calls and the comments that say why. It creates nothing, drops nothing, grants nothing
+and mints no new name, so it carries no `rig-meta.mjs` cohort; its frontier is the stem
+`staff_expense_claim_label_case$` and its sweep escape hatch is
+`tests/staff-expense-claim-label-case-preintegration-gate.mjs`
+(`CLARA_ALLOW_MISSING_SEC_LABEL_CASE=1`), last in the gate chain, in migration order.
+
+**The ruling this file answers.** The owner ruled on #931 on 2026-09-24 that arm (b) of the
+claimant-ownership wall stands — an advance held under ANOTHER live enrolment of the same client
+whose `person_label` is the claimant's — "under two conditions the wall must keep: the label match
+is exact after normalisation (case and surrounding whitespace only, never a substring or a fuzzy
+match), and the allocation editor shows, beside each such advance, the enrolment it came from". The
+first condition is this migration's; the second is a web change and carries no database object.
+
+**What was live, measured rather than read off the ticket.** Driven on `clara_l06` at chain
+0001..0339 before this file was written:
+
+- SURROUNDING WHITESPACE is already normalised AT ENROLMENT, not at the wall. Both doors that write
+  a label store `nullif(btrim(coalesce(…,'')),'')` — `clara.enrol_staff_advance_account`
+  (0043:1980) and 0221's auto-enrolment inside the claim door (0221:1149) — so an admin who types
+  `"  farah BINTI idris  "` leaves `farah BINTI idris` on the row. Cell `p1052.label.case` reads
+  the stored label back off `clara.staff_advance_accounts` and says so.
+- CASE was normalised nowhere. 0301 compared `btrim(sa2.person_label) = btrim(sa.person_label)`
+  (0301:753 and 0301:791, carried forward by 0339 at its lines 519 and 557), so a claim by the
+  claimant enrolled as `Farah binti Idris` allocating against an advance under the client's second
+  live enrolment labelled `farah BINTI idris` was REFUSED `CLR10` /
+  `advance_allocation_mismatch` / `not_this_claimant` — the same refusal a genuinely different
+  person's advance gets. Cell `p1052.label.case` was red exactly there before the recut.
+
+**The change.** `lower(btrim(...))` on both sides, and nothing looser. The claimant's side is
+lowered once where `v_claim_label` is read, so the loop compares two already-normalised strings and
+there is exactly one place either side can drift. Not a substring, not `like`, not a similarity,
+not `unaccent`; not a collation change and not a `citext` column. `btrim` stays at the wall for a
+row that predates the trimming doors — the tail's probe plants exactly such a row (`"  ali  "`) so
+that `btrim` is exercised rather than assumed.
+
+**What it widens, plainly.** Two different people of one client labelled `Ali` and `ali` were two
+claimants to this wall and are now one, exactly as two labelled `Ali` and `Ali` already were. That
+is the ruling's own trade; the staff master (#1049, re-parented to the mainline on 2026-09-25) is
+the real fix. Nothing else moves: the same client, an ACTIVE enrolment, the whole label, and the
+per-advance cap and the claimant floor untouched. The change only ever admits an allocation the
+ruling calls lawful, and never widens whose books a claim may reach.
+
+**The tail is DRIVEN, on real rows.** The label arm lives in the world half, which needs a client,
+a chart, live enrolments and advances to reach, so the tail builds them by hand and unwinds them in
+a `CLR99` sub-transaction (the 0018 / 0019 / 0020 / 0146 / 0260 / 0302 probe idiom). It proves, at
+apply time: `Ali` matches `"  ali  "` (admitted); `Ali` does not match `Ali B` (refused
+`advance_allocation_mismatch` / `not_this_claimant` at `claim.advance_allocations[2].advance_id`);
+#1067's empty-list rule still fires by name; an advance this client does not hold is still refused
+`not_this_client`; and an advance under a RETIRED enrolment is still refused however its label
+reads. `T.4` then counts, always and without branching, how many ordered pairs of live enrolments
+on the database become one claimant under the normalised match — `2` on this lane database at first
+apply, and the number a hosted apply should be read against. Nothing is backfilled: the wall is
+asked per claim.
+
+**Redo (#957) and the first-apply branch.** The single statement is a `create or replace function`
+and the prestate detects its own redo by the marker `#1052 (0340` in the live validator, skipping
+only the recut pin; the eleven non-regression pins and #1067's marker are checked on both branches.
+The FIRST APPLY ran through `pnpm db:migrate` (`#1052 prestate: clean (FIRST apply)`), and the
+first-apply branch was additionally re-proved by hand inside a rolled-back transaction with 0339's
+own body restored, so the sha branch a redo can never take was seen to pass on its own. Both redo
+branches were exercised: `CLARA_MIGRATION_REDO=0340_staff_expense_claim_label_case` over 0339's
+restored body took the sha branch, and a second redo over this file's own post-image took the
+marker branch (`clean (REDO apply)`).
+
+**The vacuity control.** With 0339's body put back on the lane database byte for byte (live sha
+`5c55fc8d860bc74c4fd721a81442b4ea19ed66240ef3d20386efd53e2a2cd294`), `p1052.label.case` fails with
+`that advance was not issued to this claimant` and `p1052.label.distinct` stays green — correctly,
+because it pins behaviour this file must not move. The recut was then restored through the
+supported redo mode; post-image sha
+`d1dff7654eda906324b534d723511ba9d4fd5b091f994a84200680c3fb164ffd`.
