@@ -467,7 +467,7 @@ insert into clara.wake_fn_allowlist(wake_kind, function_name)
 -- =====================================================================================
 do $c0362_tail$
 declare
-  v_n int; v_acl text;
+  v_n int; v_acl text; v_extra text;
 begin
   -- 1 · THE READ DOOR RESOLVES AT EXACTLY ONE pg_proc ROW, is STABLE SECURITY DEFINER owned by
   --     clara_fn_owner, and carries the search_path pin every definer body in this estate does.
@@ -487,17 +487,42 @@ begin
       using errcode='CLR10';
   end if;
 
-  -- 2 · ONE ROLE HOLDS IT, AND IT IS THE READ ROLE. Read off the ACL rather than asked role by
-  --     role, so a grant to a role this file never names is caught too.
+  -- 2 · ONE ROLE HOLDS IT, AND IT IS THE READ ROLE -- ASKED AS AN ALLOWLIST (FIX ROUND, ADV-05).
+  --
+  --     WHAT WAS WRONG. This check used to read the ACL string and refuse four spellings
+  --     (`clara_runtime=`, `clara_authenticated=`, `clara_wake_`, `clara_agent_chat_ro=`) plus a
+  --     PUBLIC arm, under a comment claiming "a grant to a role this file never names is caught
+  --     too". It is a DENYLIST, and only as wide as its author's memory: this cluster carries
+  --     clara_freeform_ro, clara_stripe_webhook, clara_invite_preview, clara_agent_read_login and
+  --     clara_auth_wall, none of which it names -- while `clara_agent_chat_ro`, which it does name,
+  --     is not a role that exists here at all. MEASURED on clara_c01 inside a transaction that was
+  --     rolled back: after `grant execute ... to clara_freeform_ro`, NEITHER arm fired and
+  --     has_function_privilege('clara_freeform_ro', ...) read true -- this tail would have applied
+  --     happily over a machine role nobody meant to admit.
+  --
+  --     WHAT IT ASKS NOW. Every `clara\_%` role this cluster carries, read off pg_roles, plus
+  --     PUBLIC, one at a time through has_function_privilege -- which is also how a privilege
+  --     arriving THROUGH public is caught, where an ACL string would have to be parsed. The reached
+  --     set must be exactly {clara_agent_ro}. clara_fn_owner is excluded because it OWNS the body
+  --     and therefore always holds EXECUTE. This is 0363's own p1148.acl.census shape, and the
+  --     matching cell is `p1147.read.acl`.
   select coalesce(array_to_string(p.proacl::text[], '|'), '(default)') into v_acl
     from pg_proc p where p.oid = 'clara.wake_get_firm_standing_instruction(text)'::regprocedure;
-  if v_acl !~ 'clara_agent_ro=X/clara_fn_owner' then
+  if not has_function_privilege('clara_agent_ro',
+       'clara.wake_get_firm_standing_instruction(text)'::regprocedure, 'EXECUTE') then
     raise exception '0362 tail: clara_agent_ro does not hold EXECUTE on the read door (acl %)', v_acl
       using errcode='CLR10';
   end if;
-  if v_acl ~ 'clara_runtime=|clara_authenticated=|clara_wake_|clara_agent_chat_ro=' or v_acl ~ '(^|\|)=X' then
-    raise exception '0362 tail: a role other than clara_agent_ro reaches the read door (acl %)', v_acl
-      using errcode='CLR10';
+  select string_agg(r, ', ' order by r) into v_extra
+    from unnest(array(select rolname from pg_roles
+                       where rolname like 'clara\_%'
+                         and rolname not in ('clara_fn_owner', 'clara_agent_ro'))
+                || array['public']) r
+   where has_function_privilege(r, 'clara.wake_get_firm_standing_instruction(text)'::regprocedure,
+           'EXECUTE');
+  if v_extra is not null then
+    raise exception '0362 tail: % also reach(es) the read door, which is clara_agent_ro''s alone (acl %)',
+      v_extra, v_acl using errcode='CLR10';
   end if;
 
   -- 3 · ONE ALLOWLIST ROW, FOR ONE KIND. A second kind is a widening and this file grants none.

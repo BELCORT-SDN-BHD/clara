@@ -249,6 +249,31 @@ async (t) => {
       () => roleQuery(role, READ_SQL, [KEY]), `${role} on ${READ_DOOR}`);
   }
 
+  // FIX ROUND (ADV-05): AND THE SET IS ASSERTED POSITIVELY, not as a loop over four names we
+  // happened to think of. The four drives above are behaviour -- they prove the refusal a real
+  // connection meets -- but as a WALL they are a denylist, and a denylist is only as wide as its
+  // author's memory. This cluster carries clara_freeform_ro, clara_stripe_webhook,
+  // clara_invite_preview, clara_agent_read_login, clara_auth_wall, clara_wake_bank and
+  // clara_wake_filing, none of which that loop names. MEASURED on clara_c01 inside a transaction
+  // that was rolled back: after `grant execute on function clara.wake_get_firm_standing_instruction
+  // (text) to clara_freeform_ro`, neither arm of 0362's own tail ACL check fired and
+  // has_function_privilege('clara_freeform_ro', ...) read true.
+  //
+  // So the roster is READ OFF pg_roles -- every `clara\_%` role this cluster carries, plus PUBLIC --
+  // and the reached set must be EXACTLY the read role. clara_fn_owner is excluded because it OWNS
+  // the body and always holds EXECUTE; this is 0363's own `p1148.acl.census` shape, applied to the
+  // door it was written for.
+  const reached = (await rootQuery(
+    `select r as role from unnest(
+             array(select rolname from pg_roles
+                    where rolname like 'clara\\_%' and rolname <> 'clara_fn_owner')
+             || array['public']) r
+      where has_function_privilege(r, 'clara.${READ_DOOR}(text)'::regprocedure, 'EXECUTE')
+      order by 1`)).rows.map((r) => r.role);
+  assert.deepEqual(reached, [ROLES.agentRo],
+    `the read door is reached by ${reached.join(", ") || "nobody"} -- it is the model lane's read `
+    + "role's alone, and every other role on this cluster was asked by name");
+
   // THE RELATION IS STILL NO MACHINE ROLE'S TO READ. This is 0338's own tail assertion, which
   // #1147's acceptance criterion asks be proved to still hold: the door exists PRECISELY because
   // the machine lane holds nothing here, so if this ever flipped the door would be redundant and
