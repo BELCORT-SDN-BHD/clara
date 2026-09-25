@@ -523,7 +523,7 @@ test("1069 a claim settling three advances says so ON THE LIST, and a single-adv
         "…on the always-visible desktop line too, the one a wide reader actually reads");
 
       assert.match(compact[1]!, /Staff expense claim — Lim Wei Jie/,
-        "a single-advance claim still reads exactly as #880 shipped it");
+        "a single-advance claim still reads exactly as ticket 880 shipped it");
       assert.doesNotMatch(compact[1]!, /settles/,
         "…with nothing added: one advance is the ticket's own threshold");
       assert.doesNotMatch(desktop[1]!, /settles/, "…on its desktop line either");
