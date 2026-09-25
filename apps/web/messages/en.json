@@ -6765,6 +6765,8 @@
       "billConflictAmount": "Accrual amount: {amount}",
       "listHeading": "Recorded accruals",
       "listBody": "Each accrual runs under the authority of the person who instructed it, and every due date rechecks that authority before any accounting work is created.",
+      "loadMore": "Load more",
+      "loadingMore": "Loading more…",
       "newAccrual": "New accrual",
       "empty": "No accruals recorded for this client yet.",
       "tableLabel": "Accruals",

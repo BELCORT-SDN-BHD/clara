@@ -30,6 +30,18 @@ cheaper check: the pinned pnpm predates `pnpm install --dry-run`, which landed i
 each spent a cycle rediscovering this separately, which is why it is written here rather than in
 any one wave's rig notes.
 
+**A database that must serve World legs needs the Workflow DevKit's own `workflow` schema, and no
+migration in this repository creates it (#1145).** Provision it once:
+`pnpm --filter @clara/runtime exec bootstrap`, with `WORKFLOW_POSTGRES_URL` set. It is not an npm
+script; it resolves to the dependency bin `@workflow/world-postgres/bin/setup.js`, which creates
+`workflow.workflow_runs` and five sibling tables. Skip it and the runtime suite's DevKit-backed
+cells do not fail — they SKIP, probing `to_regclass('workflow.workflow_runs')` and reporting the
+same success either way, so a run missing the schema still reads green with nothing DevKit-backed
+actually exercised: the riders sweep wave's integration merge lost 22 lane cells to exactly this
+shape before a later gate provisioned the schema and ran them for real. Bootstrap a DISPOSABLE
+database for this, never one other work depends on: bootstrapping a World reds
+`rig-isolation.test.mjs` T10b afterward (#866).
+
 | Component | Purpose | Setup and verification |
 |---|---|---|
 | `apps/web` | Next.js workbench and agent rail; Cloudflare Worker | [Web README](apps/web/README.md) |

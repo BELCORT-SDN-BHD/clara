@@ -1072,7 +1072,7 @@ contradicting themselves, which is the defect #936's first sentence names. The d
 `PlanReviseForm` holds that wall at the only surface that can START the generic act: for a plan an
 accrual's figures are stated on it renders no form at all, says what would go wrong in the words of
 the books, and links to the correction. The discriminator is a SECOND read —
-`liveAccrualForPlan(loadAccruals(clientId), planId)`, keyed on
+`liveAccrualForPlan((await loadAccruals(clientId)).accruals, planId)`, keyed on
 `clara.accrual_adjustments.plan_id` — because `clara.get_accounting_plan` carries no such field and
 `kind` cannot stand in for it: an accrual's plan is a `reversing_journal`, and so is an ordinary
 reversing journal nobody configured from an accrual (measured on the lane rig: 115 reversing plans

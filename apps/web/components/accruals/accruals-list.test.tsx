@@ -23,7 +23,7 @@ import assert from "node:assert/strict";
 import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
-import { renderComponent, setFieldValue } from "../../test/hookHarness";
+import { clickButton, renderComponent, setFieldValue, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import messages from "../../messages/en.json";
@@ -192,28 +192,50 @@ test("942.list.side — each row names its side and prints its two legs in POSTI
   );
 });
 
-test("942.list.filter — the register can be narrowed to one side, and says so rather than looking empty", async () => {
-  await withMockedEnv(
-    rpcRouter({ list_accrual_adjustments: { client_id: CLIENT, accruals: [ROW, REVENUE_ROW] } }),
-    async () => {
-      const h = await renderComponent(app(createElement(AccrualsList, { clientId: CLIENT })));
-      try {
-        for (let i = 0; i < 6; i++) await h.settle();
-        const filter = h.find((n) => (n as { getAttribute?: (k: string) => string | null })
-          .getAttribute?.("id") === "accruals-side-filter");
-        assert.ok(filter, "the register offers a side filter");
-        await h.fireEvent(filter, "change", (n) => setFieldValue(n, "revenue"));
-        for (let i = 0; i < 3; i++) await h.settle();
-        const text = h.text();
-        assert.match(text, /Unbilled advisory fees/);
-        assert.doesNotMatch(text, /Monthly office rent accrual/,
-          "the expense accrual is filtered out, not hidden behind a scroll");
-      } finally {
-        await h.unmount();
-        for (let i = 0; i < 3; i++) await h.settle();
-      }
-    },
-  );
+// #1152 — THE FILTER IS NOW A SERVER ROUND TRIP, NEVER A BROWSER-SIDE NARROWING (the pre-#1152
+// version of this cell drove `rpcRouter`'s single static answer and asserted on what the
+// component narrowed LOCALLY; that claim no longer holds — the component renders exactly the
+// rows the door hands it). This router answers per `p_side`, so the assertion below can only pass
+// if the SECOND read genuinely reached the server with `p_side: "revenue"` and the server did the
+// narrowing.
+test("942.list.filter — the register can be narrowed to one side, and the narrowing is a SERVER round trip, not a component-side filter", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const sideAwareRouter = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    if (!url.includes("/rpc/list_accrual_adjustments")) return jsonResponse({ message: `unmocked ${url}` }, 404);
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    bodies.push(body);
+    const side = body.p_side ?? null;
+    const rows = side === "revenue" ? [REVENUE_ROW] : side === "expense" ? [ROW] : [ROW, REVENUE_ROW];
+    return jsonResponse({ client_id: CLIENT, from: null, to: null, side, accruals: rows, next_cursor: null });
+  }) as typeof fetch;
+
+  await withMockedEnv(sideAwareRouter, async () => {
+    const h = await renderComponent(app(createElement(AccrualsList, { clientId: CLIENT })));
+    try {
+      for (let i = 0; i < 6; i++) await h.settle();
+      assert.equal(bodies.length, 1, "one read on mount");
+      assert.equal(bodies[0]?.p_side, null, "the first read asks for every side, no filter set yet");
+      assert.match(h.text(), /Unbilled advisory fees/);
+      assert.match(h.text(), /Monthly office rent accrual/);
+
+      const filter = h.find((n) => (n as { getAttribute?: (k: string) => string | null })
+        .getAttribute?.("id") === "accruals-side-filter");
+      assert.ok(filter, "the register offers a side filter");
+      await h.fireEvent(filter, "change", (n) => setFieldValue(n, "revenue"));
+      for (let i = 0; i < 3; i++) await h.settle();
+
+      assert.equal(bodies.length, 2, "changing the side control makes a SECOND round trip to the door");
+      assert.equal(bodies[1]?.p_side, "revenue", "…carrying the newly selected side to the server");
+      const text = h.text();
+      assert.match(text, /Unbilled advisory fees/);
+      assert.doesNotMatch(text, /Monthly office rent accrual/,
+        "the expense accrual is gone because the SERVER excluded it from the answer, not a component-side filter");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 3; i++) await h.settle();
+    }
+  });
 });
 
 // ==============================================================================================
@@ -264,4 +286,86 @@ test("1071.list.amount-kind — the Amount column names whether its figure is pe
       }
     },
   );
+});
+
+// ==============================================================================================
+// #1152 — THE REGISTER ITSELF REACHES THE SECOND PAGE. `lib/accruals/use-accruals-register.test.ts`
+// proves the hook's own bookkeeping (accumulation, cursor advance, the page-size-derived
+// `hasMore`); nothing proved that THIS component renders a control for it or drives it. AC5 names
+// the register, not the hook: "The register renders the first page and reaches the next one,
+// asserted by a web cell." Shape borrowed from the sibling register's own load-more cell
+// (`components/firm/activity/activity-feed.test.tsx`), which finds the BUTTON and clicks it.
+//
+// The page size is the hook's own `PAGE_LIMIT` (50) and `hasMore` is derived from the page's SIZE,
+// never from `next_cursor`'s presence — so a FULL first page is what makes the control appear, and
+// a short second page is what retires it.
+// ==============================================================================================
+
+const FULL_PAGE = Array.from({ length: 50 }, (_, i) => ({
+  ...ROW,
+  accrual_id: `dddddddd-dddd-4ddd-8ddd-${String(i).padStart(12, "0")}`,
+  purpose: `First page accrual ${i}`,
+}));
+/** The LAST row of the first page, spelled out rather than indexed off FULL_PAGE: the cursor the
+ *  component must echo back is a fact about the door's answer, so the cell states it independently
+ *  instead of re-deriving it from the fixture it is checking. */
+const LAST_OF_FIRST_PAGE = `dddddddd-dddd-4ddd-8ddd-${String(49).padStart(12, "0")}`;
+const SECOND_PAGE = [
+  { ...ROW, accrual_id: "cccccccc-cccc-4ccc-8ccc-cccccccccc01", purpose: "Second page accrual A" },
+  { ...ROW, accrual_id: "cccccccc-cccc-4ccc-8ccc-cccccccccc02", purpose: "Second page accrual B" },
+];
+
+test("1152.list.loadMore — the register renders a Load more control on a FULL page, and clicking it appends the next page and retires the control", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const pagingRouter = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    if (!url.includes("/rpc/list_accrual_adjustments")) return jsonResponse({ message: `unmocked ${url}` }, 404);
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    bodies.push(body);
+    // The door answers a SECOND page only to a caller that echoed the FIRST page's own cursor
+    // back — so a component that rendered a control but never carried the cursor forward would
+    // get page one again and the appended rows below would be the wrong ones.
+    const cursor = body.p_cursor as { tuple?: string[] } | null;
+    if (cursor?.tuple?.[2] === LAST_OF_FIRST_PAGE) {
+      return jsonResponse({ client_id: CLIENT, from: null, to: null, side: null, accruals: SECOND_PAGE, next_cursor: null });
+    }
+    return jsonResponse({
+      client_id: CLIENT, from: null, to: null, side: null, accruals: FULL_PAGE,
+      next_cursor: { tuple: ["2026-07-01", "2026-07-01T02:00:00.000000", LAST_OF_FIRST_PAGE] },
+    });
+  }) as typeof fetch;
+
+  await withMockedEnv(pagingRouter, async () => {
+    const h = await renderComponent(app(createElement(AccrualsList, { clientId: CLIENT })));
+    try {
+      for (let i = 0; i < 6; i++) await h.settle();
+      assert.equal(bodies.length, 1, "one read on mount");
+      assert.equal(bodies[0]?.p_limit, 50, "…asking the door for a page, not the client's whole history");
+      assert.match(h.text(), /First page accrual 0/);
+      assert.doesNotMatch(h.text(), /Second page accrual A/, "the second page is not on screen before anyone asks for it");
+
+      const loadMore = h.find((n) => (n as { tagName?: string }).tagName === "BUTTON"
+        && /Load more/.test(textOf(n)));
+      assert.ok(loadMore, "a full first page renders a Load more control");
+      assert.notEqual((loadMore as { disabled?: boolean }).disabled, true,
+        "…and it is enabled: nothing is in flight");
+
+      await h.act(async () => { await clickButton(loadMore); });
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      assert.equal(bodies.length, 2, "clicking Load more makes a SECOND round trip to the door");
+      assert.deepEqual((bodies[1]?.p_cursor as { tuple?: string[] } | null)?.tuple?.[2], LAST_OF_FIRST_PAGE,
+        "…carrying the FIRST page's own next_cursor back verbatim, never a cursor this component built");
+
+      const text = h.text();
+      assert.match(text, /Second page accrual A/, "the second page's rows are on screen");
+      assert.match(text, /First page accrual 0/, "…APPENDED to the first page, which is still on screen");
+      const gone = h.find((n) => (n as { tagName?: string }).tagName === "BUTTON"
+        && /Load more/.test(textOf(n)));
+      assert.equal(gone, null, "a SHORT second page retires the control — there is no third page to ask for");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 3; i++) await h.settle();
+    }
+  });
 });

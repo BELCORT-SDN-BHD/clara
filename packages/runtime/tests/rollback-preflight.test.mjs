@@ -48,6 +48,11 @@ import * as rig from "./rig.mjs";
 // that a hand-written INSERT here would get wrong, and their own `after` hook removes the sources
 // it registered.
 import { BANK_DUE_TYPE, registerSource, plantHeldWakeTask, plantQueuedClosePrepTask } from "./g1-wake-bodies.fixtures.mjs";
+// #1151 — the same module `intake-admission-e2e.mjs` calls at its own end. Proving the SCOPED
+// gate here, against real firm-scoped rows on a real estate, is what the standalone e2e driver
+// cannot cheaply repeat per round. The narrowing lives in that module, not in the shipped
+// `lib/rollback-preflight.mjs` this file otherwise exercises (SPEC-K3-03).
+import { waitForQueueDrain } from "./queue-drain.mjs";
 import {
   AGENT_TASK_KIND_CLASSES,
   AGENT_TASK_KINDS_FROM_SOURCES,
@@ -713,6 +718,85 @@ test("637.pf: #1015 — an explicit ask for the FULL document picture (documentT
     assert.ok(noise.every((id) => open.tasks.some((t) => t.id === id)), "an unscoped call still sees the full document picture");
   } finally {
     await retireNoiseDocumentTasks(noise);
+  }
+});
+
+test("637.pf: #1151 — a firmIds-scoped waitForQueueDrain drains past another firm's HELD wake task, and still fails naming THIS leg's own live task", { skip: SKIP }, async () => {
+  // THE DEFECT `tests/queue-drain.mjs`'s `waitForQueueDrain` exists to fix (#1151, candidates
+  // E26/E27; `waveS-lane06-fix.md` / `waveS-lane06-fix-2.md` follow-up 2). `clara_intake_ci` is
+  // always built fresh, but a rig CLONE of a used estate carries OTHER firms' client data — and
+  // that data can mint its own live `clara.agent_tasks` rows, most measurably a `held` wake task
+  // born from the estate's own compliance/lint transitions while both `clara.wake_engine_sources`
+  // rows are `enabled = false`. No engine a leg's own process runs will EVER clear a row it was
+  // never responsible for. Unscoped, this call cannot tell "a stranger's stuck row" from "this
+  // leg's own admitted work still live" — it answers both the same way: TIMED OUT.
+  //
+  // THE NARROWING ITSELF LIVES IN `tests/queue-drain.mjs`, NOT IN THIS MODULE'S OWN
+  // `censusUnboundTasks` (SPEC-K3-03: #1151's "Out of scope" line forbids a product code path,
+  // and `lib/rollback-preflight.mjs` is shipped). So this cell drives the GATE and asserts the
+  // answer; `censusUnboundTasks` is read here only as the corroborating "both rows really are
+  // live and unscoped-visible" half, called exactly the way every other caller calls it.
+  const stranger = await rig.buildFirm("pf-1151-stranger");
+  const { taskId: strangerTaskId, intentId: strangerIntentId } =
+    await plantHeldWakeTask({ owner: stranger.owner, client: stranger.client, payload: { bank_account_id: randomUUID() } });
+  const own = await rig.buildFirm("pf-1151-own");
+  const ownTaskId = await plantQueuedClosePrepTask({ firm: own.firm, client: own.client });
+  const rigLike = { rootQuery: (sql, params) => rig.rootQuery(sql, params) };
+  try {
+    // UNSCOPED: the census sees BOTH rows — the stranger's held wake task is exactly as live to it
+    // as this leg's own task — and a short-deadline drain times out naming the stranger's row.
+    const unscoped = await censusUnboundTasks(query, {});
+    assert.ok(unscoped.tasks.some((t) => t.id === strangerTaskId), "unscoped: the stranger firm's held wake row is visible");
+    assert.ok(unscoped.tasks.some((t) => t.id === ownTaskId), "unscoped: this leg's own live task is visible too");
+    await assert.rejects(
+      () => waitForQueueDrain(rigLike, { deadlineMs: 400 }),
+      (err) => {
+        assert.match(err.message, /TIMED OUT/);
+        assert.match(err.message, new RegExp(strangerTaskId), "unscoped: a stranger's held row alone is enough to time it out");
+        return true;
+      },
+    );
+
+    // SCOPED to "own" alone: the gate still throws, naming THIS leg's own live task and never the
+    // excluded one — the scope narrows WHAT counts, never WHETHER a leg's own live work counts.
+    await assert.rejects(
+      () => waitForQueueDrain(rigLike, { deadlineMs: 400, firmIds: [own.firm] }),
+      (err) => {
+        assert.match(err.message, /TIMED OUT/);
+        assert.match(err.message, new RegExp(ownTaskId), "names this leg's OWN live task");
+        assert.doesNotMatch(err.message, new RegExp(strangerTaskId), "never blocked by a firm this scope excluded");
+        return true;
+      },
+    );
+
+    // Settle the leg's own task terminal — through its own recovery door in real life, a plain
+    // cancel here — and the SAME scoped drain now resolves cleanly, DESPITE the stranger's row
+    // still being held, live, throughout. This is the half AC2 names and the half that could not
+    // pass before the narrowing existed.
+    await rig.rootQuery("update clara.agent_tasks set status = 'cancelled' where id = $1", [ownTaskId]);
+    const result = await waitForQueueDrain(rigLike, { deadlineMs: 3000, firmIds: [own.firm] });
+    assert.ok(result.polls >= 1);
+    const strangerStillHeld = await rig.rootQuery("select status from clara.agent_tasks where id=$1", [strangerTaskId]);
+    assert.equal(strangerStillHeld.rows[0].status, "held", "the stranger's row was never touched by the scoped drain — excluded, not settled");
+
+    // …and `censusUnboundTasks` ITSELF is byte-for-byte the unscoped answer it always was: the
+    // narrowing changed the GATE, never the shipped census this module exports.
+    const after = await censusUnboundTasks(query, {});
+    assert.ok(after.tasks.some((t) => t.id === strangerTaskId),
+      "the shipped census still reports the stranger's row unscoped — #1151 added no scope to it");
+
+    // AN EMPTY firmIds ARRAY IS REFUSED BY NAME rather than answering "drained" over a full
+    // database — a caller that computed its own firms and got none back gets a loud refusal.
+    await assert.rejects(
+      () => waitForQueueDrain(rigLike, { deadlineMs: 400, firmIds: [] }),
+      (err) => {
+        assert.match(err.message, /EMPTY array/);
+        return true;
+      },
+    );
+  } finally {
+    await rig.rootQuery("update clara.agent_tasks set status = 'cancelled' where id = $1 and status <> 'cancelled'", [ownTaskId]);
+    await retireWakeTask(strangerIntentId);
   }
 });
 

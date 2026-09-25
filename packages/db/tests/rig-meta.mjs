@@ -2441,6 +2441,13 @@ export const PLAN_OCCURRENCE_REVERSAL_DOOR_0333_COHORT = [...PLAN_OCCURRENCE_REV
 // recut, so `ACCRUAL_ADJUSTMENTS_0222_HUMAN_FNS` above (which already lists
 // "list_accrual_adjustments") covers the widened door as-is.
 
+// #1152 [0365, the accrual register reads a page at a time] — the SAME "NO COHORT CHANGE, NO NEW
+// NAME" shape as 0334's own note immediately above, restated rather than assumed: this is
+// ANOTHER drop-and-create of `clara.list_accrual_adjustments` (a caller and a limit cannot be
+// added by `create or replace` either, the same reason 0334's own note gives), and 0365's own
+// tail re-reads the SAME owner, SECURITY DEFINER, STABLE and literal ACL after the recut —
+// `ACCRUAL_ADJUSTMENTS_0222_HUMAN_FNS` still covers it, by NAME, unchanged.
+
 // #979 [0251, the depreciation authority read tells "never had one" apart from "had one, and it
 // was retired"] — NO COHORT, NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed, for
 // the same reason #797's (0212) and #720's (0198) blocks state theirs. 0251 creates no function:

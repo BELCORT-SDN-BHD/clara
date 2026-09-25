@@ -1700,6 +1700,105 @@ accumulated from an earlier, out-of-order local run, `waitForQueueDrain` correct
 the queue drained and timed out (see the action.yml comment above this step).
 <!-- /#967 -->
 
+<!-- #1151 -->
+**Two intake drills that were green for the wrong reason (candidates E26/E27; #1044's follow-ups
+1 and 2, `waveS-lane06-fix.md` / `waveS-lane06-fix-2.md`).**
+
+1. **The terminal drain (this leg) now takes `firmIds`.** `waitForQueueDrain(rig, { firmIds })`
+   scopes `censusUnboundTasks`'s own census to the leg's OWN firm(s) — this file calls it with
+   `firmIds: [firm]`, the one firm `rig.buildFirm("intake-admission-e2e")` built at the top. `clara_
+   intake_ci` is always built fresh, so an unscoped drain never saw another firm's data there; a rig
+   CLONE of a used estate does, and that estate's own compliance/lint notifications can mint `held`
+   wake tasks with no `clara.wake_engine_sources` row enabled to place them — no engine this leg's
+   process runs will EVER clear a row it was never responsible for. Unscoped, the drain cannot tell
+   that stranger's stuck row from this leg's own admitted work still being live, and times out on
+   either the same way ("TIMED OUT … unbound live tasks: […]"). Measured on a disposable clone (338
+   files / `0365`, world-bootstrapped, otherwise empty) with ONE `held` wake task planted for a
+   SEPARATE firm (`tests/g1-wake-bodies.fixtures.mjs`'s `plantHeldWakeTask`, the same producer
+   contract `rollback-preflight.test.mjs` uses): unscoped, this leg's drain times out at exactly that
+   one row every time; scoped to its own firm, it drains and the stranger row is still `held`,
+   untouched, afterwards. Re-measured in the closing wave's fix round on a much harder database — a
+   world-bootstrapped clone of the lane estate carrying **1,715 `held` wake tasks across 365 OTHER
+   firms**, minted by the intake legs' own runs from that estate's transitions with both
+   `clara.wake_engine_sources` rows disabled — the scoped drain finished in **4, 5 and 6 polls
+   (1,935 ms / 1,968 ms / 2,499 ms) on three consecutive rounds**, and a fourth, run after the batch
+   leg in the action's own order, in **6 polls / 2,780 ms**. Every figure in this paragraph is a
+   round that was actually run; there is no range claimed beyond them.
+
+   **The narrowing lives in `tests/queue-drain.mjs`, not in `lib/rollback-preflight.mjs`.** The
+   first cut of this fix added a fourth bind parameter to `censusUnboundTasks`, which is SHIPPED
+   code (`lib/runtime-contracts.mjs` and `scripts/rollback-preflight.mjs` import it, and it is in
+   `.output/server/index.mjs`) — and #1151's "Out of scope" line forbids exactly that ("any product
+   code path … both are cell gaps"). `waitForQueueDrain` therefore calls `censusUnboundTasks`
+   byte-for-byte the way every other caller does and narrows its ANSWER with one further statement
+   (`narrowTasksToFirms`), which is issued only when a caller named `firmIds`. An omitted `firmIds`
+   issues no statement at all, so no existing caller's answer can have moved; an EMPTY array is
+   refused by name rather than silently meaning "nothing is live"; and a census table the narrowing
+   cannot place fails closed. `censusNonTerminalRuns` / `censusFailedRuns`
+   (`workflow.workflow_runs`) are deliberately NOT narrowed: nothing this ticket measured named
+   them, and a database this call runs against has never had a body run against it before THIS
+   leg's own process started one — `clara_intake_ci` is always built fresh, and a rig clone's own
+   `agent_tasks`/`document_processing_tasks` residue was seeded, never actually WORKED by a live
+   engine. (That last sentence is the one thing the fix round measured a limit to: on a clone that
+   ALSO carries another leg's parked `claraWork_v6` runs, the RUN census still holds the drain open,
+   because it is firm-blind by design. Settle or finish those runs first — the action's own order
+   does, since the batch leg runs last and is never followed by a drain.) The scoped gate is driven
+   against a live database in `rollback-preflight.test.mjs`'s own `#1151` cell (48/48 unskipped on a
+   world-bootstrapped clone), and against an in-memory two-firm database in `queue-drain.test.mjs`,
+   where the assertions are on the ANSWER — drained, or timed out naming which rows — never on a
+   bind parameter.
+2. **`intake-batch-e2e.mjs`'s LEG 3 receipt census is now BY IDENTITY, not by raw count.** The old
+   assertion (`op_receipts` count === `live.length`) had no allowance for a live child settling ON
+   ITS OWN — a genuine terminal ingest failure — between the cancel decision and the belt's own
+   sweep, though the lines just above it already make exactly that allowance for the earlier
+   seed-to-decision window. Under load the window widens and the belt's own worklist read
+   (`clara._intake_batch_live_children`) finds that child gone before it ever gets there —
+   `{"batchCancelOk":true,"batchCancelSettled":0,"batchCancelChildren":0}` is what an EMPTY worklist
+   looks like — so the blunt count came up short (measured on this rig, round 1: `3 of 7`). The leg
+   now FORCES exactly that drift on one live child every round (`clara.settle_work_run(task,
+   'failed', …)` on the one child the interruption loop never directly cancels), so the census is
+   proven against the drift it exists for rather than waiting for load to happen to open the window,
+   and then checks each live child BY IDENTITY: explained by its own `cancel_accounting_work` op
+   receipt, or by its Work having reached some OTHER terminal status on its own — never by neither
+   (a genuinely skipped child still reds the leg, unchanged) and never by two (`clara.op_receipts`'s
+   own primary key, `(firm_id, fn, op_key)`, makes "decided twice" structurally unobservable here,
+   which is why the old count's real job was never actually catching that half).
+
+   **The drive and the assertion now share one condition, and the tolerance is bounded.** The first
+   cut forced the drift only `if (spontaneousTask)` and swallowed the settle's own rejection, while
+   asserting on the drift unconditionally — so a child with no `current_task_id`, or a settle the
+   door refused, reddened the leg with a message blaming the BELT. The drive now asserts its own
+   precondition, lets the settle fail loudly, and proves the child terminal BEFORE the belt reads.
+   And "settled on its own" is no longer an unbounded allowance: the leg snapshots every child's
+   status ONE QUERY before the belt call, and every child NON-TERMINAL at that instant — the ones
+   the belt's own worklist offers — must carry a receipt afterwards. A belt that swept nothing
+   therefore reds whatever the children did next; only a child already terminal when the belt read
+   is lawfully receipt-less. Re-measured over four solo rounds plus one in the action's own order,
+   all green, on a clone of a used estate: `94 / 94 / 83 / 94` receipt rows over the same number of
+   DISTINCT work ids every time (the "none decided twice" observable, now asserted rather than
+   argued), `47 / 47 / 41 / 47` children live when the belt read and every one of them holding a
+   receipt, exactly `1` settled on its own (the forced drift) and `0` unexplained every round.
+   Vacuity control: with the belt call replaced by
+   `{batchCancelOk:true,batchCancelSettled:0,batchCancelChildren:0}` the leg reds at "every child
+   STILL LIVE when the belt read must carry a cancel receipt — 47 were live, 47 have none"; the
+   call was then restored byte for byte.
+
+**Reproduction rig, for whoever needs to re-run this.** A disposable WSL Postgres 17 cluster on a
+free port (never `rigl06ac3`, never a lane's own shared cluster — migration 0154 forbids a second
+from-scratch chain on a cluster that already ran one), migrated 0001→0365 and seeded from scratch,
+`WORKFLOW_POSTGRES_URL` bootstrapped once (`pnpm --filter @clara/runtime exec bootstrap`), then the
+three legs through `scripts/ci/world-gate.mjs` in the action's own order. A TEMPLATE COPY of a used
+lane database works too and is the harder case — `create database clara_rt_test template <lane db>`,
+then the same one bootstrap — but it is not CI-shaped: it arrives carrying that estate's own live
+rows, and each intake leg mints hundreds more `held` wake tasks for other firms as it runs. Settle
+that residue (and any parked `workflow.workflow_runs`) before a leg that ENDS in a drain, or the
+drain will time out on rows that were never that leg's, which is the very condition this ticket
+documents rather than a defect in it. A stranger firm's held wake
+task is planted with `tests/g1-wake-bodies.fixtures.mjs`'s `plantHeldWakeTask({ owner, client,
+payload })` — no `registerSource` call, so it is born `held` with no source to place it, exactly the
+production shape.
+<!-- /#1151 -->
+
 NAMED RESIDUAL: leg 5 proves the LOST-FINALIZE-RESPONSE convergence, not a SIGKILL
 between finalize and checkpoint. This file boots the runtime in-process (as
 `intake-e2e.mjs` does) so it can inject the OCR fixture; a true SIGKILL variant needs the
