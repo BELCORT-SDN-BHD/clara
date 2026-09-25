@@ -940,26 +940,6 @@ asserts the catalogue comment names `#1038`/"withdrawn" and directly re-measures
 an earlier cell in this file's history once proved SUCCEEDING now REFUSES `42501`
 `insufficient_privilege`.
 
-**Restored by #1099 — the op-key idempotence law's own test coverage for `create_client`, dropped
-by this migration's grant withdrawal and repointed rather than left gone.**
-[`wb-g-opkeys.test.mjs`](tests/wave-b/wb-g-opkeys.test.mjs)'s G4/[R2-F8] census (the shared
-op-key-idempotence battery every other 0017-family writer sits in) derives its writer inventory
-from a live `EXECUTE` grant, by construction — a fn this migration ungrants can never appear in
-that inventory again, and when #1038 landed, `create_client`'s row in the census's per-writer
-fixture table was simply deleted rather than repointed, so nothing any longer drove its
-`_reserve_op` call at all. #1099 restores it, off the census: a new
-`UNGRANTED_RESERVING_FNS` registry in `wb-g-opkeys.test.mjs` names `create_client` alongside the
-migration that ungranted it and where its coverage now lives, a META cell re-measures that its
-live `prosrc` still calls `_reserve_op` (the same "a writer must never silently drop the
-discipline" law the grant-derived census enforces for every writer it CAN still see), and a
-dedicated `G4/[R2-F8] supplement` cell drives the law itself through
-`createClientRaw` — `rig-fixtures.mjs`'s root+jwt idiom, the one path this migration left
-reachable — proving both halves: an identical-payload replay returns the cached receipt
-byte-for-byte with no second `clara.clients` row, and a mutated-payload replay with the same
-`op_key` refuses `CLR10`. The pattern generalises: any future writer that loses its grant while
-keeping `_reserve_op` belongs in `UNGRANTED_RESERVING_FNS` with its own dedicated cell, not
-nowhere.
-
 ## Storage grant/policy battery
 
 [deploy/storage-provision.sql](deploy/storage-provision.sql) cannot run against the local rig —
@@ -7348,17 +7328,6 @@ exists to remove. Named in `clara._knowledge_assert_fye_pair`'s own body, in 031
 the lane's fix report; a follow-up belongs on the CLIENT-ROW door, where both records can move
 together.
 
-**Pinned by kp.15 (#1096, riders sweep wave, lane 07).** The disclosure above landed with 0318;
-no cell anywhere drove month 2 day 29 and asserted the accepted outcome until #1096. `kp.15` in
-`knowledge-onboarding-promotion.test.mjs` commits a plan with `fye => 2, fye_day => 29` beside an
-unrelated key and asserts ALL THREE keys promote — nothing withheld, day 29 live in Knowledge at
-the value captured — the mirror image of `kp.14`'s day-31 refusal. Vacuity control run on the lane
-database: the calendar check's `v_day > 29` bumped to `v_day >= 29` (deliberately refusing day 29
-too), `kp.15` seen RED for the right reason (`financial_year_end_day` withheld with CLR37) while
-every other cell in the file stayed green, then the body restored byte-for-byte from this file's
-own §A text and the restore verified by `sha256(prosrc)` equality with the pre-break measurement.
-No migration: the ticket adds a pinning test over already-disclosed, already-shipped behaviour.
-
 **How the three pasted bodies are proved.** 0318 re-cuts three whole bodies statically (no
 `pg_get_functiondef` splice, so no new entry in `apps/web/tests/firm-scope-db-pins.corpus.ts` is
 owed — the file contains no dynamic SQL at all). Each pasted body is the LIVE pre-image plus
@@ -7707,3 +7676,56 @@ behaviour change"), driven against the live catalog rather than read off this fi
 **Gate:** `tests/entry-post-receipts-via-wake-kind-disclosure.test.mjs`, frontier-gated on the
 stable stem `via_wake_kind_lane_disclosure$` with
 `tests/entry-post-receipts-via-wake-kind-disclosure-preintegration-gate.mjs`.
+
+## Two sweep-wave pins with no migration of their own (#1096, #1099, riders sweep wave, lane 07)
+
+Both tickets below add a TEST over behaviour that already shipped, so neither owns a `## NNNN`
+section of its own. The sweep wave's shared-file rule is that a lane writes its own new section
+and never edits an existing one — seven lanes edit this file at once and the merger relies on
+it — so the two notes live here, beside each other, rather than appended inside the sections of
+the applied migrations they pin (0316 and 0318). Each names the section it belongs to.
+
+### #1099 — the op-key idempotence law's own coverage for `clara.create_client` (belongs with "0316 — clara.create_client's human grant withdrawn")
+
+**Restored by #1099 — the op-key idempotence law's own test coverage for `create_client`, dropped
+by 0316’s grant withdrawal and repointed rather than left gone.**
+[`wb-g-opkeys.test.mjs`](tests/wave-b/wb-g-opkeys.test.mjs)'s G4/[R2-F8] census (the shared
+op-key-idempotence battery every other 0017-family writer sits in) derives its writer inventory
+from a live `EXECUTE` grant, by construction — a fn 0316 ungrants can never appear in
+that inventory again, and when #1038 landed, `create_client`'s row in the census's per-writer
+fixture table was simply deleted rather than repointed, so nothing any longer drove its
+`_reserve_op` call at all. #1099 restores it, off the census: a new
+`UNGRANTED_RESERVING_FNS` registry in `wb-g-opkeys.test.mjs` names `create_client` alongside the
+migration that ungranted it and where its coverage now lives, a META cell re-measures that its
+live `prosrc` still calls `_reserve_op` (the same "a writer must never silently drop the
+discipline" law the grant-derived census enforces for every writer it CAN still see), and a
+dedicated `G4/[R2-F8] supplement` cell drives the law itself through
+`createClientRaw` — `rig-fixtures.mjs`'s root+jwt idiom, the one path this migration left
+reachable (0316 left exactly one) — proving both halves: an identical-payload replay returns the cached receipt
+byte-for-byte with no second `clara.clients` row, and a mutated-payload replay with the same
+`op_key` refuses `CLR10`. The pattern generalises: any future writer that loses its grant while
+keeping `_reserve_op` belongs in `UNGRANTED_RESERVING_FNS` with its own dedicated cell, not
+nowhere.
+
+The fix round added the half a registry cannot supply. A hand-maintained list detects only the
+names somebody remembered to write down, while AC2 asks for the opposite: the NEXT writer to lose
+its grant while keeping `_reserve_op` must not drop out silently either. The G4 cell now takes
+the REVERSE census from the two sets it already computes — every WB-family fn whose live
+`prosrc` calls `_reserve_op`, minus the grant-derived writer inventory, minus
+`RESERVE_LAW_EXEMPT` — and requires that difference to be a subset of `UNGRANTED_RESERVING_FNS`,
+naming anything else by name. Measured at 313 migrations the difference is exactly
+`{create_client}`: a live, non-empty census rather than an empty-set tautology, and the cell
+asserts that floor too.
+
+### #1096 — the 29-February year-end pair is ACCEPTED, pinned (belongs with "0318 — the year-end pair rule…")
+
+**Pinned by kp.15 (#1096, riders sweep wave, lane 07).** The 29-February disclosure landed with 0318 — its header at 57-64, its function comment and the “## 0318” section above;
+no cell anywhere drove month 2 day 29 and asserted the accepted outcome until #1096. `kp.15` in
+`knowledge-onboarding-promotion.test.mjs` commits a plan with `fye => 2, fye_day => 29` beside an
+unrelated key and asserts ALL THREE keys promote — nothing withheld, day 29 live in Knowledge at
+the value captured — the mirror image of `kp.14`'s day-31 refusal. Vacuity control run on the lane
+database: the calendar check's `v_day > 29` bumped to `v_day >= 29` (deliberately refusing day 29
+too), `kp.15` seen RED for the right reason (`financial_year_end_day` withheld with CLR37) while
+every other cell in the file stayed green, then the body restored byte-for-byte from this file's
+own §A text and the restore verified by `sha256(prosrc)` equality with the pre-break measurement.
+No migration: the ticket adds a pinning test over already-disclosed, already-shipped behaviour.
