@@ -65,23 +65,28 @@ export function clientMismatchRefusalV23(reason: string, message: string, client
  * The database's typed refusal, handed back with this cut's own sentence when the estate knows
  * the reason and with the door's own message verbatim when it does not.
  *
- * `sentence(reason, detail)` is the caller's map; returning null from it means "this cut has no
- * sentence for that token", and the door's own message is then carried verbatim rather than
+ * `sentence(reason, detail, code)` is the caller's map; returning null from it means "this cut has
+ * no sentence for that token", and the door's own message is then carried verbatim rather than
  * replaced by a generic one.
+ *
+ * THE CODE IS PASSED AS WELL AS THE REASON, and that is not redundancy: some doors refuse with a
+ * sqlstate and NO typed reason (`CLR16` on a document that is not what the caller named), so a map
+ * keyed on the reason alone could never reach them. The reason is passed as `""` in that case
+ * rather than as null, so a map never has to test two kinds of absence.
  *
  * A refusal whose code is not a CLR sqlstate is a FAULT rather than a refusal: the door did not
  * govern it, so nobody wrote a sentence for it and nobody should read one.
  */
 export function governedRefusalV23(
   error: unknown,
-  sentence: (reason: string, detail: Record<string, unknown>) => string | null,
+  sentence: (reason: string, detail: Record<string, unknown>, code: string) => string | null,
   internalMessage: string,
 ): ToolRefusalV23 {
   const refused = authoringRefusal(error as DbErrorV23);
   if (refused.ok !== false) return internalFaultV23(internalMessage);
   if (!isGovernedRefusalV23(refused.code)) return internalFaultV23(internalMessage);
   const reason = typeof refused.reason === "string" ? refused.reason : null;
-  const mapped = reason === null ? null : sentence(reason, refused.details);
+  const mapped = sentence(reason ?? "", refused.details, String(refused.code));
   return {
     ok: false,
     code: refused.code,
