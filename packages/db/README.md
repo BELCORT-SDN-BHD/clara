@@ -7601,6 +7601,6 @@ first (retire the enrolment or the profile that took it)"), and its text is pinn
 **Redo-safe by construction (#957).** Every statement is `create or replace function`, between a
 marker-tolerant prestate (each recut body admits its pinned pre-image OR a body already carrying
 this file's `0337` attribution) and a tail that reads the live catalog. Both branches were exercised on the lane
-database: the REDO branch four times while the file grew section by section, and the FIRST-APPLY
+database: the REDO branch five times as the file grew section by section, and the FIRST-APPLY
 branch with all five bodies restored to their measured pre-images by hand (prestate reported
 `5 FIRST, 0 REDO`, file checksum unchanged at `42b2281f6c1156ed0a22632260d00cca92a26729f1bdde025f74fc57dd4d69b6`).

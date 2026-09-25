@@ -10,8 +10,8 @@
 // EVERY CLAIM ABOUT A DOOR IS DRIVEN AT THAT DOOR. "The bank belt refuses", "the fixed-asset
 // profile door refuses", "the advance door refuses" are sentences about behaviour, so each one is
 // measured by calling the door and reading what came back — never by reading a body's source.
-// The two structural cells at the bottom are the exception the house standard names (a catalog
-// census and a pin), and they say so.
+// The one structural cell at the bottom is the exception the house standard names (a catalog
+// census and a pin), and it says so.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";

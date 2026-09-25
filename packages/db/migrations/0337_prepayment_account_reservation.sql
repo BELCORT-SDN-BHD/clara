@@ -128,10 +128,10 @@ declare
   ];
   -- …AND THE NEIGHBOURS THIS FILE DEPENDS ON AND MUST NOT MOVE.
   --
-  --   · `_fa_role_claim_conflict` is the discriminator two of the recut doors reach the union
+  --   · `_fa_role_claim_conflict` is the discriminator §D's door reaches the union
   --     through: it returns any reservation that is not the FA role being claimed, so §A's new
-  --     domain flows through it with no edit. If it gained a domain filter, §D and §F would stop
-  --     refusing and this file's whole fixed-asset half would silently vacate.
+  --     domain flows through it with no edit. If it gained a domain filter, §D would stop refusing
+  --     and this file's whole fixed-asset half would silently vacate.
   --   · `_fa_reserved_roles` is §A's FA disjunct, delegated rather than re-listed.
   --   · `_acct_role_reserved_at` is the AS-OF twin this file deliberately leaves FA+advance-only
   --     (see the header). Pinned so the asymmetry is a decision and not a drift.
@@ -163,14 +163,18 @@ declare
   ];
   -- THE BODIES THAT MUST STILL ASK THE SHARED WALL, probed STRUCTURALLY rather than pinned. §B's
   -- correctness claim is "the prepayment lane asks this wall about its own enrolled code", and
-  -- these five are where it asks. They are this lane's own bodies, recut by #1114 and #1077 in this
-  -- very branch, so a sha pin here would make this file refuse to apply behind its own siblings; a
-  -- containment probe says the same thing and survives a recut that keeps the call.
+  -- these SEVEN are where it asks -- the two create cores, the two correction doors, the two
+  -- attention reads and the enrolment door itself, which is exactly the list §B's own in-body
+  -- comment names. They are this lane's own bodies, recut by #1114 and #1077 in this very branch,
+  -- so a sha pin here would make this file refuse to apply behind its own siblings; a containment
+  -- probe says the same thing and survives a recut that keeps the call.
   v_askers text[] := array[
     'clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)',
     'clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)',
     'clara.list_prepayment_attention(uuid)',
     'clara.list_revenue_recognition_attention(uuid)',
+    'clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text)',
+    'clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)',
     'clara.enrol_prepayment_account(uuid,text,text,text,text)'
   ];
   v_sig text;
@@ -572,7 +576,7 @@ begin
     -- #1078 [0337] THE RELEASE DOOR IS PER DOMAIN. This sentence named retire_staff_advance_account
     -- whatever register held the code, which was true while `staff_advance` was the only domain
     -- this arm could see. The prepayment roster is a third, and a refusal that names a door which
-    -- does not release the claim is the dead end WDB-R2 ruled out in 2026-08-03. The advance
+    -- does not release the claim is the dead end WDB-R2 ruled out on 2026-08-03. The advance
     -- branch's words are UNCHANGED, character for character.
     raise exception 'account % is already reserved by the % register (% role, owner %) for this client and cannot be enrolled in the fixed-asset register; %, or enrol this profile on a different account', v_clash, v_res_domain, v_res_role, coalesce(v_res_owner, '(unnamed)'),
       case when v_res_domain = 'prepayment'

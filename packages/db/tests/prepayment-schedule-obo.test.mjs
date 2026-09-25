@@ -459,20 +459,33 @@ async () => {
   assert.equal(both.detail.axis, "prepaid_account_not_enrolled",
     "the ROSTER answers first, and names where to go");
 
-  // …and the WALL is still live behind it on this lane too: the scene's OWN prepaid account is
-  // enrolled, and binding it as a bank account makes the next configuration answer the wall.
-  await bindBankAccount(scene.alice, {
-    client: scene.client, coaAccountCode: scene.prepaid, accountNumber: "915000112233" });
+  // 4 — …and the machine lane is NOT a second set of rules.
+  //
+  // [#1078, migration 0337_prepayment_account_reservation] THIS STEP USED TO EXPLOIT THE HOLE #1078
+  // CLOSED. It bound the scene's OWN enrolled prepaid account as a registered bank account and
+  // watched the next OBO configuration answer the shared wall. A live prepayment enrolment now
+  // RESERVES its code in `clara._acct_role_reserved`, so the bank belt refuses that binding
+  // outright — which is the point of the ticket, is driven at the belt in `p1078.claim.bank`, and
+  // makes `prepaid_account_ineligible` unreachable for an enrolled account on BOTH lanes (the human
+  // door's own cell, `p940.schedule.roster_gate`, carries the full reasoning).
+  //
+  // What the twin owes this battery is that it did not become a second set of rules, so both halves
+  // are driven here: the belt refuses the binding on this lane's scene too, and the twin still
+  // configures the next recognition on that same enrolled account afterwards.
+  await assertRaises(CLR.badRequest,
+    () => bindBankAccount(scene.alice, {
+      client: scene.client, coaAccountCode: scene.prepaid, accountNumber: "915000112233" }),
+    "binding the scene's enrolled prepaid account as a registered bank account");
   const extra = await extraRecognition(scene, { cents: 24000, tag: "obo-wall" });
   await recordPeriod(scene.bob, {
     document: extra.document, start: scene.termStart, end: scene.termEnd });
-  const walled = await assertPair(CLR.badRequest, "prepayment_source_unfit",
-    () => createPrepaymentScheduleFor({
-      client: scene.client, author: scene.bob, sourceEntry: extra.entry,
-      expenseAccount: scene.target, authorityRef: ref, opKey: opk("p915-roster-wall"),
-    }), "an OBO configuration against an enrolled account that has since been bound as a bank account");
-  assert.equal(walled.detail.axis, "prepaid_account_ineligible");
-  assert.equal(walled.detail.breach.axis, "bank_account");
+  const after1078 = await createPrepaymentScheduleFor({
+    client: scene.client, author: scene.bob, sourceEntry: extra.entry,
+    expenseAccount: scene.target, authorityRef: ref, opKey: opk("p915-roster-wall"),
+  });
+  assert.ok(after1078.schedule_id,
+    "the reservation closed the bank door and cost the OBO lane nothing on its own enrolled account");
+  assert.equal(after1078.prepaid_account_code, scene.prepaid);
 });
 
 // ===========================================================================================
