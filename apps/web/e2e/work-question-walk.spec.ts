@@ -320,19 +320,33 @@ test("B4: the SAME question is answered from Needs-you, and the row leaves witho
   // suite runs across two gates, green on every other run and on every isolated re-run). README.md's
   // own rule for exactly this shape — "wait for the state — `expect.poll` on the element that must
   // become `document.activeElement`... not for a number of milliseconds" — is what this polls for.
+  //
+  // ONE SETTLED OBSERVATION CARRIES ALL THREE FACTS (review round, ADV-L06-10). The first cut of
+  // this fix polled the TAG and then re-read `document.activeElement` in a SECOND, unwaited
+  // `evaluate` for its text and tabindex — so any focus movement between the two round trips (a
+  // later rAF, the `scan()` injection, a re-render) was read by the one carrying no wait, and the
+  // poll itself was satisfied by ANY `<h2>` on the page while the identity check lived in the
+  // unwaited read. The whole triple now comes back from inside the poll, so what is waited for and
+  // what is asserted are the same observation.
   await expect
-    .poll(async () => page.evaluate(() => document.activeElement?.tagName ?? "NONE"), { timeout: 15_000 })
-    .toBe("H2");
+    .poll(
+      async () => page.evaluate(() => {
+        const el = document.activeElement;
+        return {
+          tag: el?.tagName ?? "NONE",
+          text: (el?.textContent ?? "").trim().slice(0, 40),
+          tabindex: el?.getAttribute("tabindex") ?? null,
+        };
+      }),
+      {
+        timeout: 15_000,
+        message:
+          "focus was dumped onto the document body when the row disappeared, or landed somewhere other than "
+          + "this list's own section heading — made programmatically focusable (tabindex -1) and NOT a tab stop",
+      },
+    )
+    .toEqual({ tag: "H2", text: expect.stringContaining("Needs you"), tabindex: "-1" });
 
-  const focused = await page.evaluate(() => {
-    const el = document.activeElement;
-    return {
-      text: (el?.textContent ?? "").trim().slice(0, 40),
-      tabindex: el?.getAttribute("tabindex") ?? null,
-    };
-  });
-  expect(focused.text, "…this list's OWN heading, not some other section's").toContain("Needs you");
-  expect(focused.tabindex, "made programmatically focusable, and NOT a tab stop").toBe("-1");
   await scan(page, "needs-you after the question was answered inline");
 });
 
