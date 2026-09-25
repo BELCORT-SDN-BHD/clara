@@ -1013,7 +1013,14 @@ test("S6 · the registry re-publishes at ONE new version, and nobody else's row 
     )
   ).rows[0];
   assert.equal(r.versions, 1, "the registry publishes exactly one version — a re-derivation is whole or it is drift");
-  assert.equal(r.v, 6, "…and it is 6 (0228 raised to 2, #782's 0245 to 3, a wave-2 file to 4, #945 to 5, #948 to 6)");
+  // RE-BASED BY #1061 IN A LATER LANE (0342_payroll_registry_business_operation_supported.sql,
+  // riders sweep wave). #948's 0299 (this file's own ticket) raised the published registry to 6;
+  // #1061 re-derived it again for the payroll pairs (business_operation, stored_only ->
+  // supported) and raised it to 7 — it does not touch any agreement_contract row, so every other
+  // assertion in this cell is unaffected. The SINGLE SOURCE for the number is
+  // document-capability-registry.test.mjs's PUBLISHED_REGISTRY_VERSION; a wave that republishes
+  // re-bases every pinned literal, this one included.
+  assert.equal(r.v, 7, "…and it is 7 (0228 raised to 2, #782's 0245 to 3, a wave-2 file to 4, #945 to 5, #948 to 6, #1061 to 7)");
   assert.equal(r.rows, 240, "#948 inserts and deletes no registry row");
 
   const drift = (
@@ -1036,8 +1043,14 @@ test("S6 · the registry re-publishes at ONE new version, and nobody else's row 
   assert.deepEqual(moved.map((x) => x.format), AGREEMENT_READ_FORMATS);
   assert.deepEqual([...new Set(moved.map((x) => x.document_kind))], ["agreement_contract"]);
 
-  // The payroll summary's own six rows are exactly where #945 left them: this file re-published
-  // the registry's VERSION, it did not restate anybody else's verdict.
+  // The payroll summary's own six rows are exactly where #945 left them AS OF #948: this file
+  // re-published the registry's VERSION, it did not restate anybody else's verdict. RE-BASED BY
+  // #1061 IN A LATER LANE (0342_payroll_registry_business_operation_supported.sql, riders sweep
+  // wave), which is a DIFFERENT ticket re-deriving a DIFFERENT row for a DIFFERENT reason (#946's
+  // own posting lane went live) — not this file widening anything. The claim this cell actually
+  // protects — #948 touches agreement_contract alone — is now asserted by requiring payroll's pair
+  // to sit at whatever #1061 last published rather than at a literal this file would otherwise go
+  // stale against forever.
   const payroll = (
     await rootQuery(
       `select typed_facts, business_operation from clara.document_capabilities
@@ -1045,8 +1058,8 @@ test("S6 · the registry re-publishes at ONE new version, and nobody else's row 
     )
   ).rows[0];
   assert.equal(payroll.typed_facts, "supported");
-  assert.equal(payroll.business_operation, "stored_only",
-    "#946 left the payroll pair's operation axis at stored_only; #948 does not widen another ticket's row");
+  assert.equal(payroll.business_operation, "supported",
+    "#1061 (0342) re-derived the payroll pair's operation axis to supported; #948 neither caused nor undoes that move");
 });
 
 // ---------------------------------------------------------------------------

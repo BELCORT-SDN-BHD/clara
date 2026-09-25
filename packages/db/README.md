@@ -7263,3 +7263,91 @@ PARTIAL signal rather than guessing. Both branches were exercised on the lane da
 APPLY through `pnpm db:migrate` (with all four recut pins checked), and the REDO branch through
 `CLARA_MIGRATION_REDO=0318_knowledge_fye_pair_applicability` after the promotion door was put back
 at its pre-image for `kp.14`'s vacuity control.
+
+## 0342 — the payroll registry's `business_operation` catches up to the posting lane #946 already shipped (#1061, riders sweep wave, lane 04)
+
+`0342_payroll_registry_business_operation_supported.sql` closes a gap left across two riders wave
+4 tickets on the SAME lane: `0296_payroll_summary_typed_facts.sql` (#945) opened reading on the
+six `payroll_summary` pdf/image pairs and deliberately left `business_operation` at `stored_only`,
+because its own header says the drafting-and-posting half belonged to "a later file". That later
+file, `0297_payroll_summary_posting.sql` (#946), shipped and now posts a payroll run unattended
+whenever `clara._payroll_posting_verdict`'s closed rung roster holds — but it never touched
+`clara.document_capabilities`, so the registry kept publishing a claim the estate had already
+outgrown. #1061 is the follow-up filed against exactly that gap.
+
+**This file is a pure content republication, the same shape as #782's 0245 and #988's 0246
+before it.** It creates no function, table, trigger, check, policy or grant, and recuts nothing.
+Its whole content is two UPDATE statements on `clara.document_capabilities`: the six
+`payroll_summary` rows whose mime is `application/pdf` or `image/*` move `business_operation`
+from `stored_only` to `supported`, and the registry-wide version raise every prior republication
+has used (0299's most recent, 6 → 7, the same SET-TO-LITERAL `<> 7` form 0299's own header argues
+for over a bare `+ 1` — redo-safe on its own and composable with another lane raising to the same
+literal in the same wave, though no other lane in this wave touches this table).
+
+**Why `supported`, not a bare guess at "whatever value fits.".** The ticket names the value
+itself as negotiable ("or whatever value correctly describes 'posts unattended once the gate
+passes'") but also names the precedent to match: "matching what #948's own capability-registry
+row for financing agreements does for the same reason." 0299 already answered this exact question
+for the mirror-image `agreement_contract` lane — an unattended post is 0191's own published
+definition of `business_operation = supported` ("Clara does this today, and a test proves it" /
+"where Clara can carry typed facts into it"), not `proposal_only` (#988's later fifth level,
+"Clara proposes, a person confirms") — `clara._payroll_posting_verdict` posts the entry itself,
+nobody confirms a proposal first. `typed_facts` does not move: it has read `supported` since 0296.
+
+**Only the basis sentence's closing clause moves, by `replace()` rather than a full rewrite.** The
+old sentence — "Nothing is posted from these facts yet; the filing appears as work a person
+completes." — is swapped for one naming `clara._payroll_posting_verdict`'s own closed roster
+(0297 §D's brief quote, verbatim in shape): both reading channels agree, every arithmetic check
+passes, every account resolves in the client's own chart, the month is established and no entry
+for that client and month already exists, or the run appears under Needs you naming the condition
+that failed. Everything ahead of that sentence — the byte-extraction engine, the facts engine, the
+never-guess disclosure, the per-employee-strip disclosure — is provably untouched by construction,
+because `replace()` on a basis that does not contain the old sentence is a no-op rather than a
+literal that could silently retype the unchanged half wrong.
+
+**`limits.payroll_employee_detail` does not move, and that is the point.** The per-employee
+boundary 0296 named is not this ticket's subject: `clara.persist_payroll_facts` still strips every
+per-employee figure before storage and `clara._payroll_entry_plan` (0297 §C) drafts the posted
+entry from the run-level totals alone, so the boundary is exactly as true after 0342 as before it.
+Restating it would not be a re-derivation.
+
+**Scope is exactly the six rows #1061's AC1 names, and only them.** The two payroll-family tail
+checks in the prestate/tail both re-derive from the live router branch (mime = pdf or image/*)
+rather than an enumerated literal list, and a family-blind diff at the tail's step 5 re-asserts
+that no `document_kind` outside the small, already-`supported` set (the invoice family, agreement
+contract, bank statement, opening balance) gained the value — the tail's own guard against #1061's
+AC2 ("no other document kind's registry row changes as a side effect").
+
+**Prestate pins.** The five #779/#846/#782 wall trigger bodies this file's raise rides, measured
+live on this rig (never transcribed from an older header): `_tf_document_capabilities_version_
+monotone` `170df87b…e9c56`, `_tf_document_capabilities_version_high_water` `b4090687…618c9`,
+`_tf_document_capabilities_high_water_record` `839c51fb…9de40d`,
+`_tf_document_capabilities_version_uniform` `d21b6837…5ef776` — all four at their 0244/0245
+pre-images, unchanged since — and `_tf_document_capability_high_water_monotone` at
+`62e83a3b…974ec8c`, which is `0272_document_capability_wall_completion.sql`'s POST-image, not
+0244's or 0245's: 0272 (a different, already-merged fix round, live on `main` before this branch
+was cut) recut that one trigger a second time as a key-change BEFORE UPDATE trigger, and the
+migration's own prestate names the rig it measured on rather than copying an older file's sha.
+
+**`document-capability-registry.test.mjs` moves in the same commit** (`af3b5955`/#779's own
+precedent for editing this battery alongside the migration that moves its subject):
+`PUBLISHED_REGISTRY_VERSION` re-bases 6 → 7, the payroll cell now asserts `business_operation =
+'supported'` and a basis that has stopped promising the pre-0297 dead end, and the file's own
+running commentary gains a numbered paragraph (7) recording why. `EXPECTED_CELLS` is unchanged —
+no cell was added or removed, only two assertions inside the one payroll cell.
+
+**rig-meta cohort.** None — comment-only, the same posture 0245's and 0246's entries carry, for
+the same reason: no function, table or trigger is minted, so there is no name to roster and no
+cohort array would be anything but empty.
+
+**Gate.** No new preintegration gate file. `document-capability-registry.test.mjs` is already
+gated by `document-capability-preintegration-gate.mjs` (0191's cohort), which this file does not
+change, and `packages/db/package.json`'s `$GATES` list needs no new entry.
+
+**Web pins corpus.** `apps/web/tests/firm-scope-db-pins.corpus.ts` was checked (a migration file
+changed, work order rule (d)): 0342 contains no `pg_get_functiondef` splice and no other dynamic
+SQL construct the corpus's lexer would need a reviewed barrier for, so no entry was added.
+
+**Out of scope, by the ticket's own words.** The payroll posting gate's own logic and conditions
+(`clara._payroll_posting_verdict`, `clara._payroll_entry_plan`) are untouched, and no other
+document kind's registry row is re-derived.

@@ -374,6 +374,31 @@ const PAYROLL_SETTLEMENT_0298_COHORT = [...PAYROLL_SETTLEMENT_0298_HUMAN_FNS];
 // PAYROLL_0296's two internals above.
 const AGREEMENT_0299_RUNTIME_FNS = ["persist_agreement_facts", "fail_agreement_facts"];
 const AGREEMENT_0299_COHORT = [...AGREEMENT_0299_RUNTIME_FNS];
+// #1061 [0342, the payroll registry's business_operation catches up to #946] — COMMENT-ONLY,
+// deliberately, and for the SAME reason #782's 0245 entry and #988's 0246 entry above carry none.
+//
+//   0342_payroll_registry_business_operation_supported.sql INSTALLS NO FUNCTION, NO TABLE, NO
+//   TRIGGER AND NO CHECK, AND RECUTS NONE. Its whole content is a republication of
+//   `clara.document_capabilities`: an UPDATE that moves the SAME six `payroll_summary` pdf/image
+//   rows PAYROLL_0296 opened reading on from `business_operation = 'stored_only'` to `'supported'`
+//   (0297_payroll_summary_posting.sql, riders wave 4's own #946, shipped the drafting-and-posting
+//   half 0296's header deferred to "a later file" — the registry's claim had outlived the build),
+//   then the registry-wide raise every prior republication has used (0299's most recent, 6 -> 7).
+//   So there is no granted name to roster and no ungranted closure to pin: a cohort array would be
+//   empty and `cohortFailures` would compare it against nothing. `limits.payroll_employee_detail`
+//   does not move — the persist door still strips every per-employee figure and the posting lane
+//   drafts from run-level totals alone, so the boundary PAYROLL_0296 named is exactly as true
+//   after 0342 as before it.
+//
+//   THE FRONTIER IS READ FROM THE LIVE ROW, never from a migration number, the same law every
+//   battery in this file follows: `document-capability-registry.test.mjs`'s payroll cell reads
+//   `business_operation` off `clara._document_capability('pdf','payroll_summary')` directly.
+//
+//   THE FOURTH OF THE FIVE WALL BODIES THIS FILE'S RAISE RIDES (`_tf_document_capability_high_
+//   water_monotone`) IS PINNED AT 0272's POST-IMAGE, NOT 0244's OR 0245's ORIGINAL — 0272 (a
+//   different, already-merged fix round) recut it in place before this branch was ever cut, and
+//   the migration's own prestate says so rather than silently pinning a stale sha.
+// #1061 END
 // #949 [0300] the tenancy contract-terms + recurring rent-plan lane, riders wave 4 lane 01. TEN
 // clara_authenticated doors and NOT ONE machine-lane grant: this lane is a person's lane end to
 // end — a person records the terms Clara read, a person confirms the plan, a person accepts the

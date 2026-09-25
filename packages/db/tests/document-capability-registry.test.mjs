@@ -137,10 +137,28 @@ const BUSINESS_OPERATION_LEVELS = Object.freeze([...LEVELS, "proposal_only"]);
  *  than affected; the payroll rows are untouched, and the six csv/tsv/xlsx/docx/ofx/xml agreement
  *  rows keep their pre-#948 verdicts because the router's agreement arm never reaches them.
  *
+ *  7 since #1061's `0342_payroll_registry_business_operation_supported.sql`, which republished
+ *  the WHOLE registry again and changed CONTENT on the SAME SIX `payroll_summary` rows #945
+ *  opened reading on (heic/jpeg/pdf/png/tiff/webp): `business_operation` moves from `stored_only`
+ *  to `supported`, because `0297_payroll_summary_posting.sql` (riders wave 4, #946) shipped the
+ *  drafting-and-posting half #945's own header deferred to "a later file" — the registry's claim
+ *  had simply outlived the build. `typed_facts` was already `supported` since #945, so UNLIKE
+ *  #945 (which moved `typed_facts` alone) this republication moves `business_operation` alone,
+ *  the mirror image of #948's move (0299) and for the identical reason the ticket names: "matching
+ *  what #948's own capability-registry row for financing agreements does". The `limits` object is
+ *  untouched — `payroll_employee_detail` stays `accepted_limitation`, because the persist door
+ *  still strips every per-employee figure and posting reads only the run-level totals — and only
+ *  the basis sentence's closing clause is rewritten, from "Nothing is posted from these facts yet"
+ *  to what `clara._payroll_posting_verdict` actually decides. `typed_facts` and `business_operation`
+ *  now agree, so the honesty cell at the foot of this file is satisfied rather than merely
+ *  unaffected, exactly as #948's own paragraph above records for the agreement rows. The six
+ *  csv/tsv/xlsx/docx/ofx/xml payroll rows keep their pre-#1061 verdicts because the router's
+ *  payroll arm never reaches them, and no row outside `payroll_summary` moves.
+ *
  *  A future republication re-bases HERE, in one place, and says why beside the number — the
  *  precedent for editing this battery in the same commit as the migration is `af3b5955` (#779),
  *  which shipped 0207 and +147 lines of this file together. */
-const PUBLISHED_REGISTRY_VERSION = 6;
+const PUBLISHED_REGISTRY_VERSION = 7;
 
 let live = false;
 let executed = 0;
@@ -431,24 +449,33 @@ wallCompletionCell("the registry's OWN documentation of `limits` stops calling i
     "…with the sibling reason key that makes the limitation checkable");
 });
 
-// #945 (migration 0296) MOVED THIS CELL'S SUBJECT and the cell moved with it. Until then the
-// router terminated a payroll_summary as skipped_kind and this registry row was DERIVED from
-// that dead end. #926's owner ruling (2026-09-18, option G) reopened payroll reading, so the pdf
-// pair now has a reader. The half of the claim that was always the point — a pair whose facts
-// Clara does not post must never present as EXECUTABLE — is unchanged and still asserted.
-cell("a payroll_summary PDF is stored, byte-extracted and NOW facts-readable (#945), and still NEVER operation-executable", async () => {
+// #945 (migration 0296) MOVED THIS CELL'S SUBJECT and the cell moved with it: the router
+// terminated a payroll_summary as skipped_kind and this registry row was DERIVED from that dead
+// end, and #926's owner ruling (2026-09-18, option G) reopened payroll reading, so the pdf pair
+// gained a reader. #1061 (migration 0342) MOVED IT AGAIN: 0297_payroll_summary_posting.sql
+// (#946) shipped the drafting-and-posting half #945's own header deferred, so a payroll pair
+// whose reading and arithmetic hold now DOES drive a posted operation, and the registry says so.
+cell("a payroll_summary PDF is stored, byte-extracted, facts-readable (#945) and NOW operation-executable (#1061)", async () => {
   const c = await capability("pdf", "payroll_summary");
   assert.equal(c.custody, "supported");
   assert.equal(c.byte_extraction, "supported");
   assert.equal(c.typed_facts, "supported", "the router's payroll_facts lane reads this pair (#945)");
-  assert.notEqual(c.business_operation, "supported",
-    "nothing is posted from a payroll read: #945 is the reading half, #946 the drafting one");
+  assert.equal(c.business_operation, "supported",
+    "a payroll read that arithmetic-checks out posts unattended: #946 shipped the drafting-and-posting "
+    + "half #945's own header deferred, and #1061 re-derives the registry to say so");
   assert.equal(c.limits.payroll_employee_detail, "accepted_limitation",
-    "the per-employee detail is a named, permanent boundary — the persist door strips the quotes");
+    "the per-employee detail is a named, permanent boundary — the persist door strips the quotes, "
+    + "and posting reads only the run-level totals, so this limit is untouched by #1061");
+  assert.doesNotMatch(c.basis, /Nothing is posted from these facts yet/,
+    "the basis sentence must stop promising the pre-#1061 dead end");
+  assert.match(c.basis, /posts unattended/,
+    "the basis sentence must say what clara._payroll_posting_verdict actually decides");
   // A format the router's pdf/image branch never reaches keeps its pre-#945 verdict, which is
-  // what makes the six-row scope of the re-derivation checkable from outside the migration.
+  // what makes the six-row scope of both re-derivations checkable from outside their migrations.
   const csv = await capability("csv", "payroll_summary");
   assert.equal(csv.typed_facts, "stored_only", "a csv payroll export has no reader on this lane");
+  assert.equal(csv.business_operation, "stored_only",
+    "#1061 scopes to the six pdf/image pairs only, exactly as #945 did for typed_facts");
 });
 
 cell("consent_evidence is facts-UNSUPPORTED and operation-UNSUPPORTED on every format (0014/H-53)", async () => {
