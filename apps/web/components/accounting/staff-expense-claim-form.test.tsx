@@ -915,3 +915,85 @@ test("ticket 1066 the chooser also offers an outstanding advance on a DIFFERENT 
     await h.unmount();
   }
 });
+
+test("ticket 1066 the second-account match is case- and whitespace-tolerant, exactly as the wall's own lower(btrim(...))", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => [
+      ...ENROLMENTS,
+      // A DIFFERENT case and DIFFERENT surrounding whitespace than the claimant's own stored
+      // "Farah binti Idris" — 0340's own measurement ("farah BINTI idris" vs "Farah binti Idris").
+      { id: "e-second-account", account_code: "1191", person_label: "  farah BINTI idris  " },
+    ],
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}),
+      advanceRow({
+        account_code: "1191", enrolment_id: "e-second-account", person_label: "  farah BINTI idris  ",
+        advance_id: SECOND_ACCOUNT_ADVANCE, outstanding_cents: 15000, enrolment_active: true,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    const values = optionsOf(byId(h, F("advanceId"))).map((o) => attrOf(o, "value"));
+    assert.deepEqual(values, ["", FARAH_ADVANCE, SECOND_ACCOUNT_ADVANCE],
+      "a case/whitespace difference in the second enrolment's label does not hide its advance");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1066 a second account's advance under a RETIRED enrolment is not offered, even with the claimant's own label", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => ENROLMENTS, // 1191 carries no LIVE enrolment any more.
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}),
+      advanceRow({
+        account_code: "1191", enrolment_id: "e-second-account-retired", person_label: "Farah binti Idris",
+        advance_id: RETIRED_SECOND_ACCOUNT_ADVANCE, outstanding_cents: 15000, enrolment_active: false,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    const values = optionsOf(byId(h, F("advanceId"))).map((o) => attrOf(o, "value"));
+    assert.deepEqual(values, ["", FARAH_ADVANCE],
+      "a RETIRED second-account enrolment fails the wall's own sa2.active and is not offered here either");
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("ticket 1066 with the enrolment register unread, no second-account candidate is offered", async () => {
+  // The same conservative direction #1052's own "register unread" cell takes: a read the chooser
+  // uses to decide WHAT TO OFFER must never guess a claimant's own label.
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => null,
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}),
+      advanceRow({
+        account_code: "1191", enrolment_id: "e-second-account", person_label: "Farah binti Idris",
+        advance_id: SECOND_ACCOUNT_ADVANCE, outstanding_cents: 15000, enrolment_active: true,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    const values = optionsOf(byId(h, F("advanceId"))).map((o) => attrOf(o, "value"));
+    assert.deepEqual(values, ["", FARAH_ADVANCE],
+      "with the register unread the form knows no claimant label to match a second account against");
+  } finally {
+    await h.unmount();
+  }
+});
