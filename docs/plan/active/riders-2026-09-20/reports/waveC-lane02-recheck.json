@@ -1,0 +1,71 @@
+{
+  "lens": "recheck",
+  "lane": "riders wave C, lane C2",
+  "ticket": 1037,
+  "branch": "riders/wC-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "fixed_point": "6da02a8de",
+  "head_checked": "b7e771799",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/waveC-lane02-fix.md",
+  "review_reports_checked": [
+    "docs/plan/active/riders-2026-09-20/reports/waveC-lane02-codereview-spec.json",
+    "docs/plan/active/riders-2026-09-20/reports/waveC-lane02-codereview-standards.json",
+    "docs/plan/active/riders-2026-09-20/reports/waveC-lane02-review-adversarial.json"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "Head matches the fix report's stated NEW HEAD (b7e771799), working tree clean. Every finding the review reports marked FIXED was re-verified as genuinely fixed, not vacuously: ADV-1037-01 (major, unshown-region citation) and ADV-1037-03 (minor, missing firm predicate) were each re-broken by hand on the current code (disabling the shown-set guard, neutralizing the firm predicate) and confirmed to turn cells red (2 and 1 respectively), then restored, proving the fixes are load-bearing rather than cosmetic. ADV-1037-04's refutation (require+nullable over optional+nullable, because @ai-sdk/openai's strictJsonSchema defaults true) was independently checked against the current schema code and the quoted witnessFacts.v1.prompts.mjs text, and holds. ADV-1037-02's claim correction (locator copied, not linked) is reflected verbatim in the current module header, README and CONTEXT.md. C2-SPEC-02's closure (cell 1037.db6, the memoization-codec crossing) was re-run and is non-vacuous (asserts encode/decode produces a different object, then deep-equal). All touched unit and live-rig test files were re-run on clara_l02 and match the fix report's counts exactly: statement-facts-v4-citation.test.mjs 10/10, statement-facts-v4-citation-db.test.mjs 7/7, f-a2-statement-activation.test.mjs 12/12, registry-view.test.mjs 7/7, f-a2-statement-header-v3.test.mjs 21/21. The full gate chain was re-run and is clean: pnpm typecheck (exit 0), CI=true GITHUB_ACTIONS=true pnpm lint (exit 0, no genuine failures), pnpm build (exit 0), check-worker-paths/check-workflow-bundle/check-parts-parity (all OK, unchanged from the fix report), the freeze chain (check-frozen-workflows, --compare-base 6da02a8de, both selftests — all OK, manifest sha256 values independently recomputed from the current file bytes and match frozen-workflows.json exactly), and bank-match-walk e2e (6/6). The whole runtime suite was re-run once, in full: 2990 tests, 2950 pass, 2 fail, 38 skipped, 0 new failures — the 2 fails are exactly the two RIG.md-named Windows-only reds the fix report already reported (EICAR scanner, no pg_dump on PATH), byte-identical in count to the fix report's own re-run. git diff --name-only confirms no apps/web file, no migration file, and no chatTurn/claraWork file anywhere in 6da02a8de..HEAD or in the fix round's own e031069c9..HEAD slice. One finding remains genuinely open: C2-SPEC-01 (major, AC3's two-build-cutover-drill statementFacts leg) is not fixed in this round and was never claimed to be — the fix report explicitly refutes it as a fix-round item, prices the two missing pieces (a vision-capable serve child, a non-interruption parking shape), and asks the orchestrator to decide explicitly whether to ship with AC3 PARTIAL. Verified independently: packages/runtime/tests/two-build-cutover-e2e.mjs still builds only two scratch images (className \"chatTurn\" and \"claraWork\"); no statementFacts leg exists. This is not a defect the fix round concealed or mishandled — it is a correctly measured, correctly escalated residual — but per the recheck instruction to report what remains above minor, it is listed below rather than silently accepted.",
+  "gates_rerun": [
+    { "cmd": "git log --oneline 6da02a8de..HEAD ; git status --short", "result": "9 commits (6 lane + 3 fix), HEAD=b7e771799 matches fix report; working tree clean" },
+    { "cmd": "node --test packages/runtime/tests/statement-facts-v4-citation.test.mjs", "result": "10 pass, 0 fail (matches fix report)" },
+    { "cmd": "PGDATABASE=clara_l02 node --test packages/runtime/tests/statement-facts-v4-citation-db.test.mjs", "result": "7 pass, 0 fail (matches fix report)" },
+    { "cmd": "node --test packages/runtime/tests/f-a2-statement-activation.test.mjs", "result": "12 pass, 0 fail" },
+    { "cmd": "node --test packages/runtime/tests/registry-view.test.mjs", "result": "7 pass, 0 fail" },
+    { "cmd": "node --test packages/runtime/tests/f-a2-statement-header-v3.test.mjs", "result": "21 pass, 0 fail" },
+    { "cmd": "vacuity probe: comment out `if (!shown.has(idx)) continue;` in statementFacts.v4.citations.mjs, re-run citation.test.mjs, restore", "result": "8 pass / 2 fail with the guard disabled (was 10/0) — ADV-1037-01's fix is load-bearing; git diff --stat empty after restore" },
+    { "cmd": "vacuity probe: change `r.firm_id = $2` to `(r.firm_id = $2 or true)` in the same file, re-run citation-db.test.mjs, restore", "result": "6 pass / 1 fail (1037.db4) with the predicate neutralized (was 7/0) — ADV-1037-03's fix is load-bearing; git diff --stat empty after restore" },
+    { "cmd": "sha256sum on the five statementFacts.v4.* files vs frozen-workflows.json entries", "result": "all five match exactly; manifest is not stale after the fix round's own edits" },
+    { "cmd": "node scripts/check-frozen-workflows.mjs", "result": "OK — 327 frozen files, 58 use-workflow modules, 3 retired" },
+    { "cmd": "node scripts/check-frozen-workflows.mjs --compare-base 6da02a8de", "result": "OK — 322 unchanged, 5 additions, 3 retirements recorded" },
+    { "cmd": "node scripts/check-frozen-workflows.selftest.mjs", "result": "OK, all cases pass" },
+    { "cmd": "node scripts/check-frozen-workflows.registration.selftest.mjs", "result": "OK, all cases pass" },
+    { "cmd": "pnpm --filter @clara/runtime build", "result": "exit 0" },
+    { "cmd": "node scripts/check-worker-paths.mjs", "result": "OK — 2 spawn sites" },
+    { "cmd": "node scripts/check-workflow-bundle.mjs", "result": "OK — 14 pinned classes, 58 superseded bodies ship, 46 checks" },
+    { "cmd": "node packages/runtime/scripts/check-parts-parity.mjs", "result": "OK — emittable set unchanged, no new wire kind" },
+    { "cmd": "grep -c renderedRegionIndexes packages/runtime/.output/server/index.mjs", "result": "3 — the fix is in the built artifact" },
+    { "cmd": "pnpm typecheck", "result": "exit 0, apps/web and packages/runtime both Done" },
+    { "cmd": "CI=true GITHUB_ACTIONS=true pnpm lint", "result": "exit 0 across all workspaces; no FAIL/ELIFECYCLE lines beyond test-name substrings" },
+    { "cmd": "CLARA_E2E_APP_ORIGIN=https://127.0.0.1:3510 CLARA_E2E_NEXT_PORT=3511 CLARA_E2E_RUNTIME_PORT=3512 pnpm --filter @clara/web e2e bank-match-walk", "result": "6/6 passed (18.8s), matches fix report" },
+    { "cmd": "pnpm --filter @clara/runtime test (whole suite, once)", "result": "2990 tests, 2950 pass, 2 fail, 38 skipped — the 2 fails are exactly the RIG.md-named Windows-only reds (EICAR scanner #693, no pg_dump on PATH #806); 0 new failures, exact match to the fix report's own re-run" },
+    { "cmd": "git diff --name-only 6da02a8de..HEAD and e031069c9..HEAD", "result": "no apps/web path, no migrations/ path, no chatTurn/claraWork path in either range; registry.ts untouched by the fix round" }
+  ],
+  "findings": [
+    {
+      "id": "RECHECK-C2-SPEC-01",
+      "ticket": 1037,
+      "severity": "major",
+      "kind": "requirement-missing",
+      "title": "AC3 (the two-build cutover drill's statementFacts leg) is still not met — correctly declared and escalated, not silently dropped, but still open and needs an explicit orchestrator decision",
+      "status": "still open",
+      "evidence": "Re-checked on the current head (b7e771799): packages/runtime/tests/two-build-cutover-e2e.mjs still builds exactly two scratch images, className \"claraWork\" and className \"chatTurn\" (same line numbers the spec review cited); grep for 'statementFacts' in that file returns nothing. The fix report (waveC-lane02-fix.md, section 'C2-SPEC-01') does not dispute the finding — it prices the two genuinely missing pieces (a statement-facts-serve.mjs child able to serve the vision channel's canonical bytes, and a leg shape that asserts 'non-terminal and still bound to v3' rather than 'answered a parked question', since statementFacts has no interruption point) and recommends the orchestrator ship with AC3 PARTIAL, citing compensating evidence (f-a2-statement-activation's roster cells, registry-view, check-workflow-bundle's 58 superseded bodies still shipping, cell 1037.x1's rewrite proof). That recommendation is reasonable and the compensating evidence checks out (all re-verified green above), but the acceptance criterion itself remains unmet on this branch, so it should not be recorded as closed without the orchestrator's explicit sign-off on shipping partial plus a follow-up ticket for the statementFacts World driver and drill leg (the same prerequisite C2-SPEC-02's residual needs).",
+      "required_fix": "No further code change is owed IN THIS LANE (building the leg is new infrastructure work CUT-PLAN.md §3.2 priced before the lane started, not a review-fix item). The orchestrator must explicitly decide: ship the cut with AC3 recorded PARTIAL and file the statementFacts two-build leg + World driver as its own follow-up ticket (the fix report's own recommendation), or hold the cut. Either way this must be a recorded decision, not an implicit pass."
+    }
+  ],
+  "closed_or_held_findings": [
+    { "id": "ADV-1037-01", "severity": "major", "status": "FIXED, verified non-vacuously (own probe reds 2 cells without the fix, restored clean)" },
+    { "id": "ADV-1037-02", "severity": "minor", "status": "claim corrected in module header/README/CONTEXT.md (verified verbatim); the underlying property is not fixable without a migration 0322 deliberately does not take — held as a disclosed limitation, not a defect" },
+    { "id": "ADV-1037-03", "severity": "minor", "status": "FIXED, verified non-vacuously (own probe reds 1 cell without the fix, restored clean)" },
+    { "id": "ADV-1037-04", "severity": "minor", "status": "REFUTED by measurement; refutation independently checked against the current schema code and the quoted witnessFacts.v1.prompts.mjs source — holds" },
+    { "id": "ADV-1037-05", "severity": "note", "status": "no action requested; unaffected by the fix round" },
+    { "id": "ADV-1037-06", "severity": "note", "status": "no action requested; unaffected by the fix round" },
+    { "id": "C2-SPEC-02", "severity": "minor", "status": "closed at the seam it names (cell 1037.db6, re-run and confirmed non-vacuous); its residual (no durable World driver) is the same open item as RECHECK-C2-SPEC-01 and is not double-counted" },
+    { "id": "C2-SPEC-03", "severity": "note", "status": "no action requested by the review; unaffected" },
+    { "id": "C2-SPEC-04", "severity": "note", "status": "no action requested by the review (a CUT-PLAN.md prose correction, not a code item); unaffected" },
+    { "id": "C2-SPEC-05", "severity": "note", "status": "no action requested; unaffected" },
+    { "id": "C2-SPEC-06", "severity": "note", "status": "no action requested; unaffected" },
+    { "id": "C2-SPEC-07", "severity": "note", "status": "no action requested; unaffected" },
+    { "id": "C2-SPEC-08", "severity": "note", "status": "no action requested; unaffected" }
+  ],
+  "nothing_else_broke": true,
+  "mid_task_status_requests": "none arrived"
+}

@@ -1,0 +1,181 @@
+{
+  "axis": "spec",
+  "lane": "waveC-lane01",
+  "branch": "riders/wC-lane01",
+  "fixed_point": "6da02a8de",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\635",
+  "commits": 27,
+  "tickets": [985, 1000, 1030, 1135],
+  "spec_sources": [
+    "gh issue view 985 (comments: 0)",
+    "gh issue view 1000 (comments: 0)",
+    "gh issue view 1030 (comments: 0)",
+    "gh issue view 1135 (comments: 0)",
+    "docs/plan/active/riders-2026-09-20/CUT-PLAN.md (plan of record: sections 1.2, 1.3, 1.5, 1.10, 2.x, 3.1, 4.x, 5)"
+  ],
+  "verdict": "accept-with-fixes",
+  "re_run_evidence": [
+    "node scripts/check-frozen-workflows.mjs -> OK, 342 frozen files, 59 use-workflow modules, 3 retired",
+    "node scripts/check-frozen-workflows.mjs --compare-base 6da02a8de -> OK, 322 unchanged, 20 additions, 3 retirements (matches the #1135 report)",
+    "node --test tests/registry-view.test.mjs tests/chat-turn-v22-tools.test.mjs tests/clara-work-v6-roster.test.mjs tests/chat-turn-v22-trade-invoice.test.mjs -> 51/51 pass",
+    "node --test tests/chat-turn-v22-accrual.test.mjs tests/chat-turn-v22-schedules.test.mjs tests/chat-turn-v22-claim-allocations.test.mjs tests/chat-turn-v22-payroll.test.mjs tests/chat-turn-v22-opening-refresh.test.mjs tests/clara-work-v6.test.mjs tests/p6-1-parts-parity.test.mjs -> 101/101 pass",
+    "clara_l01 (127.0.0.1:55741): 311 migrations, max 0321_work_source_correction_rederivation",
+    "clara_l01: has_function_privilege('clara_runtime','clara.record_opening_targets_parsed(uuid,jsonb,uuid,text)','EXECUTE') = true (confirms #985's 0319-unused claim)",
+    "clara_l01: wake_get_client_financial_pack -> clara_agent_ro true, clara_runtime false; get_client_financial_pack -> clara_agent_ro false (confirms #1000 AC6)",
+    "clara_l01: pg_proc.prosecdef for clara.get_client_financial_pack(uuid,date,date) = true (the human door is now SECURITY DEFINER)",
+    "apps/web/messages/en.json TradeInvoice.refusals.{party_identifier_conflict,nothing_acknowledged,unknown_acknowledged_invoice} are byte-identical to the three sentences lib/trade-invoice-basis.v2.ts adds",
+    "lib/trade-invoice-basis.ts's frozen map holds 18 keys; TRADE_INVOICE_REFUSALS_V2 holds 21 (A1's one + A2's two)",
+    "registry.ts carries all five edits per class for chatTurn_v22 and claraWork_v6; commit 411583031 carries the sixth CLARA_WORK_BUNDLE_V6_BANNER import and console.log in plugins/startWorld.ts in the SAME commit as the claraWork repoint (R2 discharged)",
+    "0308's clara.create_revenue_recognition_schedule_for has a 9th arg p_pattern default straight_line; 0090's clara.get_document_extract is (p_document, p_client default null, p_max_chars default 20000) - both #1135 deviations confirmed accurate",
+    "apps/web/lib/deferred-revenue/schedule.ts RECOGNITION_REFUSAL holds exactly the 14 tokens recognitionRefusalMessage switches on"
+  ],
+  "findings": [
+    {
+      "id": "C1-SPEC-01",
+      "ticket": 1000,
+      "severity": "major",
+      "kind": "behaviour-not-asked-for",
+      "title": "0320 recuts the human read's body and flips it INVOKER to DEFINER, against the ticket's own out-of-scope line",
+      "evidence": "Issue #1000, Out of scope: \"Recutting the read's body, envelope or refusal codes\". packages/db/migrations/0320_client_financial_pack_wake_read.sql section B replaces clara.get_client_financial_pack(uuid,date,date)'s whole body with a two-statement delegate (select * into h from clara._human_ctx(clara.role_rank('viewer')); return clara._client_financial_pack_core(h.firm, p_client, p_as_of, p_month);) and declares it `stable security definer` where 0232 had SECURITY INVOKER. Measured live on clara_l01: pg_proc.prosecdef = true. The human lane's firm scope therefore no longer comes from RLS on the nine relations but from the single new predicate `and cl.firm_id = p_firm` inside the core (0320:399-400); every other statement in the core is keyed on p_client inside the `if v_visible` arm, so that one predicate is now the whole tenancy wall for BOTH lanes. The signature, defaults, envelope, coverage words and refusal codes are preserved and section TAIL proves the arithmetic by reverse-substitution and hash; the report discloses the change and names DEFER as the honest alternative.",
+      "required_fix": "An orchestrator ruling before this lane merges: either accept the split as the estate's own _*_core containment idiom (and record that #1000's out-of-scope line is superseded), or defer #1000 as class C was deferred. It must not merge as an undeclared scope expansion."
+    },
+    {
+      "id": "C1-SPEC-02",
+      "ticket": 1135,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "AC3's Work walk is not the walk section 4.5 specifies, and three of the legs the roster explicitly buys were not built",
+      "evidence": "Issue #1135 AC3: \"One chat walk and one Work walk per successor body (plan section 4.5) green\". CUT-PLAN section 4.5: \"Work walk: the claraWork_v6 half through the Work lane, covering A10's park-with-proposal and confirm path and A8/A9's term and enrolment questions\", plus three named legs (#931's two-advance claim, #937/#942's two accrual legs on tests/accrual-e2e.mjs, #915's real World prepayment leg). Only tests/chat-turn-v22-e2e.mjs was minted; it drives claraWork_v6 through the JOURNAL path and carries #931's leg. The report itself records the two accrual legs, #915's prepayment leg and the A10 proposal park on fixed-asset-acquisition-e2e.mjs as owed. No World run has ever parked on A10's proposal block, on A8/A9's term question, or on #1030's source-correction confirmation.",
+      "required_fix": "Either build the owed legs in a fix round, or obtain an explicit orchestrator ruling downgrading AC3's Work-walk clause with the four owed legs filed as tickets before the release ceremony. The proposal block and the term park are the two that ship user-visible question text nothing has driven."
+    },
+    {
+      "id": "C1-SPEC-03",
+      "ticket": 1135,
+      "severity": "major",
+      "kind": "requirement-partial",
+      "title": "Roster entries A8 and A9 are applied without their enrolment question, so AC1's \"every class-A entry is applied\" is partial",
+      "evidence": "CUT-PLAN section 1.2 A8: \"Enrolment question: opened when the door answers prepayment_source_unfit / axis = prepaid_account_not_enrolled; two text fields (account_code, reason); the accepted answer runs clara.enrol_prepayment_account ... AS THE ANSWERING PERSON in the human lane; the run then re-drives the schedule door under a NEW op key.\" A9 item 3 is the same shape plus \"An EXPIRED question settles the Work refused carrying deferred_revenue_source_unfit.\" Neither is in the diff: chatTurn.v22.tools.ts:1441-1449 states the measured reason (clara.open_work_question needs a running task and a run-minted hook token, which the chat lane does not have) and the chat half only names the account and the panel. The measurement is sound and the report discloses it as deviation 3, but AC1 reads \"Every class-A and class-D entry is applied\" without qualification.",
+      "required_fix": "Record the two enrolment questions as named partials against AC1 in the lane report's roster table (today they appear only in a deviations list), file the follow-up ticket the report promises, and have the orchestrator accept A8/A9 as PARTIAL rather than as applied."
+    },
+    {
+      "id": "C1-SPEC-04",
+      "ticket": 1030,
+      "severity": "major",
+      "kind": "requirement-evidence-gap",
+      "title": "The re-derivation lane was never driven end to end against Postgres, so AC1's \"a successor Work is admitted\" has no single cell behind it",
+      "evidence": "Issue #1030 AC1: \"A cell corrects a fact a pending question cites ... and proves a successor Work is admitted carrying the corrected reading -- not the retired Work's own basis -- sourced from the document's live facts as of the correction.\" The chain is split: packages/db/tests/work-source-correction-rederivation.test.mjs proves the BACKLOG names the retirement with live_facts; packages/runtime/tests/source-correction-rederive.test.mjs proves the pure derivation; packages/runtime/tests/reconcile-source-correction-unit.test.mjs proves the belt's arguments with BOTH database seams injected; the db cell that claims the link hand-admits its own successor. packages/runtime/lib/reconciler-work-source-correction.mjs's own SQL (clara.admit_journal_work with seven positional args, clara.settle_source_corrected_rederivation with three) is never executed against a real door. The #1030 report states it plainly: \"The belt has never run against a real database ... Nothing has yet driven backlog -> derive -> admit -> settle in one process against Postgres.\" I checked the one failure mode a mock cannot catch, the brief's json keys, and 0321:644-663 does emit op_key / client_id / corrected_by / retired_source_refs exactly as the belt reads them, so this is an evidence gap rather than a known break.",
+      "required_fix": "Add one integration cell (db battery or a World leg) that drives reconcileWorkSourceCorrections against clara_l01 from a real correction through to a settled successor, before the release ceremony. Until it exists, AC1 and AC3 should be recorded as proved-in-parts."
+    },
+    {
+      "id": "C1-SPEC-05",
+      "ticket": 1135,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "A8's term question carries model prose as its context instead of the four structured keys the contract names",
+      "evidence": "CUT-PLAN section 1.2 A8: \"The question: #653's, unchanged, clara.open_work_question with p_fields = [period_start(date,req), period_end(date,req), basis(text,req,max 4000)] and p_context = {document_id, source_entry_id, prepaid_account_code, total_cents}.\" The fields are delivered verbatim (claraWork.v6.schemas.ts:84-107) but the context is not: answerPrepaymentTermInputSchemaV6.context is z.string().max(4000).optional() supplied by the MODEL, and findQuestionCallV6 (claraWork.v6.impl.ts:1223, :1234) passes that string straight through to openWorkQuestionStep. None of document_id, source_entry_id, prepaid_account_code or total_cents reaches p_context, so the person answering the two-date question is shown whatever the model chose to write rather than the four facts the contract puts in front of them. Not listed among the report's five deviations.",
+      "required_fix": "Either build the four-key context from the run's own read (every value is available from read_prepayment_source's answer), or record the substitution as a sixth measured deviation with its reason."
+    },
+    {
+      "id": "C1-SPEC-06",
+      "ticket": 1135,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "A5's proposer ships with no caller and is now hash-locked, so the propose-a-split half of #931 is unbuilt",
+      "evidence": "CUT-PLAN section 1.2 A5: \"New helper: proposeAllocationsByDate(candidates, totalCents) ... Candidates from clara.staff_advance_summary(p_client, null) narrowed to outstanding_cents > 0 && !voided and to the claimant's enrolment.\" packages/runtime/lib/staff-expense-claim-basis.v2.ts:291-311 ships the pure proposer; nothing calls it, because the candidate read is clara_authenticated-only (report deviation 4, measured). The module has entered the chatTurn_v22 closure, so the uncalled helper is frozen and a later sharpening is a new module. The tool can refuse an unconfirmed split but can never propose one, which is the half of A5 a person would notice.",
+      "required_fix": "Keep it (the follow-up naming clara.staff_advance_summary_for is already written as the report's successor contract 2) but record A5 as PARTIAL in the roster table, and file that follow-up before the lane closes."
+    },
+    {
+      "id": "C1-SPEC-07",
+      "ticket": 1135,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "A8/A9's part-kind clauses are answered by declaring the payloads non-parts, so nothing renders a configured schedule",
+      "evidence": "CUT-PLAN section 1.2 A8: \"Part kind: prepayment_schedule_configured via prepaymentSchedulePart(answer). check-parts-parity.mjs must see it emittable at this cut.\" A9: \"Part kind: revenue_recognition_configured (schedule id, plan id, term, deferred and revenue codes, total cents, period count, the twelve period lines, configuration_only: true, overlap_warning).\" Neither is emittable: both builders discriminate on `kind`, not on `type` (packages/runtime/lib/prepayment-schedule-basis.ts:291, packages/runtime/lib/revenue-recognition-basis.ts:262), so the payload rides inside the generic tool_result and the emittable set is unchanged at six kinds. The measurement is correct about today's helpers and CUT-PLAN section 2.5's \"if it is a genuinely NEW discriminant\" branch was resolved by deciding it is not one, but the clause \"must see it emittable at this cut\" is unmet and the web shows no card for a configured schedule.",
+      "required_fix": "Record the decision as a roster-level deviation (it appears only in the AC4 narrative today), and file the web-card follow-up so the next cut can decide whether a configured schedule deserves its own wire kind."
+    },
+    {
+      "id": "C1-SPEC-08",
+      "ticket": 1135,
+      "severity": "minor",
+      "kind": "requirement-deliberately-unmet",
+      "title": "AC2's check-frozen-workflows --lock-deployed clause was deliberately not executed",
+      "evidence": "Issue #1135 AC2: \"check-frozen-workflows --lock-deployed produces the manifest change\"; the lane prompt repeats it as rule (g). The worker ran --update instead, citing CUT-PLAN section 2.4 (\"--lock-deployed is NOT a cut gate\") and packages/runtime/README.md:1037-1039 (\"commit the manifest AFTER the image is live; locking before deploy would freeze a body that no parked run can yet exist for\"). Re-measured: --compare-base 6da02a8de reports 322 unchanged, 20 additions, 0 rehashed, and the twenty new entries carry deployed:false. The substance is right (locking now would also globally lock wave 4's ten unlocked payrollFacts/agreementFacts entries) but the AC as written is unmet, and the report asks for a ruling rather than deciding unilaterally.",
+      "required_fix": "Orchestrator ruling: confirm the CUT-PLAN wins over the AC's wording, and carry --lock-deployed into the hosted release runbook's step 11a for this cut's twenty entries plus wave 4's ten."
+    },
+    {
+      "id": "C1-SPEC-09",
+      "ticket": 1135,
+      "severity": "minor",
+      "kind": "requirement-partial",
+      "title": "The deferred-by-name census lists six of the seven class-C tools, and the lane report enumerates none of them",
+      "evidence": "Lane prompt rule (d) and CUT-PLAN section 1.4: class C is SEVEN entries (C1 read_payroll_posting_state, C2 read_payroll_settlement_state, C3 read_agreement_terms, C4-C7 read_tenancy_terms / confirm_tenancy_rent_plan / confirm_tenancy_rent_plan_revision / read_rent_settlement_candidates). packages/runtime/tests/chat-turn-v22-tools.test.mjs:357-381 asserts six of them absent by name; confirm_tenancy_rent_plan_revision is missing from the list. Issue #1135 AC5 asks the lane report to name \"every deferred entry with its follow-up ticket\"; the report says only \"Class C's seven entries are DEFERRED to #1136 and #1137\" without enumerating them.",
+      "required_fix": "Add confirm_tenancy_rent_plan_revision to the absence census, and enumerate the seven class-C tool names against #1136 / #1137 in the lane report."
+    },
+    {
+      "id": "C1-SPEC-10",
+      "ticket": 1000,
+      "severity": "note",
+      "kind": "requirement-answered-elsewhere",
+      "title": "AC2's authority half is refused one layer earlier than the AC's wording, and translated",
+      "evidence": "Issue #1000 AC2: \"An unauthenticated, non-member or role-insufficient caller ... reach the model as the read's own typed refusals.\" On this lane the read is never reached for those cases: clara.mint_wake_credential refuses a below-bookkeeper on_behalf_of with CLR10 authority_lost, and clientFinancialPackRefusal translates it to CLR04 authority_lost (the one documented translation). This matches CUT-PLAN section 1.3 B1 (\"CLR04 for unauthenticated / non-member / role-insufficient\") and is driven end to end by the cell that first shows the same viewer reading the client home's own pack. Disclosed in the report.",
+      "required_fix": "No code change. Record that the CUT-PLAN's refusal mapping supersedes the AC's wording for the authority half."
+    },
+    {
+      "id": "C1-SPEC-11",
+      "ticket": 1030,
+      "severity": "note",
+      "kind": "requirement-evidence-gap",
+      "title": "Nothing-can-post-until-answered is proved structurally, never by a live run",
+      "evidence": "Issue #1030 AC2 asks for a cell proving \"nothing can post against it until that question is answered\". The cell v6.body reads four anchors out of claraWork.v6.ts and asserts their order (claim -> probe -> park -> knowledge read -> segment loop); I read the body and the order holds (claraWork.v6.ts:176-228: the hook await is reached before the knowledge read and before the loop, and a failed probe settles failed/internal rather than proceeding). No run has been admitted by the belt, claimed by an engine, parked, answered and posted.",
+      "required_fix": "No code change now; the same integration cell C1-SPEC-04 asks for closes this. Keep it named in the lane report's unverified list."
+    },
+    {
+      "id": "C1-SPEC-12",
+      "ticket": 1135,
+      "severity": "note",
+      "kind": "latent-defect-observed",
+      "title": "A second turn in one chat session fails with Invalid prompt: messages must not be empty, observed while building the walk and not diagnosed",
+      "evidence": "#1135 report, follow-up 5: three turns in ONE session made runModelSegmentStepV22 fail after 3 retries on the second turn; the walk was reshaped to give each turn its own session. The report argues it is not introduced by this cut (v22's step is v21's copy and no existing e2e drives two turns in one session), which the diff does not contradict. But it means the cut's own chat walk deliberately avoids the multi-turn path, and a person does return to a conversation.",
+      "required_fix": "File the ticket the report asks for, and say in the lane report that no walk in this cut exercises two turns in one session."
+    }
+  ],
+  "already_satisfied_claims_checked": [
+    {
+      "claim": "#985: migration 0319 is UNUSED because clara.record_opening_targets_parsed is already EXECUTE-granted to clara_runtime",
+      "verdict": "CONFIRMED on clara_l01 (has_function_privilege = true); no 0319 file exists in the diff"
+    },
+    {
+      "claim": "#985: chatTurn.v21.* source files are byte-untouched",
+      "verdict": "CONFIRMED - the diff touches only tests/chat-turn-v21-tools.test.mjs, and only to drop a stale pin literal"
+    },
+    {
+      "claim": "#985: OPENING_SOURCE_FIXES.source_reread_since_parse becomes the refresh tool's name once A3 lands",
+      "verdict": "CONFIRMED - chatTurn.v22.tools.ts:176-180 now names refresh_opening_source"
+    },
+    {
+      "claim": "#1030: claraWork_v6's sixth banner lands in the SAME commit as the registry repoint (R2)",
+      "verdict": "CONFIRMED - commit 411583031 contains plugins/startWorld.ts (+9), workflows/registry.ts (+7) and buildInfoRoutes.ts's sixth identity"
+    },
+    {
+      "claim": "#1135: the trade-invoice refusal map ends at twenty-one tokens and party_ambiguous is not reworded",
+      "verdict": "CONFIRMED - frozen map has 18 keys, TRADE_INVOICE_REFUSALS_V2 has 21, the 18 are copied by value from the frozen map, and the three new sentences match apps/web/messages/en.json byte for byte"
+    },
+    {
+      "claim": "#1135: the manifest change is additions-only (322 unchanged, 20 additions)",
+      "verdict": "CONFIRMED by re-running --compare-base 6da02a8de"
+    },
+    {
+      "claim": "#1135: chat-turn-v22-e2e.mjs is registered in the DRIVERS roster and in .github/actions/db-live-gates/action.yml",
+      "verdict": "CONFIRMED in both files"
+    },
+    {
+      "claim": "#1135 deviations 1 and 5 (get_document_extract takes three args; create_revenue_recognition_schedule_for has a ninth defaulted p_pattern)",
+      "verdict": "CONFIRMED against migrations 0090 and 0308"
+    },
+    {
+      "claim": "#1135: the parts-parity exemption ledger carries 3 rows for chatTurn.v22.ts and 2 for claraWork.v6.ts",
+      "verdict": "CONFIRMED in packages/runtime/scripts/parts-parity-exemptions.mjs"
+    }
+  ],
+  "status_request_mid_task": "none arrived"
+}

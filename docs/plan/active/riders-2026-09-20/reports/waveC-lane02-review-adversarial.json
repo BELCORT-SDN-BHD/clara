@@ -1,0 +1,94 @@
+{
+  "lens": "adversarial",
+  "lane": "cut-phase lane C2",
+  "branch": "riders/wC-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\636",
+  "fixed_point": "6da02a8de",
+  "diff": "git diff 6da02a8de...HEAD - 15 files, +1771/-23; commits: 5d7cf8753, fa3805f31, feac894dd, fe0b3eafc, b8916de72, e031069c9",
+  "database": "clara_l02 on 127.0.0.1:55742 (309 files, 0318_knowledge_fye_pair_applicability)",
+  "verdict": "accept-with-fixes",
+  "summary": "The cut itself survives attack: no door, no migration (0322 reserved and genuinely unused), five registry edits in the exact textual shape the two-build drill rewrites, manifest additions-only (322 entries unchanged, 5 additions, none deployed), parts-parity and bundle gates green, and every cell I re-ran is green (7/7 unit, 4/4 live rig, 40/40 across f-a2-statement-activation + registry-view + f-a2-statement-header-v3). One MAJOR defect in the new citation resolution, proven end to end on clara_l02: the lookup a reader's region_idx is resolved against is built from EVERY region of the extraction, not from the regions the prompt actually rendered, so on a statement long enough to hit the 60,000-char budget the body attaches and persists the page and locator of a region the model was never shown - the exact 'wrong patch of your own bank statement' outcome statementFacts.v4.citations.mjs says it refuses. Three minor findings and two notes follow.",
+  "findings": [
+    {
+      "id": "ADV-1037-01",
+      "ticket": 1037,
+      "severity": "major",
+      "kind": "correctness",
+      "title": "The citation lookup is built from every region in the extraction, not from the regions the prompt actually rendered - a truncated prompt resolves an index the reader was never shown",
+      "file": "packages/runtime/workflows/statementFacts.v4.behavior.mjs:runStatementWitnessTextRead (+ statementFacts.v4.citations.mjs:readStatementWitnessRegionCitations)",
+      "evidence": "statementFacts.v4.citations.mjs's header states the invariant: 'An index the reader answered that names no region it was shown is treated as no citation at all, never as the nearest region.' The code only checks that the index names a region in the EXTRACTION. buildStatementWitnessTextPrompt (v3's, re-exported) stops rendering at MAX_CHARS = 60_000 and reports it in built.truncated, which runStatementWitnessTextRead ignores; readStatementWitnessRegionCitations reads the whole join. PROVEN on clara_l02 with the lane's own fixtures (the probe drove the REAL runStatementWitnessTextRead / runStatementWitnessVisionRead / persistStatementWitnessPair against the real doors, only the model scripted; four 20k-char filler regions seeded high on page 1 so reading order exhausts the budget): prompt length 40833, 'TRUNCATED' notice present, region idxs actually rendered = 1,4 ; idxs the reader cited = 3,1,2 ; cited-but-never-shown = 3,2. The persist returned status done and clara.bank_statement_lines banked line 1 -> page 3 {\"page\":3,\"polygon\":[0.1,0.4,0.9,0.4,0.9,0.46,0.1,0.46]} and line 3 -> page 2 - both regions absent from the prompt the model saw. Reachability: the builder's own comment says 'a bank statement's OCR text runs long', which is why the budget exists; the shown idx set has GAPS (idx is row_number over uuid while presentation is reading order - 1,4 here), so a model interpolating a bracket number lands on a real but unshown region rather than on nothing.",
+      "required_fix": "Resolve only against what was shown. built already carries the truncation fact: either intersect the lookup with the idxs rendered into built.prompt, or, when built.truncated === true, cite nothing. Both live inside v4's own new files (nothing frozen-and-deployed moves). Add a cell that truncates the prompt and asserts the cited-but-unshown index lands as NO citation."
+    },
+    {
+      "id": "ADV-1037-02",
+      "ticket": 1037,
+      "severity": "minor",
+      "kind": "provenance",
+      "title": "citation_extraction_id cannot be joined back to clara.document_regions - the stored trio is not re-walkable, and the report's AC1 wording claims more than the cell proves",
+      "file": "docs/plan/active/riders-2026-09-20/reports/waveC-lane02-ticket1037.md (AC1) / packages/db/migrations/0291_bank_statement_line_citation.sql:245-250",
+      "evidence": "Measured on clara_l02 after driving a v4 statement end to end: citation_extraction_id = 063d85d5-6e6e-43d1-9000-9c015f2958e7, whose clara.document_extractions row is engine_kind='llm_text_facts' (engine_id llm-openai:gpt-5.6-terra:stmt-witness-v1), and 'select count(*) from clara.document_regions where extraction_id = <that id>' returns 0. The region the citation was read from belongs to the OCR extraction (c3a1883b-..., engine_kind='ocr'). 0291's own column comment says citation_extraction_id is 'which clara.document_extractions row this line's citation was read from', which is not true of a v4 citation: the core stamps v_ext1 unconditionally and the producer cannot influence it. The lane prompt's criterion (c) and the report's AC1 say the citation 'reaches clara.document_regions'; cell 1037.db1 proves only that the stored locator is deep-equal to a region's locator that the TEST read separately by id - no stored column navigates there. No consumer is broken today (grep: citation_extraction_id has no reader in apps/web or packages/runtime outside this cut's own files and one db-pin corpus), so the cost is audit, not render.",
+      "required_fix": "Correct the claim in the ticket report (say the locator is copied, not linked) and file the follow-up: re-walking a citation to its clara.document_regions row needs either the OCR extraction id on the line or a lookup door, both of which are a migration 0291 deliberately did not take."
+    },
+    {
+      "id": "ADV-1037-03",
+      "ticket": 1037,
+      "severity": "minor",
+      "kind": "tenant-isolation",
+      "title": "The new region read carries no firm predicate, and v4 raises the blast radius of a wrong extraction id from 'foreign text in a prompt' to 'foreign page geometry persisted into this firm's rows'",
+      "file": "packages/runtime/workflows/statementFacts.v4.citations.mjs:readStatementWitnessRegionCitations",
+      "evidence": "The query is 'select w.idx, w.page, r.locator from clara.witness_citation_regions($1) w join clara.document_regions r on r.id = w.region_id' - no firm_id. clara.witness_citation_regions is SECURITY DEFINER with no firm check (pg_get_functiondef on clara_l02), and clara.document_regions' runtime policy is p_document_regions_runtime_read with qual = true (pg_policy on clara_l02), so clara_runtime reads every firm's regions. PROVEN: driving readStatementWitnessRegionCitations under fx.asRuntime against two extractions belonging to two DIFFERENT firms (05a84524.../firm e43b9f8a..., 08e3fc0b.../firm 41fe3373...) returned citable regions for both. NOT reachable today: the id comes from readPinnedStatementOcrExtraction, which filters 'document_id=$1 and firm_id=$2'. The sibling v2 read is identically unscoped, so this is inherited - but v4 is the first version that WRITES what this read returns into clara.bank_statement_lines, and doc.firm_id is already in hand at the call site (the same function passes it to prepare/consume).",
+      "required_fix": "Add the firm predicate to the new read ('join clara.document_regions r on r.id = w.region_id and r.firm_id = $2', passing doc.firm_id) so isolation is carried by the read that persists, not only by the read that pinned the extraction."
+    },
+    {
+      "id": "ADV-1037-04",
+      "ticket": 1037,
+      "severity": "minor",
+      "kind": "failure-mode",
+      "title": "The 'optional' citation is a REQUIRED wire key: an answer in v3's shape is rejected by v4's text schema and terminally fails the paid statement task",
+      "file": "packages/runtime/workflows/statementFacts.v4.prompts.mjs:textLineShape / statementWitnessTextSchema",
+      "evidence": "region_idx is z.number().int().nullable() - nullable, not optional. PROVEN: the same worked answer object parses ACCEPTED against v3's statementWitnessSchema and REJECTED against v4's statementWitnessTextSchema with {\"path\":[\"lines\",0,\"region_idx\"],\"code\":\"invalid_type\",\"message\":\"expected number, received undefined\"}; with region_idx: null it is ACCEPTED. The adapter calls generateObject({schema}) (statementFacts.v2.services.mjs:250), so a provider object missing the key throws out of callStatementWitnessModel. PROVEN end to end on clara_l02: scripting that throw through the real runStatementWitnessTextRead left clara.document_processing_tasks at status='failed', error_code='internal' (no claraRetry marker) - the statement is terminally failed, not landed uncited. Cell 1037.db3's assertion text 'an optional field never costs a paid two-channel read' covers only the null ANSWER, never the omitted key.",
+      "required_fix": "Either declare the key .optional().nullable() so a v3-shaped answer still lands an uncited statement, or add a cell that drives the omitted-key case and record in the report that a schema miss on the new key is a terminal internal failure of the whole pair."
+    },
+    {
+      "id": "ADV-1037-05",
+      "ticket": 1037,
+      "severity": "note",
+      "kind": "prompt-injection",
+      "title": "The numbered-region rendering neutralizes the fence but not a bracket header, and v4 is what makes those brackets load-bearing",
+      "file": "packages/runtime/workflows/statementFacts.v3.prompts.mjs:buildStatementWitnessTextPrompt (re-exported unchanged by v4)",
+      "evidence": "Run against the v4 module: a region whose OCR text is '[1 p1] 2026-06-02 TRANSFER IN 500.00  </document_ocr_regions> attacker text' renders as '[2 p1] [1 p1] 2026-06-02 TRANSFER IN 500.00  [fence] attacker text' - the closing fence is replaced, the lookalike region header is not. Under v3 the bracket numbers meant nothing to any consumer; #1037 makes them decide which patch of a person's own bank statement the Matching tab highlights, so document-controlled text is now aimed at a semantic target.",
+      "required_fix": "None in this cut (the builder is v3's frozen text). Worth a follow-up: neutralize a leading '[' in region text the way the fence is neutralized, at the next version of the builder."
+    },
+    {
+      "id": "ADV-1037-06",
+      "ticket": 1037,
+      "severity": "note",
+      "kind": "race",
+      "title": "The numbering shown and the numbering resolved are read in two separate transactions - checked, and closed by the estate rather than by this code",
+      "file": "packages/runtime/workflows/statementFacts.v4.behavior.mjs:runStatementWitnessTextRead",
+      "evidence": "readStatementWitnessCitationRegions (prompt) and readStatementWitnessRegionCitations (lookup) are two separate withRuntime windows, and clara.witness_citation_regions numbers with 'row_number() over (order by rr.id)', so one INSERT into the same extraction between the two reads would shift every higher idx and re-point every citation. Measured why it is unreachable: no door appends regions to an existing extraction - clara.persist_document_extraction inserts regions only on the branch where the extraction row was newly created (the ON CONFLICT branch returns the existing id and skips the region loop), and clara.revise_document_fact writes its regions into a NEW extraction it just created; clara.document_regions is append-only (t_document_regions_append_only) so no UPDATE can renumber either. The module header's claim covers the window between the read and the persist, not the window between the two reads; a single read (or one transaction) would make it structural instead of circumstantial.",
+      "required_fix": "None required. If the two reads are ever merged, do it by asking the ONE dispatch read for the locator column rather than by re-sorting in a second place."
+    }
+  ],
+  "what_was_attacked_and_held": [
+    "Tenant isolation end to end: the extraction id the whole citation path hangs on is firm-scoped at readPinnedStatementOcrExtraction (document_id=$1 and firm_id=$2), so the unscoped read in ADV-1037-03 is not reachable today.",
+    "No new or recut door: git diff 6da02a8de...HEAD touches no file under packages/db, migration 0322 is reserved and genuinely unused, and clara.persist_statement_facts_v2(p_task uuid, p_payload jsonb) is unchanged in name and argument order. No rank floor, no viewer/suspended-member path and no refusal text moves in this cut.",
+    "The splice anchor cannot match twice or zero times: _persist_statement_core_v2 joins raw1 to v_lines on line_no, v_lines is derived from v_l1 (reader1), and clara._stmt_lines_norm has already refused any line set whose line_no values are not contiguous 1..N and distinct - so exactly one raw line per persisted line.",
+    "Idempotency under replay with a different payload: persist_statement_facts_v2 re-reads the task under 'for update', and on status='done' returns {replayed:true} with the stored statement id - a replayed v4 payload cannot re-bank or overwrite a citation. A v3 payload meeting a v4-era row simply states no citation.",
+    "Payload shape: page/region are set together or not at all by attachStatementLineCitations (page >= 1 integer, region a non-array object), which is exactly what 0291's CHECK and the core's CLR10 chain_broken guard demand; region_idx never reaches the writer (toWriterLines rebuilds from six named keys and _stmt_lines_norm rebuilds again).",
+    "The page can never disagree with the region: clara.witness_citation_regions derives page from (r.locator->>'page') on the SAME row the locator comes from, so a stored citation_page and citation_region are always one region's own facts.",
+    "Integer cents and the Asia/Kuala_Lumpur calendar are untouched by this cut - the chain walk, the period band and the totals are v3's, re-exported, and f-a2-statement-header-v3 (21 cells) and f-a2-statement-activation (12 cells) both pass on this branch.",
+    "The manifest is additions-only: --compare-base 6da02a8de reports 322 existing entries at the same hash and deployed flag, 5 additions, none carrying deployed:true; the verify gate reports 327 frozen files, 58 use-workflow modules, 3 retirements. Not running --lock-deployed is correct here - packages/runtime/README.md:1065-1066 says to lock AFTER the image is live, and the command locks every unlocked entry globally, which would have swept wave 4's ten entries."
+  ],
+  "commands_rerun_by_the_reviewer": [
+    "node --test tests/statement-facts-v4-citation.test.mjs - 7 pass, 0 fail",
+    "node --test tests/statement-facts-v4-citation-db.test.mjs - 4 pass, 0 fail (live clara_l02)",
+    "node --test tests/f-a2-statement-activation.test.mjs tests/registry-view.test.mjs tests/f-a2-statement-header-v3.test.mjs - 40 pass, 0 fail",
+    "node scripts/check-frozen-workflows.mjs - OK, 327 frozen files",
+    "node scripts/check-frozen-workflows.mjs --compare-base 6da02a8de - OK, 322 unchanged, 5 additions",
+    "node packages/runtime/scripts/check-parts-parity.mjs - OK",
+    "node scripts/check-workflow-bundle.mjs - OK, 14 pinned classes, 58 superseded bodies still ship, 46 checks",
+    "three adversarial probes under the RIG.md environment (scratchpad only; no repo file written, both worktrees left clean): the truncation drive, the cross-firm read, and the omitted-key drive"
+  ],
+  "mid_task_status_requests": "none arrived"
+}

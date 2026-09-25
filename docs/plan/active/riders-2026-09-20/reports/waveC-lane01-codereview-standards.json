@@ -1,0 +1,67 @@
+{
+  "axis": "standards",
+  "lane": "waveC-lane01",
+  "fixed_point": "6da02a8de",
+  "diff_range": "6da02a8de...HEAD",
+  "reviewer_role": "read-only reviewer, standards axis",
+  "sources_consulted": [
+    "AGENTS.md",
+    "CONTEXT.md",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md",
+    "docs/plan/active/riders-2026-09-20/RIG.md",
+    "docs/plan/active/riders-2026-09-20/CUT-PLAN.md (full, 1057 lines)",
+    ".claude/skills/tdd/SKILL.md, tests.md, mocking.md",
+    "packages/runtime/README.md, packages/db/README.md (diffs)",
+    "reports/waveC-lane01-ticket985.md, -ticket1000.md, -ticket1030.md, -ticket1135.md",
+    "git log 6da02a8de..HEAD (28 commits), git diff --stat, per-commit diffstats",
+    "re-run gates: check-frozen-workflows(.mjs / --compare-base), check-workflow-bundle.mjs, check-parts-parity.mjs, registry-view.test.mjs"
+  ],
+  "gates_reverified": [
+    {"gate": "node scripts/check-frozen-workflows.mjs", "result": "OK — 342 frozen files, 59 \"use workflow\" modules frozen+registered, 3 retired — matches ticket claims"},
+    {"gate": "node scripts/check-frozen-workflows.mjs --compare-base 6da02a8de", "result": "OK — 322 unchanged, 20 additions, 3 retirements, 0 mutations — matches #1135's claim"},
+    {"gate": "node scripts/check-workflow-bundle.mjs", "result": "OK — 14 pinned classes, chatTurn pinned at v22 with step/engine/emitter directives, 59 superseded bodies still ship — matches claim"},
+    {"gate": "node packages/runtime/scripts/check-parts-parity.mjs", "result": "OK — emittable set unchanged (6 kinds) — matches #1135's AC4 claim that no wire kind was added"},
+    {"gate": "node --test packages/runtime/tests/registry-view.test.mjs", "result": "7/7 pass"}
+  ],
+  "findings": [
+    {
+      "ticket": 1000,
+      "severity": "minor",
+      "category": "migration-standard",
+      "title": "Recut body flips SECURITY INVOKER -> SECURITY DEFINER, a literal departure from the house rule that a recut body preserves its SECURITY posture",
+      "file": "packages/db/migrations/0320_client_financial_pack_wake_read.sql",
+      "line": 994,
+      "summary": "The house migration law (restated in the review brief) is that a recut body keeps its owner, SECURITY mode, search_path and ACL. 0320 recuts clara.get_client_financial_pack (originally `security invoker` in 0232:862) as `security definer` (0320:999). search_path (`clara, pg_temp`) and the ACL (clara_authenticated) are verifiably unchanged; only the SECURITY mode moves.",
+      "evidence": "0232 (packages/db/migrations/0232_client_financial_pack.sql:857-863): `create function clara.get_client_financial_pack(...) language plpgsql stable security invoker set search_path = clara, pg_temp`. 0320 (packages/db/migrations/0320_client_financial_pack_wake_read.sql:988-999): the file's own comment block says \"SECURITY INVOKER -> SECURITY DEFINER, and the reason is the one-ungranted-core law rather than a widening\", then `create or replace function clara.get_client_financial_pack(...) language plpgsql stable security definer set search_path = clara, pg_temp`. This is a genuine, deliberate change to a previously-shipped human-facing door's trust boundary, not an accident: the migration cites the 0082 precedent by name, and §TAIL reverses the three anchored edits (including the floor-check swap that the SECURITY change necessitates) and hashes the result back to the pinned 0232 pre-image, and a vacuity control (removing `and cl.firm_id = p_firm`) was run and caught by both p1000.wake.no_oracle and the human lane's own p660.pack.cross_firm cell. The change is well-reasoned and well-proven, but the review brief's own house-law phrasing (\"SECURITY DEFINER ... preserved on recut bodies\") is not literally true of this migration, and a caller who trusts that phrasing at face value (e.g. skimming migrations for security-posture drift) would miss this one because it announces itself as a recut rather than a posture change.",
+      "required_fix": "No code change needed if the orchestrator accepts the in-file justification (it is thorough and matches an established estate precedent, 0082). Recommend the orchestrator explicitly sign off on this one departure in the cut report or PR description, since it is a security-relevant exception to a documented default rather than a bug.",
+      "outcome": null
+    },
+    {
+      "ticket": 1135,
+      "severity": "note",
+      "category": "duplicated-code",
+      "title": "sentenceFor/fixFor is duplicated near-verbatim as refreshSentenceFor/refreshFixFor",
+      "file": "packages/runtime/workflows/chatTurn.v22.tools.ts",
+      "line": 1052,
+      "summary": "Fowler 'Duplicated Code': two structurally identical lookup-with-fallback function pairs exist in the same file, differing only in which refusal/fix table they close over.",
+      "evidence": "chatTurn.v22.tools.ts:233-241 (landed by #985):\n```\nfunction sentenceFor(reason: string | null, fallback: string): string {\n  const sentence = reason === null ? undefined : OPENING_SOURCE_REFUSALS[reason];\n  return sentence ?? fallback;\n}\nfunction fixFor(reason: string | null, fallback: string | null): string | null {\n  const fix = reason === null ? undefined : OPENING_SOURCE_FIXES[reason];\n  return fix ?? fallback;\n}\n```\nchatTurn.v22.tools.ts:1052-1060 (landed by #1135's A3/#986 commit e95801f08):\n```\nfunction refreshSentenceFor(reason: string | null, fallback: string): string {\n  const sentence = reason === null ? undefined : OPENING_REFRESH_REFUSALS[reason];\n  return sentence ?? fallback;\n}\nfunction refreshFixFor(reason: string | null, fallback: string | null): string | null {\n  const fix = reason === null ? undefined : OPENING_REFRESH_FIXES[reason];\n  return fix ?? fallback;\n}\n```\nThe two pairs are byte-identical modulo the table they reference (OPENING_SOURCE_* vs OPENING_REFRESH_*).",
+      "required_fix": "Optional polish, not blocking: extract a single generic helper, e.g. `function lookupWithFallback<T>(table: Record<string, T>, reason: string | null, fallback: T): T`, and call it with the two different tables at each of the four sites. Low priority — the file is a version-pinned, append-only tools module and this is a same-file, same-ticket-family duplication rather than cross-module drift risk.",
+      "outcome": null
+    }
+  ],
+  "areas_checked_clean": [
+    "Five registry.ts edits (import/dispatch/re-export/workflowBodies/workflowPins) for chatTurn and claraWork match §2.2's exact textual shapes byte for byte; registry-view.test.mjs green.",
+    "The sixth CLARA_WORK_BUNDLE_V6_BANNER import + console.log landed in plugins/startWorld.ts in the same commit (411583031) as the claraWork registry repoint, and buildInfoRoutes.ts's bundles[] array was updated — R2 (the last cut's defect) was not repeated.",
+    "No previously-superseded pin cell (chatTurn_v21 / claraWork_v5) still asserts the old pin as a bare 'newest' string literal in production code or tests; both were rewritten to assert non-equality plus continued export/roster membership.",
+    "No PRD.md or ARCHITECTURE.md edits; no edits to any already-applied migration file (only 0320 and 0321 are new); frozen-workflows.json shows additions-only (20 additions, 0 mutations) vs 6da02a8de.",
+    "Both migrations (0320, 0321) carry header / measured prestate pins / tail hash-reversal proofs / a preintegration-gate module on a stable stem / a rig-meta cohort wired into the failure-check chain / a gate-chain entry appended at the correct migration-order position in packages/db/package.json. No new relation in either migration, so the FORCE RLS / zero-application-role-DML rule is vacuously satisfied.",
+    "The trade-invoice refusal map is verified structurally at 21 tokens (18 inherited + 3 new: party_identifier_conflict, nothing_acknowledged, unknown_acknowledged_invoice), and the three new sentences are byte-identical to apps/web/messages/en.json's TradeInvoice.refusals entries.",
+    "No new zod .superRefine/.refine landed anywhere in the new v22/v6 tool schemas (R5's concern); claraWork.v6.bundle.ts states this explicitly and it checks out by grep.",
+    "'Prefer a versioned copy over freezing a live shared core' (rule f): lib/opening-parse.mjs (4 other importers) was frozen in place by #985 with an extensively reasoned refusal of the versioned-copy alternative (would create a second derivation of a client's opening figures); lib/prepayment-schedule-basis.ts and lib/fa-particulars-proposal.ts were frozen in place after a measured grep showed no other first-party importer, so the versioned-copy tradeoff does not apply to them; lib/accrual-basis.ts, lib/trade-invoice-basis.ts, lib/staff-expense-claim-basis.ts (already frozen under earlier versions) were correctly succeeded by .v2.ts files rather than edited in place.",
+    "No test file in the new/touched set mocks an internal collaborator or the repo's own modules; the one place a Postgres client is faked (reconcile-source-correction-unit.test.mjs) fakes it at the belt's own two system-boundary seams (the leader connection and the per-item runtime transaction factory), consistent with mocking.md's 'mock at system boundaries only'.",
+    "No tautological test found in the sampled files (chat-turn-v22-trade-invoice, -accrual, -opening-*, clara-work-v6*, source-correction-rederive, reconcile-source-correction-unit): expected values are independent literals (e.g. RM 640.00 -> RM 999.00 fixture figures, sha256 pins, byte-for-byte string comparisons against en.json / frozen map values), not re-derivations of the code under test.",
+    "No horizontal-slicing pattern (a whole battery of red tests committed before any implementation): every commit in `git log 6da02a8de..HEAD --stat` pairs a bounded contract slice (one or two roster entries) with its own new test file and implementation in the same or an adjacent commit; no commit adds only test files across multiple unrelated seams.",
+    "apps/web is byte-untouched by this whole lane except one doc-comment edit (doors.ts, AC7 of #1030) — confirmed by diff; CONTEXT.md additions follow the house 'term / _Avoid_' shape."
+  ],
+  "summary": "Reviewed the full chatTurn_v22 / claraWork_v6 cut (4 tickets, 28 commits, 66 files, ~16.4k insertions) against the repo's documented migration house law, the registry/freeze/bundle mechanics CUT-PLAN.md specifies, and the /tdd skill's test-quality rules. Re-ran the structural gates (freeze-lint, compare-base, workflow-bundle, parts-parity, registry-view) rather than trusting the reports' numbers, and spot-verified several of the reports' most load-bearing claims (the 21-token refusal map byte-for-byte against en.json, the sixth banner commit, the SECURITY-mode change's search_path/ACL preservation, the frozen-closure import-count measurements) directly against the source. Found no hard violations of a documented standard that block the diff, no anti-pattern test (horizontal slicing, tautological assertion, internal-collaborator mock), and no edit to a frozen body, an applied migration, or a blueprint file. Two items are worth the orchestrator's attention: a deliberate, well-justified but literal departure from the 'SECURITY posture preserved on recut bodies' house default in migration 0320 (minor, sign-off item, not a defect), and a small same-file code duplication in chatTurn.v22.tools.ts's two refusal-lookup helper pairs (note, optional polish)."
+}
