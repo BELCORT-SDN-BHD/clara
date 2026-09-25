@@ -76,14 +76,57 @@ test("1030.rederive: the retired figure is gone from the proposal — the blocke
     + "figure against the corrected document is exactly what the ruling forbids");
 });
 
-test("1030.rederive: a live reading that has moved AGAIN since the correction is declined, not silently used", () => {
-  // The belt read the backlog, a second correction landed, and the brief in hand is stale. Using
-  // `new_value` would re-derive from a reading nobody is looking at any more.
+test("1030.rederive: a live reading that has moved AGAIN since the correction is DERIVED FROM, never declined into a dead end", () => {
+  // ADV-C1-05 (cut-phase adversarial round). The first cut DECLINED here, on the argument that
+  // "the next sweep reads the newest correction and this one is settled by its own successor or
+  // decline". That argument does not hold, and the measurement is the estate's own:
+  // `clara._source_corrected_work` retires only a Work in ('queued','running','awaiting_input'),
+  // so a SECOND correction landing after the first retirement — while the Work is already
+  // `cancelled` and no successor exists yet — retires nothing and writes no `source_corrected:`
+  // receipt, which is the only thing `clara.source_correction_rederivations` reads. The decline
+  // meanwhile CONSUMED the first correction's op key through `clara._reserve_op`, so it is final.
+  // Net: the person's instruction retired, nothing re-derived, no successor, and Needs-you showing
+  // nothing — which is the exact state #1030's AC4 exists to end.
+  //
+  // THE HONEST ANSWER IS THE ONE THE RULING ALREADY GIVES: the figures come from `live_facts`,
+  // which IS what the document says now. Deriving from the live reading needs no guess, and the
+  // successor is admitted PARKED on a confirmation question naming both figures — so a person
+  // sees the current figure and confirms it, rather than seeing nothing at all. A third correction
+  // arriving after that retires the successor (it is queued or awaiting_input) and the chain
+  // continues; that is what makes this self-healing where the decline was a cul-de-sac.
   const out = rederivedBasis(brief({ newCents: 99900, liveCents: 120000 }));
-  assert.equal(out.ok, false);
-  assert.equal(out.reason, "source_moved_again");
-  assert.equal(out.detail.live_cents, 120000);
-  assert.equal(out.detail.correction_cents, 99900);
+  assert.equal(out.ok, true, "the reading moved again, and the live reading is still a reading");
+  const cents = out.basis.lines.flatMap((l) => [l.debit_cents, l.credit_cents]).filter((c) => c !== 0);
+  assert.deepEqual(cents, [120000, 120000], "the proposal carries what the document says NOW");
+  assert.equal(out.from.cents, 120000);
+  assert.equal(out.from.source, "live_facts");
+  // …and the belt is TOLD the reading moved, so the fact is on the record rather than inferred.
+  assert.equal(out.from.moved_again, true);
+  assert.equal(out.from.correction_cents, 99900);
+  // A brief whose correction agrees with the live reading says so too, in the same shape.
+  assert.equal(rederivedBasis(brief()).from.moved_again, false);
+});
+
+test("1030.rederive: a document corrected BACK to the retired reading is re-offered, not declined as unchanged", () => {
+  // The other half of ADV-C1-05, and the dead end the fix must not simply move: correction 1 takes
+  // 64000 to 99900 and retires the Work, correction 2 takes it back to 64000 before the sweep. The
+  // live reading now equals the figure the retired instruction was admitted on, so the
+  // `rederivation_is_unchanged` arm would fire — and that arm's own comment says it exists for a
+  // state "something above this lane is wrong" produces. Nothing is wrong here: the document
+  // simply says again what it said, and the honest successor is the retired instruction itself,
+  // re-offered for confirmation. Declining would leave the same cul-de-sac by another name.
+  const out = rederivedBasis(brief({ priorCents: 64000, newCents: 99900, liveCents: 64000 }));
+  assert.equal(out.ok, true);
+  const cents = out.basis.lines.flatMap((l) => [l.debit_cents, l.credit_cents]).filter((c) => c !== 0);
+  assert.deepEqual(cents, [64000, 64000]);
+  assert.equal(out.from.moved_again, true);
+
+  // …while a brief whose correction AGREES with a live reading equal to the prior one is still the
+  // defensive decline it always was: there the correcting door should have refused before
+  // anything was written, and admitting a Work that changes nothing would hide that.
+  const unchanged = rederivedBasis(brief({ priorCents: 64000, newCents: 64000, liveCents: 64000 }));
+  assert.equal(unchanged.ok, false);
+  assert.equal(unchanged.reason, "rederivation_is_unchanged");
 });
 
 test("1030.rederive: a correction that is not money, or a basis that never carried the figure, is declined BY NAME", () => {
@@ -145,6 +188,9 @@ test("1030.rederive: every declined reason is one the settlement can record, and
     "rederivation_does_not_balance",
     "rederivation_is_unchanged",
     "retired_basis_unreadable",
-    "source_moved_again",
   ]);
+  // `source_moved_again` LEFT this roster in the cut-phase fix round (ADV-C1-05): it is no longer
+  // a decline, so a settlement can no longer record it, so it may not sit in a roster whose whole
+  // purpose is "every word this lane can put on a receipt a person reads".
+  assert.equal(REDERIVATION_DECLINED.includes("source_moved_again"), false);
 });

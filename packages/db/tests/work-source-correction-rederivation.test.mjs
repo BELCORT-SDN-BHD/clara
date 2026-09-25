@@ -27,7 +27,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, humanQuery, roleQuery, opk, endPool } from "./rig-helpers.mjs";
+import { rootQuery, humanQuery, roleQuery, opk, endPool, getPool, ROLES } from "./rig-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import {
   buildWorkWorld, admitJournalWork, claimWorkRun, basis, workRow,
@@ -40,8 +40,14 @@ import {
   persistInvoiceFacts, factField, statedIdentityFields,
 } from "./s6-fixtures.mjs";
 
+// §7's belt cells sweep a SHARED rig whose backlog carries every earlier run's corrections, and
+// the door answers oldest first — so the window has to be wide enough to reach the correction the
+// cell just made, or the cell would pass or fail for a reason that has nothing to do with it. The
+// belt reads this at module load, so it is set before any import of it.
+process.env.CLARA_SOURCE_CORRECTION_SWEEP_LIMIT ??= "200";
+
 const STEM = "work_source_correction_rederivation$";
-const EXPECTED_CELLS = 12;
+const EXPECTED_CELLS = 14;
 const RUNTIME = "clara_runtime";
 
 let live = false;
@@ -663,4 +669,164 @@ cell("r1030.needsyou.shows_the_successor: after a correction Needs-you shows the
   assert.equal(askedRow.status, "pending", "…and it is open, so a person can actually answer it");
 
   noteLane(`r1030.needsyou.shows_the_successor: ${String(parked.questionId).slice(0, 8)} left the list, ${String(asked.question_id).slice(0, 8)} joined it`);
+});
+
+// =============================================================================================
+// §7 · THE BELT ITSELF, DRIVEN AGAINST THIS DATABASE (C1-SPEC-04 / ADV-C1-05).
+//
+// Everything above proves the DOORS; `packages/runtime/tests/source-correction-rederive.test.mjs`
+// proves the derivation; `reconcile-source-correction-unit.test.mjs` proves the belt's arguments
+// with both database seams injected. None of them drives backlog -> derive -> admit -> settle in
+// one process against Postgres, which the #1030 report itself names as the gap. These two cells
+// close it, through the real module and the real doors.
+//
+// INSIDE ONE TRANSACTION THIS FILE ROLLS BACK, and the choice is deliberate twice over. The rig is
+// shared with every earlier cell in this file, so a committed sweep would admit a successor for
+// each of their corrections too and change what a later run of those cells sees; and the estate's
+// own adversarial round drove this lane exactly this way. A SAVEPOINT per correction stands in for
+// the belt's one-transaction-per-correction isolation, so a sibling that refuses cannot poison the
+// sweep -- what is NOT proved here is that isolation itself, which is the unit cell's subject.
+// =============================================================================================
+
+/** Run `fn(client, withRuntime)` on ONE clara_runtime connection inside a transaction that is
+ *  always rolled back. `withRuntime` gives the belt the per-correction boundary it expects. */
+async function inRolledBackRuntimeTxn(fn) {
+  const c = await getPool().connect();
+  let n = 0;
+  const withRuntime = async (f) => {
+    const sp = `r1030_sp_${(n += 1)}`;
+    await c.query(`savepoint ${sp}`);
+    try {
+      const out = await f(c);
+      await c.query(`release savepoint ${sp}`);
+      return out;
+    } catch (err) {
+      await c.query(`rollback to savepoint ${sp}`);
+      throw err;
+    }
+  };
+  try {
+    await c.query("begin");
+    await c.query(`set local role ${ROLES.runtime}`);
+    return await fn(c, withRuntime);
+  } finally {
+    await c.query("rollback").catch(() => {});
+    c.release();
+  }
+}
+
+cell("r1030.belt.end_to_end: the real belt reads the backlog, re-derives from the LIVE facts, admits a successor and settles the link — in one process against this database", async () => {
+  const { reconcileWorkSourceCorrections, REDERIVE_MODEL_ID } =
+    await import("../../runtime/lib/reconciler-work-source-correction.mjs");
+
+  const s = await invoiceWithFacts({ client: A1(), totalCents: 115000, tag: "belt1" });
+  const parked = await workParkedOnDocument({ client: A1(), document: s.documentId, b: basis({ cents: 115000 }) });
+  const { opKey } = await correctAndRetire({ document: s.documentId, parked, to: money(99900) });
+
+  // MANDATORY SETUP, stated as an assertion: the correction is on the backlog and owed a successor.
+  assert.ok(entryFor(await backlog(), opKey), "the correction is on the backlog before the sweep");
+
+  const seen = await inRolledBackRuntimeTxn(async (c, withRuntime) => {
+    const out = await reconcileWorkSourceCorrections(c, { withRuntime });
+    // READ BACK INSIDE THE SAME TRANSACTION, because the rollback is what keeps this rig usable
+    // by the cells above.
+    await c.query("reset role");
+    const successorRow = await c.query(
+      `select w.id, w.status, w.basis, w.basis_origin, w.intent_key, w.client_id,
+              t.model_snapshot
+         from clara.accounting_work w
+         left join clara.agent_tasks t on t.id = w.current_task_id
+        where w.intent_key = $1`, [opKey]);
+    const retiredRow = await c.query(
+      "select superseded_by, status from clara.accounting_work where id = $1", [parked.work_id]);
+    const receipt = await c.query(
+      `select op_key from clara.op_receipts
+        where fn = 'source_correction_rederivation' and op_key = $1`, [opKey]);
+    const successorId = successorRow.rows[0]?.id ?? null;
+    const brief = successorId === null ? null : (await c.query(
+      "select clara.source_correction_successor_brief($1::uuid) as r", [successorId])).rows[0].r;
+    return {
+      out, successor: successorRow.rows[0] ?? null, retired: retiredRow.rows[0] ?? null,
+      settled: receipt.rows.length, brief,
+    };
+  });
+
+  assert.equal(seen.out.sourceCorrectionOk, true);
+  assert.notEqual(seen.out.sourceCorrectionDormant, true, "0321 is applied, so the belt is not dormant");
+
+  // A SUCCESSOR, ADMITTED THROUGH THE REAL DOOR, under the correction's OWN op key.
+  assert.ok(seen.successor, "a successor Work was admitted");
+  assert.equal(seen.successor.intent_key, opKey);
+  assert.equal(seen.successor.client_id, A1());
+  assert.equal(seen.successor.model_snapshot, REDERIVE_MODEL_ID,
+    "…attributed honestly on its own task: this lane spends no tokens and says so");
+  assert.equal(seen.successor.basis_origin, "clara_interpreted");
+
+  // CARRYING THE CORRECTED FIGURE AND NOT THE PRE-CORRECTION ONE. The expected figures are the
+  // document's, written as literals, never recomputed the way the derivation computes them.
+  const cents = seen.successor.basis.lines
+    .flatMap((l) => [Number(l.debit_cents ?? 0), Number(l.credit_cents ?? 0)]).filter((x) => x !== 0);
+  assert.deepEqual(cents, [99900, 99900], "the successor carries what the document says now");
+
+  // THE LINK, CLAIMED. #885 left `superseded_by` NULL on purpose so this lane could claim it.
+  assert.equal(seen.retired.superseded_by, seen.successor.id);
+  assert.equal(seen.settled, 1, "…and the settlement is durable under the correction's own key");
+
+  // THE SUCCESSOR'S OWN RUN CAN NAME BOTH FIGURES before anything posts.
+  assert.ok(seen.brief, "the successor's brief answers for a Work this lane admitted");
+  assert.equal(seen.brief.retired_work_id, parked.work_id);
+
+  noteLane(`r1030.belt.end_to_end: ${seen.out.sourceCorrectionAdmitted} admitted / ${seen.out.sourceCorrectionDeclined} declined in the sweep; this correction's successor carries 99900`);
+});
+
+cell("r1030.belt.moved_again: a SECOND correction landing before the sweep retires nothing — and the first correction still gets a successor, carrying what the document says now", async () => {
+  // ADV-C1-05, driven with two real corrections rather than argued from a pure function. The
+  // premise the finding measured is asserted here as well as the fix, because the fix is only
+  // interesting if the premise holds: `clara._source_corrected_work` retires only a Work in
+  // ('queued','running','awaiting_input'), so once the FIRST correction has cancelled the parked
+  // Work the second correction retires nothing, writes no `source_corrected:` receipt, and never
+  // reaches the backlog. Before the fix the first correction was then DECLINED
+  // (`source_moved_again`) and its op key consumed — leaving a retired instruction, no successor,
+  // and Needs-you showing nothing, which is the exact state AC4 exists to end.
+  const { reconcileWorkSourceCorrections } =
+    await import("../../runtime/lib/reconciler-work-source-correction.mjs");
+
+  const s = await invoiceWithFacts({ client: A1(), totalCents: 115000, tag: "belt2" });
+  const parked = await workParkedOnDocument({ client: A1(), document: s.documentId, b: basis({ cents: 115000 }) });
+  const { opKey } = await correctAndRetire({ document: s.documentId, parked, to: money(99900) });
+
+  // THE SECOND CORRECTION, before any sweep. It commits — and retires nothing.
+  const second = await reviseFact(KEEPER(), {
+    document: s.documentId, fieldPath: "invoice.total", value: money(120000), observedVersion: 2,
+    reason: "#1030 rig: the reader misread it twice",
+  });
+  assert.equal(second.facts_version, 3, "the second correction commits");
+  assert.equal(second.superseded_work.length, 0,
+    "…and retires NOTHING, because the Work it would have retired is already cancelled — the "
+    + "premise of the dead end, measured rather than assumed");
+  assert.equal(entryFor(await backlog(), `source_corrected:${second.revision_id}:${parked.work_id}`), null,
+    "…so the second correction never reaches the backlog either");
+
+  const seen = await inRolledBackRuntimeTxn(async (c, withRuntime) => {
+    const out = await reconcileWorkSourceCorrections(c, { withRuntime });
+    await c.query("reset role");
+    const successor = await c.query(
+      "select id, basis from clara.accounting_work where intent_key = $1", [opKey]);
+    const receipt = await c.query(
+      `select result from clara.op_receipts
+        where fn = 'source_correction_rederivation' and op_key = $1`, [opKey]);
+    return { out, successor: successor.rows[0] ?? null, receipt: receipt.rows[0]?.result ?? null };
+  });
+
+  assert.ok(seen.successor,
+    "the retired Work gets a successor even though the reading moved again — the chain may not "
+    + "end with a retirement, no successor and nothing a person can see");
+  const cents = seen.successor.basis.lines
+    .flatMap((l) => [Number(l.debit_cents ?? 0), Number(l.credit_cents ?? 0)]).filter((x) => x !== 0);
+  assert.deepEqual(cents, [120000, 120000],
+    "and it carries the document's LIVE reading — 120000, the second correction's figure — never "
+    + "99900, which nobody is looking at, and never 115000, which the ruling forbids outright");
+  assert.equal(seen.receipt?.status ?? "settled", "settled");
+
+  noteLane("r1030.belt.moved_again: the second correction retired nothing; the first still produced a successor carrying 120000");
 });

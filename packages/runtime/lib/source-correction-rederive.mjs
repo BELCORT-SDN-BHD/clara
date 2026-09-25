@@ -40,7 +40,6 @@ export const REDERIVATION_DECLINED = Object.freeze([
   "rederivation_does_not_balance",
   "rederivation_is_unchanged",
   "retired_basis_unreadable",
-  "source_moved_again",
 ]);
 
 const declined = (reason, detail = {}) => ({ ok: false, reason, detail });
@@ -97,14 +96,31 @@ export function rederivedBasis(b) {
   const priorCents = centsOf(b.prior_value);
   if (priorCents === null) return declined("prior_reading_not_monetary", { field_path: fieldPath });
 
-  // THE BRIEF MAY BE STALE. A second correction can land between the backlog read and this
-  // derivation; the live reading is then not the one the correction in hand produced, and
-  // re-deriving from either would be re-deriving from a reading nobody is looking at. The next
-  // sweep reads the newest correction and this one is settled by its own successor or decline.
+  // THE BRIEF MAY BE STALE, AND THE LIVE READING IS STILL THE READING. A second correction can
+  // land between the retirement and this derivation, so the figure the correction in hand stated
+  // is not what the document says now.
+  //
+  // THIS USED TO DECLINE, and the decline was a cul-de-sac (cut-phase adversarial round,
+  // ADV-C1-05). Measured, not argued: `clara._source_corrected_work` retires only a Work in
+  // ('queued','running','awaiting_input'), so the SECOND correction — arriving while the first
+  // Work is already `cancelled` and no successor exists yet — retires nothing and writes no
+  // `source_corrected:` receipt, which is the only thing `clara.source_correction_rederivations`
+  // reads. Meanwhile the decline CONSUMED this correction's op key through `clara._reserve_op`,
+  // so it is final. Net: a retired instruction, no successor, and Needs-you showing nothing —
+  // the exact state #1030's AC4 exists to end.
+  //
+  // So the figure comes off `live_facts`, which is where the ruling puts it and where every other
+  // arm of this function already takes it from: "never the retired Work's own basis". Nothing is
+  // guessed, because nothing here was ever allowed to use `new_value` as a figure in the first
+  // place. The successor is admitted PARKED on a confirmation question naming both figures, so a
+  // person reads the current figure and confirms it; and a third correction landing after that
+  // retires the successor (queued or awaiting_input) and the chain continues, which is what makes
+  // this self-healing where the decline was not.
+  //
+  // THE FACT IS CARRIED, NEVER SWALLOWED: `from.moved_again` says the reading moved since the
+  // correction, and `from.correction_cents` says what the correction had stated.
   const correctionCents = centsOf(b.new_value);
-  if (correctionCents !== null && correctionCents !== liveCents) {
-    return declined("source_moved_again", { live_cents: liveCents, correction_cents: correctionCents });
-  }
+  const movedAgain = correctionCents !== null && correctionCents !== liveCents;
 
   let moved = 0;
   const lines = basis.lines.map((l) => {
@@ -132,16 +148,28 @@ export function rederivedBasis(b) {
     return declined("rederivation_does_not_balance", { debits_cents: debits, credits_cents: credits });
   }
 
-  if (liveCents === priorCents) {
+  if (liveCents === priorCents && !movedAgain) {
     // Defensive: the correcting door already refuses a no-op before anything is written (0268,
     // widened by 0321), so a brief that reaches here with an unmoved figure means something above
     // this lane is wrong. Declining says so instead of admitting a Work that changes nothing.
+    //
+    // NOT WHEN THE READING MOVED AGAIN, and that exception is the other half of ADV-C1-05: a
+    // document corrected 64000 -> 99900 and then back to 64000 reaches here with live == prior
+    // through no fault above this lane. The Work is already retired, so declining would leave the
+    // same cul-de-sac by another name; the honest successor is the retired instruction itself,
+    // re-offered for confirmation.
     return declined("rederivation_is_unchanged", { cents: liveCents });
   }
 
   return {
     ok: true,
     basis: Object.assign({}, basis, { lines }),
-    from: { field_path: fieldPath, cents: liveCents, source: "live_facts" },
+    from: {
+      field_path: fieldPath,
+      cents: liveCents,
+      source: "live_facts",
+      moved_again: movedAgain,
+      correction_cents: correctionCents,
+    },
   };
 }
