@@ -164,7 +164,8 @@ test("PayrollPostingSection: any OTHER refusal is a banner, because a person is 
   await mount(
     { answer: { code: "CLR11", message: "payroll summary not found", details: null }, status: 404 },
     async (text) => {
-      assert.ok(text().length > 0, "silence about a real failure is the placeholder-success defect #624 exists to stop");
+      assert.ok(text().length > 0,
+        "silence about a real failure is the placeholder-success defect ticket 624 exists to stop");
       assert.ok(text().includes("CLR11") || text().toLowerCase().includes("not found"),
         `the failure is named on screen (got ${JSON.stringify(text())})`);
     },

@@ -346,7 +346,10 @@ test("p1148.acl.census: the internal stays nobody's, the door is the human lane'
     "clara._payroll_posting_verdict holds its owner's EXECUTE and nothing else");
 
   const appRoles = (await rootQuery(
-    "select rolname from pg_roles where rolname like 'clara\_%' and rolname <> 'clara_fn_owner' order by rolname",
+    // The backslash is LIKE's own escape for the underscore, doubled for the JS string: an
+    // unescaped `_` is a single-character wildcard, and `clara%` alone would admit a role that
+    // merely starts with the letters.
+    "select rolname from pg_roles where rolname like 'clara\\_%' and rolname <> 'clara_fn_owner' order by rolname",
   )).rows.map((r) => r.rolname);
   assert.ok(appRoles.length >= 4, `premise: this cluster carries the application roles (got ${appRoles.join(", ")})`);
   const reachInternal = (await rootQuery(
