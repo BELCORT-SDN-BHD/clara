@@ -211,6 +211,17 @@ test("p6-1.parts-parity: v16 plus the live reader admits the freeform_result emi
         // v6's confirmation park calls v3's emitters and v2's open by IMPORT. A v6 site appearing
         // on either would mean this cut copied a park body it was supposed to inherit.
         "packages/runtime/workflows/claraWork.v6.impl.ts",
+        // CLOSING WAVE 2026-09-26 (#1144). Same statement again, for the same reason: v7's
+        // `completedResultV7` mints `work_result` at one site because it stamps THIS closure's
+        // digest, and `work_status` and `work_question` below do NOT gain a v7 site — v7's
+        // park, resume and emit bodies are all reached by import. A v7 site on either would
+        // mean this cut copied a park body it was supposed to inherit.
+        //
+        // AND THE CENSUS IS THE ARBITER OF `waveS-lane08-fix.md` §7.2, which settled the two
+        // tenancy confirmations' part kind by measuring exactly this list: every construction
+        // site of `work_result` is a `claraWork.*.impl.ts`, and the chat lane has never emitted
+        // it. `chatTurn_v23` adds seven tools and no site here, which is that ruling holding.
+        "packages/runtime/workflows/claraWork.v7.impl.ts",
       ],
     },
     {

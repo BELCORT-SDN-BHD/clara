@@ -430,7 +430,14 @@ const ATTRIBUTION = [
   // wave 2026-09-15 cut, chatTurn_v20's four, claraWork_v4's two (its knowledge-context step) and
   // clientOnboarding_v5's two (interview.v4.known.ts's pre-read of the same pack). Since the wave
   // 2026-09-18 cut, chatTurn_v21's four and claraWork_v5's two as well. Since the 2026-09-25 CUT
-  // PHASE (#985), chatTurn_v22's four, and (#1030) claraWork_v6's two. 24.
+  // PHASE (#985), chatTurn_v22's four, and (#1030) claraWork_v6's two. Since the 2026-09-26
+// CLOSING wave (#1144), chatTurn_v23's SEVEN and claraWork_v7's two. 33.
+//
+// v23 CONTRIBUTES SEVEN WHERE EVERY PREDECESSOR CONTRIBUTED FOUR, and that is the measured cost
+// of a cut whose tools are three modules rather than one: `chatTurn.v23.reads.ts`,
+// `chatTurn.v23.tenancy.ts` and `chatTurn.v23.refusals.ts` join the usual impl/prompt/tools/entry
+// four. `chatTurn.v23.usage.ts` does NOT appear here — it reaches only v15's usage module — which
+// is the control that shows this roster is reachability rather than a file-count.
   //
   // NEITHER NEW PAIR REACHES IT DIRECTLY, AND THAT IS WORTH SAYING BECAUSE IT LOOKS LIKE A
   // CONTRADICTION. chatTurn_v21 and claraWork_v5 both REPOINTED their knowledge read away from
@@ -445,21 +452,29 @@ const ATTRIBUTION = [
     `${W}chatTurn.v20.impl.ts`, `${W}chatTurn.v20.prompt.ts`, `${W}chatTurn.v20.tools.ts`, `${W}chatTurn.v20.ts`,
     `${W}chatTurn.v21.impl.ts`, `${W}chatTurn.v21.prompt.ts`, `${W}chatTurn.v21.tools.ts`, `${W}chatTurn.v21.ts`,
     `${W}chatTurn.v22.impl.ts`, `${W}chatTurn.v22.prompt.ts`, `${W}chatTurn.v22.tools.ts`, `${W}chatTurn.v22.ts`,
+    `${W}chatTurn.v23.impl.ts`, `${W}chatTurn.v23.prompt.ts`, `${W}chatTurn.v23.reads.ts`,
+    `${W}chatTurn.v23.refusals.ts`, `${W}chatTurn.v23.tenancy.ts`, `${W}chatTurn.v23.tools.ts`,
+    `${W}chatTurn.v23.ts`,
     `${W}claraWork.v4.impl.ts`, `${W}claraWork.v4.ts`,
     `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
     `${W}claraWork.v6.impl.ts`, `${W}claraWork.v6.ts`,
+    `${W}claraWork.v7.impl.ts`, `${W}claraWork.v7.ts`,
     `${W}clientOnboarding.v5.ts`, `${W}interview.v4.known.ts`,
   ]],
   // ... periodic-adjustment-basis.ts under the 5 reaching chatTurn_v19 entry files plus
   // chatTurn_v20's four, chatTurn_v21's four and — since the 2026-09-25 cut phase (#985) —
-  // chatTurn_v22's four. Each successor carries its predecessor's tool map forward, so each
-  // reaches this module too; none of v20, v21 or v22 has a `parts.ts` of its own (v19 stays the
-  // declarer), which is why this roster is 17 and not 20.
+  // chatTurn_v22's four and — since the 2026-09-26 CLOSING wave (#1144) — chatTurn_v23's seven.
+  // Each successor carries its predecessor's tool map forward, so each reaches this module too;
+  // none of v20, v21, v22 or v23 has a `parts.ts` of its own (v19 stays the declarer), which is
+  // why this roster is 24 and not 28.
   ["packages/runtime/lib/periodic-adjustment-basis.ts", [
     `${W}chatTurn.v19.impl.ts`, `${W}chatTurn.v19.parts.ts`, `${W}chatTurn.v19.prompt.ts`, `${W}chatTurn.v19.tools.ts`, `${W}chatTurn.v19.ts`,
     `${W}chatTurn.v20.impl.ts`, `${W}chatTurn.v20.prompt.ts`, `${W}chatTurn.v20.tools.ts`, `${W}chatTurn.v20.ts`,
     `${W}chatTurn.v21.impl.ts`, `${W}chatTurn.v21.prompt.ts`, `${W}chatTurn.v21.tools.ts`, `${W}chatTurn.v21.ts`,
     `${W}chatTurn.v22.impl.ts`, `${W}chatTurn.v22.prompt.ts`, `${W}chatTurn.v22.tools.ts`, `${W}chatTurn.v22.ts`,
+    `${W}chatTurn.v23.impl.ts`, `${W}chatTurn.v23.prompt.ts`, `${W}chatTurn.v23.reads.ts`,
+    `${W}chatTurn.v23.refusals.ts`, `${W}chatTurn.v23.tenancy.ts`, `${W}chatTurn.v23.tools.ts`,
+    `${W}chatTurn.v23.ts`,
   ]],
   // ... capability-registry.mjs (reached ONLY transitively, through work-trace.mjs) and
   // work-trace.mjs (reached ONLY through a DYNAMIC import) under claraWork_v3's 2 entry files,
@@ -478,12 +493,14 @@ const ATTRIBUTION = [
     `${W}claraWork.v4.impl.ts`, `${W}claraWork.v4.ts`,
     `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
     `${W}claraWork.v6.impl.ts`, `${W}claraWork.v6.ts`,
+    `${W}claraWork.v7.impl.ts`, `${W}claraWork.v7.ts`,
   ]],
   ["packages/runtime/lib/work-trace.mjs", [
     `${W}claraWork.v3.impl.ts`, `${W}claraWork.v3.ts`,
     `${W}claraWork.v4.impl.ts`, `${W}claraWork.v4.ts`,
     `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
     `${W}claraWork.v6.impl.ts`, `${W}claraWork.v6.ts`,
+    `${W}claraWork.v7.impl.ts`, `${W}claraWork.v7.ts`,
   ]],
   // ... and the three modules the wave 2026-09-18 cut introduced, recorded at their birth so the NEXT
   // successor's roster growth is measured against a written baseline rather than against nothing.
@@ -495,10 +512,12 @@ const ATTRIBUTION = [
   ["packages/runtime/lib/work-trace-bounds.mjs", [
     `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
     `${W}claraWork.v6.impl.ts`, `${W}claraWork.v6.ts`,
+    `${W}claraWork.v7.impl.ts`, `${W}claraWork.v7.ts`,
   ]],
   ["packages/runtime/lib/capability-registry-v2.mjs", [
     `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
     `${W}claraWork.v6.impl.ts`, `${W}claraWork.v6.ts`,
+    `${W}claraWork.v7.impl.ts`, `${W}claraWork.v7.ts`,
   ]],
   // ... and the module the 2026-09-25 CUT PHASE (#985) locked, recorded here at its birth for the
   // same reason the three above were: `lib/opening-parse.mjs` is the opening lane's route core,
@@ -508,12 +527,28 @@ const ATTRIBUTION = [
   // `lib/opening-tb-produce.mjs` — so this roster is the whole cost of that lock.
   ["packages/runtime/lib/opening-parse.mjs", [
     `${W}chatTurn.v22.impl.ts`, `${W}chatTurn.v22.prompt.ts`, `${W}chatTurn.v22.tools.ts`, `${W}chatTurn.v22.ts`,
+    `${W}chatTurn.v23.impl.ts`, `${W}chatTurn.v23.prompt.ts`, `${W}chatTurn.v23.reads.ts`,
+    `${W}chatTurn.v23.refusals.ts`, `${W}chatTurn.v23.tenancy.ts`, `${W}chatTurn.v23.tools.ts`,
+    `${W}chatTurn.v23.ts`,
+  ]],
+  // ... and the module the 2026-09-26 CLOSING wave (#1144) locked, recorded here at its birth for
+  // the same reason every module above was. `lib/fa-proposal-grounds.ts` carries the two SQL
+  // statements the sweep wave opened to the read credential (0345's depreciation-policy knowledge
+  // key, 0346's firm-scoped read of the retired account policies) and the two mappers that shape
+  // their rows; `claraWork_v7`'s proposal step calls them rather than re-spelling either statement,
+  // which is what gives each statement ONE home the db battery can drive under a real
+  // `clara_agent_ro` credential. It reaches only `lib/fa-particulars-proposal.ts` (already locked
+  // by the 2026-09-25 cut), so this roster is the whole cost of the lock.
+  ["packages/runtime/lib/fa-proposal-grounds.ts", [
+    `${W}claraWork.v7.impl.ts`, `${W}claraWork.v7.ts`,
   ]],
   ["packages/runtime/lib/knowledge-retrieval.mjs", [
     `${W}chatTurn.v21.impl.ts`, `${W}chatTurn.v21.ts`,
     `${W}chatTurn.v22.impl.ts`, `${W}chatTurn.v22.ts`,
+    `${W}chatTurn.v23.impl.ts`, `${W}chatTurn.v23.ts`,
     `${W}claraWork.v5.impl.ts`, `${W}claraWork.v5.ts`,
     `${W}claraWork.v6.impl.ts`, `${W}claraWork.v6.ts`,
+    `${W}claraWork.v7.impl.ts`, `${W}claraWork.v7.ts`,
   ]],
 ];
 

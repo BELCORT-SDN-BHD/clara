@@ -451,6 +451,18 @@ const REVIEWED_NON_PART_LITERAL_SITES = [
   ["packages/runtime/workflows/chatTurn.v22.ts","chatTurn_v22","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
   ["packages/runtime/workflows/chatTurn.v22.ts","chatTurn_v22","type: \"tool-result\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
   ["packages/runtime/workflows/chatTurn.v22.ts","chatTurn_v22","type: \"json\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
+  // chatTurn_v23 (the 2026-09-26 CLOSING wave, #1144). IDENTICAL in kind to v18's, v19's,
+  // v20's, v21's and v22's three sites, and ALL THREE FINGERPRINTS ARE AGAIN BYTE-IDENTICAL TO
+  // theirs — which is the ledger, rather than a reviewer's eye, establishing that this cut carried
+  // the park/resume statements over unchanged rather than rewriting them. `tool-call`,
+  // `tool-result` and `json` are the AI SDK's OWN message-content discriminants, not Clara
+  // transcript part kinds; they are constructed here to replay the parked clarify call and to feed
+  // the human's answer back to the model as that tool's result. v23 adds NO transcript part kind
+  // at all — its five new reads emit the already-declared `freeform_result` and its two new
+  // confirmations return a TYPED TOOL RESULT with no part of their own (waveS-lane08-fix.md §7.2).
+  ["packages/runtime/workflows/chatTurn.v23.ts","chatTurn_v23","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
+  ["packages/runtime/workflows/chatTurn.v23.ts","chatTurn_v23","type: \"tool-result\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
+  ["packages/runtime/workflows/chatTurn.v23.ts","chatTurn_v23","type: \"json\"","d9a1e7e7ba7ef26ad1d853f0d072b1070eb7ce7f2a1da36d9edb1db6f7ed4f94","0"],
   ["packages/runtime/workflows/claraWork.v1.ts","claraWork_v1","type: \"tool-result\"","949cfa52033fb6adf9605ce405396ddd472391484c772120b41d70e51bbcf6b6","0"],
   ["packages/runtime/workflows/claraWork.v1.ts","claraWork_v1","type: \"json\"","949cfa52033fb6adf9605ce405396ddd472391484c772120b41d70e51bbcf6b6","0"],
   // #629 — claraWork_v2's resume message. IDENTICAL in kind to v1's two sites above: `tool-result`
@@ -498,6 +510,14 @@ const REVIEWED_NON_PART_LITERAL_SITES = [
   // human's answer is fed back to the model. v6 adds NO transcript part kind at all.
   ["packages/runtime/workflows/claraWork.v6.ts","claraWork_v6","type: \"tool-result\"","fbe951846aee44f34798a4eb11e4f4e00df981e1e900169359642bad31049db9","0"],
   ["packages/runtime/workflows/claraWork.v6.ts","claraWork_v6","type: \"json\"","fbe951846aee44f34798a4eb11e4f4e00df981e1e900169359642bad31049db9","0"],
+  // claraWork_v7 (the 2026-09-26 CLOSING wave, #1144). IDENTICAL in kind to every row above it,
+  // and the FINGERPRINT IS AGAIN BYTE-EQUAL TO v5's AND v6's — the ledger saying something true
+  // rather than a copied constant: v7's resume statement is v6's, comments included, because this
+  // cut changes a STEP BODY that runs after a commit and nothing at all about how a human's answer
+  // is fed back to the model. `tool-result` and `json` are the AI SDK's OWN message-content
+  // discriminants, not Clara transcript part kinds. v7 adds NO transcript part kind.
+  ["packages/runtime/workflows/claraWork.v7.ts","claraWork_v7","type: \"tool-result\"","fbe951846aee44f34798a4eb11e4f4e00df981e1e900169359642bad31049db9","0"],
+  ["packages/runtime/workflows/claraWork.v7.ts","claraWork_v7","type: \"json\"","fbe951846aee44f34798a4eb11e4f4e00df981e1e900169359642bad31049db9","0"],
   ["packages/runtime/workflows/chatTurn.v2.ts","chatTurn_v2","type: \"tool-result\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v2.ts","chatTurn_v2","type: \"json\"","5ba4b1880782c05cba19a02e2f87618198baacbd3de71c7bdbbef0fed121b0ac","0"],
   ["packages/runtime/workflows/chatTurn.v3.ts","chatTurn_v3","type: \"tool-call\" as const","605a2ce2c56362daa10832de5544a306ed4a7e723652815de7512da1bd0e965a","0"],
