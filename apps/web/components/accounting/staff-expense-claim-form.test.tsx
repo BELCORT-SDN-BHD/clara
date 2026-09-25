@@ -49,6 +49,8 @@ const FARAH_ADVANCE = "55555555-5555-4555-8555-555555555555";
 const OTHER_CLAIMANT_ADVANCE = "66666666-6666-4666-8666-666666666666";
 const VOIDED_ADVANCE = "77777777-7777-4777-8777-777777777777";
 const SETTLED_ADVANCE = "88888888-8888-4888-8888-888888888888";
+const SECOND_ACCOUNT_ADVANCE = "99999999-9999-4999-8999-999999999999";
+const RETIRED_SECOND_ACCOUNT_ADVANCE = "aaaaaaaa-1111-4111-8111-111111111111";
 
 const BOOKKEEPER: NavigationScope & { firm_id?: string; user_id?: string } = {
   role_rank: 1,
@@ -871,6 +873,44 @@ test("ticket 1052 with the enrolment register unread, no advance is described as
     const texts = optionsOf(byId(h, F("advanceId"))).map((o) => String(o.textContent));
     assert.ok(texts.every((x) => !x.includes("enrolment")),
       `no option claims a source enrolment while the register is unread: ${texts.join(" | ")}`);
+  } finally {
+    await h.unmount();
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
+// #1066 — THE CHOOSER'S OWN CANDIDATE FILTER, WIDENED TO A SECOND ACCOUNT. The door
+// (`clara._assert_claim_basis`, 0340) admits an advance held under a DIFFERENT live enrolled
+// account of this client whose person label is the claimant's — the same case/whitespace-tolerant
+// match #1052 proved at the wall. Before this the chooser filtered to `draft.claimantAccountCode`
+// alone, so a preparer using the FORM had no way to select such a candidate at all; only a caller
+// going around the form (the door directly, or the future chat tool) could reach it.
+// ---------------------------------------------------------------------------------------------
+
+test("ticket 1066 the chooser also offers an outstanding advance on a DIFFERENT live enrolled account with the same claimant label", async () => {
+  const store = memoryStorage();
+  restoreAdvanceApplicationDraft(store, "");
+
+  const h = await renderComponent(App({
+    storage: store,
+    loadEnrolments: async () => [
+      ...ENROLMENTS,
+      { id: "e-second-account", account_code: "1191", person_label: "Farah binti Idris" },
+    ],
+    loadAdvances: async () => staffAdvanceSummary([
+      advanceRow({}), // Farah's own, on 1190 — offered as before.
+      advanceRow({
+        account_code: "1191", enrolment_id: "e-second-account", person_label: "Farah binti Idris",
+        advance_id: SECOND_ACCOUNT_ADVANCE, outstanding_cents: 15000, enrolment_active: true,
+      }),
+    ]),
+  }));
+  try {
+    await h.settle();
+    const select = byId(h, F("advanceId"));
+    const values = optionsOf(select).map((o) => attrOf(o, "value"));
+    assert.deepEqual(values, ["", FARAH_ADVANCE, SECOND_ACCOUNT_ADVANCE],
+      "the second, differently-numbered account's outstanding advance is now offered too");
   } finally {
     await h.unmount();
   }

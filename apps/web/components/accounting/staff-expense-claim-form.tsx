@@ -256,21 +256,12 @@ export function StaffExpenseClaimFormView({
     () => (enrolments === null ? null : new Set(enrolments.map((e) => e.account_code))),
     [enrolments],
   );
-  /** #930 — the CLAIMANT's own outstanding, unvoided advances: `staff_advance_summary`'s
-   *  `advances`, narrowed to this account_code by `isOutstandingAdvance` — the very SYMBOL
-   *  `staff-advances-register.tsx` filters its own allocation editor's candidates by, so the two
-   *  surfaces cannot disagree about what "still outstanding" means. `[]` while the claimant is
-   *  blank or the read has not resolved: no candidate is ever guessed. */
-  const advanceCandidates = useMemo(() => {
-    const code = draft.claimantAccountCode.trim();
-    if (code === "" || advancesRead.data === null) return [];
-    return advancesRead.data.advances.filter((a) => a.account_code === code && isOutstandingAdvance(a));
-  }, [advancesRead.data, draft.claimantAccountCode]);
   /** #1052 — THE CLAIMANT'S OWN LIVE ENROLMENT, resolved the way the door resolves it (0221's
    *  `clara._claim_resolve_claimant`): the stated enrolment, or the live enrolment on the account
    *  dedicated to them. `null` while the register has not been read, or while the claimant is a
    *  code with no enrolment yet — in both cases the form knows of no enrolment to compare against
-   *  and says nothing, the same conservative direction `claimantIsNew` takes. */
+   *  and says nothing, the same conservative direction `claimantIsNew` takes. Moved ABOVE
+   *  `advanceCandidates` (#1066): the chooser's own filter now needs it too. */
   const claimantEnrolmentId = useMemo(() => {
     const stated = draft.claimantEnrolmentId.trim();
     if (stated !== "") return stated;
@@ -278,6 +269,38 @@ export function StaffExpenseClaimFormView({
     if (code === "" || enrolments === null) return null;
     return enrolments.find((e) => e.account_code === code)?.id ?? null;
   }, [draft.claimantEnrolmentId, draft.claimantAccountCode, enrolments]);
+  /** #1066 — THE CLAIMANT'S OWN LABEL, normalised the same way the wall normalises it (0340:
+   *  `lower(btrim(...))`, case and surrounding whitespace only, nothing looser) — so the chooser
+   *  can recognise a SECOND enrolled account as this claimant's exactly the way
+   *  `clara._assert_claim_basis` does. `null` while the enrolment register has not been read or
+   *  the claimant's own account carries no live enrolment yet: in both cases nothing is claimed
+   *  about a second account, the same conservative direction `advanceSourceEnrolment` takes. */
+  const claimantLabel = useMemo(() => {
+    if (claimantEnrolmentId === null || enrolments === null) return null;
+    const label = enrolments.find((e) => e.id === claimantEnrolmentId)?.person_label ?? null;
+    return label === null ? null : label.trim().toLowerCase();
+  }, [claimantEnrolmentId, enrolments]);
+  /** #930 — the CLAIMANT's own outstanding, unvoided advances: `staff_advance_summary`'s
+   *  `advances`, narrowed to this account_code by `isOutstandingAdvance` — the very SYMBOL
+   *  `staff-advances-register.tsx` filters its own allocation editor's candidates by, so the two
+   *  surfaces cannot disagree about what "still outstanding" means. `[]` while the claimant is
+   *  blank or the read has not resolved: no candidate is ever guessed.
+   *
+   *  #1066 — WIDENED TO THE DOOR'S OWN SECOND ARM. `clara._assert_claim_basis` (0340) also admits
+   *  an advance held under a DIFFERENT live enrolled account of this client whose person label is
+   *  the claimant's; before this the chooser never offered such a candidate, so only a caller
+   *  going around the form could reach it. `a.enrolment_active` mirrors the wall's own `sa2.active`
+   *  — a retired enrolment on a second account still fails arm (b) at the door and is not offered
+   *  here either. */
+  const advanceCandidates = useMemo(() => {
+    const code = draft.claimantAccountCode.trim();
+    if (code === "" || advancesRead.data === null) return [];
+    return advancesRead.data.advances.filter((a) => {
+      if (!isOutstandingAdvance(a)) return false;
+      if (a.account_code === code) return true;
+      return a.enrolment_active && claimantLabel !== null && a.person_label.trim().toLowerCase() === claimantLabel;
+    });
+  }, [advancesRead.data, draft.claimantAccountCode, claimantLabel]);
   /** #1052 — WHERE AN OFFERED ADVANCE CAME FROM, when it did not come from the claimant's own
    *  enrolment. The owner's ruling of 2026-09-24 on #931 requires the editor to show it "beside
    *  each such advance, […] so the preparer's confirmation is a confirmation of that specific
