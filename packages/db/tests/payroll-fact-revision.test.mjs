@@ -199,9 +199,18 @@ test("S3 · a declared figure establishes its own question, discloses itself, an
   assert.equal(fact.text_raw, "5,050.00");
   assert.equal(fact.vision_raw, "5,000.00");
 
-  // DISCLOSED ON THE STATE ITSELF: `state_version` still says v1 (clara._payroll_entry_plan
-  // refuses anything else), so the provenance has to be said somewhere a reader will find it.
-  assert.equal(after.state_version, "v1");
+  // DISCLOSED ON THE STATE ITSELF: the door never rewrites `state_version`, so the provenance has
+  // to be said somewhere a reader will find it.
+  //
+  // RECUT AT INTEGRATION (riders sweep wave, L4's 0343 against this lane). This used to read
+  // `assert.equal(after.state_version, "v1")`, which is true only on a chain without #1048: that
+  // ticket mints clara.evaluate_payroll_run_state_v2 and stamps `v2` on every state banked from
+  // 0343 on. The claim the cell actually holds is that the door CARRIES THE VERSION THROUGH, not
+  // that the version is any particular value, and asserting it against the state as banked is
+  // strictly stronger than asserting a literal -- it fails on a door that rewrites the version in
+  // either direction, which a literal `"v1"` would not.
+  assert.equal(after.state_version, before.state_version,
+    "the revision door rewrote the state's own version");
   assert.deepEqual(after.human_declared, ["payroll.run.gross_pay"]);
   assert.equal(before.human_declared, undefined, "…and the machine's own state never carries the key");
 

@@ -9238,10 +9238,34 @@ a door two other batteries pin.
 `clara._payroll_state_with_human_fact(jsonb, text, text, bigint)` replaces the VERDICT on the one
 question and nothing else: `state` becomes `established`, `printed_cents` the declared figure (NULL
 for `payroll.run.period`, the one non-monetary question), `printed_raw` the declared rendering,
-`basis` the new vocabulary member `human_declared`, and `reason` null. `state_version` stays `v1`
-because `clara._payroll_entry_plan` refuses any other value (0297:415) and a corrected run that
-made the whole gate unreadable would be worse than the defect; the provenance is disclosed instead
-in a top-level, sorted `human_declared` array that a machine-produced state never carries.
+`basis` the new vocabulary member `human_declared`, and `reason` null. `state_version` is **carried
+through unchanged**, because a corrected run that made the whole gate unreadable would be worse than
+the defect; the provenance is disclosed instead in a top-level, sorted `human_declared` array that a
+machine-produced state never carries.
+
+**Recut at integration (riders sweep wave, lane L4's 0343 against this file).** As written on the
+lane this door admitted `state_version: v1` and nothing else, and the reason it gave was that
+`clara._payroll_entry_plan` refuses any other value (0297:415). #1048 changed exactly that body: it
+mints `clara.evaluate_payroll_run_state_v2`, which stamps `v2` on every state banked from 0343 on,
+and it recuts the drafting body to take **both versions by name**. Left at `v1` this door would have
+refused every reading banked after 0343, so #1056's whole feature would have been dark on the
+integrated chain while both lanes stayed green. The test now follows its own stated reason rather
+than its literal, in 0343's own spelling (`not in ('v1','v2')`). A v2 state survives the body whole:
+the return is a shallow merge over five keys, so `state_version` and #1048's own `completeness`
+object are both carried through untouched, and a person declaring a run figure can never erase the
+completeness witness a colleague gave.
+
+**And §G's paste was re-derived from the cut phase's post-image, not from 0268's.** This lane was cut
+from main before the cut phase merged, so its copy of `clara.revise_document_fact` was 0268 §B's
+body, and `0321_work_source_correction_rederivation.sql` (#1030, on main and released) had since
+made exactly one substitution in it: the no-op guard passes `p_field_path`, so it asks the TYPED
+notion and a re-cased `MYR` or a respelled date stops retiring every Work parked on the document.
+Pasting the two-argument call back would have removed that rule with nothing to notice it — both
+overloads are live, and this file's own tail checked the line by its two-argument substring. The
+substitution is carried over verbatim, the tail's needle moved with it, and §A's pin on that body is
+now bimodal, admitting 0268's shape or 0321's post-image with each named. The three payroll
+neighbours lane L4's 0343 recuts (`persist_payroll_facts`, `clara._payroll_entry_plan`,
+`clara._payroll_posting_verdict`) are bimodal for the same reason.
 
 It **carries unchanged** `computed_cents`, both channel quotes, and the whole `rows` object. That
 last carry is load-bearing: rungs 3 and 4 of the gate read `rows.contested`, `rows.unbalanced` and

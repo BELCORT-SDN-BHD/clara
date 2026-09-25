@@ -60,9 +60,14 @@
 --   * The corrected question becomes `established` with the human's own figure, and its `basis`
 --     becomes `human_declared` -- a new member of a vocabulary that already exists for exactly
 --     this purpose (`printed_value`, `printed_total_agrees_row_sum`, ..., 0296:630).
---   * `state_version` stays `v1`, because `clara._payroll_entry_plan` refuses any other value
---     (0297:415) and a corrected run that made the whole gate unreadable would be worse than the
---     defect. Provenance is disclosed instead, on the state itself: a top-level `human_declared`
+--   * `state_version` is CARRIED THROUGH UNCHANGED, because a corrected run that made the whole
+--     gate unreadable would be worse than the defect. RECUT AT INTEGRATION: this used to read
+--     "stays `v1`, because `clara._payroll_entry_plan` refuses any other value (0297:415)", and
+--     lane L4's #1048 changed exactly that body -- it mints evaluator v2, stamps `state_version:
+--     v2` on every state banked from 0343 on, and takes both versions by name. This door does the
+--     same, so a reading banked after 0343 is still correctable, and the state it writes back is
+--     still judged by the version that produced it. Provenance is disclosed the same way either
+--     way, on the state itself: a top-level `human_declared`
 --     array naming every question a person has declared. A reader of a corrected state can always
 --     tell which figures the frozen evaluator produced and which a person did.
 --   * `computed_cents`, `text_raw`, `vision_raw` and the whole `rows` object are CARRIED
@@ -119,7 +124,41 @@ declare
     '9889780c7abcf79d6c939b79706c521113e7aa6b77b138cee6af1457e4889d83',
     'clara._payroll_posting_verdict(uuid)',
     '23c644b7b4ad11cee43c1e02acb2599733cb1000a808d108a5519d4b3a0a4df0'];
+  -- BIMODAL, ADDED AT INTEGRATION (riders sweep wave). Four of the pins above were measured on
+  -- this lane's own rig, which was cut from main BEFORE the cut phase merged and which carries no
+  -- lane L4. Each of the four has a SECOND admissible shape on the integrated chain, and each one
+  -- is named with the file that produces it, so a body that is neither still refuses BY NAME.
+  --
+  --   · `revise_document_fact` -- 0321_work_source_correction_rederivation (#1030, the cut phase,
+  --     on main and RELEASED) makes ONE substitution in 0268 §B's body: the no-op guard passes
+  --     `p_field_path`. §G's paste carries that substitution now (see the note there), so this
+  --     file recuts from 0321's POST-image rather than from 0268's.
+  --   · `persist_payroll_facts`, `_payroll_entry_plan`, `_payroll_posting_verdict` -- all three
+  --     are lane L4's 0343_payroll_completeness_witness (#1048), which merges before this lane.
+  --     0343 moves the persist door's evaluator call from v1 to the v2 it mints, and recuts the
+  --     drafting body and the posting gate for the row-sum-plus-witness arm. NONE of that changes
+  --     what this file relies on: §D's `clara._payroll_state_with_human_fact` calls no evaluator
+  --     at all (its own comment says so, and the tail re-reads it), it re-derives the three
+  --     buckets from the STORED state by the bucketing rule, which 0343 does not touch, and
+  --     0343's two new witness keys are OPTIONAL additions to `clara._payroll_answers_ok`'s
+  --     vocabulary that leave the ELEVEN REQUIRED run questions exactly as they were.
+  v_alt text[] := array[
+    'clara.revise_document_fact(uuid,text,jsonb,int,text,text)',
+    'e0d7ee1c016d1eb757447c621311580b91e6b1963182f2de4df9233600a2edac',
+    'clara.persist_payroll_facts(uuid,jsonb,jsonb,integer)',
+    '529a8260779720790da608d313dd89ee4cbaeb173d90da64567b012a98c51e85',
+    'clara._payroll_entry_plan(uuid,jsonb)',
+    'a584ced7bf6cbcd4733987b5331648dfebe713693772584122f5374ca3c1a45a',
+    'clara._payroll_posting_verdict(uuid)',
+    '378086068b13e4fa9eba17bb1beba8aa749d0200989872d3296d1246da5a1242'];
+  v_j int;
 begin
+  -- THE CUT PHASE'S OWN SUBSTITUTION MUST BE REACHABLE, because §G now calls it unconditionally.
+  -- A prerequisite is a prestate refusal, not a body that would fail at its first call.
+  if to_regprocedure('clara._fact_value_changed(jsonb,jsonb,text)') is null then
+    raise exception '#1056 prestate: clara._fact_value_changed(jsonb,jsonb,text) is absent -- §G carries 0321''s typed no-op guard, so 0321_work_source_correction_rederivation must apply first'
+      using errcode = 'CLR10';
+  end if;
   -- (a) THE RECUT PAIR. Marker-tolerant in ONE direction only: a body that already carries this
   --     file's own marker is a REDO of this file, and a body at neither the pinned pre-image nor
   --     this file's post-image is drift that must stop the apply.
@@ -128,11 +167,22 @@ begin
     select p.prosrc, encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_src, v_sha
       from pg_proc p where p.oid = v_recut[v_i]::regprocedure;
     if v_sha is distinct from v_recut[v_i + 1] then
-      if position('#1056' in coalesce(v_src,'')) > 0 then
-        v_mode := 'REDO';
-      else
-        raise exception '#1056 prestate: % has DRIFTED (sha %) -- it is neither the pre-image this file recuts nor a body carrying this file''s own marker',
-          v_recut[v_i], v_sha using errcode = 'CLR10';
+      -- …or the SECOND admissible pre-image this body has on the integrated chain.
+      v_j := 1;
+      while v_j < array_length(v_alt, 1) loop
+        if v_alt[v_j] = v_recut[v_i] and v_alt[v_j + 1] = v_sha then
+          v_mode := v_mode || ' (0321 pre-image)';
+          exit;
+        end if;
+        v_j := v_j + 2;
+      end loop;
+      if position('(0321 pre-image)' in v_mode) = 0 then
+        if position('#1056' in coalesce(v_src,'')) > 0 then
+          v_mode := 'REDO';
+        else
+          raise exception '#1056 prestate: % has DRIFTED (sha %) -- it is none of its admissible pre-images and carries no marker of this file''s own',
+            v_recut[v_i], v_sha using errcode = 'CLR10';
+        end if;
       end if;
     end if;
     v_i := v_i + 2;
@@ -149,8 +199,21 @@ begin
         v_neighbour[v_i] using errcode = 'CLR10';
     end if;
     if v_sha is distinct from v_neighbour[v_i + 1] then
-      raise exception '#1056 prestate: neighbour % has DRIFTED (sha %, expected %) -- this file reads it and must be re-derived against the live body before applying',
-        v_neighbour[v_i], v_sha, v_neighbour[v_i + 1] using errcode = 'CLR10';
+      -- …unless it is the SECOND admissible shape lane L4's 0343 gives it. Read against v_alt
+      -- rather than widened: a neighbour at neither shape still stops the apply by name.
+      v_j := 1;
+      v_k := null;
+      while v_j < array_length(v_alt, 1) loop
+        if v_alt[v_j] = v_neighbour[v_i] and v_alt[v_j + 1] = v_sha then
+          v_k := 'alt';
+          exit;
+        end if;
+        v_j := v_j + 2;
+      end loop;
+      if v_k is null then
+        raise exception '#1056 prestate: neighbour % has DRIFTED (sha %, expected % or its one admissible integrated shape) -- this file reads it and must be re-derived against the live body before applying',
+          v_neighbour[v_i], v_sha, v_neighbour[v_i + 1] using errcode = 'CLR10';
+      end if;
     end if;
     v_i := v_i + 2;
   end loop;
@@ -203,7 +266,7 @@ $fn$;
 revoke all on function clara._revisable_payroll_run_field(text) from public;
 
 comment on function clara._revisable_payroll_run_field(text) is
-  '#1056: the payroll lane''s closed revisable set -- the ELEVEN run-level questions clara.persist_payroll_facts writes a region for (0296''s own clara._payroll_answers_ok vocabulary). Nothing below the run level: the six per-employee cells are summed and discarded at read time, so no region carries one and there is no prior value a revision could replace. Ungranted; reached from clara._revisable_fact_lane alone.';
+  '#1056: the payroll lane''s closed revisable set -- the ELEVEN REQUIRED run-level questions clara.persist_payroll_facts writes a region for (0296''s own clara._payroll_answers_ok vocabulary). Nothing below the run level: the six per-employee cells are summed and discarded at read time, so no region carries one and there is no prior value a revision could replace. Nor #1048''s two OPTIONAL completeness witnesses (payroll.run.employee_count, payroll.run.page_count, added to that vocabulary by 0343): a witness is answered at its own door, clara.answer_payroll_completeness, whose answer row is append-only and names the person who gave it, and admitting it here would let the generic fact door write past that table. Ungranted; reached from clara._revisable_fact_lane alone.';
 
 -- =====================================================================================
 -- §C  WHICH LANE A PATH BELONGS TO -- clara._revisable_fact_lane(text).
@@ -325,9 +388,11 @@ comment on function clara._payroll_source_observation(uuid) is
 --                       identity STAYS BLOCKED after any number of run-level declarations. A
 --                       person cannot clear a row problem from the run line, and this body does
 --                       not let them appear to.
---       everything else including `state_version`, which stays `v1` because the drafting body
---                       refuses any other value (0297:415) and a corrected run that made the whole
---                       gate unreadable would be worse than the defect being corrected.
+--       everything else including `state_version`, which is carried through UNCHANGED (v1 or, from
+--                       lane L4's 0343, v2) and including #1048's own `completeness` object, so a
+--                       person declaring a run figure never erases the witness a colleague gave.
+--                       A corrected run that made the whole gate unreadable would be worse than
+--                       the defect being corrected, which is why the version is never rewritten.
 --
 --     AND WHAT IT ADDS: `human_declared`, a sorted, duplicate-free array of every question a
 --     person has stated on this reading. `state_version` cannot carry that disclosure, so the
@@ -355,9 +420,23 @@ declare
 begin
   -- IT REFUSES RATHER THAN NO-OPS. A body that quietly returned the state unchanged would let the
   -- door append an extraction whose reading had not moved, which is the defect wearing a receipt.
-  if p_state is null or p_state->>'state_version' is distinct from 'v1'
+  --
+  -- RECUT AT INTEGRATION (riders sweep wave, L4's 0343 against this file). This test used to read
+  -- `is distinct from 'v1'`, and the reason this file gave for it was that
+  -- `clara._payroll_entry_plan` refuses any other value. Lane L4's #1048 changed exactly that: it
+  -- mints `clara.evaluate_payroll_run_state_v2`, which stamps `state_version: v2` on every state
+  -- banked from 0343 on, and it recuts the drafting body to take BOTH versions by name
+  -- (0343: `not in ('v1','v2')`). Left at `v1` this door would have refused every reading banked
+  -- after 0343 -- #1056's whole feature dark on the integrated chain, with the lane green.
+  -- So this test follows its own stated reason rather than its literal, in 0343's own spelling.
+  --
+  -- A v2 STATE SURVIVES THIS BODY WHOLE. The return below is `p_state || jsonb_build_object(...)`,
+  -- a shallow merge over five keys, so `state_version` and #1048's `completeness` object are both
+  -- carried through untouched: a person declaring a run figure cannot erase the witness a
+  -- colleague gave, and the corrected state is still judged by the version that produced it.
+  if p_state is null or coalesce(p_state->>'state_version','') not in ('v1','v2')
      or jsonb_typeof(p_state->'facts') <> 'object' then
-    raise exception 'the banked payroll state is not a v1 fact state this door can revise'
+    raise exception 'the banked payroll state is not a fact state this door can revise'
       using errcode = 'CLR10', detail = '{"reason":"payroll_state_unreadable"}';
   end if;
   if not clara._revisable_payroll_run_field(p_field) then
@@ -721,7 +800,20 @@ begin
   -- cosmetic guard -- no retirement of the Work parked on this document and no question turned
   -- permanently unanswerable. A fact the reader never persisted has no prior value, and anything
   -- is a change against nothing.
-  if v_prior_value is not null and not clara._fact_value_changed(v_prior_value, v_new_value) then
+  --
+  -- RECUT AT INTEGRATION (riders sweep wave): the THREE-ARGUMENT call is the cut phase's, and
+  -- this file must not revert it. This body is 0268 §B's paste plus this ticket's own payroll
+  -- points, and it was written against 0268's two-argument guard because this lane was cut from
+  -- main BEFORE the cut phase merged. `0321_work_source_correction_rederivation.sql` (#1030, on
+  -- main and RELEASED) makes exactly ONE substitution in this body -- it passes `p_field_path`,
+  -- so the no-op guard asks the TYPED notion and a re-cased `MYR` or a respelled date stops
+  -- retiring every Work parked on the document. Pasting the two-argument call back would have
+  -- removed that rule with no cell anywhere to notice: this file's own tail checks this line by
+  -- substring, and the substring it checked was the two-argument one. Both overloads are live,
+  -- so nothing would have failed. Carried over verbatim from 0321 §B, and the tail's needle
+  -- below moved with it.
+  if v_prior_value is not null
+     and not clara._fact_value_changed(v_prior_value, v_new_value, p_field_path) then
     raise exception 'this revision does not change what the document is recorded as saying'
       using errcode = 'CLR10', detail = jsonb_build_object('reason', 'value_unchanged',
         'field_path', p_field_path, 'value', v_new_value)::text;
@@ -1030,7 +1122,10 @@ begin
     'no_facts_to_revise',
     'value_not_scalar', 'value_blank', 'value_unchanged',
     'stale_source_version',
-    'clara._fact_value_changed(v_prior_value, v_new_value)',
+    -- RECUT AT INTEGRATION: the cut phase's 0321 (#1030) passes p_field_path here, so the needle
+    -- is the THREE-argument spelling. The old two-argument needle would still have matched the
+    -- pre-0321 shape and quietly passed on a body that had lost #1030's typed no-op rule.
+    'clara._fact_value_changed(v_prior_value, v_new_value, p_field_path)',
     'clara._supersede_source_corrected_work(p_document, c.firm, v_locked, c.actor',
     'clara._append_event(c.firm, ''document.fact_revised''',
     'clara._finish_op(c.firm, ''revise_document_fact'', p_op_key'] loop
