@@ -778,3 +778,71 @@ test("p931.claimant.samelabel two enrolments of ONE client sharing a person_labe
     + "on a byte-equal person_label and nothing else",
   );
 });
+
+// ===========================================================================================
+// 9 · #1067 [0339] — AN ALLOCATION LIST THAT IS PRESENT CARRIES AT LEAST ONE ALLOCATION.
+//
+// 0301 reads the list through `v_listed`, which is "an array with MORE THAN ZERO members", so a
+// present-but-EMPTY array is not a list at all to this validator: every rule the list has —
+// its settlement, its distinctness, its exact sum and its head — is skipped, and what the claim
+// is then judged on is whatever ELSE it happens to carry. The runtime's own wire schema refuses
+// an empty list (`workRoutes.ts`, `advance_allocations` / `at_least_one`), but the door is the
+// boundary any caller can reach, so the rule belongs here too and under the same word.
+//
+// THIS SECTION'S OWN FRONTIER, layered on top of `gateAlloc` above. 0301's stem is true from its
+// own migration onward, long before 0339 exists, so these cells need their OWN stem check —
+// prepayment-stated-term.test.mjs's own two-frontier idiom.
+// ===========================================================================================
+
+export const SEC_EMPTY_ALLOC_STEM = "staff_expense_claim_empty_allocation$";
+
+let _empty = null;
+async function emptyLaneReady() {
+  if (_empty === null) {
+    try {
+      const r = await rootQuery(
+        "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+        [SEC_EMPTY_ALLOC_STEM]);
+      _empty = r.rows[0].n > 0;
+    } catch {
+      _empty = false;
+    }
+  }
+  return _empty;
+}
+
+async function gateEmpty(t) {
+  if (await emptyLaneReady()) return false;
+  if (process.env.CLARA_ALLOW_MISSING_SEC_EMPTY_ALLOCATION === "1") {
+    markSkip();
+    t.skip(`#1067 empty-allocation refusal absent (no ${SEC_EMPTY_ALLOC_STEM} migration applied)`);
+    return true;
+  }
+  assert.fail(
+    "#1067: the empty-allocation refusal is absent. Apply "
+    + "0339_staff_expense_claim_empty_allocation.sql (or its numbered suite copy), or set "
+    + "CLARA_ALLOW_MISSING_SEC_EMPTY_ALLOCATION=1 for the package-wide pre-integration sweep.",
+  );
+  return true;
+}
+
+test("p1067.empty an advance application that states an allocation list and allocates NOTHING is refused by its own name, at the list's own field", async (t) => {
+  if (await gateAlloc(t) || await gateEmpty(t)) return;
+  const client = await allocClient("emptyalloc");
+  // THE WORKED EXAMPLE. The rig claim totals 60,500 sen and ONE 80,000-sen advance stands ready
+  // to carry it, so every other rule this door has would admit this submission: the exact-sum
+  // check cannot fire (an empty list is never compared), the cap is not reached, the claimant
+  // owns the advance. The list is present and it allocates nothing — that alone is the refusal.
+  const adv = (await seedAdvance(ALICE(), BOB(), { client, cents: 80000, issueDate: "2026-01-10" })).advance;
+  const c = claim({
+    settlement: SETTLEMENT.advance,
+    advanceAccountCode: SECHART.advance,
+    advanceId: adv.id,
+    payableAccountCode: null,
+  });
+  c.advance_allocations = [];
+  const { detail } = await refusesAlloc(client, "CLR10", SEC_REASON.allocationMismatch,
+    () => admitStaffExpenseClaimWork({ client, author: ALICE(), claim: c }), "empty");
+  assert.equal(detail.field, "claim.advance_allocations");
+  assert.equal(detail.constraint, "at_least_one");
+});

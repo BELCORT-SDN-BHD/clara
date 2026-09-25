@@ -7263,3 +7263,58 @@ PARTIAL signal rather than guessing. Both branches were exercised on the lane da
 APPLY through `pnpm db:migrate` (with all four recut pins checked), and the REDO branch through
 `CLARA_MIGRATION_REDO=0318_knowledge_fye_pair_applicability` after the promotion door was put back
 at its pre-image for `kp.14`'s vacuity control.
+
+## 0339 — an `advance_allocations` array that is present carries at least one allocation, by name (#1067, riders sweep wave, lane 03)
+
+`0339_staff_expense_claim_empty_allocation.sql` recuts exactly one body,
+`clara._assert_claim_basis(uuid,jsonb,boolean)`, at 0301's post-image byte for byte plus one new
+rule. It creates nothing, drops nothing, grants nothing and mints no new name, so it carries no
+`rig-meta.mjs` cohort; its frontier is the stem `staff_expense_claim_empty_allocation$` and its
+sweep escape hatch is `tests/staff-expense-claim-empty-allocation-preintegration-gate.mjs`
+(`CLARA_ALLOW_MISSING_SEC_EMPTY_ALLOCATION=1`), last in the gate chain, in migration order.
+
+**What was live.** 0301's payload half opens the allocation block with `v_listed := jsonb_typeof(…)
+= 'array' and jsonb_array_length(…) > 0`, and asks every list rule under `if v_listed`. A
+present-but-EMPTY array is therefore not a list at all to that validator, so the settlement rule,
+the distinctness rule, the exact sum and the head rule are all skipped. Driven on the lane database
+(`clara_l06`, chain 0001..0318) before the fix, in three shapes:
+
+- an advance application carrying `advance_allocations: []` **and** `advance_id` was **ADMITTED** —
+  `clara._claim_allocations` falls through to its single-advance branch, so the door posted the
+  claim against an advance the stated list does not name. Evidence: cell `p1067.empty` red with
+  "the call SUCCEEDED (no error)" before the recut, green after.
+- the same claim **without** `advance_id` was refused, but with the world half's
+  `advance_allocation_mismatch` / `claim.advance_id` / `present` — the very refusal a claim that
+  named no advance at all receives, so "I sent an empty list" and "I told you nothing" were one
+  refusal. Cell `p1067.tellapart`.
+- on any other settlement the key was **IGNORED**: a reimbursement carrying `advance_allocations:
+  []` was admitted and posted, because the rule that refuses a list on a non-advance settlement is
+  itself gated on `v_listed`. Cell `p1067.settlement`, red on the admission before the recut.
+
+The ticket frames this as the two layers disagreeing about who catches an empty list, and they did:
+`packages/runtime/src/workRoutes.ts` already refuses one (`advance_allocations` / `at_least_one`),
+while the database — the boundary any caller can reach — relied on an exact-sum check that never
+runs against an empty array.
+
+**The rule, and where it sits.** The new check is asked immediately after "is it an array?" and
+immediately before anything that reads what the array says, which is the same two-step
+`claim.items` is already judged in (`array`, then `at_least_one`). It therefore holds regardless of
+the claim's total (#1067 AC1's own words) and regardless of the settlement, and it makes `v_listed`
+honest: after this file `v_listed` is false only when the key is absent or JSON `null`, so no
+present list shape can skip the four rules any more. A claim carrying no `advance_allocations` key
+is untouched (#1067 AC3) and so is one carrying JSON `null`, which 0221's type rule admits as
+"absent" and this file does not move.
+
+**The word.** `reason` stays `advance_allocation_mismatch` and the new `constraint` is
+`at_least_one`, the word the runtime already uses, so both layers now say the same thing. #1067 AC2
+is met by the constraint alone: `at_least_one` and `exact_sum` are two named specialisations of one
+reason at one field, and the tail drives both in the same run. No web change was needed —
+`fieldForClaimPath` (`apps/web/lib/work/staff-expense-claim.ts`) already maps
+`claim.advance_allocations` onto the `advanceAllocations` control.
+
+**Redo (#957) and the first-apply branch.** The single statement is a `create or replace function`
+and the prestate detects its own redo by the marker `#1067 (0339` in the live validator, skipping
+only the recut pin; the ten non-regression pins are checked on both branches. The FIRST APPLY
+branch ran through `pnpm db:migrate` (`#1067 prestate: clean (FIRST apply)`), and was additionally
+re-proved by hand inside a rolled-back transaction with 0301's own body restored, so the sha branch
+the redo can never take was seen to pass on its own.
