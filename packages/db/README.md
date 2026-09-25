@@ -915,6 +915,26 @@ asserts the catalogue comment names `#1038`/"withdrawn" and directly re-measures
 an earlier cell in this file's history once proved SUCCEEDING now REFUSES `42501`
 `insufficient_privilege`.
 
+**Restored by #1099 — the op-key idempotence law's own test coverage for `create_client`, dropped
+by this migration's grant withdrawal and repointed rather than left gone.**
+[`wb-g-opkeys.test.mjs`](tests/wave-b/wb-g-opkeys.test.mjs)'s G4/[R2-F8] census (the shared
+op-key-idempotence battery every other 0017-family writer sits in) derives its writer inventory
+from a live `EXECUTE` grant, by construction — a fn this migration ungrants can never appear in
+that inventory again, and when #1038 landed, `create_client`'s row in the census's per-writer
+fixture table was simply deleted rather than repointed, so nothing any longer drove its
+`_reserve_op` call at all. #1099 restores it, off the census: a new
+`UNGRANTED_RESERVING_FNS` registry in `wb-g-opkeys.test.mjs` names `create_client` alongside the
+migration that ungranted it and where its coverage now lives, a META cell re-measures that its
+live `prosrc` still calls `_reserve_op` (the same "a writer must never silently drop the
+discipline" law the grant-derived census enforces for every writer it CAN still see), and a
+dedicated `G4/[R2-F8] supplement` cell drives the law itself through
+`createClientRaw` — `rig-fixtures.mjs`'s root+jwt idiom, the one path this migration left
+reachable — proving both halves: an identical-payload replay returns the cached receipt
+byte-for-byte with no second `clara.clients` row, and a mutated-payload replay with the same
+`op_key` refuses `CLR10`. The pattern generalises: any future writer that loses its grant while
+keeping `_reserve_op` belongs in `UNGRANTED_RESERVING_FNS` with its own dedicated cell, not
+nowhere.
+
 ## Storage grant/policy battery
 
 [deploy/storage-provision.sql](deploy/storage-provision.sql) cannot run against the local rig —
