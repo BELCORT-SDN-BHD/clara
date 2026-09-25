@@ -40,9 +40,9 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  rootQuery, humanQuery, wakeQuery, namedCall,
+  rootQuery, humanQuery, roleQuery, wakeQuery, asWake, namedCall,
   ensureReady, endPool, buildWorld, createClient, upsertAccount,
-  mintWake, opk, ROLES,
+  mintWake, revokeWake, assertRaises, opk, ROLES, PG,
 } from "./rig-fixtures.mjs";
 import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts, claimTask } from "./a21-helpers.mjs";
 import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
@@ -107,6 +107,7 @@ function unready(t) {
 const ALICE = () => world.users.alice; // owner, firm A — the maker
 const BOB = () => world.users.bob;     // bookkeeper, firm A — the checker, and the OBO human the
                                        // chat lane acts for (bookkeeper+ is the wake floor)
+const CAROL = () => world.users.carol; // viewer, firm A — the queue's own human floor
 const FIRM_A = () => world.firms.A;
 
 // ---------------------------------------------------------------------------
@@ -498,4 +499,231 @@ test("p1136.queue.agreement_blocked_row_travels — an agreement that was read a
        from unnest(array['clara_agent_ro','clara_runtime','clara_authenticated','clara_wake_interactive']) r`);
   assert.equal(acl.rows[0].any_role, false,
     "#1136 opened a queue door, never the verdict body 0299 granted to nobody");
+});
+
+// ===========================================================================================
+// THE CEREMONY — what each model-lane door asks for before it reads anything. Driven on BOTH
+// doors together, because a wall that exists on one of them is not a wall.
+// ===========================================================================================
+
+const DOORS = () => [
+  {
+    name: SETTLEMENT_DOOR,
+    sql: namedCall(SETTLEMENT_DOOR, SETTLEMENT_SPECS),
+    args: (client) => [client],
+  },
+  {
+    name: "wake_list_review_queue",
+    sql: namedCall("wake_list_review_queue", QUEUE_SPECS),
+    args: (client) => [JSON.stringify({ client_id: client }), null, 200],
+  },
+];
+
+const reasonOf = (err) => {
+  try { return JSON.parse(err.detail).reason; } catch { return null; }
+};
+
+test("p1136.wake.no_credential — a session on the read role with no wake secret is refused CLR03 by both doors, and the refusal says nothing about the client it was asked for", async (t) => {
+  if (unready(t)) return;
+  const client = await freshClient();
+  const invented = "00000000-0000-4000-8000-0000000011aa";
+  for (const door of DOORS()) {
+    // The READ role, no secret bound: this is what a pooled checkout looks like before
+    // `withReadWakeScoped` binds anything.
+    await assertRaises("CLR03", () => roleQuery(ROLES.agentRo, door.sql, door.args(client)),
+      `${door.name} without a credential`);
+    // …and the SAME refusal for a client that does not exist at all, so a credential-less caller
+    // cannot use either door as an existence probe.
+    await assertRaises("CLR03", () => roleQuery(ROLES.agentRo, door.sql, door.args(invented)),
+      `${door.name} without a credential, on an invented id`);
+  }
+});
+
+test("p1136.wake.kind_not_allowlisted — a wake kind with no allowlist row is refused CLR03 by both doors even holding the EXECUTE, and each door holds exactly one row", async (t) => {
+  if (unready(t)) return;
+  const client = await freshClient();
+  // `proactive` is a live kind with a credential of its own and NO row for either door. The
+  // EXECUTE is on the ROLE, so this is the kind gate refusing, not the ACL.
+  const { secret } = await mintWake({ kind: "proactive", firm: FIRM_A() });
+  for (const door of DOORS()) {
+    await assertRaises("CLR03", () => wakeQuery(ROLES.agentRo, secret, door.sql, door.args(client)),
+      `${door.name} under a proactive credential`);
+    const rows = await rootQuery(
+      "select wake_kind from clara.wake_fn_allowlist where function_name = $1 order by 1", [door.name]);
+    assert.deepEqual(rows.rows.map((r) => r.wake_kind), ["interactive"],
+      `${door.name} must be reachable from exactly one wake kind`);
+  }
+});
+
+test("p1136.wake.needs_a_named_person — a credential that names no on_behalf_of is refused CLR03 wake_authority_absent by both doors: these reads ride a person's authority or they do not happen", async (t) => {
+  if (unready(t)) return;
+  const client = await freshClient();
+  const { secret } = await mintWake({ kind: "interactive", firm: FIRM_A(), onBehalfOf: null });
+  for (const door of DOORS()) {
+    let err = null;
+    try { await wakeQuery(ROLES.agentRo, secret, door.sql, door.args(client)); } catch (e) { err = e; }
+    assert.ok(err, `${door.name}: an unattended credential read a firm's inbox`);
+    assert.equal(err.code, "CLR03", `${door.name}: errcode`);
+    assert.equal(reasonOf(err), "wake_authority_absent", `${door.name}: the door's own detail reason`);
+  }
+});
+
+test("p1136.wake.floor_is_the_credential — the model lane's floor is the credential's own BOOKKEEPER+, strictly above the queue's VIEWER floor, and a revoked credential goes inert on both doors", async (t) => {
+  if (unready(t)) return;
+  const client = await freshClient();
+
+  // (a) THE QUEUE'S OWN FLOOR IS VIEWER, driven rather than recited: CAROL is a viewer of firm A
+  //     and the human door answers her.
+  const asViewer = await humanQueue(CAROL(), { scope: { client_id: client } });
+  assert.ok(Array.isArray(asViewer.rows), "the queue's own floor is not VIEWER any more");
+
+  // (b) THE MODEL LANE CANNOT ACT FOR HER. The credential cannot even be minted: #630's typed
+  //     authority_lost, raised by clara.mint_wake_credential before either door is involved. So
+  //     the machine lane is NARROWER than the door it reaches.
+  await assertRaises("CLR10",
+    () => mintWake({ kind: "interactive", firm: FIRM_A(), onBehalfOf: CAROL() }),
+    "an OBO credential for a viewer");
+
+  // (c) AND A CREDENTIAL THAT WAS VALID GOES INERT the moment it is revoked — the same mechanism
+  //     that makes a demotion mid-conversation stop the read.
+  const live = await chatCredential();
+  assert.ok(await wakeQueueRead(live.secret, { scope: { client_id: client } }));
+  assert.ok(await wakeCandidates(live.secret, client));
+  await revokeWake(live.credentialId);
+  for (const door of DOORS()) {
+    await assertRaises("CLR03", () => wakeQuery(ROLES.agentRo, live.secret, door.sql, door.args(client)),
+      `${door.name} under a revoked credential`);
+  }
+});
+
+// ===========================================================================================
+// THE TENANT WALL — the one predicate this file added, driven from the outside.
+// ===========================================================================================
+
+test("p1136.wake.tenant_wall — through firm A's credential, firm B's real client answers exactly what an invented id answers, and an unscoped read returns firm A's rows and nobody else's", async (t) => {
+  if (unready(t)) return;
+  const theirs = world.clients.B1;                       // a real client of firm B
+  const invented = "00000000-0000-4000-8000-0000000011bb";
+  const { secret } = await chatCredential();
+
+  // THE QUEUE: both are the read's OWN CLR10 `queue scope is malformed` — the same answer a
+  // person gets, so a caller learns the same thing about a client that exists elsewhere and one
+  // that exists nowhere.
+  const a = await assertRaises("CLR10",
+    () => wakeQueueRead(secret, { scope: { client_id: theirs } }), "firm B's client through firm A's credential");
+  const b = await assertRaises("CLR10",
+    () => wakeQueueRead(secret, { scope: { client_id: invented } }), "an invented id");
+  assert.equal(a.message, b.message,
+    "another firm's client and an invented id must be indistinguishable to this lane");
+  await assertRaises("CLR10", () => humanQueue(BOB(), { scope: { client_id: theirs } }),
+    "…and the bookkeeper's own door answers the same way, so the split moved no wall");
+
+  // THE SETTLEMENT READ: 0298's own CLR11, unchanged, for both.
+  const c = await assertRaises("CLR11", () => wakeCandidates(secret, theirs), "firm B's client");
+  const d = await assertRaises("CLR11", () => wakeCandidates(secret, invented), "an invented id");
+  assert.equal(c.message, d.message, "the settlement read must not be an existence oracle either");
+
+  // AN UNSCOPED READ IS SCOPED ANYWAY — by the credential's firm, inside the core. Firm B's
+  // clients cannot appear in it whatever the caller does or does not ask for.
+  const wide = await wakeQueueRead(secret, { scope: null, limit: 500 });
+  const theirIds = (await rootQuery("select id from clara.clients where firm_id = $1", [world.firms.B]))
+    .rows.map((r) => r.id);
+  assert.equal(wide.rows.filter((r) => theirIds.includes(r.client_id)).length, 0,
+    "an unscoped model-lane read reached another firm's rows");
+  assert.deepEqual(wide, await humanQueue(BOB(), { scope: null, limit: 500 }),
+    "…and it is the same unscoped envelope the bookkeeper sees");
+});
+
+// ===========================================================================================
+// THE GRANT THIS TICKET BOUGHT, AND NOTHING ELSE.
+// ===========================================================================================
+
+test("p1136.acl.two_doors_one_role — clara_agent_ro holds the two new doors, every other role is refused 42501 on them, the two cores are reachable by nobody, and the human doors stay closed to the machine lane", async (t) => {
+  if (unready(t)) return;
+  const client = await freshClient();
+  const { secret } = await chatCredential();
+  // DRIVEN, not read off the catalog: the role that is supposed to hold them does.
+  assert.ok(await wakeCandidates(secret, client), "clara_agent_ro cannot call the settlement door");
+  assert.ok(await wakeQueueRead(secret, { scope: { client_id: client } }), "clara_agent_ro cannot call the queue door");
+
+  for (const door of DOORS()) {
+    for (const role of [ROLES.runtime, ROLES.authenticated, ROLES.wakeInteractive]) {
+      await assertRaises(PG.insufficientPrivilege,
+        () => roleQuery(role, door.sql, door.args(client)), `${role} on ${door.name}`);
+    }
+  }
+
+  // THE CORES: nobody, including the read role that holds the doors in front of them.
+  const cores = [
+    ["select clara._payroll_settlement_candidates_core($1::uuid, $2::uuid)", [FIRM_A(), client]],
+    ["select clara._list_review_queue_core($1::uuid, null, null, 10)", [FIRM_A()]],
+  ];
+  for (const [sql, args] of cores) {
+    for (const role of [ROLES.runtime, ROLES.agentRo, ROLES.authenticated, ROLES.wakeInteractive]) {
+      await assertRaises(PG.insufficientPrivilege, () => roleQuery(role, sql, args), `${role} on an ungranted core`);
+    }
+  }
+
+  // THE HUMAN DOORS are still closed to the machine lane — 0011:4210-4213's own assertion about
+  // clara_agent_ro and clara.list_review_queue, driven rather than re-read from the catalog.
+  const humanDoors = [
+    [namedCall("list_review_queue", QUEUE_SPECS), [JSON.stringify({ client_id: client }), null, 50]],
+    [namedCall("get_payroll_settlement_candidates", SETTLEMENT_SPECS), [client]],
+  ];
+  for (const [sql, args] of humanDoors) {
+    for (const role of [ROLES.agentRo, ROLES.runtime, ROLES.wakeInteractive]) {
+      await assertRaises(PG.insufficientPrivilege, () => roleQuery(role, sql, args), `${role} on a HUMAN door`);
+    }
+  }
+
+  // AND NO ACT CAME WITH THEM. #947's settlement door is the one a person uses on the bank
+  // surface or in Needs you; the chat lane holds nothing on it.
+  await assertRaises(PG.insufficientPrivilege,
+    () => roleQuery(ROLES.agentRo,
+      namedCall("settle_payroll_net_pay", [
+        { name: "p_client", cast: "uuid" }, { name: "p_entry", cast: "uuid" },
+        { name: "p_line", cast: "uuid" }, { name: "p_op_key", cast: "text" }]),
+      [client, client, client, "p1136-never"]),
+    "clara_agent_ro on the settlement ACT");
+});
+
+test("p1136.wake.read_only — both model-lane doors answer inside a READ ONLY transaction, which is the only kind the chat lane's read pool opens, and neither writes a row", async (t) => {
+  if (unready(t)) return;
+  const client = await freshClient();
+  await seedPayrollChart(ALICE(), client);
+  const run = await readPayrollRun(ALICE(), client, { answers: { "payroll.run.period": value("2026-06") } });
+  assert.equal(run.posting.posted, true, "mandatory setup: the run posted");
+  const { secret } = await chatCredential();
+
+  const before = (await rootQuery(
+    "select (select count(*) from clara.domain_events) as ev, (select count(*) from clara.operation_receipts) as ops")
+  ).rows[0];
+
+  const answers = await asWake(ROLES.agentRo, secret, async (c) => {
+    await c.query("select set_config('transaction_read_only', 'on', true)");
+    // The control: this transaction really IS read-only, proven by a write that 25006s in it. It
+    // runs inside a savepoint, because a refused statement aborts the transaction it was refused
+    // in and the doors still have to be called in the SAME one.
+    await c.query("savepoint p1136_ro");
+    let refused = null;
+    try { await c.query("create temporary table _p1136_ro_probe(x int)"); }
+    catch (e) { refused = e.code; }
+    await c.query("rollback to savepoint p1136_ro");
+    assert.equal(refused, PG.readOnly, "the read-only probe did not make the transaction read-only");
+    const q = (await c.query(namedCall("wake_list_review_queue", QUEUE_SPECS),
+      [JSON.stringify({ client_id: client }), null, 200])).rows[0].result;
+    const s = (await c.query(namedCall(SETTLEMENT_DOOR, SETTLEMENT_SPECS), [client])).rows[0].result;
+    return { q, s };
+  });
+  assert.ok(Array.isArray(answers.q.rows), "the queue door answered read-only");
+  assert.equal(answers.s.length, 1, "the settlement door answered read-only, with this client's one unsettled run");
+
+  // NO ACT, stated as a measurement: these are readings, so the estate's two act ledgers do not
+  // move. #946's and #947's contracts both say the tools mint no work_accepted and ask no
+  // work_question; this is the database half of that promise.
+  const after = (await rootQuery(
+    "select (select count(*) from clara.domain_events) as ev, (select count(*) from clara.operation_receipts) as ops")
+  ).rows[0];
+  assert.equal(after.ev, before.ev, "a model-lane read emitted a domain event");
+  assert.equal(after.ops, before.ops, "a model-lane read wrote an operation receipt");
 });
