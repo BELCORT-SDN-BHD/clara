@@ -22,7 +22,8 @@ import { opk } from "./rig-helpers.mjs";
 import { prepaymentScene, createPrepaymentSchedule } from "./prepayment-schedule-fixtures.mjs";
 import { freshAccrualClient, accrual, createAccrualAdjustment } from "./accrual-adjustments-fixtures.mjs";
 import { correctAccrualAdjustment } from "./accrual-correction-fixtures.mjs";
-import { instructionRef } from "./accounting-plans-fixtures.mjs";
+import { instructionRef, createAccountingPlan, reviseAccountingPlan } from "./accounting-plans-fixtures.mjs";
+import { basis } from "./work-journal-fixtures.mjs";
 import { firmOf, filedDocument, seedExtraction, seedRegion, enqueueInvoiceFacts, claimTask } from "./a21-helpers.mjs";
 import { consentEvidenceDoc, grantPurpose, activatePurpose } from "./wave-b/wb-0020-helpers.mjs";
 
@@ -283,6 +284,23 @@ export const confirmRentPlanFor = async ({
   (await roleQuery(ROLES.runtime, namedCall("confirm_tenancy_rent_plan_for", CONFIRM_FOR_SPECS),
     [client, author, document, rentAccount, payableAccount, judgement, opKey ?? opk1150("obo-confirm")])
   ).rows[0].result;
+
+/**
+ * SPENDS one derived key at `clara.revise_accounting_plan` DIRECTLY, on a plan of its own. That is
+ * the one route a person has to the nested door with an arbitrary key (0284's own header), and it
+ * is how a genuine collision on the accrual correction's derived key is produced without reaching
+ * around any wall.
+ */
+export async function spendReviseKey(sub, { client, authorityRef, span, opKey }) {
+  const plan = await createAccountingPlan(sub, {
+    client, authorityRef, purpose: "p1150 key-spending plan",
+    effectiveFrom: span.from, effectiveTo: span.to,
+    basis: basis({ postingDate: span.from, memo: "p1150 key-spending basis" }) });
+  await reviseAccountingPlan(sub, {
+    plan: plan.plan_id, effectiveFrom: span.from, effectiveTo: span.to,
+    basis: basis({ postingDate: span.from, memo: "p1150 key-spending revision" }), opKey });
+  return plan.plan_id;
+}
 
 export async function caught(fn) {
   try { await fn(); return null; } catch (e) { return e; }

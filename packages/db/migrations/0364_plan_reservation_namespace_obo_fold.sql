@@ -108,6 +108,8 @@ declare
   v_recut text[][] := array[
     ['clara.create_accrual_adjustment(uuid,text,jsonb,jsonb,text,text,integer,text,date,date,text)',
      '09c682f52d6d9209425ff2923e37aba95ef4d483511ccee9d9829fd91985eed2'],
+    ['clara.correct_accrual_adjustment(uuid,jsonb,text)',
+     '6a59591a6211acdb6975c7dcfe1dc5c2b3334a8d68ad4281635e7d38ac19fdfa'],
     ['clara._confirm_tenancy_rent_plan_core(uuid,uuid,text,uuid,uuid,text,text,text,text)',
      'e8a65796245bd331a72c7f92c6b882737f45e4f1be12c35739f5ea430265ef29']
   ];
@@ -117,15 +119,22 @@ declare
   --     the whole file is an argument about what it keys on; typing its raise is out of scope.
   --   · `create_accounting_plan` is the nested door all three lanes reach, and the body the
   --     tenancy lane's HUMAN branch hands its derived key to.
-  --   · `_prepayment_schedule_core` is the lane that KEEPS `:plan`. If it moved, "the prepayment
-  --     lane is unchanged" would be false and every suffix below would need re-deciding.
+  --   · `_prepayment_schedule_core` and `replace_prepayment_schedule` are the lane that KEEPS
+  --     `:plan` / `:end`. If either moved, "the prepayment lane is unchanged" would be false and
+  --     every suffix below would need re-deciding.
+  --   · `revise_accounting_plan` is the nested door §B reaches, and the thin delegate 0353 left
+  --     in front of `clara._revise_accounting_plan_core`.
   v_keep text[][] := array[
     ['clara._reserve_op(uuid,text,text,bytea)',
      '8816acb44d8c14980d21d8cdf19dc249f876f4bb49b39ca99b1f6fb915fe64b4'],
     ['clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)',
      '544cd88ecaa5b5237969aff36b1bd0d8a5cdf41aacea234e6415d3df54b523ea'],
     ['clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)',
-     'af096b607079e11a7888d907f8c5c9f03880ead0b9565ec26ee6feb9257dafd7']
+     'af096b607079e11a7888d907f8c5c9f03880ead0b9565ec26ee6feb9257dafd7'],
+    ['clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text)',
+     'ed859dbe813067464a7635d6775c823a36c3f400b59f326952fb22c6ce34e699'],
+    ['clara.revise_accounting_plan(uuid,text,text,integer,text,date,date,jsonb,text,text)',
+     '94804ddc1dccd444c5bb5294524634db4afea043499eb8746dd7aae16b02ad77']
   ];
 begin
   -- 1 · THE TWO FILES THIS ONE CONTINUES ARE ON THIS CHAIN. 0336 is the namespace decision this
@@ -161,7 +170,7 @@ begin
     select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'clara'
        and p.prosrc ~ ('p_op_key[[:space:]]*\|\|[[:space:]]*''' || (array[':acplan', ':acrev', ':tnplan'])[v_i] || '''')
-       and p.oid::regprocedure::text <> ANY (array[
+       and p.oid::regprocedure::text <> ALL (array[
          'clara.create_accrual_adjustment(uuid,text,jsonb,jsonb,text,text,integer,text,date,date,text)',
          'clara.correct_accrual_adjustment(uuid,jsonb,text)',
          'clara._confirm_tenancy_rent_plan_core(uuid,uuid,text,uuid,uuid,text,text,text,text)']);
@@ -308,6 +317,222 @@ begin
     'explicit_instruction', p_authority_ref, p_effective_from, p_effective_to, p_op_key);
   return clara._finish_op(v_firm, 'create_accrual_adjustment', p_op_key, v_result);
 end $c0364_a$;
+
+-- =====================================================================================
+-- §B — clara.correct_accrual_adjustment — THE ACCRUAL LANE'S NESTED **REVISION** RESERVATION.
+--
+-- 0284's own body (#936), verbatim from the live catalog, with ONE hunk in three places: the
+-- derived key handed to `clara.revise_accounting_plan`, the `nested_op_key` the typed
+-- `plan_op_key_conflict` refusal names, and the comment that explains both. #936's own wrap —
+-- which types an UNTYPED CLR10 out of the nested call and re-raises everything else byte for byte
+-- — is untouched, and `p1150.correction.namespace` drives it on the key that moved.
+-- =====================================================================================
+CREATE OR REPLACE FUNCTION clara.correct_accrual_adjustment(p_accrual_id uuid, p_accrual jsonb, p_op_key text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $c0364_b$
+declare
+  v_actor uuid; v_firm uuid;
+  v_old clara.accrual_adjustments%rowtype;
+  v_cur clara.accounting_plan_revisions%rowtype;
+  v_fresh_corrected_by uuid;
+  v_nested_detail text; v_nested_message text;
+  v_basis jsonb; v_dedupe jsonb; v_revision jsonb; v_new_id uuid; v_result jsonb;
+begin
+  if p_op_key is null or p_op_key ~ '^\s*$' then
+    raise exception 'correcting an accrual requires its idempotency key' using errcode='CLR10',
+      detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
+  end if;
+
+  -- THE FLOOR, WITH A TYPED REASON -- the same 0222 mapping `create_accrual_adjustment` uses for
+  -- the identical reason: `clara._human_ctx` raises a bare CLR04 and a surface cannot classify it.
+  begin
+    select a.actor, a.firm into v_actor, v_firm from clara._human_ctx(clara.role_rank('bookkeeper')) a;
+  exception when sqlstate 'CLR04' then
+    raise exception 'correcting an accrual requires an active bookkeeper or above'
+      using errcode='CLR04',
+        detail=jsonb_build_object('reason',
+          case when clara.jwt_sub() is null then 'no_authenticated_actor'
+               when clara.jwt_firm() is null then 'actor_not_active'
+               else 'insufficient_role' end)::text;
+  end;
+
+  -- IDENTITY. NO EXISTENCE ORACLE ACROSS FIRMS: an id naming nothing and one belonging to another
+  -- firm answer identically (0222's own rule for get_accrual_adjustment, reached the same way).
+  select * into v_old from clara.accrual_adjustments where id = p_accrual_id and firm_id = v_firm;
+  if v_old.id is null then
+    raise exception 'accrual adjustment not found in your firm' using errcode='CLR11',
+      detail='{"reason":"accrual_not_found"}';
+  end if;
+
+  -- THE PAYLOAD HALF, BEFORE THE RESERVATION -- deterministic, no side effects, safe to re-run on
+  -- a replay. It is the payload ALONE: the term-window wall reads the LIVE revision's authority,
+  -- which is mutable world state, so it sits in the world half below (see the header).
+  perform clara._assert_accrual_particulars(p_accrual);
+
+  -- #942 — THE SIDE IS NOT A CORRECTION. A correction restates the PARTICULARS of the accrual the
+  -- plan is running; the side decides which two account TYPES those particulars are even allowed
+  -- to name and which way every entry the plan has already posted was signed. Flipping it would
+  -- leave a schedule whose posted periods are Dr expense / Cr liability and whose next period is
+  -- Dr asset / Cr income, under one authority and one purpose. The honest act is to let this
+  -- accrual's authority end and configure the other side's own accrual, so this is a typed
+  -- refusal and never a silent re-interpretation. `v_old` is append-only, so this comparison is
+  -- as deterministic as the particulars above it and belongs in the same half.
+  if clara._accrual_side(p_accrual) is distinct from v_old.side then
+    raise exception 'this is a % accrual; a correction restates it, it does not turn it into a % one',
+      v_old.side, clara._accrual_side(p_accrual)
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','accrual_side_immutable','field','accrual.side',
+          'side', v_old.side, 'requested_side', clara._accrual_side(p_accrual))::text;
+  end if;
+
+  -- THE RESERVATION. Re-raised with a typed reason, the same wrap `create_accrual_adjustment`
+  -- gives `_reserve_op`'s own untyped "op_key reused with different args" (0004:46).
+  begin
+    v_dedupe := clara._reserve_op(v_firm, 'correct_accrual_adjustment', p_op_key,
+      clara._hash(jsonb_build_object('accrual_id', p_accrual_id,
+        'particulars', clara._accrual_canonical(p_accrual))));
+  exception when sqlstate 'CLR10' then
+    raise exception 'this correction key already corrected a DIFFERENT accrual' using errcode='CLR10',
+      detail='{"reason":"op_key_conflict","field":"op_key"}';
+  end;
+  if v_dedupe is not null then
+    if v_dedupe ? 'pending' then
+      raise exception 'this correction key is held by an in-flight sibling' using errcode='CLR13',
+        detail='{"reason":"operation_in_flight"}';
+    end if;
+    return v_dedupe;
+  end if;
+
+  -- THE WORLD HALF, AFTER THE RESERVATION BRANCH -- an account retired or a filing withdrawn
+  -- between two attempts under one key, exactly 0222's own reasoning for `_assert_accrual_world`.
+  perform clara._assert_accrual_world(v_firm, v_old.client_id, p_accrual);
+
+  -- RUNG 1 -- the SAME accounting_plans row lock clara.revise_accounting_plan itself takes
+  -- (0193:1679). Holding it BEFORE the recheck below is what makes "already corrected" a typed
+  -- refusal rather than a race that surfaces as a bare 23505 on uq_accrual_adjustments_corrects
+  -- (see the header).
+  perform 1 from clara.accounting_plans where id = v_old.plan_id for update;
+
+  select corrected_by_accrual_id into v_fresh_corrected_by
+    from clara.accrual_adjustments where id = v_old.id;
+  if v_fresh_corrected_by is not null then
+    raise exception 'this accrual has already been corrected; correct its successor instead'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','accrual_already_corrected',
+          'corrected_by_accrual_id', v_fresh_corrected_by)::text;
+  end if;
+
+  select * into v_cur from clara.accounting_plan_revisions
+   where plan_id = v_old.plan_id and superseded_at is null;
+  if not found then
+    raise exception 'this plan has no live revision to correct' using errcode='CLR13',
+      detail='{"reason":"no_live_revision"}';
+  end if;
+
+  -- THE AUTHORITY WINDOW IS THE LIVE REVISION'S OWN, read under the lock that holds it still.
+  -- Never `v_old`'s: that pair is what the accrual row remembered when it was written, and a
+  -- lawful plan revision since then has moved it (see the header, ADV-01). The shared 0222
+  -- predicate therefore judges the corrected term against the authority that is actually live.
+  perform clara._assert_accrual_term_window(p_accrual, v_cur.effective_from, v_cur.effective_to);
+  -- #937 - THE PER-PERIOD WALL, against the LIVE revision's own schedule and window (ADV-01's own
+  -- rule, applied to this ticket's set): a corrected per-period set must cover exactly the
+  -- periods the plan that is actually running will reach.
+  perform clara._assert_accrual_period_amounts(p_accrual, v_cur.frequency, v_cur.day_rule,
+    v_cur.day_of_month, v_cur.effective_from, v_cur.effective_to);
+  v_basis := clara._accrual_journal_basis(p_accrual, v_old.purpose, v_cur.effective_from);
+
+  -- THE NESTED DOOR -- clara.revise_accounting_plan, PINNED, UNTOUCHED (see the header for why:
+  -- lane 05 pins this same body). Every schedule argument is the LIVE revision's own, carried
+  -- through unchanged; only the basis is new.
+  --
+  -- THE DERIVED KEY'S OWN COLLISION IS TYPED (ADV-06). `clara._reserve_op` keys on
+  -- (firm_id, fn, op_key), so `p_op_key || ':acrev'` shares the (firm, 'revise_accounting_plan')
+  -- namespace with keys a caller chooses for that door DIRECTLY -- and #936 is the first place the
+  -- nested door is one a human reaches with an arbitrary key of their own. When the two collide,
+  -- the nested door re-raises `_reserve_op`'s own message with NO detail at all, so a surface can
+  -- render only CLR10 and the raw sentence. This wrap types exactly that case -- an UNTYPED CLR10
+  -- out of the nested call -- and re-raises everything else byte-identically with a bare `raise`,
+  -- so no refusal the plan door already classifies is masked or renamed.
+  --
+  -- #1150 [0364]: THE ACCRUAL LANE'S OWN NESTED NAMESPACE, in 0336's shape. This derivation is
+  -- taken at `revise_accounting_plan` rather than at `create_accounting_plan`, so it never
+  -- collided with the two create doors; it shared the PREPAYMENT lane's `:plan` token all the
+  -- same, and the partition this file settles is one suffix per lane, whichever nested door it is
+  -- spent at. `:acrev` is the accrual lane's revision half, beside §A's `:acplan`.
+  begin
+    v_revision := clara.revise_accounting_plan(v_old.plan_id, v_cur.frequency, v_cur.day_rule,
+      v_cur.day_of_month, v_cur.timezone, v_cur.effective_from, v_cur.effective_to, v_basis,
+      v_cur.reversal_day_rule, p_op_key || ':acrev');
+  exception when sqlstate 'CLR10' then
+    get stacked diagnostics v_nested_detail = pg_exception_detail,
+                            v_nested_message = message_text;
+    if coalesce(btrim(v_nested_detail), '') = '' then
+      raise exception 'the plan revision this correction records is blocked: %', v_nested_message
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','plan_op_key_conflict','field','op_key',
+            'nested_op_key', p_op_key || ':acrev')::text;
+    end if;
+    raise;
+  end;
+
+  -- THE SUCCESSOR ROW, for the revision that just came out of the nested call. Every column
+  -- `create_accrual_adjustment`'s own tail (`_accrual_finish`, 0222 §C) writes, from the CORRECTED
+  -- particulars except purpose/authority, which this door does not ask the caller to restate.
+  insert into clara.accrual_adjustments(firm_id, client_id, plan_id, revision, purpose,
+      side, expense_account_code, liability_account_code, amount_cents, currency, effective_from,
+      effective_to, service_period_start, service_period_end, term_source,
+      document_service_period_id, method, authority_kind, authority_ref, source_document_id,
+      instruction, corrects_accrual_id, recorded_by)
+    values (v_firm, v_old.client_id, v_old.plan_id, (v_revision ->> 'revision')::int, v_old.purpose,
+      -- #942: carried from the row being corrected, which the wall above has just proved the
+      -- payload agrees with.
+      v_old.side,
+      btrim(p_accrual ->> 'expense_account_code'), btrim(p_accrual ->> 'liability_account_code'),
+      (p_accrual ->> 'amount_cents')::bigint, 'MYR', v_cur.effective_from, v_cur.effective_to,
+      (p_accrual ->> 'service_period_start')::date, (p_accrual ->> 'service_period_end')::date,
+      p_accrual ->> 'term_source',
+      nullif(btrim(coalesce(p_accrual ->> 'document_service_period_id','')),'')::uuid,
+      p_accrual -> 'method', v_old.authority_kind, v_old.authority_ref,
+      nullif(btrim(coalesce(p_accrual ->> 'source_document_id','')),'')::uuid,
+      btrim(p_accrual ->> 'instruction'), v_old.id, v_actor)
+    returning id into v_new_id;
+
+  -- #937 - THE STATED PERIOD AMOUNTS, written in the SAME transaction as the detail they belong
+  -- to and BEFORE any occurrence is admitted, because the resolver the admission core asks
+  -- (clara._plan_accrual_period_line) reads exactly these rows. The `where` is the rule's own
+  -- gate: a stated_amount accrual writes none, and clara._assert_accrual_period_amounts has
+  -- already refused a period_amounts key under any other rule.
+  insert into clara.accrual_period_amounts(firm_id, client_id, accrual_id, due_date,
+      amount_cents, currency, recorded_by)
+    select v_firm, v_old.client_id, v_new_id, (e ->> 'due_date')::date,
+           (e ->> 'amount_cents')::bigint, 'MYR', v_actor
+      from jsonb_array_elements(
+             case when jsonb_typeof(p_accrual -> 'period_amounts') = 'array'
+                  then p_accrual -> 'period_amounts' else '[]'::jsonb end) e
+     where (p_accrual -> 'method' ->> 'rule') = 'stated_period_amount';
+
+  -- THE ONE-WAY STAMP -- 0222's append-only trigger's ONE admitted update, ridden here for the
+  -- first time: NULL -> an id, once (`t_accrual_adjustments_append_only`).
+  update clara.accrual_adjustments set corrected_by_accrual_id = v_new_id where id = v_old.id;
+
+  perform clara._audit(v_firm, v_actor, null, null, 'correct_accrual_adjustment', null,
+    jsonb_build_object('client', v_old.client_id, 'plan', v_old.plan_id,
+      'corrects_accrual_id', v_old.id, 'accrual_id', v_new_id,
+      'revision', (v_revision ->> 'revision')::int,
+      'amount_cents', (p_accrual ->> 'amount_cents')::bigint, 'op_key', p_op_key));
+
+  v_result := jsonb_build_object(
+    'accrual_id', v_new_id, 'corrects_accrual_id', v_old.id,
+    'plan_id', v_old.plan_id, 'revision_id', v_revision ->> 'revision_id',
+    'revision', (v_revision ->> 'revision')::int,
+    'superseded_revision', (v_revision ->> 'superseded_revision')::int,
+    'status', v_revision ->> 'status',
+    'overlap_warning', v_revision -> 'overlap_warning');
+  return clara._finish_op(v_firm, 'correct_accrual_adjustment', p_op_key, v_result);
+end $c0364_b$;
 
 -- =====================================================================================
 -- §C — clara._confirm_tenancy_rent_plan_core — THE TENANCY LANE'S NESTED PLAN RESERVATION.
@@ -539,11 +764,12 @@ declare v_n int; v_src text; v_i int; v_sig text; v_suffix text;
 begin
   -- 1 · EACH LANE THAT MOVED GAINED ITS OWN SUFFIX **AND LOST THE SHARED ONE**. The pair is what
   --     matters: gaining without losing would leave the collision exactly where it was.
-  for v_i in 1 .. 2 loop
+  for v_i in 1 .. 3 loop
     v_sig := (array[
       'clara.create_accrual_adjustment(uuid,text,jsonb,jsonb,text,text,integer,text,date,date,text)',
+      'clara.correct_accrual_adjustment(uuid,jsonb,text)',
       'clara._confirm_tenancy_rent_plan_core(uuid,uuid,text,uuid,uuid,text,text,text,text)'])[v_i];
-    v_suffix := (array[':acplan', ':tnplan'])[v_i];
+    v_suffix := (array[':acplan', ':acrev', ':tnplan'])[v_i];
     select p.prosrc into v_src from pg_proc p where p.oid = v_sig::regprocedure;
     if v_src !~ ('p_op_key[[:space:]]*\|\|[[:space:]]*''' || v_suffix || '''') then
       raise exception '0364 tail: % does not derive %', v_sig, v_suffix using errcode='CLR10';
@@ -557,18 +783,24 @@ begin
   -- 2 · THE PREPAYMENT LANE STILL HOLDS `:plan`, which is the half of the partition that keeps
   --     every key already spent meaning what it meant.
   select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara' and p.prosrc ~ 'p_op_key[[:space:]]*\|\|[[:space:]]*'':plan''';
+  if v_n <> 2 then
+    raise exception '0364 tail: % bodies derive '':plan'' (expected the prepayment lane''s two and nothing else)', v_n
+      using errcode='CLR10';
+  end if;
+  select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'clara' and p.prosrc ~ 'p_op_key[[:space:]]*\|\|[[:space:]]*'':plan'''
      and p.oid::regprocedure::text = ANY (array[
        'clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)',
        'clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text)']);
   if v_n <> 2 then
-    raise exception '0364 tail: % of the prepayment lane''s two bodies still derive '':plan''', v_n
+    raise exception '0364 tail: the two bodies that derive '':plan'' are not the prepayment lane''s own'
       using errcode='CLR10';
   end if;
 
   -- 3 · AND THE SUFFIXES THIS FILE MINTS ARE DERIVED BY EXACTLY ONE BODY EACH.
-  for v_i in 1 .. 2 loop
-    v_suffix := (array[':acplan', ':tnplan'])[v_i];
+  for v_i in 1 .. 3 loop
+    v_suffix := (array[':acplan', ':acrev', ':tnplan'])[v_i];
     select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'clara'
        and p.prosrc ~ ('p_op_key[[:space:]]*\|\|[[:space:]]*''' || v_suffix || '''');
@@ -585,12 +817,22 @@ begin
    where n.nspname = 'clara'
      and p.oid::regprocedure::text = ANY (array[
        'clara.create_accrual_adjustment(uuid,text,jsonb,jsonb,text,text,integer,text,date,date,text)',
+       'clara.correct_accrual_adjustment(uuid,jsonb,text)',
        'clara._confirm_tenancy_rent_plan_core(uuid,uuid,text,uuid,uuid,text,text,text,text)'])
      and p.prosecdef and p.provolatile = 'v'
      and p.proowner::regrole::text = 'clara_fn_owner'
      and array_to_string(p.proconfig, ',') = 'search_path=clara, pg_temp';
-  if v_n <> 2 then
-    raise exception '0364 tail: % of the 2 recut bodies keep their posture (owner, secdef, volatile, search_path)', v_n
+  if v_n <> 3 then
+    raise exception '0364 tail: % of the 3 recut bodies keep their posture (owner, secdef, volatile, search_path)', v_n
+      using errcode='CLR10';
+  end if;
+
+  -- 5 · AND #936's TYPED WRAP NAMES THE KEY THE DOOR ACTUALLY DERIVES. A refusal that reported
+  --     the old suffix would send a caller looking for a receipt that was never taken.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.correct_accrual_adjustment(uuid,jsonb,text)'::regprocedure;
+  if position('''nested_op_key'', p_op_key || '':acrev''' in v_src) = 0 then
+    raise exception '0364 tail: the correction door''s plan_op_key_conflict does not name the key it derives'
       using errcode='CLR10';
   end if;
 

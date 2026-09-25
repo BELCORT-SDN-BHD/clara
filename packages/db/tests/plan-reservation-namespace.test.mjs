@@ -33,8 +33,8 @@ import { endPool, ensureReady } from "./rig-fixtures.mjs";
 import {
   PLAN_NS_GATE, PLAN_NS_STEM, planNamespaceApplied, tenancyLanePresent,
   namespaceScene, accrualLaneIn, tenancyLaneIn, pastSpan,
-  createPrepaymentSchedule, createAccrualAdjustment, accrual,
-  confirmRentPlan, receiptsUnder, opk1150,
+  createPrepaymentSchedule, createAccrualAdjustment, correctAccrualAdjustment, accrual,
+  confirmRentPlan, receiptsUnder, opk1150, caught, detailOf, spendReviseKey,
 } from "./plan-reservation-namespace-fixtures.mjs";
 
 const ACCRUAL_TZ = "Asia/Kuala_Lumpur";
@@ -121,4 +121,133 @@ async (t) => {
     assert.equal(nested.length, 1,
       `${suffix}: exactly one row, so the lane really took the reservation rather than skipping it`);
   }
+});
+
+// ===========================================================================================
+// AC1 (the correction lane) — THE ACCRUAL CORRECTION'S NESTED **REVISION** RESERVATION.
+//
+// `clara.correct_accrual_adjustment` derives its key under `revise_accounting_plan`, not under
+// `create_accounting_plan`, so it never collided with the create doors. It shared the prepayment
+// lane's `:plan` token all the same, which is the partition this ticket closes: a suffix belongs
+// to ONE lane, whichever nested door it is spent at. It moves to the accrual lane's own `:acrev`.
+// ===========================================================================================
+
+test("p1150.correction.namespace — a correction reserves its nested plan revision under the "
+  + "accrual lane's own `:acrev`, holds nothing under `:plan`, and still types a genuine "
+  + "collision on that derived key rather than re-raising the primitive's untyped one",
+async (t) => {
+  if (unready(t)) return;
+  const scene = await namespaceScene("corr");
+  const acc = await accrualLaneIn(scene, "corr");
+  const span = await pastSpan(2);
+  const base = await createAccrualAdjustment(scene.bob, {
+    client: acc.client, authorityRef: acc.authorityRef,
+    accrual: accrual({ servicePeriodStart: span.from, servicePeriodEnd: span.to }),
+    frequency: "monthly", dayRule: "last_day_of_month", dayOfMonth: null,
+    timezone: ACCRUAL_TZ, effectiveFrom: span.from, effectiveTo: span.to,
+    opKey: opk1150("corr-base") });
+  assert.ok(base.accrual_id, "mandatory setup: the accrual to correct was configured");
+
+  const key = opk1150("corr");
+  const corrected = await correctAccrualAdjustment(scene.bob, {
+    accrualId: base.accrual_id,
+    accrual: accrual({ servicePeriodStart: span.from, servicePeriodEnd: span.to, cents: 99000 }),
+    opKey: key });
+  assert.ok(corrected.accrual_id, "the correction was admitted");
+  assert.notEqual(corrected.accrual_id, base.accrual_id,
+    "mandatory setup: a correction writes a successor row rather than editing the old one");
+
+  const nested = await receiptsUnder(scene.firm, `${key}:acrev`);
+  assert.deepEqual(nested.map((r) => r.fn), ["revise_accounting_plan"],
+    "the accrual correction reserves its nested revision under a key of its own");
+  assert.deepEqual(await receiptsUnder(scene.firm, `${key}:plan`), [],
+    "…and holds nothing at all in the prepayment lane's namespace");
+
+  // THE TYPED WRAP STILL FIRES ON THE KEY THAT MOVED. #936's own wall: when the derived key
+  // genuinely collides, the correction door types `plan_op_key_conflict` and names the nested key,
+  // instead of re-raising `clara._reserve_op`'s detail-less CLR10. Driven by spending the DERIVED
+  // key at the nested door directly, which is the one way a person can reach it (0284's header).
+  const clash = opk1150("corr-clash");
+  await spendReviseKey(scene.bob, {
+    client: acc.client, authorityRef: acc.authorityRef, span, opKey: `${clash}:acrev` });
+  const blocked = await caught(() => correctAccrualAdjustment(scene.bob, {
+    // The SUCCESSOR row, because an accrual may be corrected once: correcting `base` again is
+    // refused `accrual_already_corrected` above the plan door and would never reach the
+    // reservation this arm is about (measured).
+    accrualId: corrected.accrual_id,
+    accrual: accrual({ servicePeriodStart: span.from, servicePeriodEnd: span.to, cents: 77000 }),
+    opKey: clash }));
+  assert.ok(blocked, "a genuine collision on the derived key was admitted");
+  assert.equal(blocked.code, "CLR10");
+  assert.equal(detailOf(blocked).reason, "plan_op_key_conflict",
+    "the correction door stopped typing its nested collision");
+  assert.equal(detailOf(blocked).nested_op_key, `${clash}:acrev`,
+    "…and no longer names the key it actually derived");
+});
+
+// ===========================================================================================
+// AC3 — ORDINARY, NON-COLLIDING IDEMPOTENCY IS UNCHANGED, DRIVEN PER LANE.
+//
+// A suffix that moves must not change what a genuine retry does. It cannot: each lane's OUTER
+// reservation short-circuits the whole body, so a true retry never reaches the nested call at all
+// — which is also why nothing is backfilled. This cell drives that rather than arguing it.
+// ===========================================================================================
+
+test("p1150.idempotent.per_lane — on each of the three lanes a genuine retry under the same key "
+  + "with the same arguments replays its stored result, and takes no second nested reservation",
+async (t) => {
+  if (unready(t)) return;
+  const scene = await namespaceScene("idem");
+  const span = await pastSpan(2);
+
+  // 1 — THE PREPAYMENT LANE, which kept `:plan`.
+  const pk = opk1150("idem-prepay");
+  const p1 = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.entry, expenseAccount: scene.target,
+    authorityRef: scene.authorityRef, opKey: pk });
+  const p2 = await createPrepaymentSchedule(scene.bob, {
+    client: scene.client, sourceEntry: scene.entry, expenseAccount: scene.target,
+    authorityRef: scene.authorityRef, opKey: pk });
+  assert.deepEqual(p2, p1, "the prepayment lane returned a different receipt on a genuine retry");
+  assert.equal((await receiptsUnder(scene.firm, `${pk}:plan`)).length, 1,
+    "the prepayment lane took a SECOND nested reservation on a retry");
+
+  // 2 — THE ACCRUAL LANE, which moved to `:acplan`.
+  const acc = await accrualLaneIn(scene, "idem");
+  const particulars = accrual({ servicePeriodStart: span.from, servicePeriodEnd: span.to });
+  const ak = opk1150("idem-accrual");
+  const call = () => createAccrualAdjustment(scene.bob, {
+    client: acc.client, authorityRef: acc.authorityRef, accrual: particulars,
+    frequency: "monthly", dayRule: "last_day_of_month", dayOfMonth: null,
+    timezone: ACCRUAL_TZ, effectiveFrom: span.from, effectiveTo: span.to, opKey: ak });
+  const a1 = await call();
+  assert.deepEqual(await call(), a1, "the accrual lane returned a different receipt on a genuine retry");
+  assert.equal((await receiptsUnder(scene.firm, `${ak}:acplan`)).length, 1,
+    "the accrual lane took a SECOND nested reservation on a retry");
+  assert.deepEqual(await receiptsUnder(scene.firm, `${ak}:plan`), [],
+    "…and left nothing behind in the prepayment lane's namespace");
+
+  // 3 — THE TENANCY LANE, which moved to `:tnplan`.
+  const ten = await tenancyLaneIn(scene, "idem");
+  const tk = opk1150("idem-tenancy");
+  const t1 = await confirmRentPlan(scene.bob, {
+    client: ten.client, document: ten.document, opKey: tk });
+  const t2 = await confirmRentPlan(scene.bob, {
+    client: ten.client, document: ten.document, opKey: tk });
+  assert.deepEqual(t2, t1, "the tenancy lane returned a different receipt on a genuine retry");
+  assert.equal((await receiptsUnder(scene.firm, `${tk}:tnplan`)).length, 1,
+    "the tenancy lane took a SECOND nested reservation on a retry");
+
+  // 4 — AND A RETRY WITH **DIFFERENT** ARGUMENTS IS STILL REFUSED, by each lane's own OUTER
+  //     reuse wall. That raise is deliberately left untyped: it is one door answering its own
+  //     caller's mistake, not two lanes meeting on a reservation neither of them named.
+  const changed = await caught(() => createAccrualAdjustment(scene.bob, {
+    client: acc.client, authorityRef: acc.authorityRef,
+    accrual: accrual({ servicePeriodStart: span.from, servicePeriodEnd: span.to, cents: 55000 }),
+    frequency: "monthly", dayRule: "last_day_of_month", dayOfMonth: null,
+    timezone: ACCRUAL_TZ, effectiveFrom: span.from, effectiveTo: span.to, opKey: ak }));
+  assert.ok(changed, "the accrual lane admitted a second, different configuration under one key");
+  assert.equal(changed.code, "CLR10");
+  assert.equal(detailOf(changed).reason, "op_key_conflict",
+    "the accrual door's own outer reuse wall stopped answering");
 });
