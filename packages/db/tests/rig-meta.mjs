@@ -2330,6 +2330,17 @@ export const AUTHORITY_REF_HUMAN_INSTRUCTION_0250_COHORT = [
 const FYE_PAIR_WALL_0310_UNGRANTED_FNS = ["_knowledge_assert_fye_pair"];
 export const FYE_PAIR_WALL_0310_COHORT = [...FYE_PAIR_WALL_0310_UNGRANTED_FNS];
 
+// #1051 [0330, ONE authority-wall predicate for clara.create_accounting_plan and
+// clara._obo_plan_core] — its own cohort, for the same "wholly present or wholly absent" reason
+// 0250's carries: the `db-slice-frontiers` matrix runs this package against databases pinned at
+// earlier frontiers where 0308 has applied and 0330 has not. `_assert_plan_authority` is
+// UNGRANTED like `_authority_ref_refusal`, whose definition it wraps: the main sweep fails the
+// moment a grant appears on it, this cohort fails if it ever DISAPPEARS from the two plan doors
+// that must both call it (see plan-authority-wall.test.mjs's own census cell). ONE name, because
+// 0330 mints exactly one.
+const PLAN_AUTHORITY_WALL_0330_UNGRANTED_FNS = ["_assert_plan_authority"];
+export const PLAN_AUTHORITY_WALL_0330_COHORT = [...PLAN_AUTHORITY_WALL_0330_UNGRANTED_FNS];
+
 // #979 [0251, the depreciation authority read tells "never had one" apart from "had one, and it
 // was retired"] — NO COHORT, NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed, for
 // the same reason #797's (0212) and #720's (0198) blocks state theirs. 0251 creates no function:
@@ -4229,6 +4240,11 @@ export async function grantMatrixFailures() {
   const fyePairWallLive = FYE_PAIR_WALL_0310_COHORT.filter((n) => liveNames.has(n));
   if (fyePairWallLive.length !== 0) {
     failures.push(...cohortFailures("#1031 0310 knowledge fye pair wall", FYE_PAIR_WALL_0310_COHORT, liveNames));
+  }
+  // #1051 [0330] — bimodal like 0310's: wholly present once 0330 applies, wholly absent before it.
+  const planAuthorityWallLive = PLAN_AUTHORITY_WALL_0330_COHORT.filter((n) => liveNames.has(n));
+  if (planAuthorityWallLive.length !== 0) {
+    failures.push(...cohortFailures("#1051 0330 shared plan authority wall", PLAN_AUTHORITY_WALL_0330_COHORT, liveNames));
   }
   // #652 [0222] — bimodal like F-A6's: wholly present once 0222 applies, wholly absent before it,
   // because the `db-slice-frontiers` matrix runs this package against earlier frontiers.

@@ -69,12 +69,21 @@ const RECUT = [
   // and put 0300's three-kind wall into 0308's pasted body; that commit derives a7c108d5... from
   // 0308's own pasted text, whose pre-edit sha256 reproduced c8e99098... exactly, and the
   // from-scratch chain confirms it against the live catalog.
-  // What this pin is FOR is unaffected by either recut and is re-checked below against the LIVE
-  // body, structurally rather than by transcription: the client rung 203005004 still sits above
-  // any clara.accounting_plans row lock, and the advisory is still passed this door's own plan
-  // id. That is the point of pinning the text rather than the migration number.
+  // RE-BASED A THIRD TIME. #1051 (0330_plan_authority_wall_predicate.sql, riders sweep wave lane
+  // 01) FOLDS this body's authority wall out into one shared predicate,
+  // `clara._assert_plan_authority`, which `clara._obo_plan_core` calls too — the two walls were
+  // two hand-written copies and 0308's "verbatim" claim about them was no longer true. One block
+  // of this body becomes one `perform`, and the three declarations that block alone used go with
+  // it; nothing else in the body moves, and nothing this door admits or refuses moves either
+  // (all three authority_ref kinds survive on BOTH doors — see plan-authority-wall.test.mjs's
+  // own both-doors drive). That takes a7c108d5... to 544cd88e..., measured on the lane rig after
+  // 0330 applied and re-derived from 0330's own file text.
+  // What this pin is FOR is unaffected by any of the three recuts and is re-checked below
+  // against the LIVE body, structurally rather than by transcription: the client rung 203005004
+  // still sits above any clara.accounting_plans row lock, and the advisory is still passed this
+  // door's own plan id. That is the point of pinning the text rather than the migration number.
   { fn: "clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,int,text,date,date,jsonb,text,text)",
-    sha: "a7c108d5dd4febbae9f98a87b42b69468aec31f1731336b2185c8e91b1b0951c" },
+    sha: "544cd88ecaa5b5237969aff36b1bd0d8a5cdf41aacea234e6415d3df54b523ea" },
   { fn: "clara.revise_accounting_plan(uuid,text,text,int,text,date,date,jsonb,text,text)",
     sha: "8a6e69efac967592592bf3e8d08683145e5b43456a63fe673788337349382886" },
   { fn: "clara._accrual_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,int,text,date,date,jsonb)",

@@ -7263,3 +7263,65 @@ PARTIAL signal rather than guessing. Both branches were exercised on the lane da
 APPLY through `pnpm db:migrate` (with all four recut pins checked), and the REDO branch through
 `CLARA_MIGRATION_REDO=0318_knowledge_fye_pair_applicability` after the promotion door was put back
 at its pre-image for `kp.14`'s vacuity control.
+
+## 0330 — one authority-wall predicate for the two plan doors (#1051, riders sweep wave, lane 01)
+
+`0330_plan_authority_wall_predicate.sql` mints `clara._assert_plan_authority(text, jsonb, uuid,
+uuid)` and points `clara.create_accounting_plan` and `clara._obo_plan_core` at it. **Nothing
+either door admits or refuses moves.** It is a fold, not a rule change, and the tail proves that
+mechanically rather than by assertion.
+
+**The ticket's stated current behaviour was stale, and this file does not build what it asked
+for.** #1051 was filed saying the OBO twin admits TWO `authority_ref` kinds against the human
+door's three, and recommended keeping the machine lane at two. Measured on the integrated chain,
+both bodies already carry the SAME list — `0308_deferred_revenue_recognition.sql:893` against the
+identical list at line 614 — because the riders wave-4 integrator carried #949's (0300)
+`contract_confirmation` into the twin as well as into the human door. Taking the recommendation
+would therefore REMOVE a kind the integrated wave deliberately added, on the machine lane, in the
+direction of refusing something admitted today. The sweep wave's plan of record re-briefed the
+ticket for exactly that reason (`docs/plan/active/riders-2026-09-20/SWEEP-PLAN.md`, "The four
+narrowed tickets, and the one re-briefed") and this file follows the re-brief: **keep the three
+kinds on both doors, and fold the two copies into one.**
+
+**THE CORRECTION 0308 CANNOT CARRY.** `0308_deferred_revenue_recognition.sql:870` says, inside
+`clara._obo_plan_core`, "THE AUTHORITY SHAPE, verbatim from clara.create_accounting_plan", and
+0308's header says the same of the pasted body. That claim is **not true of anything as of this
+file, and was already untrue before it.** 0308 was written on a rig that did not carry 0300; on
+the integrated chain 0300 applies first, the integrator re-based 0308's pasted human door onto
+0300's three-kind post-image and then widened the twin's copy BY HAND to match. From that moment
+the two blocks were two independently maintained texts that happened to agree, which is what
+"verbatim" was trying and failing to guarantee. Applied migrations are immutable, so the
+correction is recorded here and in `clara._assert_plan_authority`'s own catalogue comment, and the
+two bodies now share one text instead of claiming to.
+
+**What the fold leaves standing, deliberately.** `clara._accrual_plan_core` carries a THIRD
+hand-written copy of this same wall (`0222_accrual_adjustments.sql:1014-1025`) and reaches the
+chat lane through its own inline `exists` probes rather than through #977's one definition. That
+is a live authority gap with its own ticket, **#1080**, which points that body at this predicate.
+Folding it here would widen #1051, so this file names it in its header, in the predicate's
+comment, in its own tail census and in `plan-authority-wall.test.mjs` — and states the census as a
+RULE (a body either calls the predicate or keeps its own copy, never both) so #1080 composes with
+it instead of having to edit it.
+
+**How the two pasted bodies are proved.** Both are re-cut statically — no `pg_get_functiondef`
+splice, so no new entry in `apps/web/tests/firm-scope-db-pins.corpus.ts` is owed; the file
+contains no dynamic SQL of any kind. Each pasted body is the LIVE pre-image with exactly one block
+replaced by one `perform`, and the three declarations that block alone used (`v_ref_kind`,
+`v_ref_id`, `v_reason`) dropped with it. The tail proves that by **reverse substitution**
+(0318's idiom): it reads the installed body, puts 0308's own authority block and those three
+declarations back, and requires the result to hash to the `sha256(prosrc)` the prestate pinned
+(`a7c108d5…` for the human door, `2049c1c4…` for the twin). A change smuggled anywhere else in
+either pasted body reds the migration instead of shipping. The tail additionally re-reads both
+post-images (`544cd88e…`, `149b4a3d…`), both grant postures, `clara._authority_ref_refusal`'s
+unmoved body (`55c20b20…`) and its zero grants, the two catalog censuses, and DRIVES the new
+predicate over all eight of its refusal axes.
+
+**Redo-safe by construction (#957).** Every statement is `create or replace function`, `revoke` or
+`comment on`. The prestate is bimodal on the two doors' bodies and refuses a MIXED state (one door
+folded, one not) rather than guessing, and it cross-checks the predicate's existence against the
+branch it read. Because a bimodal pin can only ever show `CLARA_MIGRATION_REDO` its "already live"
+branch, the FIRST APPLY branch was proved by hand first: the prestate block was run verbatim
+inside a rolled-back transaction against the un-applied lane database, printed its FIRST APPLY
+notice and passed. Both branches then ran for real — the first apply through `pnpm db:migrate`,
+and the redo through `CLARA_MIGRATION_REDO=0330_plan_authority_wall_predicate` after the tail
+gained its reverse-substitution check.

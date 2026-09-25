@@ -114,6 +114,17 @@ export const INLINE_CHAT_LANE_EXISTENCE = "from clara.agent_tasks t where t.id =
 /** The one function that owns the answer after #977. */
 export const REFUSAL_FN_SIG = "clara._authority_ref_refusal(text,uuid,uuid,uuid)";
 
+/** #1051 (0330) — THE SHARED PLAN AUTHORITY WALL, and why this module has to know about it. #977
+ *  wired BOTH doors directly at `REFUSAL_CALL`. 0330 folds the plan lane's whole authority wall
+ *  (the two authority-kind refusals, the three `authority_ref` shape refusals and this very
+ *  resolution) out of `clara.create_accounting_plan` and `clara._obo_plan_core` into ONE
+ *  predicate, so on a post-0330 chain the two plan bodies reach #977's definition THROUGH it
+ *  rather than by naming it. The claim #977 makes — one definition, no door keeping its own copy
+ *  — is unchanged; the SHAPE of the census that proves it is not, so the census cell measures
+ *  which chain it is on rather than assuming one. */
+export const PLAN_WALL_FN_SIG = "clara._assert_plan_authority(text,jsonb,uuid,uuid)";
+export const PLAN_WALL_CALL = "clara._assert_plan_authority(";
+
 /** Normalize a `prosrc` the way 0250's tail assertions do. */
 export const normalizeSrc = (src) =>
   String(src).replace(/--[^\n]*/g, "").toLowerCase().replace(/\s+/g, " ").trim();

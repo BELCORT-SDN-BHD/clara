@@ -1901,12 +1901,20 @@ Six `p977.*` cells:
   `clara._authority_ref_refusal(text,uuid,uuid,uuid)` exists, `stable`, SECURITY DEFINER, owned by
   `clara_fn_owner`, `search_path` pinned, EXECUTE held by nobody (not PUBLIC, not
   `clara_authenticated`/`clara_runtime`/`clara_agent_ro`).
-* `p977.definition.one` — the catalog census: both doors READ the shared definition, neither still
-  carries its own inline chat-lane existence test, that inline test now survives in EXACTLY ONE
-  `clara` function (`_accrual_plan_core`, the accrual lane's copy, which the owner's ruling
-  deliberately leaves alone), and EXACTLY the two doors the ruling names read the one definition.
+* `p977.definition.one` — the catalog census: both doors REACH the shared definition, neither
+  still carries its own inline chat-lane existence test, that inline test now survives in EXACTLY
+  ONE `clara` function (`_accrual_plan_core`, the accrual lane's copy, which the owner's ruling
+  deliberately leaves alone), and EXACTLY the expected roster reads the one definition.
   Normalized in JS by the same rule 0250's tail normalizes `prosrc` in SQL, so the cell and the
-  migration cannot disagree about what "the fragment" is.
+  migration cannot disagree about what "the fragment" is. **BIMODAL since #1051
+  (`0330_plan_authority_wall_predicate.sql`)**, measured off the catalog rather than assumed: on
+  a pre-0330 chain the plan door and #941's OBO twin each NAME `clara._authority_ref_refusal`; on
+  a post-0330 chain the plan lane's whole authority wall lives in one shared predicate,
+  `clara._assert_plan_authority`, which both plan bodies call and which is itself the reader, so
+  the roster reads `_assert_plan_authority, sign_depreciation_authority`. #977's claim is
+  unchanged — one definition, no door keeping its own copy — and the cell stays an EXACT closed
+  world in either branch. The shared wall has its own battery,
+  `plan-authority-wall.test.mjs`, below.
 * `p977.both.unauthored_chat_turn_refused` — the cell that forces the rule to be a CONJUNCTION:
   `clara.agent_tasks.created_by` is nullable for every kind, so a `chat_turn` nobody signed is
   refused too.
@@ -1934,6 +1942,41 @@ signature.
 `packages/db/package.json`'s `"test"` chain at its MIGRATION-order position (last, after
 `fa-particulars-completion-fold-preintegration-gate.mjs`, 0249). A FOCUSED run does not preload it
 and FAILS LOUDLY below 0250; final acceptance is exactly that focused shape counting ZERO skips.
+
+## The shared plan authority wall (#1051, `0330_plan_authority_wall_predicate.sql`)
+
+`plan-authority-wall.test.mjs`, frontier-gated on its own stable stem
+(`plan_authority_wall_predicate$`) with `plan-authority-wall-preintegration-gate.mjs` as the
+package-sweep escape (`CLARA_ALLOW_MISSING_PLAN_AUTHORITY_WALL`). A FOCUSED run does not preload
+the gate, so a chain missing 0330 fails loudly there rather than skipping.
+
+**What the ticket asked for is not what it is.** #1051 was filed saying `clara._obo_plan_core`
+admits two `authority_ref` kinds against the human door's three, and recommended keeping the
+machine lane narrower. That premise is stale: the riders wave-4 integrator carried #949's
+`contract_confirmation` into BOTH bodies, so the two walls already admit the same three kinds, and
+taking the ticket's recommendation would REMOVE one. What is live is the ticket's second half —
+two independently hand-written copies of one wall, and 0308:870's "verbatim from
+clara.create_accounting_plan" claim that is no longer true of anything. 0330 is therefore a
+refactor that PRESERVES the three kinds.
+
+Cells:
+
+* `p1051.wall.one_definition` — the catalog census, the structural standard for a recut body:
+  `clara._assert_plan_authority(text,jsonb,uuid,uuid)` exists as an ungranted, `stable`, SECURITY
+  DEFINER, `clara_fn_owner`-owned, `search_path`-pinned internal; both plan doors CALL it and
+  neither carries a line of the wall any more; and the wall's own sentence lives in exactly one
+  body besides `clara._accrual_plan_core`, the THIRD copy #1051 deliberately leaves standing and
+  #1080 owns. Stated as a RULE (a body either calls the predicate or keeps its own copy, never
+  both) rather than as a closed roster, so #1080 composes with it instead of having to edit it.
+* `p1051.wall.same_kinds` — the behaviour half, driven END TO END through BOTH seams on ONE
+  client: the human door `clara.create_accounting_plan` as a bookkeeper and the on-behalf
+  entrance `clara.create_prepayment_schedule_for` on a real `clara_runtime` connection. All
+  three admitted kinds — an `accounting_work`, a `chat_task` carrying an author and a
+  `contract_confirmation` — are ADMITTED by both, and a fourth kind is refused by both with the
+  same sentence and the same `authority_ref_invalid` / `kind` detail. The
+  `contract_confirmation` arm is the one the wave-4 integrator asserted and nothing drove: the
+  human door's side was covered by `tenancy-rent-plan.test.mjs`'s `S5`, the OBO twin's side was
+  not covered anywhere before this cell.
 
 ## The depreciation authority retired-read fallback (#979)
 
