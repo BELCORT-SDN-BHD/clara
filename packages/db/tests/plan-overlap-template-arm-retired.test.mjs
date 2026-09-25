@@ -102,12 +102,28 @@ const REVISE_SPLIT = {
   delegate: { fn: REVISE_DOOR, sha: "94804ddc1dccd444c5bb5294524634db4afea043499eb8746dd7aae16b02ad77" },
 };
 
+// …and the FOURTH plan writer the estate gained in the same file [fix round, SPEC-L08-1137-E].
+// clara._tenancy_plan_core is the OBO lane's stand-in for clara.create_accounting_plan: it CREATES
+// an accounting plan, it takes the #929 client rung and it calls the overlap advisory. It belongs
+// on this roster for exactly the reason the other three are on it, and the first cut left it off.
+// Sha-pinned like the rest, so an edit to it is a red here rather than an unwatched change.
+//
+// It is also the duplication README section 0353 follow-up 1 exists to remove: once
+// clara._obo_plan_core absorbs `recurring_journal` (after #1051 and #1080), this body becomes a
+// two-line caller and drops off this roster the way a thin delegate does. The entry stays until
+// then, because an unwatched fourth writer is exactly how ADV-L08-01 happened.
+const TENANCY_PLAN_STEP = {
+  fn: "clara._tenancy_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)",
+  sha: "3065a41f862a419fe25cfa1c9d665e2b57578a54a6c4bfc489f5c13f4887d37b",
+};
+
 /** The bodies that HOLD the computation (T.4), per generation. */
 async function recutRoster() {
   const split = (await rootQuery(
     "select count(*)::int as n from clara.schema_migrations where version ~ $1", [REVISE_SPLIT_STEM])
   ).rows[0].n > 0;
-  return split ? RECUT.map((s) => (s.fn === REVISE_DOOR ? REVISE_SPLIT.core : s)) : RECUT;
+  if (!split) return RECUT;
+  return [...RECUT.map((s) => (s.fn === REVISE_DOOR ? REVISE_SPLIT.core : s)), TENANCY_PLAN_STEP];
 }
 
 let world = null;
