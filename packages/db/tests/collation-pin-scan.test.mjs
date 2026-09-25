@@ -260,7 +260,7 @@ test("collation-pin · the corpus is non-empty on both sides, so a green above c
   const observed = scanCorpus();
   const keysFound = observed.reduce((n, r) => n + r.keys.length, 0);
   const keysRecorded = RECORDED_SITES.reduce((n, r) => n + r.keys.length, 0);
-  // The numbers #1047 worked: 66 keys over 37 files (22 keys in 16 applied migrations, 44 in 21
+  // The numbers #1047 worked: 66 keys over 37 files (28 keys in 16 applied migrations, 38 in 21
   // batteries). A corpus that scanned nothing, or a record that recorded nothing, would let the
   // assertion above pass while proving nothing at all.
   assert.ok(keysFound >= 40, `the scanner still reads the estate's censuses (found ${keysFound} movable keys)`);

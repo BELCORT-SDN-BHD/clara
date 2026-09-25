@@ -445,7 +445,7 @@ These do NOT keep it, and are the shapes to look at:
 
 **The record and the guard.** `tests/collation-pin-scan.mjs` holds `RECORDED_SITES`: every pinned,
 text-ordered site in `migrations/` and `tests/` as of #1047 — 66 movable keys over 37 files, of
-which 22 keys in 16 **applied** migrations, each with the reason it cannot flip. Applied migrations
+which 28 keys in 16 **applied** migrations, each with the reason it cannot flip. Applied migrations
 are never edited, so for those the entry is the proof. `tests/collation-pin-scan.test.mjs` scans the
 corpus on every run and refuses a site the record does not hold, naming the file and saying what to
 write; it needs no database, so it runs on every leg. A NEW site is fixed with `collate "C"`, never

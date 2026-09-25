@@ -398,7 +398,7 @@ export function scanJsText(source) {
 
 /** @type {Array<{ path: string, keys: string[], why: string }>} */
 export const RECORDED_SITES = [
-  // --- migrations: 22 keys over 16 applied files ------------------------------------------------
+  // --- migrations: 28 keys over 16 applied files ------------------------------------------------
   { path: "migrations/0020_typed_consent.sql", keys: ["x.pin"],
     why: "the key is `p.proname || '=' || <acl text>`, and an expression that carries a catalog `name` inherits its C collation (measured with pg_collation_for)" },
   { path: "migrations/0038_wave_c_b_bank.sql", keys: ["x.pin"],
@@ -433,7 +433,7 @@ export const RECORDED_SITES = [
   { path: "migrations/0295_wave4_chart_rows.sql", keys: ["special_acc_type", "version"],
     why: "the five special markers (proved in collation-pin-portability); `version` is clara.coa_templates.version, an integer" },
 
-  // --- batteries: 44 keys over 21 files ---------------------------------------------------------
+  // --- batteries: 38 keys over 21 files ---------------------------------------------------------
   // A battery is EDITABLE, so a key here is a site this ticket deliberately did not touch: the six
   // census files the sweep plan gave this lane are fixed in place, and the rest belong to lanes
   // that own those files. Every key below draws on a value set the portability battery proves, or
