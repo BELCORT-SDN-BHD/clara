@@ -866,3 +866,112 @@ test("W10 · the answer door refuses a question that was never asked, and an ans
     "…and the door is a governed act, so it needs an op key like any other",
   );
 });
+
+test("W4c · the SECOND witness: a page count of one admits the sum, and a page count above one does not", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+
+  // ONE PAGE, NO HEADCOUNT. The document says it is not truncated, which is exactly the gap the row
+  // sum opens ("did I read every line of this document?"). The OTHER gap -- is this document the
+  // whole firm's run -- is not opened by the sum and is not closed here: a printed totals row is
+  // equally silent about it, and #946 has posted from printed totals since without asking.
+  const onePage = await evaluate(
+    "v2",
+    ...bothChannels({ answers: NO_TOTALS, witness: { "payroll.run.page_count": value("1") } }),
+  );
+  assert.equal(onePage.completeness.verdict, "witnessed");
+  assert.equal(onePage.completeness.witness, "single_page");
+  assert.equal(onePage.completeness.employee_count, null, "…on the page count alone, with no headcount printed");
+  const p1 = await plan(world.clients.A1, onePage);
+  assert.equal(p1.ready, true, `${JSON.stringify(p1.refusals)}`);
+  assert.equal(p1.posting_basis.kind, "row_sum");
+  assert.equal(p1.posting_basis.witness, "single_page");
+  assert.equal(p1.posting_basis.page_count, 1);
+  assert.equal(Number(p1.debit_cents), 500000);
+
+  // THREE PAGES, NO HEADCOUNT. The summary names more pages than the one that was read, which is the
+  // case the row sum is least safe in -- so nothing is witnessed and the question is parked.
+  const threePages = await evaluate(
+    "v2",
+    ...bothChannels({ answers: NO_TOTALS, witness: { "payroll.run.page_count": value("3") } }),
+  );
+  assert.equal(threePages.completeness.verdict, "absent");
+  assert.equal(threePages.completeness.witness, null);
+  assert.equal(threePages.completeness.reason, "the_summary_names_more_pages_than_the_one_read");
+  const p3 = await plan(world.clients.A1, threePages);
+  assert.equal(p3.ready, false);
+  assert.deepEqual(p3.refusals.map((r) => r.reason), ["completeness_unwitnessed"]);
+  assert.deepEqual(p3.legs, []);
+
+  // AND THE HEADCOUNT STILL WINS OVER THE PAGE COUNT when both are printed: a page that says it is
+  // one page AND names three employees, over two lines read, is CONTRADICTED, not witnessed. A
+  // truncation the page itself does not know about is exactly the case the weaker witness misses.
+  const both = await evaluate(
+    "v2",
+    ...bothChannels({
+      answers: NO_TOTALS,
+      witness: { "payroll.run.page_count": value("1"), "payroll.run.employee_count": value("3") },
+    }),
+  );
+  assert.equal(both.completeness.verdict, "contradicted");
+  assert.equal(both.completeness.witness, null);
+  const pb = await plan(world.clients.A1, both);
+  assert.equal(pb.ready, false);
+  assert.deepEqual(pb.refusals.map((r) => r.reason), ["completeness_contradicted"]);
+});
+
+test("W4d · a witness neither channel was asked is `not_asked`, and it parks the question rather than blocking the estate", async (t) => {
+  if (unready(t)) return;
+
+  await seedPayrollChart(world.users.alice, world.clients.A1);
+  // THE SHAPE THE FROZEN payrollFacts_v1 WORKER SENDS TODAY: eleven answers, no witness at all. This
+  // is the compatibility cell -- if an unasked witness read as `unanswered` inside `facts`, the
+  // verdict would fold it into `arithmetic_holds` and EVERY payroll run in the estate would be
+  // refused on the grounds that the page does not add up.
+  const state = await evaluate("v2", ...bothChannels({ answers: NO_TOTALS }));
+  assert.equal(state.witness["payroll.run.employee_count"].state, "not_asked");
+  assert.equal(state.witness["payroll.run.page_count"].state, "not_asked");
+  assert.equal(
+    state.witness["payroll.run.employee_count"].reason,
+    "neither_channel_was_asked_this_question",
+    "…and it says so: a prompt that never asked and a page that prints nothing are different facts",
+  );
+  assert.deepEqual(
+    Object.keys(state.facts).sort(),
+    [...RUN_FIELDS].sort(),
+    "the witness never joins `facts`, which is what keeps the arithmetic rung out of this",
+  );
+  assert.equal(state.completeness.verdict, "absent");
+  assert.equal(state.completeness.reason, "no_completeness_witness_printed");
+
+  const p = await plan(world.clients.A1, state);
+  assert.deepEqual(
+    p.refusals.map((r) => r.reason),
+    ["completeness_unwitnessed"],
+    "the parked question, and NOT `arithmetic_failed` or `run_totals_not_printed`",
+  );
+
+  // A witness ONE channel answered and the other did not is `not_asked` too, not a disagreement:
+  // a half-configured prompt is a prompt problem, not a page problem.
+  const half = await evaluate(
+    "v2",
+    envelope({ channel: "text", answers: NO_TOTALS, witness: { "payroll.run.employee_count": value("2") } }),
+    envelope({ channel: "vision", answers: NO_TOTALS }),
+  );
+  assert.equal(half.witness["payroll.run.employee_count"].state, "not_asked");
+  assert.equal(half.witness["payroll.run.employee_count"].reason, "only_one_channel_answered_this_question");
+  assert.equal(half.completeness.verdict, "absent");
+
+  // …but a witness BOTH channels read DIFFERENTLY is a reading disagreement like any other, and it
+  // fails the `channels_agree` rung rather than quietly parking a question about a page nobody has
+  // actually read.
+  const disagree = await evaluate(
+    "v2",
+    envelope({ channel: "text", answers: NO_TOTALS, witness: { "payroll.run.employee_count": value("2") } }),
+    envelope({ channel: "vision", answers: NO_TOTALS, witness: { "payroll.run.employee_count": value("3") } }),
+  );
+  assert.equal(disagree.witness["payroll.run.employee_count"].state, "channels_disagree");
+  assert.equal(disagree.completeness.verdict, "absent");
+  assert.equal(disagree.completeness.reason, "printed_headcount_could_not_be_read");
+});
