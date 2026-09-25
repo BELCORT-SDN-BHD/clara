@@ -132,12 +132,14 @@ test("p871.web.signed_out: an issuer-lapsed invitation still previews, with its 
 });
 
 test("p871.web.signed_out: every failed read renders NOTHING extra and never takes the sign-in step away", async () => {
+  // #1095 -- `rate_limited` is EXCLUDED from this group on purpose: it is the one indefinite
+  // reason that now gains a render (see the dedicated tests below). Every OTHER failure still
+  // renders nothing extra, which is the property this loop pins.
   const failures: (PublicInvitePreviewOutcome | null)[] = [
     null,
     { ok: false, kind: "not_previewable" },
     { ok: false, kind: "indefinite", reason: "transport" },
     { ok: false, kind: "indefinite", reason: "unreadable" },
-    { ok: false, kind: "indefinite", reason: "rate_limited" },
   ];
   for (const outcome of failures) {
     const h = await mount(formWith(outcome));
@@ -155,6 +157,39 @@ test("p871.web.signed_out: every failed read renders NOTHING extra and never tak
     const text = textOf(h.container as never);
     assert.equal(/not valid|expired|revoked/i.test(text), false, `${label}: no verdict is printed`);
   }
+});
+
+// #1095 -- THE ONE INDEFINITE REASON THAT RENDERS SOMETHING. The runtime already computes a
+// `retryAfterSeconds` off the door's own 15-minute/5-reload wall (`0309_invite_preview_public_
+// door.sql`); before this ticket the courier discarded it and this page rendered nothing at all
+// for a rate-limited read, identically to a transport failure. The property under test: the
+// visitor now sees how long the wall asked them to wait, and NOTHING else about this journey
+// changes -- no verdict about the invitation, the sign-in step still offered, the firm/role/email
+// block (a DIFFERENT section, for a DIFFERENT outcome) still absent.
+test("p871.web.signed_out: a rate-limited read renders the wall's own wait, and nothing else changes", async () => {
+  const h = await mount(formWith({ ok: false, kind: "indefinite", reason: "rate_limited", retryAfterSeconds: 47 }));
+
+  const text = textOf(h.container as never);
+  assert.match(text, /47 seconds/, "the door's own wait, rendered exactly -- never rounded into a vaguer bucket");
+
+  // The firm/role/email block is a different section, for the `ok: true` outcome only; it must
+  // not appear here.
+  assert.equal(
+    findIn(h.container as never, bySectionLabel("invite-signed-out-preview-heading")),
+    null,
+    "the rate-limited face is not the firm/role/email preview block",
+  );
+  const gate = findIn(h.container as never, byButtonText(/Accept invitation/));
+  assert.ok(gate, "the sign-in step is still offered -- a rate wall refusal never blocks the journey");
+  assert.equal(/not valid|expired|revoked/i.test(text), false, "no verdict is printed about the invitation itself");
+});
+
+test("p871.web.signed_out: an over-long wait renders as 'at least', matching the courier's own flag", async () => {
+  const h = await mount(formWith({
+    ok: false, kind: "indefinite", reason: "rate_limited", retryAfterSeconds: 900, atLeast: true,
+  }));
+  const text = textOf(h.container as never);
+  assert.match(text, /at least 900 seconds/, "the clamp is disclosed, never silently understated");
 });
 
 test("p871.web.signed_out: the credential-holding reader is reachable ONLY from the server, and the client component imports it as a TYPE", async () => {

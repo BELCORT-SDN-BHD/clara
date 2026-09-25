@@ -777,6 +777,22 @@ export function InviteAcceptForm({
                 <p className="mt-3 max-w-prose text-xs text-muted-foreground">{tPreview("issuerLapsedNote")}</p>
               ) : null}
             </section>
+          ) : signedOutPreview
+              && !signedOutPreview.ok
+              && signedOutPreview.kind === "indefinite"
+              && signedOutPreview.reason === "rate_limited" ? (
+            // #1095 — THE ONE INDEFINITE REASON THAT RENDERS SOMETHING. `transport` and
+            // `unreadable` stay silent (the "failed read renders nothing extra" rule above); a
+            // rate refusal is different because the runtime already computed a wait
+            // (`readPublicInvitePreview`'s own header), so there IS something honest to say. This
+            // is still a NOTICE, not a verdict: the invitation itself is untouched (0309's own
+            // comment — "the refusal is soft by construction") and the control below still
+            // consumes the link exactly as it does for every other outcome.
+            <p className="max-w-prose text-xs text-muted-foreground">
+              {signedOutPreview.atLeast
+                ? tPreview("rateLimitedNoticeAtLeast", { seconds: signedOutPreview.retryAfterSeconds })
+                : tPreview("rateLimitedNotice", { seconds: signedOutPreview.retryAfterSeconds })}
+            </p>
           ) : null}
           <Button
             type="button"
