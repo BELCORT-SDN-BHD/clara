@@ -2294,6 +2294,26 @@ differs is the ACT: its own receipt, its own audit verb, and a refusal that name
 that: *"books the reversing entry for this period alone, and can never touch another period. It
 leaves the same amount on the books for this period as Reverse now does."*
 
+**Two conditions behind that sentence, recorded so they are a decision rather than an accident**
+(review round 2026-09-25, SPEC-05 and ADV-L01-02).
+
+* *"the same amount"* is unconditional as written, and it is true of every schedule this estate
+  admits — but only because one wall elsewhere makes the counter-example unreachable. "Reverse now"
+  is a CATCH-UP over `[dueDate, accrualReversalDate(dueDate)]`, and on a monthly schedule due on the
+  1st that window's last day would also be the NEXT period's accrual day, so the catch-up would
+  admit a second event. `clara._assert_plan_schedule` refuses exactly that plan shape by name
+  (`reversal_collides_with_next_occurrence`), which is why no such accrual exists to contradict the
+  copy. If that wall is ever relaxed, this sentence is the first thing that becomes false; the
+  owner's call is whether to keep it or name the period instead.
+* The two remedies leave the same LEDGER and a different HISTORY. "Reverse now" commits its receipt
+  whether or not the occurrence was admitted, so a refusal it reaches (for instance a period whose
+  accrual never posted) stays recorded on the plan for a colleague to read. "Reverse this period
+  only" refuses by raising, which rolls the record back with the act and frees the idempotency key
+  for a real retry. Both behaviours are right for their own shape; the person pressing one of two
+  buttons is not told which they get. Driven through both doors by
+  `packages/db/tests/plan-occurrence-reversal-door.test.mjs`'s
+  `p1073.history.refusal_record_diverges`.
+
 **One component, both surfaces.** `components/firm/accrual-bill-conflict-affordance.tsx` is what the
 firm-wide Needs-you inbox mounts through `NEEDS_YOU_AFFORDANCES` and what the Accruals page's own
 conflict section (`components/accruals/accrual-bill-conflicts.tsx`) mounts directly — the shape #938's

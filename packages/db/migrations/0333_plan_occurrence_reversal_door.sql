@@ -119,6 +119,30 @@
 -- `code` travel outward unchanged — this file mints no refusal vocabulary for anything the core
 -- already names.
 --
+-- WHAT RAISING COSTS, NAMED RATHER THAN DISCOVERED (adversarial round 2026-09-25, ADV-L01-02).
+-- Rolling back is not free of consequence, and the two remedies DIFFER in what the firm's own
+-- history records. The admission core answers several refusals by WRITING them: it inserts (or
+-- reuses) the occurrence row, stamps `outcome.state='refused'` on it and returns -- "recorded on
+-- the occurrence rather than raised ... so it is legible in the history" is its own comment, and
+-- the ORPHAN WALL (`reversal_before_primary`) is the arm a person actually reaches. Reached
+-- through `clara.request_plan_catch_up`, which commits its receipt either way, that refused
+-- occurrence SURVIVES: the plan is left holding `reversal@<date>: refused/reversal_before_primary`
+-- beside its admitted primary, a colleague can read it later, and the SAME row becomes admissible
+-- once the accrual posts. Reached through THIS door it does not survive, because the raise takes
+-- the write with it. That is the price of leaving the op key free, and it is the right trade for a
+-- door whose whole contract is "one act, and a refusal is not an act" -- but it is a real
+-- difference between two remedies the same screen offers for the same fact, so it is stated here,
+-- in `packages/db/README.md`'s section for this file and in CONTEXT.md's `accrual_bill_conflict`
+-- paragraph, and it is DRIVEN through both doors on one scene by
+-- `p1073.history.refusal_record_diverges`.
+--
+-- AND A REFUSAL NAMES NO ROW IT DESTROYED (ADV-L01-01). Because the write rolls back, the core's
+-- `occurrence_id` is forwarded ONLY in the answers the core reached before writing anything
+-- (`reversal_already_admitted`, `period_already_admitted`), where it names a row another
+-- transaction committed; on every recorded-then-refused arm the key is REMOVED from the raised
+-- payload. Both carry `occurrence_recorded`, so a surface reads one rule rather than guessing
+-- which meaning of the key it is holding. See the refusal branch's own comment for the mechanism.
+--
 -- WHAT THIS FILE DELIBERATELY DOES NOT DO (the ticket's own out-of-scope lines, made structural
 -- rather than promised):
 --   * it does not touch `clara.request_plan_catch_up` or `clara.skip_plan_occurrence`. Both are
@@ -257,7 +281,7 @@ create or replace function clara.reverse_plan_occurrence(p_plan uuid, p_due date
 declare
   v_actor uuid; v_firm uuid; v_ctx record; r record;
   v_dedupe jsonb; v_result jsonb; v_answer jsonb;
-  v_k int; v_rev_due date; v_reason text; v_code text;
+  v_k int; v_rev_due date; v_reason text; v_code text; v_detail jsonb; v_durable boolean;
 begin
   if p_op_key is null or p_op_key ~ '^\s*$' then
     raise exception 'reversing one period of a plan requires its idempotency key'
@@ -350,8 +374,14 @@ begin
                        then 'reversal_already_admitted' else 'unclassified' end);
     v_code := coalesce(v_answer ->> 'code',
                 case v_reason
-                  when 'reversal_already_admitted' then 'CLR13'
+                  -- `plan_not_found` is a BELT, not an arm a caller reaches through this door:
+                  -- clara._plan_door_ctx above has already resolved the plan under the caller's
+                  -- own firm and raised CLR11 itself if it did not exist, and the `for update`
+                  -- lock holds that same row for the rest of the transaction. It is mapped so the
+                  -- map is TOTAL over the core's vocabulary, not because the core can answer it
+                  -- from this entrance.
                   when 'plan_not_found' then 'CLR11'
+                  when 'reversal_already_admitted' then 'CLR13'
                   when 'plan_paused' then 'CLR10'
                   when 'plan_ended' then 'CLR10'
                   when 'client_inactive' then 'CLR13'
@@ -359,11 +389,34 @@ begin
                   when 'outside_authority_window' then 'CLR10'
                   when 'not_yet_due' then 'CLR10'
                   else 'CLR13' end);
+
+    -- THE ROW-IDENTITY KEY IS CONDITIONAL, AND THE PAYLOAD NOW SAYS SO (adversarial round
+    -- 2026-09-25, ADV-L01-01). The admission core RECORDS most of its refusals ON an occurrence
+    -- row -- it inserts or updates the row, stamps `outcome.state='refused'` on it and returns
+    -- that row's id, "legible in the plan's own history" in its own words -- and it does that for
+    -- `reversal_before_primary`, for both `*_period_line_missing` arms and for the arm that
+    -- catches the Work door's own refusal. This door RAISES, so the whole transaction rolls back:
+    -- a row the core inserted never existed, and a refused outcome it stamped on a row that DID
+    -- exist is gone too, leaving a row whose recorded state is not the one the caller was told
+    -- about. Handing `occurrence_id` outward unqualified would therefore give a surface an
+    -- identifier for something it cannot open, under the SAME key that names a real, committed
+    -- row in the two answers the core reaches BEFORE it writes anything (`converged`, which this
+    -- door names `reversal_already_admitted`, and `period_already_admitted`). One key with two
+    -- opposite meanings is not a contract. So the key survives only where the row does, and
+    -- `occurrence_recorded` tells a reader which of the two it is holding.
+    v_durable := coalesce((v_answer ->> 'converged')::boolean, false)
+                 or v_reason = 'period_already_admitted';
+    v_detail := v_answer || jsonb_build_object('reason', v_reason,
+                  'due_date', to_char(p_due,'YYYY-MM-DD'),
+                  'reversal_due_date', to_char(v_rev_due,'YYYY-MM-DD'));
+    if v_answer ? 'occurrence_id' then
+      v_detail := v_detail || jsonb_build_object('occurrence_recorded', v_durable);
+      if not v_durable then
+        v_detail := v_detail - 'occurrence_id';
+      end if;
+    end if;
     raise exception 'this period''s reversal was not admitted (%)', v_reason
-      using errcode = v_code,
-        detail = (v_answer || jsonb_build_object('reason', v_reason,
-                    'due_date', to_char(p_due,'YYYY-MM-DD'),
-                    'reversal_due_date', to_char(v_rev_due,'YYYY-MM-DD')))::text;
+      using errcode = v_code, detail = v_detail::text;
   end if;
 
   perform clara._audit(v_firm, v_actor, null, null, 'reverse_plan_occurrence', null,
@@ -399,7 +452,12 @@ comment on function clara.reverse_plan_occurrence(uuid,date,text) is
   'rather than a reported outcome, so a refusal rolls back and leaves the key free: its own four '
   '(invalid_op_key, invalid_request, plan_does_not_reverse, accrual_occurrence_not_found), plus '
   'whatever the admission core answers -- passed outward under the core''s own reason and code, '
-  'with reversal_already_admitted naming the core''s converged answer.';
+  'with reversal_already_admitted naming the core''s converged answer. A raised refusal rolls '
+  'back whatever the core RECORDED on an occurrence row, so the refusal payload carries '
+  'occurrence_id only where that row was committed by another transaction '
+  '(reversal_already_admitted, period_already_admitted) and says which case it is in '
+  'occurrence_recorded; the same refusal reached through clara.request_plan_catch_up, which '
+  'commits either way, DOES leave the refused occurrence in the plan''s history.';
 
 reset role;
 

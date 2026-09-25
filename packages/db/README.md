@@ -7710,7 +7710,39 @@ The core's own `reason` and `code` travel outward unchanged. 0333 mints exactly 
 its own that no body already names (`plan_does_not_reverse`, and `reversal_already_admitted` for the
 core's CONVERGED answer, which carries no `reason` key at all); `invalid_op_key`,
 `invalid_request` and `accrual_occurrence_not_found` are `clara.skip_plan_occurrence`'s own, reused
-deliberately so one fact keeps one vocabulary.
+deliberately so one fact keeps one vocabulary. `plan_not_found` appears in the door's code map as a
+BELT only: `clara._plan_door_ctx` has already resolved the plan under the caller's own firm and
+raised CLR11 itself, and the `for update` lock holds that row for the rest of the transaction, so
+the core cannot answer it from this entrance. The map is total over the core's vocabulary; that arm
+is unreachable and the body now says so.
+
+**What raising costs, and the two things a payload must not pretend** (adversarial round
+2026-09-25, ADV-L01-01 and ADV-L01-02). `clara._plan_admit_occurrence` answers several refusals by
+WRITING them: it inserts or reuses the occurrence row, stamps `outcome.state='refused'` on it and
+returns that row's id — "recorded on the occurrence rather than raised … so it is legible in the
+history" are its own words — and the arm a person actually reaches that way is the ORPHAN WALL,
+`reversal_before_primary`. Two consequences follow from this door raising rather than reporting, and
+both are contract rather than accident:
+
+* **The refusal names no row it destroyed.** The raise rolls the core's write back, so the
+  `occurrence_id` it returned names a row that never existed (or a row whose recorded refusal is
+  gone). 0333 therefore forwards that key ONLY in the answers the core reaches BEFORE it writes
+  anything — `reversal_already_admitted` (the converged answer) and `period_already_admitted`,
+  where the row was committed by another transaction — and REMOVES it on every
+  recorded-then-refused arm. Both carry `occurrence_recorded` (`true` / `false`), so a surface
+  reads one rule instead of guessing which meaning of the key it holds. Driven by
+  `p1073.refusals.payload_identity`.
+* **The plan's own history diverges between the two remedies, and that is stated rather than
+  discovered.** The SAME refusal reached through `clara.request_plan_catch_up`, which commits its
+  receipt either way, leaves `reversal@<date>: refused/reversal_before_primary` in the plan's
+  occurrence history beside its admitted primary — a colleague can read it later, and the same row
+  becomes admissible once the accrual posts. Reached through this door it leaves nothing, because
+  the raise takes the write with it. That is the price of leaving the op key free for a real retry,
+  and it is the right trade for a door whose contract is "one act, and a refusal is not an act" —
+  but a bookkeeper offered both remedies on one screen gets a different durable record depending on
+  which they press. Driven on one scene through both doors by
+  `p1073.history.refusal_record_diverges`, and named in CONTEXT.md's `accrual_bill_conflict`
+  paragraph.
 
 ### What this file does not do
 
@@ -7731,6 +7763,17 @@ the prestate's own redo branch (the prestate then printed `REDO APPLY` and the c
 branches of the bimodal pin were therefore exercised for real, so the wave-3 addendum's hand proof of
 the first-apply branch was not needed. The file has no data-dependent branch: every prestate and tail
 arm reads `pg_proc` and `pg_namespace` only.
+
+**The fix round of 2026-09-25 edited this file after it was applied, and re-applied the WHOLE
+CHAIN.** `CLARA_MIGRATION_REDO` refuses anything that is not the highest applied version, and 0334
+sat above 0333, so the supported way to re-apply an edited 0333 was a true from-scratch chain: the
+lane database `clara_l04` was dropped, `scripts/role-census-reset.mjs --apply` took the cluster back
+to 0154's pinned 14 `clara%` roles, the database was recreated and `pnpm --filter @clara/db migrate`
+ran `0001` → `0334` (314 files, 314 applied, no drift on a second run), then `seed`. Every one of
+this lane's five files therefore printed its FIRST-APPLY branch against a real chain rather than by
+the hand proof the wave-3 addendum asks for, `0330` and `0331` included — so the bimodal pins are
+proved on both branches for real, and #1051's AC3 "from-scratch chain green" is satisfied on the
+lane's own chain as well as by whatever the integrator runs on a disposable cluster.
 
 ## 0334 — the accrual register's side filter moves server-side (#1075, riders sweep wave, lane 01)
 

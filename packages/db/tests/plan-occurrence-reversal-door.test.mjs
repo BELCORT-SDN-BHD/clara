@@ -40,6 +40,7 @@ import {
   freshAccrualClient, accrual, createAccrualAdjustment, postPlanWork, requestPlanCatchUp,
   occurrenceRows, occurrenceCount, instructionRef, opReceiptRows,
   createAccountingPlan, endAccountingPlan, pauseAccountingPlan, resumeAccountingPlan, PLAN_KIND,
+  setClientStatus,
   todayInPlanZone, shiftMonths, ACHART, ACCRUAL_TZ,
 } from "./accrual-adjustments-fixtures.mjs";
 import {
@@ -102,6 +103,14 @@ async function monthEndBack(n) {
   const r = await rootQuery(
     `select ((date_trunc('month', ($1::date + ($2 || ' months')::interval)) + interval '1 month'
               - interval '1 day')::date)::text as d`, [today, String(-n)]);
+  return r.rows[0].d;
+}
+
+/** The first day of the month AFTER `day`'s. That is the rule 0193 states for a reversal date,
+ *  computed here from the calendar so the expectation does not come from the body under test. */
+async function monthAfter(day) {
+  const r = await rootQuery(
+    "select ((date_trunc('month', $1::date) + interval '1 month')::date)::text as d", [day]);
   return r.rows[0].d;
 }
 
@@ -531,6 +540,107 @@ test("p1073.refusals.core — the admission core's own answers travel outward un
     plan: paused.plan_id, due: paused.row.period, opKey: key,
   });
   assert.equal(done.reversed, true, "a key a refusal rolled back is free for the real act");
+
+  // 4 · A CLIENT THAT IS NO LONGER ACTIVE. The fourth arm of the door's own code map, driven
+  //     rather than assumed (adversarial round 2026-09-25, ADV-L01-06): the core answers
+  //     `client_inactive` for any non-active client status and this door must map it to the same
+  //     CLR13 its siblings do, not invent a code for it.
+  const dormant = await conflictScene({ tag: "refuse-dormant" });
+  await setClientStatus(dormant.client, "archived");
+  try {
+    await assertPair(CLR.conflict, "client_inactive",
+      () => reversePlanOccurrence(BOB(), { plan: dormant.plan_id, due: dormant.row.period }),
+      "reversing one period for a client that is no longer active");
+  } finally {
+    await setClientStatus(dormant.client, "active");
+  }
+});
+
+test("p1073.refusals.payload_identity — a refusal names an occurrence row only when that row outlives it, and the payload says which case the reader holds", async (t) => {
+  if (await gate1073(t)) return;
+
+  // 1 · A REFUSAL THE ADMISSION CORE RECORDED. The orphan wall writes the occurrence row, stamps
+  //     the refused outcome on it and returns its id — "legible in the plan's own history" is its
+  //     own reason for doing so. This door RAISES, so that write rolls back with the transaction,
+  //     and a payload that still named the row would hand a surface an identifier for something it
+  //     cannot open (adversarial round 2026-09-25, ADV-L01-01).
+  const a = await longAccrual({ tag: "payload" });
+  const beforeOrphan = await occurrenceCount(a.plan_id);
+  const orphan = await assertPair(CLR.conflict, "reversal_before_primary",
+    () => reversePlanOccurrence(BOB(), { plan: a.plan_id, due: a.unpostedDue }),
+    "a period whose accrual never posted");
+  assert.equal(orphan.detail.occurrence_recorded, false,
+    `the recorded-then-rolled-back refusal says so: ${JSON.stringify(orphan.detail)}`);
+  assert.equal(Object.prototype.hasOwnProperty.call(orphan.detail, "occurrence_id"), false,
+    `…and names no occurrence row: ${JSON.stringify(orphan.detail)}`);
+  assert.equal(orphan.detail.primary_state, "no_occurrence",
+    "…while every answer the core gave that is still TRUE after the rollback survives");
+  assert.equal(await occurrenceCount(a.plan_id), beforeOrphan,
+    "…and the plan really did keep nothing");
+
+  // 2 · A REFUSAL THE CORE REACHED BEFORE IT WROTE ANYTHING. A period this plan has already
+  //     reversed CONVERGES on a row an earlier transaction committed, so the id is real — and this
+  //     cell OPENS it rather than trusting the key.
+  const s = await conflictScene({ tag: "payload-converged" });
+  const first = await reversePlanOccurrence(BOB(), {
+    plan: s.plan_id, due: s.row.period, opKey: opk("p1073-payload-1"),
+  });
+  assert.equal(first.reversed, true, "the period is reversed once, for real");
+  const again = await assertPair(CLR.conflict, "reversal_already_admitted",
+    () => reversePlanOccurrence(BOB(), {
+      plan: s.plan_id, due: s.row.period, opKey: opk("p1073-payload-2"),
+    }),
+    "reversing a period this plan has already reversed");
+  assert.equal(again.detail.occurrence_recorded, true,
+    `the converged refusal says its row was kept: ${JSON.stringify(again.detail)}`);
+  const rows = await occurrenceRows(s.plan_id);
+  assert.ok(rows.some((r) => r.id === again.detail.occurrence_id),
+    `…and the row it names is one a reader can open: ${JSON.stringify(again.detail)}`);
+});
+
+test("p1073.history.refusal_record_diverges — the SAME refusal is kept in the plan's history by 'reverse now' and kept by nothing when the one-period remedy raises it", async (t) => {
+  if (await gate1073(t)) return;
+
+  // The two remedies this screen offers for one fact answer the same way and leave DIFFERENT
+  // durable records, because one commits its receipt either way and the other raises. The
+  // adversarial round (2026-09-25, ADV-L01-02) found that difference undocumented and unmeasured;
+  // this cell measures it on two identically built scenes so the trade is a decision, not an
+  // accident. 0333's header, packages/db/README.md's 0333 section and CONTEXT.md's
+  // `accrual_bill_conflict` paragraph all state it.
+  const viaWindow = await longAccrual({ tag: "hist-window" });
+  const viaDoor = await longAccrual({ tag: "hist-door" });
+  const revDue = await monthAfter(viaWindow.unpostedDue);
+  assert.equal(revDue, await monthAfter(viaDoor.unpostedDue),
+    "the two scenes reverse the same period on the same day");
+  const windowBefore = await occurrenceCount(viaWindow.plan_id);
+  const doorBefore = await occurrenceCount(viaDoor.plan_id);
+
+  // 1 · "REVERSE NOW" — a catch-up over exactly that reversal day. The orphan wall refuses, the
+  //     core RECORDS the refusal on the occurrence, and the receipt commits: the row stays.
+  await requestPlanCatchUp(BOB(), {
+    plan: viaWindow.plan_id, from: revDue, to: revDue, opKey: opk("p1073-hist-window"),
+  });
+  const kept = (await occurrenceRows(viaWindow.plan_id))
+    .filter((r) => r.leg === "reversal" && r.due_date === revDue);
+  assert.equal(kept.length, 1,
+    `the window left the refused reversal on the plan (got ${JSON.stringify(kept)})`);
+  assert.equal(kept[0].outcome?.state, "refused",
+    `…recorded as refused: ${JSON.stringify(kept[0].outcome)}`);
+  assert.equal(kept[0].outcome?.reason, "reversal_before_primary", "…under the core's own token");
+  assert.equal(kept[0].work_id, null, "…and it admitted no Work");
+  assert.equal(await occurrenceCount(viaWindow.plan_id), windowBefore + 1,
+    "…so the plan's history gained a row a colleague can read later");
+
+  // 2 · THE ONE-PERIOD REMEDY — the same refusal, raised. The transaction rolls back, which is
+  //     what frees the op key, and the record goes with it.
+  await assertPair(CLR.conflict, "reversal_before_primary",
+    () => reversePlanOccurrence(BOB(), { plan: viaDoor.plan_id, due: viaDoor.unpostedDue }),
+    "the same refusal reached through the one-period remedy");
+  assert.equal(await occurrenceCount(viaDoor.plan_id), doorBefore,
+    "the raised refusal left the plan exactly as it found it");
+  assert.equal((await occurrenceRows(viaDoor.plan_id))
+    .filter((r) => r.leg === "reversal" && r.due_date === revDue).length, 0,
+    "…and in particular no refused reversal for that period");
 });
 
 // ===========================================================================================

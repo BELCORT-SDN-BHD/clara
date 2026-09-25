@@ -1211,7 +1211,11 @@ remedies that act on the accrual plan directly — skip the next occurrence, rev
 over the window from the flagged period to its scheduled reversal date), or reverse THIS PERIOD
 ONLY (one named occurrence, no window; #1073). The last two leave the same amount on the books for
 that period, and differ as ACTS rather than as outcomes: one is a window, one is a scoped entry
-with its own receipt and a refusal that names the occurrence.
+with its own receipt and a refusal that names the occurrence. They also differ in what the plan's
+own history KEEPS when the remedy is refused: the window commits its receipt either way, so a
+refusal it reaches is left recorded on the occurrence for a colleague to read and becomes
+admissible once the accrual posts; the scoped entry refuses by rolling back, which frees its key
+for a real retry and leaves no record of the attempt.
 A derived row outlives its own REMEDIES: when the plan those remedies act on is ended or paused
 they all refuse, while the fact that produced the row is still on the books — so the row stays and
 the surface renders the remedies unavailable with the reason, rather than the row disappearing or

@@ -2265,7 +2265,24 @@ and reads every answer back off `clara.journal_lines`, `clara.accounting_plan_oc
   a period whose accrual never posted, and `plan_ended` / `plan_paused` — the same two tokens both
   existing remedies raise, so the surfaces keep one sentence each. The cell then proves WHY this
   door raises instead of reporting: the op_key a `plan_paused` refusal rolled back does the real act
-  once the plan is resumed.
+  once the plan is resumed. The fix round of 2026-09-25 added the fourth arm of the door's own code
+  map, `client_inactive` on an archived client (ADV-L01-06), which no cell drove before.
+* `p1073.refusals.payload_identity` — the refusal CONTRACT, added by the fix round of 2026-09-25
+  (ADV-L01-01). The admission core records most refusals ON an occurrence row and returns its id;
+  this door raises, so that write rolls back. The cell drives both halves: the orphan wall's
+  refusal carries `occurrence_recorded: false` and NO `occurrence_id`, and the plan really keeps
+  nothing; the converged `reversal_already_admitted` refusal carries `occurrence_recorded: true`
+  and an `occurrence_id` the cell OPENS on `clara.accounting_plan_occurrences` rather than trusting
+  the key. It was red against the pre-fix body for exactly the right reason (the payload still
+  named a row the rollback had destroyed).
+* `p1073.history.refusal_record_diverges` — the divergence between the two remedies, measured
+  rather than discovered (ADV-L01-02). Two identically built plans, one refusal: through
+  `clara.request_plan_catch_up`, which commits its receipt either way, the plan is LEFT holding a
+  `refused` / `reversal_before_primary` reversal occurrence with no Work; through this door the
+  same refusal leaves the plan exactly as it found it. The reversal date the cell compares on is
+  computed from the calendar (`date_trunc('month', due) + 1 month`), not from
+  `clara._plan_reversal_date`, so the expectation does not come from the body under test.
+  Non-vacuity: pointed at the WINDOW plan, the "no refused reversal survives" half goes red.
 * `p1073.revenue.one_live_amount` — the same claim on the other half of the books (#942). A revenue
   accrual (Dr accrued income / Cr revenue) with a document-sourced invoice crediting the same income
   account inside the period: the reversal exchanges the sides of what that period posted, the income
