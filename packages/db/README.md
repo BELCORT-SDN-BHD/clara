@@ -7516,10 +7516,27 @@ so this is a statement about the shared body, not about a lane that ships today.
 **One consequence nobody asked for, and it is the right one.** If a correction moved an accrual onto
 DIFFERENT accounts after a period posted, the reversal now posts to the ORIGINAL two accounts (the
 ones carrying the balance) rather than the new ones. If one of those has since been deactivated, the
-reversal REFUSES at posting time through `clara._validate_entry_lines`'s existing "line codes to a
-non-existent account" floor instead of posting to an account that carries nothing. A balance cannot
-be cleared off an account the books will not accept a line on; the remedy is to reactivate it. No
-new refusal is minted here, and the floor is 0009's, unchanged.
+reversal REFUSES at posting time instead of posting to an account that carries nothing. A balance
+cannot be cleared off an account the books will not accept a line on; the remedy is to reactivate
+it. No new refusal is minted here: the floor already existed and this file only routes a reversal
+into it.
+
+WHICH floor, exactly — corrected by the adversarial round of 2026-09-25 (ADV-L01-03), because this
+section and 0332's own immutable header both named the wrong body. The refusal is
+`clara._record_journal_entry_core`'s own active-account check, not
+`clara._validate_entry_lines`'s. The one a reversal reaches raises **CLR10** with the sentence
+`line <n> codes to an account this client does not have active: <code>` and the typed detail
+`{"reason":"unknown_account","field":"lines[<n>].account_code","account_code":"<code>"}`;
+`clara._validate_entry_lines`'s own sentence is `line codes to a non-existent account`, it carries
+**no** `reason` token at all, and it is never reached on this path because
+`clara._record_journal_entry_core` runs its check first (measured on `clara_l04`: the check sits at
+`prosrc` offset 26518 of that body, its call to `clara._validate_entry_lines` at 35680). A catalog
+census of the live schema places the "does not have active" sentence in exactly three bodies —
+`clara._record_journal_entry_core`, `clara._assert_accrual_account`, `clara._assert_adjustment_account`
+— and the "non-existent account" sentence in exactly one, `clara._validate_entry_lines`. A surface
+mapping refusal reasons must therefore expect `unknown_account`; the applied 0332 header keeps its
+wrong citation because applied migrations are immutable, and this is where the estate states the
+correction (the same idiom 0330 uses for 0308:870).
 
 **The NULL guard is a belt, not a branch a caller can reach**, and the file says so in a checkable
 way rather than in prose. `v_primary_entry` is the entry `clara._plan_primary_entry` just resolved
