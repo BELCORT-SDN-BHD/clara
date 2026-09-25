@@ -7478,3 +7478,99 @@ allowlist rows are `on conflict do nothing`, and each split RECOVERS its pre-ima
 splices — from the human door on a fresh apply, and by REVERSING the committed core on a redo — so
 the pin is asserted on both paths rather than only on the one `CLARA_MIGRATION_REDO` takes. §0 also
 refuses a HALF-applied file (one core present, one absent) by name rather than completing it.
+
+## 0353 — the model lane reaches the tenancy lane: six read twins and two on-behalf-of confirmations (#1137, riders sweep wave, lane L8)
+
+#949's successor contract (`reports/wave4-lane01-ticket949.md`) named four chat tools —
+`read_tenancy_terms`, `read_rent_settlement_candidates`, `confirm_tenancy_rent_plan` and
+`confirm_tenancy_rent_plan_revision` — whose doors are all `clara_authenticated` only. The cut phase
+deferred all four (`docs/plan/active/riders-2026-09-20/CUT-PLAN.md` §1.4, class C, entries C4-C7)
+and asked for an owner ruling on the two CONFIRMATIONS, because they are acts a person takes. The
+owner-delegated ruling of 2026-09-25 on #1137 answers it: **yes, Clara may confirm a tenancy rent
+plan on a bookkeeper's behalf from the conversation, as an OBO twin in #915's shape — the person
+still confirms and the act is recorded as theirs.**
+
+This file is that ruling's database half, and it applies two established shapes at once.
+
+**The six READS take #1000's [0320] / #1136's [0352] shape.** Each read's computation moves into ONE
+ungranted core that takes the caller's FIRM as an argument
+(`clara._get_contract_terms_core`, `clara._get_tenancy_rent_plan_draft_core`,
+`clara._propose_contract_terms_core`, `clara._get_tenancy_escalation_revision_core`,
+`clara._get_rent_settlement_candidates_core`, `clara._get_tenancy_deposit_coding_core`); each human
+door keeps its signature, its envelope, its refusal codes, its floor and its ACL and becomes that
+core's own thin audited wrapper; and six new audited wrappers — `clara.wake_*`, EXECUTE to
+`clara_agent_ro` alone with one `clara.wake_fn_allowlist` row each for the `interactive` kind — are
+the model lane's doors.
+
+**The two CONFIRMATIONS take #915's [0307] shape.** Each confirmation's body moves into ONE
+ungranted core that takes the firm, the ACTOR and the LANE as arguments
+(`clara._confirm_tenancy_rent_plan_core`, `clara._confirm_tenancy_rent_plan_revision_core`); the
+human door keeps its JWT read and passes `lane => 'human'`; and
+`clara.confirm_tenancy_rent_plan_for` / `clara.confirm_tenancy_rent_plan_revision_for` — EXECUTE to
+`clara_runtime` alone — name the initiating human in an ARGUMENT and re-check that person's
+membership LIVE (no membership answers exactly as an unknown client does; a deactivated member gets
+`authority_lost`; below bookkeeper gets `insufficient_role`). Every rule that is not about WHO is
+calling lives in the core, so "the twin's refusal vocabulary matches the human door's for every
+shared rule" is a fact rather than a promise.
+
+**Why `clara.revise_accounting_plan` is in this file at all.** The escalation's confirmation ENDS in
+a plan revision, and that door resolves its caller through `clara._plan_door_ctx` → `clara._human_ctx`
+→ `clara.jwt_sub()`. The alternative to splitting it was a machine-side copy of 8.7 kB of
+concurrency-critical logic — two advisory rungs, a row lock, a re-read under it, the alignment wall,
+the catch-up wall — and a second copy of that is a second place for a posting race to be forgotten.
+So `clara._revise_accounting_plan_core(p_firm, p_actor, …)` is 0193's own body with the actor ladder
+lifted out, and `clara.revise_accounting_plan` is a thin delegate over it whose op-key wall still
+runs FIRST and whose floor and firm wall are still `clara._plan_door_ctx`'s.
+
+**The one duplication this file knowingly adds, and the follow-up that removes it.**
+`clara._tenancy_plan_core` is the plan-creation step the OBO confirmation takes, because
+`clara.create_accounting_plan` needs a JWT. It is `clara._obo_plan_core`'s (0308) body with the kind
+fixed to `recurring_journal`, and it BELONGS in `clara._obo_plan_core` as a two-line widening of
+that body's closed kind set. It is separate only because lane L1 of the riders sweep wave recuts
+`clara._obo_plan_core` in the same wave (#1051, then #1080), and the sweep's grouping rule is that
+no database body is written in one lane and written or pinned in another — a second recut of one
+body in one wave collides at integration, and a prestate pinned to a sha another lane is about to
+change refuses the migration for a change that is not a defect. **Follow-up: once #1051 and #1080
+have landed, widen `clara._obo_plan_core`'s kind set to admit `recurring_journal` with
+`via = 'confirm_tenancy_rent_plan_for'`, and reduce `clara._tenancy_plan_core` to a caller of it.**
+For the same reason this file's prestate deliberately does NOT pin
+`clara.create_accounting_plan`, `clara._obo_plan_core`, `clara._accrual_plan_core` or
+`clara._authority_ref_refusal`.
+
+**What the machine side bought, and nothing else.** Eight EXECUTEs on eight NEW names and six
+allowlist rows for one wake kind. No human door's ACL moved; the ten names of
+`TENANCY_RENT_0300_HUMAN_FNS` still hold zero machine-lane grants, and the tail asserts that role by
+role. `clara.settle_rent_payable` (accepting a candidate bank line) and
+`clara.record_contract_terms` (recording what the page says) gain NO twin: a settlement with two
+candidate lines of the same amount is adjudicated where a person can see both, and recording a term
+is the person's own reading of the page.
+
+**The surgery, and how a reader checks it.** Nine bodies are recut and not one is hand-retyped.
+Eight of the nine share ONE anchor — the `c := clara._human_ctx(clara.role_rank('<floor>'));` line
+every 0300 door opens with — replaced by a comment and `select p_firm as firm into c;` (the reads)
+or `select p_firm as firm, p_actor as actor into c;` (the confirmations). The replacement ASSIGNS
+THE SAME RECORD VARIABLE the human door assigned, so no second substitution is needed and every
+other line of every core is the human door's own text byte for byte. Three bodies carry one further
+anchor each, and each is a LANE question and nothing else: the confirmation's plan step (human →
+`clara.create_accounting_plan`, OBO → `clara._tenancy_plan_core`), the revision's plan step (both
+lanes → `clara._revise_accounting_plan_core`, so there is no branch), and
+`clara.revise_accounting_plan`'s own actor ladder. Both confirmations also stamp the lane on their
+audit row (`via`), exactly as 0222, 0307 and 0308 stamp theirs — the only observable change to a
+human entrance in this file, and it is additive.
+
+Each core is installed as PLAIN SQL with its body written out, and the derivation is pinned on BOTH
+sides of the apply: §0 applies the surgery to the LIVE pre-image and refuses unless the result
+hashes to the body embedded below it, and §TAIL re-reads the COMMITTED core, pins the same value and
+REVERSES the surgery back to the pre-image's own sha.
+
+**The client-pin arm differs by shape, and both arms fail CLOSED.** The two client-scoped reads
+compare the credential's pin against the argument, as the bank wrappers do. The four
+document-scoped reads take no client, and resolving a document's client in order to compare it
+would be an existence surface of its own — so they REFUSE a pinned credential outright. Both are
+dormant today: the one allowlisted kind, `interactive`, is client-less by construction.
+
+**Redo (#957).** Redo-safe by construction: every object is a `create or replace`, the six allowlist
+rows are `on conflict do nothing`, and each split RECOVERS its pre-image before it splices — from
+the human door on a fresh apply, and by REVERSING the committed core on a redo — so the pin is
+asserted on both paths rather than only on the one `CLARA_MIGRATION_REDO` takes. §0 also refuses a
+HALF-applied file by name rather than completing it.
