@@ -33,7 +33,45 @@ set local statement_timeout = '20min';  -- PRECAUTIONARY, not load-bearing: this
 -- =====================================================================================
 do $c0338_pre$
 declare
-  v_n int; v_def text;
+  v_n int; v_sha text; v_src text; v_i int;
+  v_first int := 0; v_redo int := 0; v_modes text := '';
+  -- THE BODIES THIS FILE RECUTS, pinned by their sha256(prosrc) MEASURED ON THIS RIG (riders sweep
+  -- lane 02 database `clara_l05`, 313 files, max `0337_prepayment_account_reservation` -- #1114,
+  -- #1077, #1079 and #1078 landed in this lane before this ticket), never copied from an older
+  -- migration's header. Each admits exactly TWO pre-images of its own -- its measured live sha, or
+  -- a body that already carries this file's own `0338` attribution -- so a redo (#957) is admitted
+  -- and real drift still refuses BY NAME. 0337's and 0336's idiom, line for line.
+  v_recut text[][] := array[
+    ['clara._authority_ref_refusal(text,uuid,uuid,uuid)',
+     '55c20b2008d51cc58cd4dc29b3f434965ead8450a846a73eb9f01f62d53cc208'],
+    ['clara._obo_plan_core(text,uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)',
+     '2049c1c4404e47102b375d506271938f5f3e03405fd7a25b8d303118c13a6b4a']
+  ];
+  -- …AND THE NEIGHBOURS THIS FILE DEPENDS ON AND MUST NOT MOVE.
+  --
+  --   · `create_accounting_plan` is the door this file deliberately does NOT widen. §E's whole
+  --     claim -- that the explicit-instruction branch is byte-for-byte the wall that was there --
+  --     is a claim about THIS body's text, because #915's and #941's parity cells compare the two
+  --     entrances' refusal payloads byte for byte. If it moved, §E must be re-derived against it.
+  --   · `_prepayment_plan_core` is the one-line wrapper the schedule core reaches §E through. It
+  --     is `_obo_plan_core` with the kind bound; if it stopped delegating, §E would be dead code.
+  --   · `_plan_admit_occurrence` is what makes the directing human MEAN something: it hands the
+  --     plan's `authorised_by` to `clara.admit_journal_work`, which rechecks that person's
+  --     membership, activity, rank and client status every month. This file writes plans FOR that
+  --     body to admit and does not touch it.
+  --   · `wake_establish_prepayment_schedule` keeps its exact seven arguments and its delegation
+  --     (the ticket's own words). The lane re-opens inside the shared core, which is where #1036's
+  --     own header said to re-open it -- "one arm in one body rather than a second door".
+  v_keep text[][] := array[
+    ['clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)',
+     'a7c108d5dd4febbae9f98a87b42b69468aec31f1731336b2185c8e91b1b0951c'],
+    ['clara._prepayment_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)',
+     '266499b22d5e71c2095fccb570c301349810a0742129f33765e03f3060f72e7a'],
+    ['clara._plan_admit_occurrence(uuid,date,text,text,boolean)',
+     '02ea6afe635dc9a8453d69918f5f48cb05f404f6e404973096db2ec92d0a655e'],
+    ['clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)',
+     '84348ed4365bdbc07ad0020eca307e6f12fa5fc3141903092a0764fae462693e']
+  ];
 begin
   -- 1 · THE RELATION THIS FILE MINTS IS NOT ALREADY SOMEBODY ELSE'S. A `create table if not
   --     exists` is redo-safe, but it is only SAFE if the table it finds is this file's own.
@@ -62,7 +100,43 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '0338 prestate OK';
+  -- 4 · THE BODIES THIS FILE RECUTS, each in ONE of its own two admissible pre-images.
+  for v_i in 1 .. array_length(v_recut, 1) loop
+    select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex'), p.prosrc into v_sha, v_src
+      from pg_proc p where p.oid = v_recut[v_i][1]::regprocedure;
+    if v_sha is null then
+      raise exception '0338 prestate: % is absent', v_recut[v_i][1] using errcode='CLR10';
+    elsif v_sha = v_recut[v_i][2] then
+      v_first := v_first + 1; v_modes := v_modes || v_recut[v_i][1] || '=FIRST ';
+    elsif position('0338' in v_src) > 0 then
+      v_redo := v_redo + 1; v_modes := v_modes || v_recut[v_i][1] || '=REDO ';
+    else
+      raise exception '0338 prestate: % is neither its pinned pre-image (%) nor this file''s own recut; live sha %',
+        v_recut[v_i][1], v_recut[v_i][2], v_sha using errcode='CLR10';
+    end if;
+  end loop;
+
+  -- 5 · THE NEIGHBOURS ARE EXACTLY WHAT THIS FILE WAS WRITTEN AGAINST.
+  for v_i in 1 .. array_length(v_keep, 1) loop
+    select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_sha
+      from pg_proc p where p.oid = v_keep[v_i][1]::regprocedure;
+    if v_sha is distinct from v_keep[v_i][2] then
+      raise exception '0338 prestate: % moved (expected %, live %) -- this file reads it as the estate''s own rule and does not edit it; re-measure before applying',
+        v_keep[v_i][1], v_keep[v_i][2], coalesce(v_sha, '(absent)') using errcode='CLR10';
+    end if;
+  end loop;
+
+  -- 6 · THE AUTHORITY-KIND WALL IS STILL A NAMED CHECK. §C widens it by name; a wall that had
+  --     been dropped or renamed would leave §C adding a constraint nobody removed.
+  select count(*) into v_n from pg_constraint
+   where conrelid = 'clara.accounting_plans'::regclass
+     and conname = 'accounting_plans_authority_kind_check' and contype = 'c';
+  if v_n <> 1 then
+    raise exception '0338 prestate: clara.accounting_plans has no accounting_plans_authority_kind_check -- #977''s wall is what this file widens'
+      using errcode='CLR10';
+  end if;
+
+  raise notice '0338 prestate OK -- % FIRST, % REDO -- %', v_first, v_redo, v_modes;
 end $c0338_pre$;
 
 set role clara_fn_owner;
@@ -262,6 +336,261 @@ grant execute on function clara.record_firm_standing_instruction(text, text, tex
 comment on function clara.record_firm_standing_instruction(text, text, text) is
   '#1050: a named member of the firm records a firm-level standing instruction, with the one-line reason it is given under. Admin floor, clara_authenticated only -- no machine lane may reach it, because an instruction a machine recorded would name nobody. Version-forward: an unchanged re-recording by the same member is idempotent, a restated reason withdraws the live row and inserts a fresh one.';
 
+
+-- =====================================================================================
+-- §C — clara.accounting_plans.authority_kind GAINS ONE VALUE, and exactly one.
+--
+-- 0193:418 minted it as a CLOSED ONE-MEMBER check and its own header says why: "the spec's second
+-- kind is not built in this slice, and a one-member check is how that is enforced rather than
+-- hoped for". #977/0250 then made the wall the estate's accounting-authority control. The ruling
+-- of 2026-09-25 widens it by ONE member -- `standing_instruction` -- so a reader can tell a plan a
+-- person TYPED from a plan a person's STANDING INSTRUCTION produced, without either of them being
+-- a plan nobody authorised.
+--
+-- IT IS STILL CLOSED. `authority_rule` -- the kind 0193 named and refused -- is still absent, and
+-- both doors still refuse it by its own name before this constraint is ever consulted.
+-- =====================================================================================
+alter table clara.accounting_plans
+  drop constraint if exists accounting_plans_authority_kind_check;
+alter table clara.accounting_plans
+  add constraint accounting_plans_authority_kind_check
+  check (authority_kind in ('explicit_instruction', 'standing_instruction'));
+
+-- =====================================================================================
+-- §D — clara._authority_ref_refusal (0250 §A, widened by 0300 to a third kind). VERBATIM except
+--      the FOURTH arm, inserted immediately before the unknown-kind raise.
+--
+-- This is #977's ONE definition of "is the instruction this plan cites a person's instruction",
+-- and the estate's own census cell (`p977.definition.one`,
+-- tests/authority-ref-human-instruction.test.mjs) asserts a CLOSED world of exactly three readers.
+-- 0338 adds no reader: the wake lane resolves its firm's live instruction itself and hands the
+-- citation to `clara._prepayment_plan_core`, which is `clara._obo_plan_core`, which is one of the
+-- three.
+-- =====================================================================================
+create or replace function clara._authority_ref_refusal(p_ref_kind text, p_ref_id uuid, p_firm uuid, p_client uuid)
+  returns text language plpgsql stable security definer set search_path = clara, pg_temp as $c0338_arr$
+declare v_kind text; v_author uuid;
+begin
+  if p_ref_kind = 'accounting_work' then
+    -- UNCHANGED BY #977, and the owner's ruling says why: `clara.accounting_work.initiator` is
+    -- NOT NULL (0178:308), so a Work row cannot exist without naming the person who asked for
+    -- it. Its EXISTENCE in this firm and client is already the proof this door needs.
+    if exists (select 1 from clara.accounting_work w
+                where w.id = p_ref_id and w.firm_id = p_firm and w.client_id = p_client) then
+      return null;
+    end if;
+    return 'authority_ref_unresolved';
+  end if;
+
+  if p_ref_kind = 'chat_task' then
+    -- THE CHAT LANE, NARROWED. The same firm-AND-client ladder both doors already applied, and
+    -- then TWO facts about the row itself, as a CONJUNCTION:
+    --
+    --   its KIND is `chat_turn` -- only a turn is typed by a person. `wake`, `autodraft`,
+    --   `close_prep` and `accounting_work` are runs the estate started for itself, and the last
+    --   three carry an author (the human the run was started for) without being instructions.
+    --
+    --   its `created_by` is NOT NULL -- the column is nullable for every kind (0006:138) and the
+    --   chat ingress is what stamps it, so a turn row nobody signed is not an instruction either.
+    select t.kind, t.created_by into v_kind, v_author from clara.agent_tasks t
+     where t.id = p_ref_id and t.firm_id = p_firm and t.client_id = p_client;
+    if not found then
+      return 'authority_ref_unresolved';
+    end if;
+    if v_kind = 'chat_turn' and v_author is not null then
+      return null;
+    end if;
+    return 'authority_ref_not_human_instruction';
+  end if;
+
+  -- UNREACHABLE FROM EITHER DOOR: both refuse an unknown `kind` with their own
+  -- `authority_ref_invalid` wall before they ever call this. A raise rather than a quiet
+  -- refusal, so a future lane that widens the admitted kinds finds this line instead of a
+  -- silent "unresolved".
+  if p_ref_kind = 'contract_confirmation' then
+    -- #949 (0300): THE TENANCY LANE'S OWN INSTRUCTION, and it is admitted for the SAME reason
+    -- the accounting_work arm is, not a weaker one: clara.contract_plan_confirmations.
+    -- confirmed_by is NOT NULL, so the row cannot exist without naming the person who confirmed
+    -- the plan. Its EXISTENCE in this firm and client is the proof this door needs. The row also
+    -- carries the agreement it was confirmed against, which is how a rent plan records its
+    -- source document without a document ever being mistaken for an instruction.
+    if exists (select 1 from clara.contract_plan_confirmations cf
+                where cf.id = p_ref_id and cf.firm_id = p_firm and cf.client_id = p_client) then
+      return null;
+    end if;
+    return 'authority_ref_unresolved';
+  end if;
+
+  -- #1050 (0338 §D): THE FIRM'S OWN STANDING INSTRUCTION -- a FOURTH kind, admitted for the
+  -- SAME reason the accounting_work and contract_confirmation arms are and not a weaker one:
+  -- `clara.firm_standing_instructions.recorded_by` is NOT NULL, so the row cannot exist without
+  -- naming the MEMBER of this firm who gave it.
+  --
+  -- RESOLVED AT FIRM SCOPE, where the other three use the firm-AND-client ladder, and the
+  -- asymmetry is the point. Those three cite a CLIENT-scoped row. This one is the FIRM's standing
+  -- decision about how Clara may act for every client it keeps books for, and it names no client
+  -- at all -- narrowing it by client would make it resolve for none of them.
+  --
+  -- AND IT MUST STILL BE IN FORCE. A withdrawn row is kept forever (0338 §A is append-only) so a
+  -- plan written under it stays readable for as long as the plan does; it authorises nothing NEW.
+  -- `withdrawn_at is null` is what makes "the firm instructed this" a present-tense claim.
+  if p_ref_kind = 'firm_standing_instruction' then
+    if exists (select 1 from clara.firm_standing_instructions fsi
+                where fsi.id = p_ref_id and fsi.firm_id = p_firm and fsi.withdrawn_at is null) then
+      return null;
+    end if;
+    return 'authority_ref_unresolved';
+  end if;
+
+  raise exception 'clara._authority_ref_refusal: unknown authority reference kind %', coalesce(p_ref_kind, '(null)')
+    using errcode = 'CLR10';
+end $c0338_arr$;
+
+-- =====================================================================================
+-- §E — clara._obo_plan_core (0308 §D, recut by 0941's fold into one body). VERBATIM except the
+--      authority-kind wall and the reference-kind wall, each widened by exactly one member, and
+--      the two admitted ONLY in their own pairing.
+--
+-- WHY THIS BODY AND NOT `clara.create_accounting_plan`. The human door resolves its actor through
+-- `clara._human_ctx` -> `clara.jwt_sub()`, which no unattended connection carries; the wake lane
+-- therefore reaches the plan row through this twin, exactly as the OBO lane does. The human door
+-- is left at ONE authority kind on purpose: nothing in the ruling asks a person to plead their
+-- firm's standing instruction for a plan they typed themselves.
+-- =====================================================================================
+create or replace function clara._obo_plan_core(p_kind text, p_firm uuid, p_client uuid, p_author uuid, p_purpose text, p_authority_kind text, p_authority_ref jsonb, p_frequency text, p_day_rule text, p_day_of_month integer, p_timezone text, p_effective_from date, p_effective_to date, p_basis jsonb)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $c0338_obo$
+declare
+  v_plan uuid; v_rev uuid; v_digest text; v_ref_kind text; v_ref_id uuid; v_reason text;
+  v_warning jsonb; v_next jsonb; v_via text;
+begin
+  -- THE KIND IS A CLOSED SET, and an unknown one RAISES rather than writing a plan row the CHECK
+  -- would refuse with a bare 23514. Unreachable from either caller (both pass a literal); a later
+  -- lane that widens the set finds this line instead of a silent constraint violation.
+  if p_kind is null or p_kind not in ('amortisation_schedule', 'revenue_recognition_schedule') then
+    raise exception 'clara._obo_plan_core: unknown plan kind %', coalesce(p_kind, '(null)')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','plan_kind_unsupported','kind',p_kind)::text;
+  end if;
+  v_via := case p_kind when 'amortisation_schedule' then 'create_prepayment_schedule_for'
+                       else 'create_revenue_recognition_schedule_for' end;
+
+  -- THE AUTHORITY SHAPE, verbatim from clara.create_accounting_plan.
+  if p_authority_kind = 'authority_rule' then
+    raise exception 'an authority rule cannot yet authorise a plan; record the explicit instruction instead'
+      using errcode='CLR10', detail='{"reason":"authority_rule_unsupported"}';
+  end if;
+  -- #1050 (0338 §E) -- A SECOND AUTHORITY KIND, and exactly one, which is the ruling's own
+  -- arithmetic. `standing_instruction` is what the clocked prepayment lane writes: a NAMED MEMBER
+  -- of the firm recorded a firm-level standing instruction (0338 §A/§B), and every plan the
+  -- close_prep wake writes while it stands is authorised by THAT member, admitted under THEIR
+  -- membership and rank. It is not a wider wall -- the strict pairing below is what keeps it from
+  -- being one -- and it is deliberately NOT given to `clara.create_accounting_plan`: a person at a
+  -- keyboard types their own instruction, and has no use for their firm's blanket delegation.
+  if p_authority_kind is distinct from 'explicit_instruction'
+     and p_authority_kind is distinct from 'standing_instruction' then
+    raise exception 'unknown plan authority kind %', coalesce(p_authority_kind,'(null)')
+      using errcode='CLR10', detail='{"reason":"invalid_authority_kind"}';
+  end if;
+  if p_authority_ref is null or jsonb_typeof(p_authority_ref) <> 'object' then
+    raise exception 'a plan authority names the instruction that carries it'
+      using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"object"}';
+  end if;
+  v_ref_kind := p_authority_ref ->> 'kind';
+  -- RIDERS WAVE 4 INTEGRATION: the THIRD kind, because "verbatim from
+  -- clara.create_accounting_plan" above is a claim this file's own cells MEASURE --
+  -- p915.obo.refusals_match and p941.obo.authority drive both entrances on the same state
+  -- and require the same sentence byte for byte. Lane 01's 0300 added
+  -- contract_confirmation to the human door, so the twin carries it too or the parity
+  -- breaks. It admits nothing new in substance: clara._authority_ref_refusal, which 0300
+  -- also widened, still resolves the reference under the same firm-and-client ladder, and
+  -- a contract_confirmation row IS a named person's own confirmation -- exactly the
+  -- "person's instruction" #977 requires and an agent run cannot manufacture.
+  -- #1050 (0338 §E) -- THE TWO KINDS ARE ADMITTED ONLY IN THEIR OWN PAIRING, and the widening is
+  -- additive only because of it. A `standing_instruction` citing a chat turn would be a label
+  -- pasted on a person's typed decision; an `explicit_instruction` citing a standing-instruction
+  -- row would be a person claiming their firm's blanket delegation as something they themselves
+  -- decided. Each kind therefore names exactly the references that can carry it.
+  --
+  -- THE EXPLICIT BRANCH IS BYTE-FOR-BYTE THE WALL THAT WAS HERE BEFORE, and that is load-bearing
+  -- rather than tidy: #915's and #941's parity cells (`p915.obo.refusals_match`,
+  -- `p941.obo.authority`) drive this body and `clara.create_accounting_plan` on the same state and
+  -- compare the WHOLE refusal payload byte for byte, so a reworded sentence here would be a
+  -- divergence from a door this file has no standing to widen.
+  if p_authority_kind = 'standing_instruction' then
+    if v_ref_kind is distinct from 'firm_standing_instruction' then
+      raise exception 'a standing instruction authorises a plan only by citing the firm standing-instruction row that carries it'
+        using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"kind"}';
+    end if;
+  elsif v_ref_kind is null or v_ref_kind not in ('accounting_work','chat_task','contract_confirmation') then
+    raise exception 'a plan authority reference names an accounting_work, a chat_task or a contract_confirmation'
+      using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"kind"}';
+  end if;
+  begin
+    v_ref_id := (p_authority_ref ->> 'id')::uuid;
+  exception when others then
+    v_ref_id := null;
+  end;
+  if v_ref_id is null then
+    raise exception 'a plan authority reference names a row by id'
+      using errcode='CLR10', detail='{"reason":"authority_ref_invalid","constraint":"id"}';
+  end if;
+  -- RESOLVED, and on the CHAT-LANE arm a PERSON'S instruction rather than a task the estate
+  -- enqueued for itself (#977, 0250). The chat entrance these doors open is exactly the caller
+  -- that will supply `{kind:'chat_task', id: <this turn>}`, so this is the wall that stops a wake
+  -- run or an autodraft from authorising its own schedule.
+  v_reason := clara._authority_ref_refusal(v_ref_kind, v_ref_id, p_firm, p_client);
+  if v_reason = 'authority_ref_not_human_instruction' then
+    raise exception 'the instruction this plan cites is not a person''s instruction'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason',v_reason,'kind',v_ref_kind,'id',v_ref_id)::text;
+  elsif v_reason is not null then
+    raise exception 'the instruction this plan cites does not exist for this client'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason',v_reason,'kind',v_ref_kind,'id',v_ref_id)::text;
+  end if;
+
+  if p_purpose is null or btrim(p_purpose) = '' then
+    raise exception 'an accounting plan needs a purpose' using errcode='CLR10',
+      detail='{"reason":"invalid_purpose","constraint":"nonempty"}';
+  end if;
+  perform clara._assert_plan_schedule(p_kind, p_frequency, p_day_rule,
+    p_day_of_month, p_timezone, p_effective_from, p_effective_to, null);
+  perform clara._assert_journal_basis(p_basis);
+  v_digest := clara._journal_basis_digest(p_basis);
+
+  perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
+
+  v_plan := gen_random_uuid();
+  insert into clara.accounting_plans(id, firm_id, client_id, kind, status, purpose, authority_kind,
+      authority_ref, authorised_by, authority_from, current_revision, created_by)
+    values (v_plan, p_firm, p_client, p_kind, 'active', btrim(p_purpose),
+      p_authority_kind, p_authority_ref, p_author, p_effective_from, 1, p_author);
+  insert into clara.accounting_plan_revisions(plan_id, firm_id, client_id, plan_kind, revision,
+      frequency, day_rule, day_of_month, timezone, effective_from, effective_to, basis,
+      basis_digest, auto_reverse, reversal_day_rule, created_by)
+    values (v_plan, p_firm, p_client, p_kind, 1, p_frequency, p_day_rule,
+      p_day_of_month, p_timezone, p_effective_from, p_effective_to, p_basis, v_digest, false,
+      null, p_author)
+    returning id into v_rev;
+
+  v_warning := clara._plan_overlap_warning(p_client, p_basis, v_plan);
+  select jsonb_agg(jsonb_build_object('due_date', to_char(e.due_date,'YYYY-MM-DD'), 'leg', e.leg)
+           order by e.due_date) into v_next
+    from clara._plan_due_events(p_effective_from, p_frequency, p_day_rule, p_day_of_month, false,
+           p_effective_from, coalesce(p_effective_to, (p_effective_from + 3650)), 3) e;
+
+  -- THE AUDIT ROW IS 0193'S OWN VERB with the entrance's `via`, exactly as 0222's core stamps its
+  -- own: the audit trail says a plan was created and by WHICH entrance, and a reader can tell an
+  -- OBO configuration from a human one without joining anything.
+  perform clara._audit(p_firm, p_author, null, null, 'create_accounting_plan', null,
+    jsonb_build_object('client', p_client, 'plan', v_plan, 'kind', p_kind,
+      'revision', 1, 'authority', p_authority_ref, 'via', v_via));
+
+  return jsonb_build_object('plan_id', v_plan, 'revision_id', v_rev, 'revision', 1,
+    'status', 'active', 'kind', p_kind,
+    'next_occurrences', coalesce(v_next,'[]'::jsonb), 'overlap_warning', v_warning);
+end $c0338_obo$;
+
 reset role;
 
 -- =====================================================================================
@@ -328,5 +657,48 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '0338 tail OK -- a named member of the firm can record a standing instruction';
+  -- 4 · THE AUTHORITY-KIND WALL IS WIDENED BY ONE AND STILL CLOSED, read off the constraint
+  --     definition rather than off this file's own text.
+  select count(*) into v_n from pg_constraint
+   where conrelid = 'clara.accounting_plans'::regclass
+     and conname = 'accounting_plans_authority_kind_check'
+     and pg_get_constraintdef(oid) like '%explicit_instruction%'
+     and pg_get_constraintdef(oid) like '%standing_instruction%'
+     and pg_get_constraintdef(oid) not like '%authority_rule%';
+  if v_n <> 1 then
+    raise exception '0338 tail: the authority-kind CHECK is not {explicit_instruction, standing_instruction}'
+      using errcode='CLR10';
+  end if;
+
+  -- 5 · THE FOURTH ARM RESOLVES, DRIVEN rather than read: an id this database does not hold is
+  --     unresolved, which is only reachable if the arm exists at all (an unknown kind RAISES).
+  if clara._authority_ref_refusal('firm_standing_instruction',
+       '00000000-0000-4000-8000-00000000dead'::uuid, gen_random_uuid(), gen_random_uuid())
+     is distinct from 'authority_ref_unresolved' then
+    raise exception '0338 tail: clara._authority_ref_refusal does not carry the firm_standing_instruction arm'
+      using errcode='CLR10';
+  end if;
+
+  -- 6 · THE HUMAN PLAN DOOR IS NOT WIDENED. §E gives the second kind to the OBO twin alone, and
+  --     that asymmetry is a decision rather than an oversight, so it is asserted.
+  select count(*) into v_n from pg_proc p
+   where p.oid = 'clara.create_accounting_plan(uuid,text,text,text,jsonb,text,text,integer,text,date,date,jsonb,text,text)'::regprocedure
+     and p.prosrc like '%p_authority_kind is distinct from ''explicit_instruction'' then%'
+     and p.prosrc not like '%standing_instruction%';
+  if v_n <> 1 then
+    raise exception '0338 tail: clara.create_accounting_plan was widened -- the ruling gives the second kind to the unattended lane only'
+      using errcode='CLR10';
+  end if;
+
+  -- 7 · #977's CLOSED WORLD OF READERS IS UNMOVED. `p977.definition.one` asserts exactly three
+  --     bodies read the shared definition; this file adds none, and says so here too.
+  select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara' and p.proname <> '_authority_ref_refusal'
+     and p.prosrc like '%clara._authority_ref_refusal(%';
+  if v_n <> 3 then
+    raise exception '0338 tail: % bodies read clara._authority_ref_refusal -- #977''s closed world is three', v_n
+      using errcode='CLR10';
+  end if;
+
+  raise notice '0338 tail OK -- a named member of the firm can record a standing instruction, and a plan may cite it';
 end $c0338_tail$;
