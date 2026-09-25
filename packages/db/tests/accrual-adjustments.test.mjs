@@ -704,7 +704,18 @@ test("p652.acl.grants — the accrual relation is RLS-forced with no application
   };
   const HUMAN = "clara.create_accrual_adjustment(uuid,text,jsonb,jsonb,text,text,int,text,date,date,text)";
   const FOR = "clara.create_accrual_adjustment_for(uuid,uuid,text,jsonb,jsonb,text,text,int,text,date,date,text)";
-  const LIST = "clara.list_accrual_adjustments(uuid,date,date)";
+  // #1075 (0334) widened this door to a fourth argument (p_side, server-side) and the
+  // three-argument signature is GONE (0334's own tail proves it does not survive as a resolvable
+  // overload) — but THIS battery is gated on 0222 alone (gateAccruals), and the `db-slice-
+  // frontiers` matrix runs it against earlier frontiers where 0334 has not applied, so the probed
+  // signature is picked off the LIVE catalog rather than hardcoded either way (the
+  // `list_accounting_work`/0267 idiom, firm-portfolio-pack.test.mjs's own `workListWidened`).
+  const sideFilterLive = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ $1",
+    ["accrual_list_side_filter$"])).rows[0].n > 0;
+  const LIST = sideFilterLive
+    ? "clara.list_accrual_adjustments(uuid,date,date,text)"
+    : "clara.list_accrual_adjustments(uuid,date,date)";
   const GET = "clara.get_accrual_adjustment(uuid)";
 
   for (const sig of [HUMAN, LIST, GET]) {
