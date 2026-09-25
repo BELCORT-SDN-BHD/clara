@@ -112,7 +112,9 @@ declare
     ['clara._fa_assert_code_unreserved(uuid,text)',
      '816f9c24c6cf36b876c7fa3ec1df8a6eac4d492e5f139a8d64755caef534203b'],
     ['clara.upsert_fa_account_profile(uuid,text,text,text,text)',
-     '14cba9a309642dafa8a39131a3b850f9663b5b7d64e3fea8632852c11af0e41c']
+     '14cba9a309642dafa8a39131a3b850f9663b5b7d64e3fea8632852c11af0e41c'],
+    ['clara._adv_enrolment_admission(uuid,text,uuid)',
+     '55a2bf3c3020202c32e513219e83c8f3b72a23640100431436137ea8b2949f2a']
   ];
   -- …AND THE NEIGHBOURS THIS FILE DEPENDS ON AND MUST NOT MOVE.
   --
@@ -613,6 +615,139 @@ revoke all on function clara.upsert_fa_account_profile(uuid, text, text, text, t
 grant execute on function clara.upsert_fa_account_profile(uuid, text, text, text, text)
   to clara_authenticated;
 
+-- =====================================================================================
+-- §E — clara._adv_enrolment_admission — THE STAFF-ADVANCE ENROLMENT DOOR'S ADMISSION PREDICATE.
+--      0043's body VERBATIM except a third remedy branch on its reservation arm.
+--
+-- This body is BOTH the gate `clara.enrol_staff_advance_account` enforces and the sentence
+-- `clara._adv_on_approve` shows a person who is trying to reverse an entry on a retired advance
+-- code, which is why the branch carries an `advice` and not only a `remedy` token.
+-- =====================================================================================
+create or replace function clara._adv_enrolment_admission(p_client uuid, p_code text,
+    p_exclude_entry uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $c0337_e$
+declare
+  v_bal bigint; v_dom text; v_role text; v_owner text; v_bank uuid; v_perm boolean;
+  v_axis text; v_reason text; v_msg text; v_remedy text; v_advice text; v_detail jsonb;
+  v_fallback constant text :=
+    ' Or leave the code as it is and post an ordinary correcting journal entry on it instead: nothing guards a retired advance code, and staff_advance_tie reports movement outside every enrolment window in its own out_of_window_cents column.';
+begin
+  select coalesce(sum(l.debit_cents - l.credit_cents), 0) into v_bal
+    from clara.journal_lines l
+    join clara.journal_entries j on j.id = l.entry_id
+    where l.client_id = p_client and l.account_code = p_code and j.status = 'approved'
+      and (p_exclude_entry is null or j.id <> p_exclude_entry);
+
+  -- (i) TYPING (the verb's own argument, kept at its own site).
+  if not exists (select 1 from clara.coa_accounts a
+                 where a.client_id = p_client and a.account_code = p_code
+                   and a.is_active and a.account_type = 'asset'
+                   and a.account_class is null) then
+    v_axis := 'account_type'; v_reason := 'advance_enrolment_invalid';
+    v_msg := 'a staff-advance account must be an active, asset-typed, non-control account on this client''s chart';
+    v_remedy := 'fix_chart_account_then_re_enrol';
+    v_advice := format('Re-enrolment is refused today: %s is not an active, asset-typed, non-control account on this client''s chart. Restore the chart account (active, asset-typed, no control class) FIRST, then re-enrol this code, then reverse the entry again.%s', p_code, v_fallback);
+  end if;
+
+  -- (ii) THE BANK DOOR. Status-blind, exactly as the verb wrote it -- a bank account that was
+  -- deactivated still carries `coa_account_code`, so the code stays bound until the binding is
+  -- MOVED. The advice names the verb that moves it rather than implying deactivation frees it.
+  if v_axis is null then
+    select ba.id into v_bank from clara.bank_accounts ba
+      where ba.client_id = p_client and ba.coa_account_code = p_code limit 1;
+    if v_bank is not null then
+      v_axis := 'bank_account'; v_reason := 'advance_enrolment_invalid';
+      v_msg := format('account %s is a registered bank account for this client and cannot be enrolled as a staff-advance account', p_code);
+      v_remedy := 'move_bank_binding_then_re_enrol';
+      v_advice := format('Re-enrolment is refused today: %s is bound to a registered bank account for this client (deactivating that bank account does NOT free the code -- the binding survives it). Move the binding onto another chart code (remap_bank_account_coa) FIRST, then re-enrol this code, then reverse the entry again.%s', p_code, v_fallback);
+    end if;
+  end if;
+
+  -- (iii) THE SHARED RESERVATION UNION.
+  if v_axis is null then
+    select rr.domain, rr.role, rr.owner_ref into v_dom, v_role, v_owner
+      from clara._acct_role_reserved(p_client, p_code) rr limit 1;
+    if v_dom is not null then
+      v_axis := 'role_reserved'; v_reason := 'advance_enrolment_invalid';
+      v_msg := format('chart account %s is already reserved by the %s register (%s role) for this client; pick a different account', p_code, v_dom, v_role);
+      -- WHICH SHAPE HOLDS IT, AND WHAT ACTUALLY RELEASES THAT SHAPE. `_fa_reserved_roles`
+      -- unions two: an ACTIVE fa_account_profiles row (released by retire_fa_account_profile)
+      -- and a clara.fixed_assets REGISTER ROW, which keeps the codes it was born with and so
+      -- survives the profile being retired or version-forwarded.
+      --
+      -- [CROSS-SECTION EDIT, authored by the S5 reservation-authority lane -- owner ruling
+      -- 2026-08-03 / WDB-R1 item 2. Reported, not silent.] This arm used to answer
+      -- "permanent, and it will never become possible". That was a TRUE statement about the
+      -- pre-0042 world, where the register disjuncts carried no status test -- and it was
+      -- precisely the defect the ruling ordered eradicated, because it made a lawful advance
+      -- reversal un-recordable FOREVER. 0042 S5.15 gates those disjuncts, so a DISPOSED,
+      -- SUPERSEDED or UNWOUND row no longer holds the code: this branch now has a followable
+      -- remedy and, under WDB-R2, must name it instead of promising an impossibility.
+      --
+      -- THE PROBE IS GATED IDENTICALLY TO THE UNION, which is the whole point: a message that
+      -- measured "does any row carry this code" while the union measured "does any LIVE row
+      -- carry it" would report a claim that does not exist -- telling a professional to end an
+      -- asset that is already disposed. One predicate, both places, so they cannot drift.
+      v_perm := (v_dom = 'fa') and exists (
+        select 1 from clara.fixed_assets f
+         where f.client_id = p_client
+           and clara._fa_status_holds_account_role(f.status)
+           and p_code in (f.asset_account_code, f.accum_depr_account_code,
+                          f.depr_expense_account_code));
+      if v_perm then
+        v_remedy := 'release_fa_register_row_then_re_enrol';
+        v_advice := format('Re-enrolment is refused today: the FIXED-ASSET REGISTER holds %s (%s role, owner asset %s) on a LIVE register row, and retiring the account profile alone does NOT release it -- a register row keeps the codes it was born with. End that row first (dispose the asset, or reverse its acquisition, which unwinds it -- each has its own preconditions and will say so), then re-enrol this code, then reverse the entry again.%s', p_code, v_role, coalesce(v_owner, '(unnamed)'), v_fallback);
+      elsif v_dom = 'fa' then
+        v_remedy := 'retire_fa_profile_then_re_enrol';
+        v_advice := format('Re-enrolment is refused today: %s is reserved by the fixed-asset register (%s role, owner asset %s) through an ACTIVE account profile. Retire that profile (retire_fa_account_profile) FIRST, then re-enrol this code, then reverse the entry again.%s', p_code, v_role, coalesce(v_owner, '(unnamed)'), v_fallback);
+      elsif v_dom = 'prepayment' then
+        -- #1078 [0337] THE THIRD DOMAIN, AND ITS OWN DOOR. The shared union gained a
+        -- prepayment-roster arm, so this body can now be handed a domain whose claim
+        -- retire_staff_advance_account cannot release. Naming that door here would be the exact
+        -- dead end the WDB-R2 ruling of 2026-08-03 ordered eradicated from this very arm. What
+        -- retirement does and does not do is stated rather than implied: #940's owner decision 5
+        -- closes the account to NEW schedules and leaves a running one posting to term end, so a
+        -- retirement is enough to free the code for an advance enrolment and does not disturb the
+        -- books.
+        v_remedy := 'retire_prepayment_enrolment_then_re_enrol';
+        v_advice := format('Re-enrolment is refused today: %s is already reserved by the prepayment-account roster for this client (%s purpose). Retire that enrolment (retire_prepayment_account, which closes the account to new schedules and leaves any running one posting to term end) FIRST, then re-enrol this code, then reverse the entry again.%s', p_code, v_role, v_fallback);
+      else
+        v_remedy := 'retire_advance_enrolment_then_re_enrol';
+        v_advice := format('Re-enrolment is refused today: %s is already reserved by the staff-advance register for this client (owner %s). Retire that enrolment (retire_staff_advance_account, which needs every advance on it settled) FIRST, then re-enrol this code, then reverse the entry again.%s', p_code, coalesce(v_owner, '(unnamed)'), v_fallback);
+      end if;
+    end if;
+  end if;
+
+  -- (iv) ENROL-CLEAN-ONLY.
+  if v_axis is null and v_bal <> 0 then
+    v_axis := 'balance'; v_reason := 'enrolment_balance_nonzero';
+    v_msg := format('account %s already carries an approved GL balance of %s cents; a staff-advance enrolment can only start from a clean account (carry the existing balances down onto a fresh dedicated code, or use a new account for this person)', p_code, v_bal);
+    v_remedy := 'clear_balance_then_re_enrol';
+    v_advice := format('The code now carries an approved GL balance of %s cents from other use, so a re-enrolment would be refused (a staff-advance enrolment can only start from a clean account): carry that balance down onto its own dedicated code FIRST, then re-enrol this code, then reverse the entry again.', v_bal);
+  end if;
+
+  if v_axis is null then
+    return jsonb_build_object('admitted', true, 'account_code', p_code,
+      'balance_cents', v_bal, 'axis', null, 'reason', null, 'remedy', 're_enrol',
+      'advice', 'Re-enrol the account, then reverse the entry again -- every enrolment gate (chart typing, the bank door, the shared register reservations and the account''s approved balance) passes for this code right now, so enrolment will admit it.');
+  end if;
+
+  v_detail := jsonb_build_object('reason', v_reason, 'axis', v_axis,
+    'account_code', p_code, 'remedy', v_remedy);
+  if v_axis = 'role_reserved' then
+    v_detail := v_detail || jsonb_build_object('reserved_domain', v_dom,
+      'reserved_role', v_role, 'reserved_owner', v_owner);
+  elsif v_axis = 'balance' then
+    v_detail := v_detail || jsonb_build_object('balance_cents', v_bal);
+  elsif v_axis = 'bank_account' then
+    v_detail := v_detail || jsonb_build_object('bank_account_id', v_bank);
+  end if;
+  return jsonb_build_object('admitted', false, 'account_code', p_code,
+    'balance_cents', v_bal, 'axis', v_axis, 'reason', v_reason, 'remedy', v_remedy,
+    'message', v_msg, 'advice', v_advice, 'detail', v_detail);
+end $c0337_e$;
+revoke all on function clara._adv_enrolment_admission(uuid, text, uuid) from public;
+
 reset role;
 
 -- =====================================================================================
@@ -626,7 +761,8 @@ declare
     'clara._acct_role_reserved(uuid,text)',
     'clara._adj_line_eligibility_breach(uuid,jsonb)',
     'clara._fa_assert_code_unreserved(uuid,text)',
-    'clara.upsert_fa_account_profile(uuid,text,text,text,text)'
+    'clara.upsert_fa_account_profile(uuid,text,text,text,text)',
+    'clara._adv_enrolment_admission(uuid,text,uuid)'
   ];
 begin
   -- 1 · THE SHARED CENSUS CARRIES THREE DOMAINS AND LOST NEITHER OF THE TWO IT HAD. Gaining the
@@ -737,6 +873,22 @@ begin
       using errcode='CLR10';
   end if;
 
+  -- 6 · THE STAFF-ADVANCE ADMISSION PREDICATE HAS A THIRD REMEDY, and kept its two.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara._adv_enrolment_admission(uuid,text,uuid)'::regprocedure;
+  foreach v_sig in array array['retire_prepayment_enrolment_then_re_enrol',
+                               'retire_advance_enrolment_then_re_enrol',
+                               'retire_fa_profile_then_re_enrol',
+                               'release_fa_register_row_then_re_enrol'] loop
+    if position(v_sig in v_src) = 0 then
+      raise exception '0337 tail: the advance admission predicate lost the % remedy', v_sig
+        using errcode='CLR10';
+    end if;
+  end loop;
+  if position('clara._acct_role_reserved(p_client, p_code)' in v_src) = 0 then
+    raise exception '0337 tail: the advance admission predicate no longer asks the census itself -- 0042 S5.14(6) accepts it as the enrolment delegate ONLY because it does'
+      using errcode='CLR10';
+  end if;
 
 
   -- 8 · NOTHING ELSE MOVED. No overload was minted for any recut body, and the ACLs are exactly

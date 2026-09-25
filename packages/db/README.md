@@ -7500,6 +7500,7 @@ staff-advance siblings already do.
 | B | `clara._adj_line_eligibility_breach` | its reservation read SKIPS the new domain, so every answer this wall gives is the answer it gave before 0337 |
 | C | `clara._fa_assert_code_unreserved` | the bank belt's machine reason names the register that actually holds the code |
 | D | `clara.upsert_fa_account_profile` | its shared-union refusal names `retire_prepayment_account` for a roster claim |
+| E | `clara._adv_enrolment_admission` | a third remedy branch, `retire_prepayment_enrolment_then_re_enrol`, with its own advice |
 
 §A is the whole of the reservation: the bank belt (`clara._fa_assert_code_unreserved`, reached from
 the `t_bank_accounts_fa_reserved` trigger), the fixed-asset discriminator
@@ -7531,6 +7532,17 @@ the dead end the WDB-R2 ruling of 2026-08-03 ordered eradicated from exactly thi
 sentences. The remedy clause is now per domain and the advance branch's words are unchanged.
 `p1078.claim.fixed_asset` drives the refusal, then drives the named remedy and watches the profile
 enrol, so the sentence is not a promise.
+
+**§E — the staff-advance enrolment door.** `clara.enrol_staff_advance_account` ENFORCES
+`clara._adv_enrolment_admission`, and `clara._adv_on_approve` shows that same body's `advice` to a
+person trying to reverse an entry on a code the register no longer holds — which is why the branch
+carries a full sentence and not only a remedy token. Its reservation arm had two branches, both
+fixed-asset-aware, and an `else` that assumed staff-advance. A roster claim now takes its own
+branch: remedy `retire_prepayment_enrolment_then_re_enrol`, advice naming
+`retire_prepayment_account` and stating what retirement does and does not do (it closes the account
+to new schedules and leaves a running one posting to term end, so it frees the code without
+disturbing the books). `p1078.claim.staff_advance` drives the door, reads the advice off the
+predicate, then drives the remedy and watches the advance enrolment land.
 
 ### §B is the load-bearing half, and it is not a softening
 

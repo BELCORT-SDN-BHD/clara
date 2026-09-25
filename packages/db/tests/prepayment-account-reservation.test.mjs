@@ -30,7 +30,7 @@ import {
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 4;
+const EXPECTED_CELLS = 5;
 
 before(async () => { ready = await reservationApplied().catch(() => false); });
 
@@ -242,4 +242,48 @@ cell("p1078.claim.fixed_asset — an account the prepayment roster holds cannot 
   assert.equal(adv.detail.reserved_domain, RESERVED_DOMAIN.staffAdvance);
   assert.match(adv.err.message, /retire_staff_advance_account, which needs every advance on it settled/,
     `the advance branch still says what it always said: ${adv.err.message}`);
+});
+
+cell("p1078.claim.staff_advance — an account the prepayment roster holds cannot be enrolled as a STAFF-ADVANCE account, the refusal carries its own remedy token and an advice that names retire_prepayment_account, and the two existing remedies are unmoved", async () => {
+  const { scene, code } = await enrolledScene("adv", { code: "19000107" });
+  assert.equal(await advanceEnrolmentCount(scene.client, code), 0, "mandatory setup: not enrolled");
+
+  const refused = await assertPair(CLR.badRequest, "advance_enrolment_invalid",
+    () => enrolStaffAdvanceAccount(scene.alice, { client: scene.client, account: code }),
+    "enrolling an account the prepayment roster holds as a staff-advance account");
+  assert.equal(refused.detail.axis, "role_reserved",
+    "the refusal rides 0043's own axis rather than a new vocabulary");
+  assert.equal(refused.detail.reserved_domain, RESERVED_DOMAIN.prepayment);
+  assert.equal(refused.detail.reserved_role, RESERVED_ROLE.prepayment);
+  assert.equal(refused.detail.remedy, ADV_REMEDY_PREPAYMENT,
+    "the remedy TOKEN is the roster's own — clara._adv_on_approve composes its advice from it");
+  assert.match(refused.err.message, /reserved by the prepayment register/,
+    `the sentence names the register: ${refused.err.message}`);
+  assert.equal(await advanceEnrolmentCount(scene.client, code), 0, "the refusal enrolled nothing");
+
+  // THE ADVICE IS WHAT A PERSON ACTUALLY READS when they try to reverse an entry on this code, so
+  // it is read from the predicate itself rather than inferred from the remedy token.
+  const advice = await rootQuery(
+    `select clara._adv_enrolment_admission($1::uuid, $2::text, null) as a`, [scene.client, code]);
+  assert.equal(advice.rows[0].a.admitted, false);
+  assert.match(advice.rows[0].a.advice, /retire_prepayment_account/,
+    `the advice names the door that releases THIS claim: ${advice.rows[0].a.advice}`);
+  assert.doesNotMatch(advice.rows[0].a.advice, /retire_staff_advance_account/,
+    "…and not one that cannot");
+
+  // AND THE REMEDY REALLY IS THE REMEDY.
+  await retirePrepaymentAccount(scene.bob, { client: scene.client, account: code });
+  await enrolStaffAdvanceAccount(scene.alice, { client: scene.client, account: code });
+  assert.equal(await advanceEnrolmentCount(scene.client, code), 1,
+    "the named door releases the claim and the advance enrolment then lands");
+
+  // THE FIXED-ASSET BRANCH IS UNMOVED, measured on the same client.
+  const faCode = await account(scene.alice, {
+    client: scene.client, code: "19000108", name: "#1078 fa for adv", type: "asset" });
+  await reserveAsFixedAssetCost(scene.alice, { client: scene.client, assetAccount: faCode });
+  const fa = await assertPair(CLR.badRequest, "advance_enrolment_invalid",
+    () => enrolStaffAdvanceAccount(scene.alice, { client: scene.client, account: faCode }),
+    "enrolling a fixed-asset-reserved account as a staff-advance account");
+  assert.equal(fa.detail.remedy, "retire_fa_profile_then_re_enrol",
+    "the fixed-asset remedy is still 0043's own");
 });
