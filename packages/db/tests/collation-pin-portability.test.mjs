@@ -22,6 +22,11 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { IDENTIFIER_KEY_NAMES, scanSqlText } from "./collation-pin-scan.mjs";
 import { asRoot, endPool } from "./rig-helpers.mjs";
 
 after(async () => {
@@ -229,6 +234,29 @@ const PINNED_VALUE_SETS = [
             from pg_proc p where p.pronamespace = 'clara'::regnamespace`,
     min: 1000,
   },
+  // --- added by #1047's fix round (ADV-L07-03), for the sites the widened scanner newly recorded
+  {
+    site: "0220:960/965 — the firm-knowledge key roster (`k.knowledge_key`)",
+    sql: "select knowledge_key as v, '' as grp from clara.knowledge_keys",
+    min: 14,
+  },
+  {
+    site: "0129:1359/1367 — each wake kind's function roster (`fn_name`)",
+    sql: "select fn_name as v, wake_kind as grp from clara.wake_fn_allowlist",
+    min: 100,
+  },
+  {
+    site: "0139:399/401 — clara.statutory_deadlines' constraint names, taken as TEXT rather than as `name`",
+    sql: `select con.conname::text as v, 'statutory_deadlines' as grp
+            from pg_constraint con where con.conrelid = 'clara.statutory_deadlines'::regclass`,
+    min: 20,
+  },
+  {
+    site: "0290:147 — each clara relation's grantees (`grantee::regrole::text`), the table-grant twin of 0150:1842",
+    sql: `select distinct table_name::text as grp, grantee::regrole::text as v
+            from information_schema.role_table_grants where table_schema = 'clara'`,
+    min: 300,
+  },
 ];
 
 test("collation-pin · every recorded site's OWN value set sorts identically under both collations", async () => {
@@ -262,6 +290,97 @@ test("collation-pin · every recorded site's OWN value set sorts identically und
         `${entry.site}: this server's DEFAULT ordering already differs from C, so the pinned literal was taken under a third order.`,
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// THE ARRAY-VERDICT PROOF (#1047's fix round, ADV-L07-03).
+//
+// A migration tail runs against the schema AT ITS OWN POINT IN THE CHAIN, and the estate renames
+// things: 0038's four document CHECK censuses (`ck_processing_task_lane_0038`,
+// `ck_document_extractions_engine_kind_0038`, `ck_processing_task_error_code_0038`,
+// `ck_processing_task_binding_0038`) do not exist at the head of the chain at all, so no live query
+// can re-measure the value sets they pin. What CAN be re-measured is the verdict each of those
+// tails carries in its own text: `v_vals is distinct from array['…','…']`. The scanner hands back
+// that array's members with the finding, so this cell re-orders the migration's OWN literal under
+// both collations. Nothing is hand-copied — the file is the source — and the assertion is the exact
+// question the pin asks: does this member set sort the same way under C and under en_US.UTF-8?
+//
+// This is why the generic form of the census would be wrong. Measured on the lane rig: the tokens
+// of EVERY clara CHECK constraint do move (`cancel_requested`/`cancelled` in
+// `agent_tasks_status_check`, `op_key`/`open` in `clara._abandon_close_core`'s body). The hazard is
+// real and close by; it just does not touch the sets the estate actually pins.
+// ---------------------------------------------------------------------------------------------
+
+test("collation-pin · every ARRAY verdict an applied migration pins sorts identically under both collations", async () => {
+  const migrationsDir = join(fileURLToPath(new URL("..", import.meta.url)), "migrations");
+  /** @type {Array<{ file: string, line: number, members: string[] }>} */
+  const verdicts = [];
+  for (const file of readdirSync(migrationsDir).sort()) {
+    if (!file.endsWith(".sql")) continue;
+    for (const site of scanSqlText(readFileSync(join(migrationsDir, file), "utf8"))) {
+      if (site.members) verdicts.push({ file, line: site.line, members: site.members });
+    }
+  }
+  // 33 on the branch that fixed this. The floor is the vacuity control: an extraction that
+  // silently stopped matching would make every assertion below pass over an empty list.
+  assert.ok(verdicts.length >= 30, `the scanner still reads the estate's array verdicts (${verdicts.length} found)`);
+
+  await withComparator(async (client, label) => {
+    for (const v of verdicts) {
+      const r = await client.query(
+        `with s as (select unnest($1::text[]) as v)
+         select array_to_string(array_agg(v order by v collate "C"), ',')             as under_c,
+                array_to_string(array_agg(v order by v collate pg_temp.c1047), ',')   as under_comparator,
+                array_to_string(array_agg(v order by v), ',')                         as under_default
+           from s`,
+        [v.members],
+      );
+      const m = r.rows[0];
+      assert.equal(
+        m.under_comparator,
+        m.under_c,
+        `${v.file}:${v.line} — its ${v.members.length}-member verdict REORDERS between C and ${label}\n` +
+          `  C          : ${m.under_c}\n  ${label}: ${m.under_comparator}\n` +
+          'This tail cannot run on an en_US.UTF-8 server: the census needs a forward re-pin that spells `collate "C"`.',
+      );
+      assert.equal(m.under_default, m.under_c, `${v.file}:${v.line} — this server's default ordering already differs from C`);
+    }
+  });
+});
+
+test("collation-pin · the free `%_id` list is a measured fact: no name on it is a text column", async () => {
+  // #1047 FIX ROUND (ADV-L07-05). `classifyOrderKey` used to declare EVERY `%_id` spelling free.
+  // It is not: `clara` carries about forty TEXT `%_id` columns. The scanner now frees a closed
+  // list, and this cell is what keeps that list honest — a member that ever becomes (or already
+  // is) a text column somewhere in `clara` turns the scanner's silence into a lie, so the list
+  // is checked against the live catalog rather than asserted in a comment.
+  await asRoot(async (client) => {
+    const r = await client.query(
+      `select a.attname, format_type(a.atttypid, a.atttypmod) as t, count(*)::int as n
+         from pg_attribute a
+         join pg_class c on c.oid = a.attrelid
+         join pg_namespace ns on ns.oid = c.relnamespace
+        where ns.nspname = 'clara' and c.relkind in ('r','p') and a.attnum > 0 and not a.attisdropped
+          and a.attname = any($1)
+        group by 1, 2 order by 1, 2`,
+      [IDENTIFIER_KEY_NAMES],
+    );
+    assert.ok(r.rows.length > 0, "the free list names columns that actually exist — an empty answer would prove nothing");
+    const textish = r.rows.filter((row) => /char|text/.test(row.t));
+    assert.deepEqual(
+      textish,
+      [],
+      "a key the scanner treats as free is a TEXT column somewhere in clara, so an ORDER BY over it DOES take the " +
+        "database collation: " + textish.map((row) => `${row.attname} (${row.t}, ${row.n} column(s))`).join(", "),
+    );
+    // The control: the shape the list deliberately no longer frees really is text here.
+    const text = await client.query(
+      `select format_type(a.atttypid, a.atttypmod) as t from pg_attribute a
+         join pg_class c on c.oid = a.attrelid join pg_namespace ns on ns.oid = c.relnamespace
+        where ns.nspname = 'clara' and c.relname = 'trace_spans' and a.attname = 'trace_id'`,
+    );
+    assert.equal(text.rows[0]?.t, "text", "clara.trace_spans.trace_id is text — the counterexample the narrowing exists for");
   });
 });
 

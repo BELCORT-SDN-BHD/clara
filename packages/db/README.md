@@ -443,18 +443,36 @@ These do NOT keep it, and are the shapes to look at:
 `select pg_collation_for(<expr>)` answers this on the live server for any expression; it is what
 `tests/collation-pin-portability.test.mjs` measures rather than asserting from memory.
 
+**Two verdict shapes, not one.** The estate writes a set verdict either as a joined literal
+(`v_txt <> 'a,b'`) or as an **array constructor** (`v_keys is distinct from array['a','b']`).
+Both pin the ORDER equally hard, because an array is ordered; 0132:1545/1549, 0220:960/965,
+0038's six token censuses and thirty more sites use the second shape.
+
 **The record and the guard.** `tests/collation-pin-scan.mjs` holds `RECORDED_SITES`: every pinned,
-text-ordered site in `migrations/` and `tests/` as of #1047 — 66 movable keys over 37 files, of
-which 28 keys in 16 **applied** migrations, each with the reason it cannot flip. Applied migrations
-are never edited, so for those the entry is the proof. `tests/collation-pin-scan.test.mjs` scans the
-corpus on every run and refuses a site the record does not hold, naming the file and saying what to
-write; it needs no database, so it runs on every leg. A NEW site is fixed with `collate "C"`, never
-added to the record.
+text-ordered site the scanner finds in `migrations/` and `tests/` — **99 movable keys over 56
+files, of which 61 keys in 34 applied migrations**, each with the reason it cannot flip. Applied
+migrations are never edited, so for those the entry is the proof.
+`tests/collation-pin-scan.test.mjs` scans the corpus on every run and refuses a site the record
+does not hold, naming the file and saying what to write; it needs no database, so it runs on every
+leg. A NEW site is fixed with `collate "C"`, never added to the record.
+
+The record is only as complete as the instrument, and #1047's own adversarial round proved that
+twice over. Its first cut read **66 keys over 37 files**: it recognised a verdict only when the
+right-hand side began with a quote (so every array verdict was invisible), and it hard-freed the
+bare aliases `k`, `n`, `i`, `o` and every `%_id` spelling (so a `jsonb_object_keys(...) k` TEXT
+alias looked like an integer, and `stripe_session_id` / `trace_id` / `run_id` — about forty TEXT
+`%_id` columns in `clara` — looked like uuids). Both blind spots are closed, and the free `%_id`
+list is now a short closed list that
+`collation-pin-portability.test.mjs` re-measures against the live catalog.
 
 **The live proof.** `tests/collation-pin-portability.test.mjs` re-measures, on whatever server the
 suite runs on: it builds a comparator (the real glibc `en_US.UTF-8` where the OS has the locale,
 otherwise an ICU `ka-shifted` collation), makes it prove it reorders 0295's own pair, and then
-orders each recorded site's live value set under both `C` and that comparator.
+orders each recorded site's live value set under both `C` and that comparator. Where a site's
+subject no longer exists at the head of the chain — 0038's four document CHECK censuses were
+renamed by a later migration, and a tail runs against the schema at its OWN point in the chain —
+the battery instead re-orders the **array verdict the migration carries in its own text**, read
+back out of the file by the scanner rather than hand-copied. 33 such verdicts are proved today.
 
 **Portable today, fragile by construction.** The orderings the estate pins do not move — but the
 name space they draw on does. Measured on the lane rig at 309 migrations:
@@ -463,6 +481,13 @@ name space they draw on does. Measured on the lane rig at 309 migrations:
 before `e` under `C` and carries no primary weight under the other). Nothing pins that relation's
 index names today. One new `clara._x` landing beside an unprefixed `clara.x_y` does the same to a
 function census, which is why the rule is a rule and not a case-by-case judgement.
+
+The same measurement, widened in the fix round, shows how close the hazard sits to what IS pinned.
+Take the quoted tokens of **every** `clara` CHECK constraint and sort them under both collations
+and they DO move — `cancel_requested` against `cancelled` in `agent_tasks_status_check`, `op_key`
+against `open` in `clara._abandon_close_core`'s own body. The sets the estate actually pins escape
+only because none of them happens to hold such a pair. That is luck with a guard around it, not
+safety, and it is why a new census writes `collate "C"` instead of being reasoned about.
 
 ## Member doors: the lock order other migrations depend on
 

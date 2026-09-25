@@ -142,6 +142,65 @@ end $pre$;
   assert.equal(scanSqlText(contentVerdict).length, 1, "a verdict taken against ordered content IS a pin");
 });
 
+test("collation-pin · an ARRAY-CONSTRUCTOR verdict is a pin, and its own members come back with the finding", () => {
+  // #1047 FIX ROUND (ADV-L07-03). The estate writes its set verdicts two ways, and the first cut
+  // of this scanner only saw one of them: `v <> 'a,b'` (a quoted literal) was a pin, while
+  // `v is distinct from array['a','b']` — 0132:1545/1549, 0220:960/965 and thirty more sites —
+  // returned nothing at all. An array constructor pins the ORDER exactly as hard: the array is
+  // ordered, so a collation that moves two members past each other fails the comparison.
+  const arrayVerdict = `
+do $pre$
+declare v_keys text[];
+begin
+  select array_agg(k order by k) into v_keys from jsonb_object_keys(v_payload) k;
+  if v_keys is distinct from array['as_of','locale','policy_key','reason'] then
+    raise exception 'prestate: the refusal payload key set is %', v_keys using errcode = 'CLR10';
+  end if;
+end $pre$;
+`;
+  const findings = scanSqlText(arrayVerdict);
+  assert.equal(findings.length, 1, "an array-literal verdict over a text-ordered aggregate IS a pin");
+  assert.match(findings[0].why, /array literal/, "…and the finding says which verdict shape it read");
+  assert.deepEqual(
+    findings[0].members,
+    ["as_of", "locale", "policy_key", "reason"],
+    "the verdict's own members come back, so collation-pin-portability can re-order them under two collations " +
+      "without anybody hand-copying the list — which is the only way to prove a site whose subject a later " +
+      "migration renamed (0038's four document CHECK censuses)",
+  );
+
+  // …and the same block with `collate \"C\"` on the key is not a finding at all.
+  const fixed = arrayVerdict.replace("order by k)", 'order by k collate "C")');
+  assert.notEqual(fixed, arrayVerdict, "positive control: the ORDER BY must actually have changed");
+  assert.deepEqual(scanSqlText(fixed), [], "a collated array-verdict census is not a finding");
+});
+
+test("collation-pin · a bare one-letter alias is UNRESOLVED, and a `%_id` spelling is not proof of a uuid", () => {
+  // #1047 FIX ROUND (ADV-L07-05). The module header promises that a key it cannot resolve is
+  // treated as MOVABLE, never as safe; the first cut broke that promise twice. `k`, `n`, `i` and
+  // `o` sat in the integer cohort although `k` is this estate's own idiom for a
+  // `jsonb_object_keys(...) k` TEXT alias (0132:1545), and every `%_id` spelling was declared a
+  // uuid although `clara` carries about forty TEXT `%_id` columns.
+  for (const alias of ["k", "n", "i", "o", "x.k", "t.n"]) {
+    assert.equal(classifyOrderKey(alias).free, false, `\`${alias}\` is a FROM-item alias, not an integer column`);
+    assert.equal(classifyOrderKey(alias).domain, "unresolved");
+  }
+  assert.equal(classifyOrderKey("stripe_session_id").free, false, "clara.checkout_intents.session_id and friends are TEXT");
+  assert.equal(classifyOrderKey("trace_id").free, false, "clara.trace_spans.trace_id is TEXT");
+  // The closed list that remains free is measured against the live catalog by
+  // collation-pin-portability.test.mjs, so it cannot quietly grow a text column.
+  assert.equal(classifyOrderKey("id").free, true);
+  assert.equal(classifyOrderKey("m.account_id").free, true);
+  // An ordinality or a sort column is still free — narrowing the cohort must not widen it away.
+  assert.equal(classifyOrderKey("ordinality").free, true);
+  assert.equal(classifyOrderKey("m.ordinal").free, true);
+  assert.equal(classifyOrderKey("attnum").free, true);
+  // A catalog `name` CAST TO TEXT keeps C: information_schema's grantee is `sql_identifier`, which
+  // IS `name` (0127:376/387/390 orders `grantee::text`). The reg* casts do NOT keep it.
+  assert.equal(classifyOrderKey("grantee::text").free, true);
+  assert.equal(classifyOrderKey("grantee::regrole::text").free, false);
+});
+
 test("collation-pin · the verdict that counts is the one taken on THIS value, not a later reuse of the same variable", () => {
   // A prestate reuses `v_bad` a dozen times. 0150:2058 aggregates the non-core add-back families
   // into `v_bad` and asks only whether it IS NULL; three hundred lines later another census
@@ -260,9 +319,12 @@ test("collation-pin · the corpus is non-empty on both sides, so a green above c
   const observed = scanCorpus();
   const keysFound = observed.reduce((n, r) => n + r.keys.length, 0);
   const keysRecorded = RECORDED_SITES.reduce((n, r) => n + r.keys.length, 0);
-  // The numbers #1047 worked: 66 keys over 37 files (28 keys in 16 applied migrations, 38 in 21
-  // batteries). A corpus that scanned nothing, or a record that recorded nothing, would let the
-  // assertion above pass while proving nothing at all.
+  // The numbers #1047 worked, as re-derived in its fix round once the scanner learned the
+  // array-constructor verdict and stopped hard-freeing bare aliases and `%_id` spellings:
+  // 99 keys over 56 files (61 keys in 34 applied migrations, 38 in 22 batteries). The first cut
+  // read 66 over 37, and the 33 keys it could not see are the whole of ADV-L07-03. A corpus that
+  // scanned nothing, or a record that recorded nothing, would let the assertion above pass while
+  // proving nothing at all.
   assert.ok(keysFound >= 40, `the scanner still reads the estate's censuses (found ${keysFound} movable keys)`);
   assert.ok(keysRecorded >= 40, `the record is still populated (${keysRecorded} keys)`);
   assert.ok(

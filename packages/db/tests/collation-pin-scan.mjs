@@ -28,12 +28,30 @@ const COLLATE_C = /collate\s+(?:"C"|C(?![\w."-]))/i;
 const CATALOG_NAME =
   /^(?:[a-z_][a-z0-9_]*\.)?(?:proname|relname|conname|tgname|polname|policyname|rolname|attname|nspname|typname|enumlabel|grantee|grantor|table_name|column_name|constraint_name|trigger_name|routine_name|schema_name|specific_name|index_name|sequence_name|udt_name|table_schema)$/i;
 
-/** Keys whose ordering is numeric, an ordinality, or an oid — no collation involved. */
+/** Keys whose ordering is numeric, an ordinality, or an oid — no collation involved.
+ *
+ *  #1047 FIX ROUND (ADV-L07-05): the bare single letters `o`, `n`, `i` and `k` used to sit in this
+ *  list and were therefore declared FREE. They are not integers in this estate, they are FROM-item
+ *  aliases — `0132:1545` writes `array_agg(k order by k) … from jsonb_object_keys(…) k`, where `k`
+ *  is TEXT — and a one-letter alias is exactly the case the module header promises to classify
+ *  `unresolved`, which is movable. Only names that cannot be a bare alias stay. */
 const INTEGER_KEY =
-  /^(?:\d+|(?:[a-z_][a-z0-9_]*\.)?(?:ord|o|n|i|k|seq|idx|rn|oid|ordinal|ordinality|sort_order|sort_ordinal|ordinal_position|attnum|pronargs|enumsortorder|line_no|level|depth|objsubid|indexrelid))$/i;
+  /^(?:\d+|(?:[a-z_][a-z0-9_]*\.)?(?:ord|seq|idx|rn|oid|ordinal|ordinality|sort_order|sort_ordinal|ordinal_position|attnum|pronargs|enumsortorder|line_no|level|depth|objsubid|indexrelid))$/i;
 
-/** uuid / integer surrogate keys: `id`, `x_id`. A uuid ORDERS as a uuid, not as text. */
-const IDENTIFIER_KEY = /^(?:[a-z_][a-z0-9_]*\.)?(?:id|[a-z0-9_]+_id)$/i;
+/** Surrogate keys that order by a TYPE, never by a collation.
+ *
+ *  #1047 FIX ROUND (ADV-L07-05): the generic `%_id` SPELLING used to sit here, and a spelling is
+ *  not proof of a uuid. Measured on the lane catalog: `clara` carries about forty TEXT `%_id`
+ *  columns — `stripe_session_id`, `stripe_event_id`, `run_id`, `trace_id`, `span_id`, `event_id`,
+ *  `receipt_id`, `logical_op_id`, `engine_id`, `bundle_id` … — every one of which sorts under the
+ *  database collation. The free set is now the CLOSED list below: `id`, the estate's own
+ *  primary-key spelling (231 `uuid`, 6 `bigint`, 2 `boolean` columns and no text at all), plus the
+ *  two ordered surrogates the corpus actually pins, both `uuid`. `collation-pin-portability.mjs`'s
+ *  live cell re-measures that no member of this list is a text column on the running server, so
+ *  the list is checked rather than asserted; every other `%_id` falls through to `unresolved`,
+ *  which is movable. */
+export const IDENTIFIER_KEY_NAMES = ["id", "account_id", "account_set_version_id", "constant_version_id"];
+const IDENTIFIER_KEY = new RegExp(`^(?:[a-z_][a-z0-9_]*\\.)?(?:${IDENTIFIER_KEY_NAMES.join("|")})$`, "i");
 
 /** timestamp / date columns. */
 const TIMESTAMP_KEY = /^(?:[a-z_][a-z0-9_]*\.)?[a-z0-9_]+_(?:at|on|date)$/i;
@@ -59,6 +77,12 @@ export function classifyOrderKey(raw) {
   if (IDENTIFIER_KEY.test(key)) return { key, domain: "identifier", free: true };
   if (TIMESTAMP_KEY.test(key)) return { key, domain: "timestamp", free: true };
   if (CATALOG_NAME.test(key)) return { key, domain: "catalog_name", free: true };
+  // A `name` CAST TO TEXT keeps collation C — `pg_collation_for(proname::text)` answers `"C"`, and
+  // the portability battery measures exactly that. 0127:376/387/390 order
+  // `information_schema.role_routine_grants.grantee::text`, whose underlying type is `sql_identifier`
+  // = `name`. The `::regrole::text` and `::regprocedure::text` shapes below are NOT this: the reg*
+  // cast drops the collation on the way through, which is why they stay movable.
+  if (CATALOG_NAME.test(key.replace(/::text$/i, ""))) return { key, domain: "catalog_name_text", free: true };
   if (/::regprocedure::text$/i.test(key)) return { key, domain: "regprocedure_text", free: false };
   if (/::regrole::text$/i.test(key)) return { key, domain: "regrole_text", free: false };
   if (/::regclass::text$/i.test(key)) return { key, domain: "regclass_text", free: false };
@@ -260,10 +284,49 @@ function splitKeyList(list) {
   return keys.map((k) => k.replace(/\s+/g, " ").trim()).filter(Boolean);
 }
 
+/** The quoted members of the ARRAY constructor that starts at `from` in `text`, in written order.
+ *  `null` when the constructor holds anything that is not a plain single-quoted literal (a column
+ *  reference, a cast of a sub-expression, a nested constructor): such a verdict is not a value set
+ *  this file can prove by itself, and saying so is better than half-reading it. */
+function arrayMembers(text, from) {
+  const open = text.indexOf("[", from);
+  if (open === -1) return null;
+  let depth = 0;
+  let body = null;
+  for (let i = open; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "'") {
+      i++;
+      while (i < text.length) {
+        if (text[i] === "'" && text[i + 1] === "'") { i += 2; continue; }
+        if (text[i] === "'") break;
+        i++;
+      }
+      continue;
+    }
+    if (ch === "[") depth++;
+    else if (ch === "]") { depth--; if (depth === 0) { body = text.slice(open + 1, i); break; } }
+  }
+  if (body === null) return null;
+  const members = [];
+  for (const piece of splitKeyList(body)) {
+    const m = /^'((?:[^']|'')*)'(?:::[a-z_][a-z0-9_ ]*(?:\[\])?)?$/i.exec(piece.trim());
+    if (!m) return null;
+    members.push(m[1].replace(/''/g, "'"));
+  }
+  return members.length ? members : null;
+}
+
 /**
  * Why an aggregate's value is a PIN, or null when it is not pinned at all. Three shapes, which is
  * every shape the estate writes: digested where it stands, assigned to a variable that is compared
  * against a literal, or assigned to a variable that is digested.
+ *
+ * Returns `{ why, members }`, where `members` is the ARRAY verdict's own literal members when the
+ * verdict is an array constructor of quoted literals and `null` otherwise. `members` is what
+ * `collation-pin-portability.test.mjs` re-orders under two collations, so a site whose subject no
+ * longer exists at the head of the chain (0038's four document CHECK censuses were renamed by a
+ * later migration) is still proved from the file's own text rather than from a hand-copied list.
  *
  * SCOPED TO THE DEF-USE REGION. A prestate reuses `v_bad` or `v_names` a dozen times; the verdict
  * that belongs to THIS aggregate is the one taken before the variable is written again. Searching
@@ -279,7 +342,7 @@ function pinReason(blockText, at) {
   // statement carries the hex literal is a pin here and now; one that does not falls through to
   // the def-use analysis below, which finds the `v_sha <> '…'` verdict when there is one.
   if (DIGEST_CALL.test(before) && HEX_LITERAL.test(blockText.slice(at, statementEnd(blockText, at)))) {
-    return "digested where it stands, against a hex literal";
+    return { why: "digested where it stands, against a hex literal", members: null };
   }
   const after = blockText.slice(at);
   const into = /\binto\s+(?:strict\s+)?([a-z_][a-z0-9_]*)/i.exec(after.slice(0, 900));
@@ -292,8 +355,16 @@ function pinReason(blockText, at) {
   rewritten.lastIndex = into ? into.index + into[0].length : 1;
   const nextWrite = rewritten.exec(after);
   const region = after.slice(0, nextWrite ? nextWrite.index : undefined);
+  // #1047 FIX ROUND (ADV-L07-03): an ARRAY CONSTRUCTOR is as much a verdict literal as a quoted
+  // string. `array_agg(k order by k) into v_keys` followed by
+  // `if v_keys is distinct from array['as_of','locale','policy_key','reason']` (0132:1545/1549)
+  // pins the ORDER as hard as any `string_agg(…) <> 'a,b'` does — the array is ordered, so a
+  // collation that moves two members past each other fails the comparison. The first cut of this
+  // scanner only recognised a right-hand side that began with a quote, an `E'` or a `||`, so the
+  // estate's array-verdict idiom (0220:960/965, 0132:1545/1549, and every sibling) was invisible
+  // and the record below claimed a completeness it did not have.
   const comparedWithLiteral = new RegExp(
-    "\\b" + escaped + "\\b\\s*(?:is\\s+distinct\\s+from|is\\s+not\\s+distinct\\s+from|<>|=|!=)\\s*(?:'([^']*)'|E'|\\|\\|)",
+    "\\b" + escaped + "\\b\\s*(?:is\\s+distinct\\s+from|is\\s+not\\s+distinct\\s+from|<>|=|!=)\\s*(?:'([^']*)'|E'|\\|\\||array\\s*\\[)",
     "i",
   );
   const comparison = comparedWithLiteral.exec(region);
@@ -304,13 +375,17 @@ function pinReason(blockText, at) {
     // SENTINEL: the aggregate exists to name the members found, the order reaches the error
     // message and nothing else, and no ordering the server can produce equals `(none)`.
     if (comparison[1] !== undefined && SENTINEL_LITERAL.test(comparison[1])) return null;
-    return "compared with a literal via " + variable;
+    const isArray = /array\s*\[$/i.test(comparison[0]);
+    return {
+      why: (isArray ? "compared with an array literal via " : "compared with a literal via ") + variable,
+      members: isArray ? arrayMembers(region, comparison.index + comparison[0].length - 1) : null,
+    };
   }
   const digested = new RegExp(
     "(?:sha256|md5|clara\\._hash|digest)\\s*\\(\\s*(?:convert_to\\s*\\(\\s*)?" + escaped + "\\b",
     "i",
   );
-  if (digested.test(region)) return "digested via " + variable;
+  if (digested.test(region)) return { why: "digested via " + variable, members: null };
   return null;
 }
 
@@ -319,7 +394,7 @@ function pinReason(blockText, at) {
  * that no collation is guaranteed to leave alone.
  *
  * @param {string} source the migration's text
- * @returns {Array<{ line: number, fn: string, why: string, keys: Array<{key:string,domain:string,free:boolean}> }>}
+ * @returns {Array<{ line: number, fn: string, why: string, members: string[]|null, keys: Array<{key:string,domain:string,free:boolean}> }>}
  */
 export function scanSqlText(source) {
   const clean = blankSqlComments(source);
@@ -333,12 +408,13 @@ export function scanSqlText(source) {
       if (orderBy === null) continue;
       const keys = splitKeyList(orderBy).map(classifyOrderKey);
       if (!keys.length || keys.every((k) => k.free)) continue;
-      const why = pinReason(block.text, match.index);
-      if (!why) continue;
+      const pin = pinReason(block.text, match.index);
+      if (!pin) continue;
       findings.push({
         line: clean.slice(0, block.offset + match.index).split("\n").length,
         fn: match[1].toLowerCase(),
-        why,
+        why: pin.why,
+        members: pin.members,
         keys,
       });
     }
@@ -374,6 +450,7 @@ export function scanJsText(source) {
       line: text.slice(0, match.index).split("\n").length,
       fn: match[1].toLowerCase(),
       why: "a census in a battery is asserted",
+      members: null,
       keys,
     });
   }
@@ -398,42 +475,80 @@ export function scanJsText(source) {
 
 /** @type {Array<{ path: string, keys: string[], why: string }>} */
 export const RECORDED_SITES = [
-  // --- migrations: 28 keys over 16 applied files ------------------------------------------------
+  // --- migrations: 61 keys over 34 applied files ------------------------------------------------
   { path: "migrations/0020_typed_consent.sql", keys: ["x.pin"],
     why: "the key is `p.proname || '=' || <acl text>`, and an expression that carries a catalog `name` inherits its C collation (measured with pg_collation_for)" },
-  { path: "migrations/0038_wave_c_b_bank.sql", keys: ["x.pin"],
-    why: "0020:2304's census, re-pinned verbatim — same `name`-derived key, same C collation" },
+  { path: "migrations/0037_wave_c_a_subledger.sql", keys: ["m[1]"],
+    why: "the five quoted tokens of ck_je_coding_kind, read out of the live constraint definition; the verdict is an array literal whose own order the array-verdict cell proves stable" },
+  { path: "migrations/0038_wave_c_b_bank.sql", keys: ["x.pin", "m[1]", "m[1]", "m[1]", "m[1]", "m[1]", "m[1]"],
+    why: "0020:2304's census re-pinned verbatim (same `name`-derived key), plus six token censuses over a CHECK definition or a purpose guard; every one takes an array-literal verdict the array-verdict cell proves stable" },
   { path: "migrations/0041_wave_d_a_fa_register.sql", keys: ["d.fn"],
     why: "the reachability CTE seeds `unnest(v_seed) collate \"C\"`, and the verdict names one function" },
   { path: "migrations/0057_wave_e_registry_snapshots.sql", keys: ["m[1]"],
     why: "the distinct status literals of one body; the verdict is the single token `approved`, which no ordering can reach differently" },
+  { path: "migrations/0078_wave_e_eta_wake_wrappers_part2.sql", keys: ["g"],
+    why: "`g` is `case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end` — pg_get_userbyid returns `name`, so the CASE derives C (measured) — and the verdict names one grantee" },
+  { path: "migrations/0084_wave_e_eta_approval_obo.sql", keys: ["g", "g"],
+    why: "the same `case … pg_get_userbyid` grantee alias, C-derived, with a one-member verdict at each site" },
+  { path: "migrations/0086_b3_reopen_ends_on_part2.sql", keys: ["g"],
+    why: "the same `case … pg_get_userbyid` grantee alias, C-derived, one-member verdict" },
   { path: "migrations/0103_f_a7_pi_additive.sql", keys: ["item"],
     why: "the seven `f_aN` shim names of clara.agent_receipt_source_census(); proved in collation-pin-portability" },
   { path: "migrations/0106_f_a2_posting_core.sql", keys: ["g"],
     why: "`case when grantee = 0 then 'PUBLIC' else pg_get_userbyid(grantee) end` — pg_get_userbyid returns `name`, so the CASE inherits C" },
+  { path: "migrations/0107_f_a2_posting_grants.sql", keys: ["g"],
+    why: "the same `case … pg_get_userbyid` grantee alias, C-derived, one-member verdict" },
+  { path: "migrations/0116_f_a5_reporting_agency_pr2e_grants.sql", keys: ["g"],
+    why: "the same `case … pg_get_userbyid` grantee alias, C-derived, one-member verdict" },
+  { path: "migrations/0129_f_a3_pr3_retirement_parity_doors.sql", keys: ["fn_name", "fn_name"],
+    why: "clara.wake_fn_allowlist.fn_name is ordinary text and DOES move, but each of the two EXCEPT censuses takes a ONE-MEMBER verdict, and one member has no ordering; the live roster is re-measured per wake_kind in collation-pin-portability" },
+  { path: "migrations/0132_f_a5b_pr1_sandbox_export.sql", keys: ["k", "k"],
+    why: "`k` is jsonb_object_keys' TEXT alias, movable by type; both verdicts are the same four refusal-payload keys, proved stable by the array-verdict cell" },
+  { path: "migrations/0139_statutory_deadlines.sql", keys: ["x"],
+    why: "`x` re-sorts the file's own expected constraint-name array for the comparison against a conname census; the live constraint names of clara.statutory_deadlines are re-measured in collation-pin-portability and the literal's order is proved by the array-verdict cell" },
   { path: "migrations/0150_coa_template_pr_a.sql",
     keys: ["account_code", "add_back_class", "f.family_key", "g.grantee::regrole::text", "g.grantee::regrole::text", "g.privilege_type", "special_acc_type", "t.inclusion"],
     why: "the seeded chart vocabularies and the template grant matrix; each value set is proved in collation-pin-portability" },
   { path: "migrations/0152_f_t3_pr_1_tax_platform.sql", keys: ["p.oid::regprocedure::text"],
     why: "the set is the functions this file added, and the verdict is ONE signature — with a second member the verdict fails whatever the order" },
+  { path: "migrations/0160_checkout_gate_c2_stripe_events.sql",
+    keys: ["coalesce(r.rolname,'PUBLIC')", "coalesce(r.rolname,'PUBLIC')", "p.oid::regprocedure::text"],
+    why: "pg_roles.rolname is `name`, so the coalesce keeps C; the regprocedure census takes a two-member verdict proved stable by the array-verdict cell, and the regprocedure cohort is re-measured live" },
   { path: "migrations/0162_fs7_e2_artifact_download_door.sql", keys: ["coalesce(rr.rolname,'PUBLIC')"],
     why: "pg_roles.rolname is `name`; coalescing it with a literal keeps C" },
+  { path: "migrations/0163_checkout_gate_c3_folded_door.sql",
+    keys: ["coalesce(r.rolname,'PUBLIC')", "coalesce(r.rolname,'PUBLIC')", "coalesce(r.rolname,'PUBLIC')", "p.oid::regprocedure::text"],
+    why: "the same `coalesce(rolname,'PUBLIC')` C-derived key three times, and one regprocedure census with a two-member verdict the array-verdict cell proves stable" },
+  { path: "migrations/0178_accounting_work_journal_successor.sql", keys: ["g", "g"],
+    why: "the same `case … pg_get_userbyid` grantee alias, C-derived, one-member verdict at each site" },
   { path: "migrations/0190_document_byte_door_v2.sql", keys: ["coalesce(rr.rolname, 'PUBLIC')"],
     why: "pg_roles.rolname is `name`; coalescing it with a literal keeps C" },
+  { path: "migrations/0195_work_egress_purpose_and_execution_trace.sql", keys: ["t.m[1]"],
+    why: "the grandfathered bundle ids read out of the recut core's own body; the verdict is {clara-work/v1, clara-work/v2}, two members that differ only in their last character, proved stable live and by the array-verdict cell" },
+  { path: "migrations/0204_record_journal_entry_core_reversal_liveness.sql", keys: ["t.m[1]"],
+    why: "0195:2544's census re-pinned verbatim — the same two clara-work bundle ids" },
   { path: "migrations/0215_counterparty_identity_provenance.sql", keys: ["privilege_type"],
     why: "the SQL privilege names, every one `^[A-Z]+$`; proved in collation-pin-portability" },
   { path: "migrations/0218_firm_setup.sql", keys: ["item_key"],
     why: "the three firm-defaultable setup keys; proved in collation-pin-portability" },
   { path: "migrations/0219_client_onboarding_facts.sql", keys: ["a::text", "a::text", "a::text"],
     why: "the aclitem text of one function each — two entries, `clara_authenticated` before `clara_fn_owner` under both collations; proved in collation-pin-portability" },
+  { path: "migrations/0220_firm_knowledge_defaults.sql", keys: ["k.knowledge_key"],
+    why: "clara.knowledge_keys.knowledge_key is ordinary text and movable by type; the admitted verdict is four keys that differ in their first letter, proved stable by the array-verdict cell and re-measured against the live 14-key roster in collation-pin-portability" },
+  { path: "migrations/0227_depreciation_history.sql", keys: ["x.n"],
+    why: "`n` is `p.proname` aliased inside the sub-select, so the ORDER BY is over a catalog `name` and carries C; the three-member verdict is proved stable as well" },
+  { path: "migrations/0241_knowledge_scope_default_drop.sql", keys: ["scope_default"],
+    why: "clara.knowledge_keys.scope_default was ordinary text (this file drops it), but the prestate's verdict is the single value `client`, and one member has no ordering" },
   { path: "migrations/0269_invite_issuer_lapsed_status.sql", keys: ["privilege_type", "privilege_type"],
     why: "the SQL privilege names; proved in collation-pin-portability" },
   { path: "migrations/0270_firm_document_limits_writer.sql", keys: ["privilege_type", "privilege_type"],
     why: "the SQL privilege names; proved in collation-pin-portability" },
+  { path: "migrations/0290_document_regions_field_path_check.sql", keys: ["grantee::regrole::text"],
+    why: "a regrole cast to text takes the database collation, but the INSERT-grantee verdict on clara.document_regions is one role; the whole role_table_grants cohort is re-measured per table in collation-pin-portability" },
   { path: "migrations/0295_wave4_chart_rows.sql", keys: ["special_acc_type", "version"],
     why: "the five special markers (proved in collation-pin-portability); `version` is clara.coa_templates.version, an integer" },
 
-  // --- batteries: 38 keys over 21 files ---------------------------------------------------------
+  // --- batteries: 38 keys over 22 files ---------------------------------------------------------
   // A battery is EDITABLE, so a key here is a site this ticket deliberately did not touch: the six
   // census files the sweep plan gave this lane are fixed in place, and the rest belong to lanes
   // that own those files. Every key below draws on a value set the portability battery proves, or
@@ -452,11 +567,13 @@ export const RECORDED_SITES = [
   { path: "tests/counterparty-alias-kind.test.mjs", keys: ["role"], why: "the alias-role vocabulary of one relation" },
   { path: "tests/dba-close-gate-codeability.test.mjs", keys: ["kind", "kind"], why: "a closed row-kind vocabulary" },
   { path: "tests/dba-coding-lane-classification.test.mjs", keys: ["r ->> 'filing_id'"], why: "uuid text, whose dashes fall at the same offset in every value" },
+  { path: "tests/delta-algebra-phase.mjs", keys: ["o"],
+    why: "`o` is the WITH ORDINALITY column of `unnest($1::bytea[]) with ordinality q(h,o)` — a bigint, so nothing collates; the alias only LOOKS movable because a text scanner cannot resolve it" },
   { path: "tests/f-a2-generic.test.mjs", keys: ["kind", "kind", "kind", "kind", "r.field_path"], why: "a closed row-kind vocabulary, and the field-path grammar 0290 pins" },
   { path: "tests/f-a5-reporting-agency-pr2-census.test.mjs", keys: ["case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end"], why: "pg_get_userbyid returns `name`, so the CASE inherits C" },
   { path: "tests/f-a5b-card1-seam-stage-b.test.mjs", keys: ["e.version"], why: "an evaluator version string of digits and dots" },
-  { path: "tests/f-t1-sst-reference.test.mjs", keys: ["pg_get_userbyid(rr)::text", "rolname::text"],
-    why: "both keep the `name` collation through the cast (measured); and the roster is used as a SET, never pinned as an ordered literal" },
+  { path: "tests/f-t1-sst-reference.test.mjs", keys: ["pg_get_userbyid(rr)::text"],
+    why: "the cast keeps the `name` collation (measured); and the roster is used as a SET, never pinned as an ordered literal" },
   { path: "tests/invite-preview-public.test.mjs", keys: ["t.name"], why: "the caller's own text[] roster, taken against the `(none)` sentinel" },
   { path: "tests/masb-wording-seed-battery.test.mjs", keys: ["phrase_key"], why: "the seeded wording keys of one locale" },
   { path: "tests/prepayment-wake-reroute.test.mjs", keys: ["wake_kind"], why: "clara.wake_fn_allowlist.wake_kind for one function — a one-member verdict" },
