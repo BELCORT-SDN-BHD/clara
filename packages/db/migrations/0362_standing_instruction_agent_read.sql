@@ -364,25 +364,48 @@ begin
   -- #1147 makes the consequence visible and records the question rather than taking it
   -- (packages/db/README.md, the 0362 section).
   --
-  -- WHY THE COUNT IS TAKEN HERE. After the stamp, inside the same transaction, so what it reports
-  -- is the world the withdrawal leaves behind rather than the one it found. A count taken before
-  -- the update would be a prediction.
+  -- WHY THE COUNT IS TAKEN HERE. After the stamp, inside the same transaction. What it reports is
+  -- THIS TRANSACTION'S SNAPSHOT of the plans the instruction authorised, taken at the moment the
+  -- withdrawal lands -- not a promise about the world afterwards, which this body cannot make: the
+  -- wake arm of `clara._prepayment_schedule_core` resolves the live instruction with a plain
+  -- `select ... limit 1` and takes no share lock, so an unattended `close_prep` run already in
+  -- flight can commit a plan a moment later (FIX ROUND, ADV-04). That window is why the `= 0` arm
+  -- on screen states what was TRUE AT WITHDRAWAL rather than asserting that nothing keeps posting
+  -- (`apps/web/messages/en.json`, `standingWithdrawnPlans`), and why serialising the two is written
+  -- up as a successor item rather than taken here (recutting a schedule core is outside #1147).
+  -- A count taken BEFORE the update would be a prediction, so this placement still stands.
   --
   -- WHAT `LIVE` MEANS, and it is measured rather than spelled: `status = 'active'`. 0193's CHECK
   -- admits exactly {active, paused, ended}; a paused plan posts nothing and an ended one is over,
   -- so neither is something a withdrawal leaves running. A person who has already paused a plan
   -- is not told they still have to.
   --
+  -- WHAT IS COUNTED IS THE FIRM'S INSTRUCTION, NOT THE ROW BEING WITHDRAWN (FIX ROUND, ADV-01 /
+  -- SPEC-02). 0338's record door is VERSION-FORWARD (`0338:436`): a restated reason -- or simply
+  -- recording the instruction again after a withdrawal -- withdraws the live row as `superseded by
+  -- a restated standing instruction` and inserts a FRESH one with a new id, precisely so that a
+  -- plan written while the old row stood keeps reading the basis it was written under. That plan
+  -- goes on citing the SUPERSEDED id. A count keyed on `v_row.id` therefore answers 0 for every
+  -- firm that ever restated, and the card renders "Nothing was running under it" over a schedule
+  -- that is still posting -- the exact false belief this key exists to remove. So the predicate is
+  -- the (firm, instruction_key) FAMILY: every row of this firm's standing instruction of this kind,
+  -- live or superseded, because withdrawing the instruction is what the person did.
+  --
   -- THE REFERENCE IS COMPARED AS TEXT, never cast to uuid: `authority_ref` is an open jsonb object
   -- (its only CHECK is that it IS an object, 0193), so a row whose `id` is not uuid-shaped would
-  -- turn a count into a 22P02 at the exact moment a firm is trying to withdraw.
+  -- turn a count into a 22P02 at the exact moment a firm is trying to withdraw. The family is
+  -- reached through the ROWS rather than through `authority_ref ->> 'instruction_key'`, which
+  -- 0338:1102 also writes: `id` is the citation `clara._authority_ref_refusal` itself keys on, so
+  -- a plan the estate can still resolve is a plan this count can still see.
   select count(*)::int into v_plans
     from clara.accounting_plans ap
    where ap.firm_id = v_firm
      and ap.status = 'active'
      and ap.authority_kind = 'standing_instruction'
      and ap.authority_ref ->> 'kind' = 'firm_standing_instruction'
-     and ap.authority_ref ->> 'id' = v_row.id::text;
+     and ap.authority_ref ->> 'id' in (
+           select fsi.id::text from clara.firm_standing_instructions fsi
+            where fsi.firm_id = v_firm and fsi.instruction_key = v_key);
 
   perform clara._audit(v_firm, v_actor, null, null, 'withdraw_firm_standing_instruction', null,
     jsonb_build_object('instruction_key', v_key, 'instruction_id', v_row.id, 'op_key', p_op_key));
@@ -406,10 +429,14 @@ comment on function clara.withdraw_firm_standing_instruction(text, text, text) i
   'only. The row is kept forever with its withdrawal stamp, so a plan written while the '
   'instruction stood still reads the basis it was written under; what stops is NEW work -- the '
   'clocked lane refuses wake_authority_absent again. #1147 [0362]: the receipt also carries '
-  'plans_still_posting, the count of LIVE (status = ''active'') plans of this firm that the '
-  'withdrawn instruction authorised and that keep posting under the member who authorised them. '
-  'Withdrawal does NOT pause them -- whether it should is an owner ruling #1050 was not given, and '
-  'this file makes the consequence visible rather than deciding it.';
+  'plans_still_posting, the count of LIVE (status = ''active'') plans of this firm authorised by '
+  'ANY recording of this standing instruction -- the whole (firm, instruction_key) family, because '
+  '0338''s record door is version-forward and a plan authorised before a restatement goes on citing '
+  'the superseded row -- which keep posting under the member who authorised them. It is this '
+  'transaction''s snapshot at the moment of withdrawal, not a promise about the world afterwards: '
+  'the wake arm takes no share lock on the instruction row, so a close_prep run already in flight '
+  'can land one after it. Withdrawal does NOT pause them -- whether it should is an owner ruling '
+  '#1050 was not given, and this file makes the consequence visible rather than deciding it.';
 
 reset role;
 

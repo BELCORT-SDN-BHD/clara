@@ -462,6 +462,49 @@ async (t) => {
     `the sibling firm's own live plan is not counted at its own withdrawal: ${JSON.stringify(outOther)}`);
 });
 
+test("p1147.withdraw.counts_across_a_restatement -- the count is of the firm's INSTRUCTION, not of "
+  + "the ROW being withdrawn: a plan authorised under a recording that was later RESTATED is still "
+  + "posting, and the withdrawal says so rather than telling the firm it stopped everything",
+async (t) => {
+  if (await readGate(t)) return;
+
+  // WHY THIS STATE EXISTS AT ALL. 0338's record door is VERSION-FORWARD (`:436`): a restated
+  // reason -- or simply recording the instruction again after a withdrawal -- withdraws the live
+  // row as `superseded by a restated standing instruction` and inserts a FRESH one with a new id,
+  // so that a plan written while the old row stood still reads the basis it was written under. The
+  // plan keeps citing the SUPERSEDED id. A count keyed on the row being withdrawn therefore
+  // answers 0 for a firm that ever restated, and the card's `=0` arm states, in words, the exact
+  // thing #1147 exists to stop a firm believing.
+  const sc = await prepaidScene("p1147restate");
+  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
+  const first = await record(sc.alice, { opKey: opk("p1147-restate-1") });
+  const w = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.ok(w.plan_id, "mandatory setup: the clocked lane configured a plan under the FIRST recording");
+  assert.equal((await plansUnder(first.instruction_id)).length, 1,
+    "mandatory setup: exactly one plan cites the first recording");
+
+  // THE RESTATEMENT, through the real human door with a different sentence.
+  const second = await record(sc.alice,
+    { reason: "p1147: and we have moved to a weekly close.", opKey: opk("p1147-restate-2") });
+  assert.notEqual(second.instruction_id, first.instruction_id,
+    "mandatory setup: a restated reason mints a fresh row (0338's version-forward supersede)");
+  assert.deepEqual(await plansUnder(second.instruction_id), [],
+    "mandatory setup: the plan still cites the SUPERSEDED row, which is what makes this state real");
+
+  const out = await withdraw(sc.alice, { opKey: opk("p1147-restate-wd") });
+  assert.equal(out.instruction_id, second.instruction_id, "the withdrawal closed the LIVE row");
+  assert.equal(out.plans_still_posting, 1,
+    "a firm that restated its instruction is told nothing keeps posting while a schedule the same "
+    + `instruction authorised is still active: ${JSON.stringify(out)}`);
+
+  // …AND THE PLAN REALLY IS STILL POSTING. The count is measured against the world, not against
+  // itself: the plan is read independently as root and is still ACTIVE.
+  const live = await plansUnder(first.instruction_id);
+  assert.equal(live.length, 1, "the plan under the superseded row vanished");
+  assert.equal(live[0].status, "active",
+    "withdrawing the instruction changed a plan it authorised -- the ruling #1147 was NOT given");
+});
+
 // =============================================================================================
 // S3 — THE DEFERRED-REVENUE ASYMMETRY, HELD BY A CENSUS RATHER THAN BY A COMMENT.
 //
