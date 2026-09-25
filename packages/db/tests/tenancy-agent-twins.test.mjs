@@ -869,9 +869,34 @@ test("p1137.obo.plan_step_parity -- every refusal the HUMAN plan step raises is 
   // 2 -- ...AND THE SHARED AUTHORITY RESOLUTION, whose refusal token is a VARIABLE and so invisible
   //      to the census above: both bodies must still resolve the cited instruction through #977's
   //      ONE definition rather than merely checking its shape.
+  //
+  //      RECUT AT INTEGRATION (riders sweep wave, L1's 0330 against this lane). This asked both
+  //      bodies to NAME clara._authority_ref_refusal. That is how the plan door reached it before
+  //      #1051; after 0330 the door reaches it through the shared clara._assert_plan_authority and
+  //      names it nowhere, and 0353's own plan step was recut at integration to do the same,
+  //      because #1051's census refuses any body that both calls the predicate and keeps a copy of
+  //      the wall. So the REACH is what this cell follows, measured off the catalog rather than
+  //      pinned: the shared predicate where it is live, the definition itself where it is not.
+  //      The claim is unchanged and is now stronger, because both bodies must reach the SAME hop.
+  const planWallLive = (await rootQuery(
+    "select to_regprocedure('clara._assert_plan_authority(text,jsonb,uuid,uuid)') is not null as ok"))
+    .rows[0].ok;
+  const reach = planWallLive
+    ? /clara\._assert_plan_authority\(/
+    : /clara\._authority_ref_refusal\(/;
   for (const sig of [PLAN_DOOR, OBO_PLAN_STEP]) {
-    assert.match(await bodyOf(sig), /clara\._authority_ref_refusal\(/,
-      `${sig} no longer resolves its authority through clara._authority_ref_refusal (#977, 0250)`);
+    assert.match(await bodyOf(sig), reach,
+      `${sig} no longer resolves its authority through ${planWallLive
+        ? "clara._assert_plan_authority (#1051, 0330), the one wall both plan doors share"
+        : "clara._authority_ref_refusal (#977, 0250)"}`);
+  }
+  if (planWallLive) {
+    // ...and the predicate is itself a reader of the one definition, so the hop is a fold and not
+    // a second copy. The same two-step #977's own battery makes.
+    assert.match(
+      await bodyOf("clara._assert_plan_authority(text,jsonb,uuid,uuid)"),
+      /clara\._authority_ref_refusal\(/,
+      "#1051's shared plan wall does not resolve through clara._authority_ref_refusal");
   }
 
   // 3 -- THE POSITION, driven rather than read. The wall belongs where

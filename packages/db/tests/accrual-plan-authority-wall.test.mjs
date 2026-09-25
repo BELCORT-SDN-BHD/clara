@@ -385,10 +385,29 @@ async () => {
   // wrote. That case was an argument in 0331's header; here it is a closed-world measurement, so a
   // later lane that grants one of these paths turns this cell red instead of quietly making the
   // header false.
-  const CONFIRMATION_DOORS = [
-    "clara.confirm_tenancy_rent_plan(uuid,uuid,text,text,text,text)",
-    "clara.confirm_tenancy_rent_plan_revision(uuid,uuid,text,text)",
-  ];
+  //
+  // WHERE THE WRITE LIVES MOVED AT INTEGRATION (riders sweep wave, this lane against L8's
+  // #1137/0353), and the claim did not. 0353 gives each tenancy confirmation an on-behalf twin by
+  // SPLITTING the human door into a core plus a thin door, exactly as #915 and #941 did for the
+  // plan step: the `insert into clara.contract_plan_confirmations` goes down one level into
+  // `clara._confirm_tenancy_rent_plan_core` and `..._revision_core`, and the human door becomes a
+  // caller. So the closed world of WRITERS is the same lane's same two acts, named one level
+  // lower. What this cell is really about is untouched and is still measured below: no runtime
+  // connection can reach either act or the table, and the row cannot exist without naming who
+  // confirmed it. Measured off the catalog rather than assumed, so a chain without 0353 still
+  // pins the pre-split pair and a THIRD writer of any spelling still reds this cell.
+  const splitForObo = (await rootQuery(
+    "select to_regprocedure('clara._confirm_tenancy_rent_plan_core(uuid,uuid,text,uuid,uuid,text,"
+    + "text,text,text)') is not null as ok")).rows[0].ok;
+  const CONFIRMATION_DOORS = splitForObo
+    ? [
+      "clara._confirm_tenancy_rent_plan_core(uuid,uuid,text,uuid,uuid,text,text,text,text)",
+      "clara._confirm_tenancy_rent_plan_revision_core(uuid,uuid,text,uuid,uuid,text,text)",
+    ]
+    : [
+      "clara.confirm_tenancy_rent_plan(uuid,uuid,text,text,text,text)",
+      "clara.confirm_tenancy_rent_plan_revision(uuid,uuid,text,text)",
+    ];
 
   // 1 — THE ONLY WRITERS, as a closed world over every clara body rather than a spot check.
   const writers = (await rootQuery(
@@ -404,7 +423,15 @@ async () => {
   //     catalog's own C-ordered name type, so no database collation can change this roster.
   const MACHINE_ROLES = ["clara_runtime", "clara_agent_ro", "clara_wake_interactive",
     "clara_wake_proactive", "clara_wake_bank", "clara_wake_filing"];
-  for (const sig of CONFIRMATION_DOORS) {
+  // The ACL claim belongs to the HUMAN DOORS, which keep their names across 0353's split: the two
+  // writers above are those doors before the split and their ungranted cores after it, and an
+  // ungranted core is not something a role reaches at all. Where the split is live the cores are
+  // asserted to be reachable by NOBODY, which is strictly stronger than the clause they replaced.
+  const HUMAN_DOORS = [
+    "clara.confirm_tenancy_rent_plan(uuid,uuid,text,text,text,text)",
+    "clara.confirm_tenancy_rent_plan_revision(uuid,uuid,text,text)",
+  ];
+  for (const sig of HUMAN_DOORS) {
     const acl = (await rootQuery(
       "select has_function_privilege('clara_authenticated', $1::regprocedure, 'execute') as auth, "
       + "       has_function_privilege('public', $1::regprocedure, 'execute') as pub", [sig])).rows[0];
@@ -416,6 +443,16 @@ async () => {
         + "            else has_function_privilege($2, $1::regprocedure, 'execute') end as ex",
         [sig, role])).rows[0];
       assert.equal(r.ex, false, `${role} cannot execute ${sig}`);
+    }
+  }
+  if (splitForObo) {
+    for (const sig of CONFIRMATION_DOORS) {
+      const n = (await rootQuery(
+        "select count(*)::int as n from pg_proc p, unnest(coalesce(p.proacl, '{}'::aclitem[])) as a "
+        + "where p.oid = $1::regprocedure and a::text not like 'clara_fn_owner=%'", [sig])).rows[0].n;
+      assert.equal(n, 0,
+        `${sig} is granted to somebody -- 0353's confirmation core is an internal, reachable by no `
+        + "role at all, and the OBO twin is the only other way in");
     }
   }
 
@@ -511,9 +548,23 @@ async () => {
   assert.deepEqual(census.filter((c) => c.carriesOwnWall).map((c) => c.name),
     ["_assert_plan_authority"],
     "the wall's sentence lives in exactly ONE clara body — #1051's predicate");
+  // A FOURTH CALLER JOINED AT INTEGRATION (riders sweep wave, this lane against L8's #1137/0353).
+  // That lane was cut from the cut head, which has no 0330, so its `clara._tenancy_plan_core`
+  // pasted 0300's authority block whole and would have been the fourth HAND-WRITTEN copy of the
+  // wall. This census is what refused it, and the integration recut folded it the same way 0330
+  // folded the two plan doors and this ticket the accrual core. The claim that matters is
+  // unchanged and is asserted above: the wall's SENTENCE still lives in exactly one body. What
+  // grows is the roster of bodies that REACH it, which is the ticket working rather than drifting.
+  // Measured off the catalog, never assumed: the step joins the roster only where it exists.
+  const tenancyStepLive = (await rootQuery(
+    "select to_regprocedure('clara._tenancy_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,"
+    + "integer,text,date,date,jsonb)') is not null as ok")).rows[0].ok;
   assert.deepEqual(census.filter((c) => c.callsPredicate).map((c) => c.name),
-    ["_accrual_plan_core", "_obo_plan_core", "create_accounting_plan"],
-    "and exactly the three plan bodies call it — the two #1051 folded and this ticket's third");
+    tenancyStepLive
+      ? ["_accrual_plan_core", "_obo_plan_core", "_tenancy_plan_core", "create_accounting_plan"]
+      : ["_accrual_plan_core", "_obo_plan_core", "create_accounting_plan"],
+    "and exactly the plan bodies call it — the two #1051 folded, this ticket's third, and #1137's "
+    + "tenancy plan step where that lane is on the chain");
   assert.deepEqual(census.filter((c) => c.carriesInlineProbe).map((c) => c.name), [],
     "#977's inline chat-lane existence probe survives in NO clara body; 0250:604 pinned it at "
     + "one because 0250 could not reach this lane, and this is the ticket that took it to none");

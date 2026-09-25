@@ -134,9 +134,22 @@ const REVISE_SPLIT = {
 // clara._obo_plan_core absorbs `recurring_journal` (after #1051 and #1080), this body becomes a
 // two-line caller and drops off this roster the way a thin delegate does. The entry stays until
 // then, because an unwatched fourth writer is exactly how ADV-L08-01 happened.
+//
+// RE-MEASURED AT INTEGRATION (riders sweep wave, L1's 0330 against lane L8's 0353). Half of that
+// follow-up landed in the merge rather than later: this lane was cut from the cut head, which has
+// no 0330, so 0353 pasted 0300's AUTHORITY BLOCK into this body whole -- a FOURTH hand-written
+// copy of the wall #1051 folds, and the only one that would have been left standing. #1051's own
+// census refuses any body that both calls the shared predicate and keeps a copy of the wall's
+// sentence, so the integration recut points this step at clara._assert_plan_authority exactly as
+// 0330 pointed the two plan doors. That moved the body and nothing else: what it admits, what it
+// refuses, its SQLSTATE and its typed detail are all unchanged, which is what 0353's own
+// p1137.obo.refusals_match and p1137.obo.plan_step_parity measure. The body still CREATES a plan
+// and still takes the #929 client rung, so it stays on this roster, at its new sha.
+//   3065a41f... -- the body 0353 wrote on a chain without #1051.
+//   9560414f... -- the same body with its authority block folded into the shared predicate.
 const TENANCY_PLAN_STEP = {
   fn: "clara._tenancy_plan_core(uuid,uuid,uuid,text,text,jsonb,text,text,integer,text,date,date,jsonb)",
-  sha: "3065a41f862a419fe25cfa1c9d665e2b57578a54a6c4bfc489f5c13f4887d37b",
+  sha: "9560414f256f80e641cb04a60d140fa4bd0189c722db0f9f97b47a797e3699a3",
 };
 
 /** The bodies that HOLD the computation (T.4), per generation. */

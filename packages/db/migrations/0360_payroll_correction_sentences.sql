@@ -167,11 +167,25 @@ begin
   -- is spliced by six other files and its sha moves for reasons that have nothing to do with this
   -- one. If that arm ever starts asking the verdict, defect 1's premise is gone and this file's
   -- own sentence is the thing to revisit.
-  select p.prosrc into v_src from pg_proc p
-   where p.oid = 'clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure;
+  --
+  -- WHERE THE ARM LIVES, ASKED AT INTEGRATION RATHER THAN ASSUMED (riders sweep wave). Lane L8's
+  -- #1136 (0352) SPLITS this read: the body moves into `clara._list_review_queue_core`, taking the
+  -- payroll arm with it, and `clara.list_review_queue` becomes a thin door that resolves the
+  -- viewer floor and delegates. Read at the door alone this check refused on the integrated chain,
+  -- and it was right to -- the markers really are not there any more. The arm did not go away, it
+  -- went down one level, so this reads the CORE where the split has landed and the door where it
+  -- has not. Both are real chains this file ships on, and it still refuses if the arm is in
+  -- neither.
+  if to_regprocedure('clara._list_review_queue_core(uuid,jsonb,jsonb,integer)') is not null then
+    select p.prosrc into v_src from pg_proc p
+     where p.oid = 'clara._list_review_queue_core(uuid,jsonb,jsonb,integer)'::regprocedure;
+  else
+    select p.prosrc into v_src from pg_proc p
+     where p.oid = 'clara.list_review_queue(jsonb,jsonb,integer)'::regprocedure;
+  end if;
   if position('''payroll_posting_blocked''::text row_kind' in v_src) = 0
      or position('pv.v->>''sentence'' question_text' in v_src) = 0 then
-    raise exception '#1056 fix prestate: the payroll Needs-you arm is not where this file expects it -- the sentence it renders may no longer be the verdict''s own'
+    raise exception '#1056 fix prestate: the payroll Needs-you arm is in neither clara._list_review_queue_core nor clara.list_review_queue -- the sentence it renders may no longer be the verdict''s own'
       using errcode = 'CLR10';
   end if;
 

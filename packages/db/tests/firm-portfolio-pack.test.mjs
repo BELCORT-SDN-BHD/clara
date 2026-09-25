@@ -813,12 +813,17 @@ test("p659.portfolio.no_recut — list_review_queue, list_accounting_work, get_c
   const workListSig = workListWidened ? "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int,timestamptz,timestamptz)" : "clara.list_accounting_work(uuid,text[],uuid,text[],timestamptz,timestamptz,text,text,int)";
   const PINS = {
     ...(queueSplitForAgentLane
+      // RE-MEASURED AT INTEGRATION. Lane L8 measured the SPLIT-OUT core on a chain without lane
+      // L4's 0343, so it carried the pre-0343 queue body. 0352 re-derives the core from whatever
+      // the live body is, so on the integrated chain it carries 0343's seventeenth row kind too
+      // and hashes differently. The DOOR's own pin above is unchanged, because the thin door 0352
+      // installs is the same text whatever body it replaced.
       ? { "clara._list_review_queue_core(uuid,jsonb,jsonb,int)":
-            "5eae4caaf6a17eb4441c2079b31b71674b541334264fa5c01cd4544645542591" }
+            "b3fe3ad11d2d70d38a8ab3a51472300b3db7d423ac43b43c9791dad3507bc21c" }
       : {}),
     "clara.list_review_queue(jsonb,jsonb,int)":
       queueSplitForAgentLane
-        ? "PENDING_0352_ON_THE_INTEGRATED_CHAIN"
+        ? "a76f8a575c1567d6b3577b9b3de0cb43e22d90fc9097a391da474aae1d844e48"
         : sweepWitnessQueueSplice
         ? "ae0ee7e6bded5c7b9e3e1d5397e793522465adbee0ae789235d965a05abf9784"
         : wave4AccrualQueueSplices

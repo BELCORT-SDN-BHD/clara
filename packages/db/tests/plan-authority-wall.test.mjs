@@ -170,8 +170,16 @@ async () => {
   assert.deepEqual(carriers.filter((n) => n !== ACCRUAL_CORE), ["_assert_plan_authority"],
     "the wall's own sentence lives in exactly ONE body besides the third copy #1080 owns "
     + `(carriers: ${carriers.join(", ")})`);
+  // THE PLAN FAMILY GAINED A FOURTH MEMBER AT INTEGRATION (riders sweep wave, this lane against
+  // L8's #1137/0353): `clara._tenancy_plan_core`, the on-behalf plan step behind the tenancy rent
+  // confirmation. That lane was cut from the cut head, which has no 0330, so it pasted 0300's
+  // authority block whole; this very census refused it, and the integration recut folded it onto
+  // the predicate like the other three. It is a plan body by every test this rule uses — it CREATES
+  // an accounting plan and takes the #929 client rung — so it belongs inside the family rather than
+  // outside it. The rule is unchanged: nothing OUTSIDE the plan family may call the predicate.
+  const PLAN_FAMILY = ["create_accounting_plan", "_obo_plan_core", ACCRUAL_CORE, "_tenancy_plan_core"];
   assert.deepEqual(
-    callers.filter((n) => !["create_accounting_plan", "_obo_plan_core", ACCRUAL_CORE].includes(n)),
+    callers.filter((n) => !PLAN_FAMILY.includes(n)),
     [],
     `no body outside the plan family calls the predicate (callers: ${callers.join(", ")})`);
   const both = census.filter((c) => c.carriesOwnWall && c.callsPredicate);

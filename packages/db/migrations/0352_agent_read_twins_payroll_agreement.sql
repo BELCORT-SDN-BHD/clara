@@ -300,19 +300,48 @@ do $t1136_pre$
 declare
   v_src text; v_new text; v_sha text; v_mode text; v_n int; v_i int; v_firm_n int;
   v_sig text; v_expect text; v_kinds text[]; v_k text;
-  -- THE TWO BODIES THIS FILE RECUTS, at their MEASURED live sha on `clara_l01` at 312 files /
-  -- `0323_trade_invoice_probe_self_exclusion` (the merged and released riders cut phase). Neither
-  -- is copied from an earlier migration's header.
+  -- THE TWO BODIES THIS FILE RECUTS, at their MEASURED live sha. Neither is copied from an
+  -- earlier migration's header.
+  --
+  -- THE QUEUE PIN AND THE BODY §D EMBEDS WERE RE-DERIVED AT INTEGRATION (riders sweep wave).
+  -- Both were measured on `clara_l01` at 312 files / `0323_trade_invoice_probe_self_exclusion`,
+  -- which is the merged cut phase and NO sweep lane. Lane L4's #1048 (0343) splices
+  -- `clara.list_review_queue` again before this file applies -- the payroll_witness_rows CTE, one
+  -- union arm and one predicate, the SEVENTEENTH row kind -- so on the integrated chain the live
+  -- body is `ae0ee7e6...`, not `d5456ecc...`.
+  --
+  -- This file does not merely PIN that body, it SPLITS it: §D installs a core whose text is
+  -- embedded here. Left at the old derivation the split would have installed a core written from
+  -- the pre-0343 body and SILENTLY DROPPED the seventeenth row kind, with nothing to notice --
+  -- the tail checks the core by its own markers, which the old text carries. So the core was
+  -- re-derived from the LIVE body by this file's OWN surgery (`__t1136_queue_forward`, the three
+  -- replaces spelled in §-1), never retyped, and the derivation was proved both ways: the OLD
+  -- embedded core reverses exactly to `d5456ecc...`, and the NEW one reverses exactly to the live
+  -- `ae0ee7e6...`. The three anchor counts §0 asserts hold on the new pre-image too (declare 1,
+  -- floor line 1, `c.firm` 24, `p_firm` 0).
+  --
+  -- The settlement half needed nothing: no lane of this wave writes
+  -- `clara.get_payroll_settlement_candidates`, and its pin was re-measured and holds.
   c_settle_pre constant text :=
     '09de64492afaa5f2876c9d51078de55f29fccb946b1bf1fd868403734e4e65e4';
   c_queue_pre constant text :=
-    'd5456eccb945decd9f61bba6194543d0528ee5f052776d6fdc20cf9fa0226b6b';
+    'ae0ee7e6bded5c7b9e3e1d5397e793522465adbee0ae789235d965a05abf9784';
   -- …AND THE TWO BODIES §A AND §D EMBED, which must be exactly those two with this file's own
   -- anchored surgery applied. Measured on the same rig from the same pre-images.
   c_settle_core constant text :=
     'a00342aa0fb9ec7c09b13404f8e92b5f19a28366bd65a75ece8be32af7e8bafb';
   c_queue_core constant text :=
-    '5eae4caaf6a17eb4441c2079b31b71674b541334264fa5c01cd4544645542591';
+    'b3fe3ad11d2d70d38a8ab3a51472300b3db7d423ac43b43c9791dad3507bc21c';
+  -- THE HASH RECIPE, CORRECTED AT INTEGRATION (riders sweep wave). Every sha in this file was
+  -- taken with `sha256(<text>::bytea)`, and that cast runs bytea's own INPUT function, which reads
+  -- a backslash as the start of an escape. It worked on this lane's rig because no body it hashes
+  -- carried one. Lane L4's #1048 (0343) recuts `clara._payroll_posting_verdict` and its new body
+  -- carries a backslash at character 22284, so on the integrated chain the cast raises
+  -- `invalid input syntax for type bytea` and the migration aborts before it edits anything.
+  -- Every site now uses `convert_to(<text>, 'UTF8')`, which is this estate's own recipe and is
+  -- byte-identical to the cast for every backslash-free text -- so NO pin value in this file moves
+  -- because of the change, and the one body that needed it is hashed correctly for the first time.
+  --
   -- UNCONDITIONAL NEIGHBOUR PINS. Every one is MEASURED LIVE on `clara_l01` at the same frontier.
   -- This file CALLS the first four and RELIES on the last four being exactly what the two reads it
   -- is splitting rely on — the two ungranted verdict bodies whose sentences the queue projects,
@@ -326,8 +355,14 @@ declare
      'd1a8a1940ffee67f0bbe1f44f4081c8a5b1fca1775832948c2c606ced2043a46'],
     ['clara.role_rank(text)',
      '5ced25aed03ff000519af583c5c5b89c4d59c4cb5f20e49f39877435e8c2576f'],
+    -- RE-MEASURED AT INTEGRATION (riders sweep wave). Lane L4's #1048 (0343) recuts this body for
+    -- the row-sum-plus-witness posting arm, and 0343 applies before this file. This file only
+    -- READS the verdict's sentence through the queue projection, which 0343 does not move, so the
+    -- pin is re-measured rather than widened: the value below is the body 0343 installs, and a
+    -- third shape still stops the apply BY NAME. The lane's own pre-0343 value was
+    -- 23c644b7b4ad11cee43c1e02acb2599733cb1000a808d108a5519d4b3a0a4df0.
     ['clara._payroll_posting_verdict(uuid)',
-     '23c644b7b4ad11cee43c1e02acb2599733cb1000a808d108a5519d4b3a0a4df0'],
+     '378086068b13e4fa9eba17bb1beba8aa749d0200989872d3296d1246da5a1242'],
     ['clara._agreement_posting_verdict(uuid)',
      'ddd38816bc22037bd5b5c4f1b56b3bbaf1aba581871bd38b12b8918a63607168'],
     ['clara._payroll_net_pay_unsettled(uuid)',
@@ -360,13 +395,13 @@ begin
   --     asserted on BOTH paths. On a fresh apply the pre-image is the human door's own body; on a
   --     redo it is the committed core with this file's surgery REVERSED.
   select clara.__t1136_settle_preimage() into v_src;
-  v_sha := encode(sha256(v_src::bytea), 'hex');
+  v_sha := encode(sha256(convert_to(v_src, 'UTF8')), 'hex');
   if v_sha is distinct from c_settle_pre then
     raise exception '#1136 §0: clara.get_payroll_settlement_candidates(uuid) is not the body this file was written against (mode %, recovered sha %, expected %) — re-derive the surgery against the LIVE body',
       v_mode, v_sha, c_settle_pre using errcode = 'CLR10';
   end if;
   select clara.__t1136_queue_preimage() into v_src;
-  v_sha := encode(sha256(v_src::bytea), 'hex');
+  v_sha := encode(sha256(convert_to(v_src, 'UTF8')), 'hex');
   if v_sha is distinct from c_queue_pre then
     raise exception '#1136 §0: clara.list_review_queue(jsonb,jsonb,integer) is not the body this file was written against (mode %, recovered sha %, expected %) — re-derive the surgery against the LIVE body',
       v_mode, v_sha, c_queue_pre using errcode = 'CLR10';
@@ -378,7 +413,7 @@ begin
     if to_regprocedure(v_sig) is null then
       raise exception '#1136 §0: neighbour % is absent', v_sig using errcode = 'CLR10';
     end if;
-    select encode(sha256(p.prosrc::bytea), 'hex') into v_sha
+    select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_sha
       from pg_proc p where p.oid = v_sig::regprocedure;
     if v_sha is distinct from v_expect then
       raise exception '#1136 §0: neighbour % moved (sha % , expected %) — another lane recut it; re-measure this file''s pins before applying',
@@ -442,7 +477,7 @@ begin
     raise exception '#1136 §0: the settlement surgery does not reverse to the pre-image'
       using errcode = 'CLR10';
   end if;
-  v_sha := encode(sha256(v_new::bytea), 'hex');
+  v_sha := encode(sha256(convert_to(v_new, 'UTF8')), 'hex');
   if v_sha is distinct from c_settle_core then
     raise exception '#1136 §0: the body §A embeds is not the surgery of the live #947 read (derived sha %, embedded %) — re-derive §A against the LIVE body',
       v_sha, c_settle_core using errcode = 'CLR10';
@@ -492,7 +527,7 @@ begin
         using errcode = 'CLR10';
     end if;
   end loop;
-  v_sha := encode(sha256(v_new::bytea), 'hex');
+  v_sha := encode(sha256(convert_to(v_new, 'UTF8')), 'hex');
   if v_sha is distinct from c_queue_core then
     raise exception '#1136 §0: the body §D embeds is not the surgery of the live queue read (derived sha %, embedded %) — re-derive §D against the LIVE body',
       v_sha, c_queue_core using errcode = 'CLR10';
@@ -889,6 +924,10 @@ begin
                     and pe.status='done')
       and not exists(select 1 from clara.journal_entries pj where pj.filing_id=pf.id
         and (pj.status='draft' or (pj.status='approved' and pj.reversed_by is null)))
+      -- #1048 (0343): a PARKED completeness question is the payroll_witness_rows arm's row, not
+      -- this one. One document, one row: the split is on the verdict's own `completeness.parked`,
+      -- which both arms read, so neither can claim a row the other also claims.
+      and coalesce((pv.v->'completeness'->>'parked')::boolean, false) = false
   ), payroll_settlement_rows as (
     -- #947 (0298): A POSTED PAYROLL RUN WHOSE NET PAY HAS NOT LEFT THE BANK YET. DERIVED from
     -- clara._payroll_net_pay_unsettled's own FIFO ledger read -- stores nothing, clears itself
@@ -1045,6 +1084,39 @@ begin
                        where ro.plan_id=o.plan_id and ro.leg='reversal' and ro.period_key=o.period_key
                          and ro.work_id is not null)
     order by o.plan_id,o.due_date,je.posting_date,je.id
+  ), payroll_witness_rows as (
+    -- #1048 (0343): A PAYROLL SUMMARY THAT PRINTS NO TOTAL AND WITNESSES NOTHING -- the PARKED
+    -- QUESTION. DERIVED, stores nothing, clears itself: clara._payroll_posting_verdict is asked
+    -- about the estate as it is NOW, and the sentence shown is that body's own, so the words a
+    -- person reads and the decision the lane took can never drift apart. Section `needs_you`, lane
+    -- `needs_you`. Unlike every other payroll row kind, this one is cleared HERE, by answering:
+    -- clara.answer_payroll_completeness records a named yes (which posts the run from its own row
+    -- sum) or a named no (which hands the document back to the payroll_rows arm above). `id` is
+    -- the filing's id; `amount_cents` is the gross the answer would post, so the size of the
+    -- decision is on the row. The active-client guard mirrors the other kinds (0017 R1-F5).
+    select 1 section_rank,'payroll_completeness_question'::text row_kind,'needs_you'::text section,
+      pw.client_id,null::uuid counterparty_id,pw.id filing_id,
+      null::uuid entry_id,
+      null::uuid question_id,null::uuid task_id,pw.document_id,'needs_you'::text lane,
+      false auto,false rule_backed,false high_stakes,pw.filed_at aged_since,
+      nullif(pwv.v->'completeness'->>'gross_sum_cents','')::bigint amount_cents,
+      nullif(pwv.v->'plan'->>'period_month','') period,
+      pwv.v->>'sentence' question_text,
+      pw.filed_at created_at,pw.id,''::text vendor_group,
+      null::text coding_kind,null::uuid watch_id,null::text tier,null::uuid finding_id,
+      null::text client_name,null::uuid[] batch_ids,null::int open_proposal_count
+    from clara.document_filings pw
+    join clara.clients active_payroll_witness_client on active_payroll_witness_client.id=pw.client_id and active_payroll_witness_client.status='active'
+    join clara.documents pwd on pwd.id=pw.document_id and pwd.document_kind='payroll_summary'
+    cross join lateral (select clara._payroll_posting_verdict(pw.document_id) v) pwv
+    where pw.firm_id=p_firm and pw.retired_at is null
+      and (v_client is null or pw.client_id=v_client)
+      and exists(select 1 from clara.document_extractions pwe
+                  where pwe.document_id=pw.document_id and pwe.engine_kind='payroll_text_facts'
+                    and pwe.status='done')
+      and not exists(select 1 from clara.journal_entries pwj where pwj.filing_id=pw.id
+        and (pwj.status='draft' or (pwj.status='approved' and pwj.reversed_by is null)))
+      and coalesce((pwv.v->'completeness'->>'parked')::boolean, false) = true
   ), all_rows as (
     select * from draft_rows union all select * from filing_rows
     union all select * from question_rows union all select * from task_rows
@@ -1058,6 +1130,7 @@ begin
     union all select * from rent_settlement_rows
     union all select * from rent_escalation_rows
     union all select * from bill_rows
+    union all select * from payroll_witness_rows
   ), keyed as (
     select r.*,array[r.section_rank::text,r.client_id::text,r.vendor_group,
       r.created_at::text,r.id::text] sort_tuple from all_rows r
@@ -1247,11 +1320,11 @@ declare
   c_settle_pre constant text :=
     '09de64492afaa5f2876c9d51078de55f29fccb946b1bf1fd868403734e4e65e4';
   c_queue_pre constant text :=
-    'd5456eccb945decd9f61bba6194543d0528ee5f052776d6fdc20cf9fa0226b6b';
+    'ae0ee7e6bded5c7b9e3e1d5397e793522465adbee0ae789235d965a05abf9784';
   c_settle_core constant text :=
     'a00342aa0fb9ec7c09b13404f8e92b5f19a28366bd65a75ece8be32af7e8bafb';
   c_queue_core constant text :=
-    '5eae4caaf6a17eb4441c2079b31b71674b541334264fa5c01cd4544645542591';
+    'b3fe3ad11d2d70d38a8ab3a51472300b3db7d423ac43b43c9791dad3507bc21c';
   v_machine text[] := array['clara_agent_ro','clara_runtime','clara_wake_interactive',
                             'clara_wake_proactive','clara_wake_bank','clara_wake_filing',
                             'clara_freeform_ro'];
@@ -1262,7 +1335,7 @@ begin
   for v_i in 1 .. 2 loop
     v_sig := (array['clara._payroll_settlement_candidates_core(uuid,uuid)',
                     'clara._list_review_queue_core(uuid,jsonb,jsonb,integer)'])[v_i];
-    select encode(sha256(p.prosrc::bytea), 'hex') into v_sha from pg_proc p where p.oid = v_sig::regprocedure;
+    select encode(sha256(convert_to(p.prosrc, 'UTF8')), 'hex') into v_sha from pg_proc p where p.oid = v_sig::regprocedure;
     if v_sha is distinct from (array[c_settle_core, c_queue_core])[v_i] then
       raise exception '#1136 tail: % was committed at sha % but §0 derived %', v_sig, v_sha,
         (array[c_settle_core, c_queue_core])[v_i] using errcode = 'CLR10';
@@ -1272,13 +1345,13 @@ begin
   -- (1) THE ARITHMETIC DID NOT CHANGE. Reverse this file's own surgery on the COMMITTED cores and
   --     hash: if a single byte of either computation moved, this raises.
   select clara.__t1136_settle_preimage() into v_src;
-  v_sha := encode(sha256(v_src::bytea), 'hex');
+  v_sha := encode(sha256(convert_to(v_src, 'UTF8')), 'hex');
   if v_sha is distinct from c_settle_pre then
     raise exception '#1136 tail: the settlement core does not reverse to #947''s body (sha %, expected %)', v_sha, c_settle_pre
       using errcode = 'CLR10';
   end if;
   select clara.__t1136_queue_preimage() into v_src;
-  v_sha := encode(sha256(v_src::bytea), 'hex');
+  v_sha := encode(sha256(convert_to(v_src, 'UTF8')), 'hex');
   if v_sha is distinct from c_queue_pre then
     raise exception '#1136 tail: the queue core does not reverse to the queue''s body (sha %, expected %)', v_sha, c_queue_pre
       using errcode = 'CLR10';
