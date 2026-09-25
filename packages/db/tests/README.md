@@ -237,9 +237,9 @@ a small Markdown table there: pass, fail, skip, cells and the declared floor/ski
 held to. A dispatch run's summary page therefore carries every leg's real numbers next to what
 they were checked against, with no raw log to open.
 
-**The weekly schedule's own failure is now a visible notification, not only a raw run log
-(#1127).** The bounds and the step summary above both prove something about a RUN that already
-happened; neither one tells anyone the schedule went red at all unless they open the Actions tab.
+**`ci.yml` now WIRES the weekly schedule's own failure to a visible notification (#1127).** The
+bounds and the step summary above both prove something about a RUN that already happened; neither
+one tells anyone the schedule went red at all unless they open the Actions tab.
 This wave's own evidence is that nobody reliably did: a test-corpus retarget and a census
 widening each moved a number `db-slice-frontiers` depends on, and neither was caught for a
 stretch of time. `.github/workflows/ci.yml`'s `notify-schedule-failure` job depends on `ci` — the
@@ -248,13 +248,37 @@ gate already decided — and fires only when `github.event_name == 'schedule'` a
 != 'success'`; a `workflow_dispatch` run is excluded because a human who just triggered it is
 already watching, and a `pull_request`/`push` failure is already visible to its author on the PR.
 No Slack, email or webhook channel exists anywhere in this repo's `.github/` today, so the job
-posts a `gh issue comment` onto the standing tracking issue (#1127) instead, carrying the run's
-own result and a link back to it (`github.run_id`) rather than a bare "it failed." The job
-declares its own job-level `permissions: issues: write`; the workflow itself still carries no
-top-level `permissions:` block, so every other job keeps its present (lesser) default token scope.
+posts a `gh issue comment` onto a standing CI-health issue instead, carrying the run's own result
+and a link back to it (`github.run_id`) rather than a bare "it failed." The job declares its own
+job-level `permissions: issues: write`; the workflow itself still carries no top-level
+`permissions:` block, so every other job keeps its present (lesser) default token scope.
 `ci-schedule-notify.test.mjs` holds the job's existence, its `needs`/`if` wiring, its
 least-privilege grant, and that the terminal `ci` job's own `needs` list stays exactly the ten
 legs it already had — this ticket adds a job that reacts to `ci`, not a new leg `ci` waits on.
+
+> **The channel is RESOLVED, never a number pinned in the workflow.** The first cut hardcoded
+> `gh issue comment 1127`; #1127 is the ticket that asked for the notification, and the wave that
+> delivers it closes the ticket — so the standing channel for every future weekly red would have
+> been a closed issue nobody has reason to reopen, which is the ticket's own failure mode
+> re-created by its own fix. The job looks up the OPEN issue whose title is exactly
+> `CI health: the weekly scheduled sweep` and opens one when none exists, so the channel can
+> neither be closed out from under it nor need a human to create it first.
+>
+> **What is HELD, and what the first scheduled run is still what proves.** Held by cells: the job's
+> wiring, its grant, that it pins no issue number, that it resolves by title and creates when it
+> finds nothing, and that the failure reaches `$GITHUB_STEP_SUMMARY` — which needs no token scope at
+> all — BEFORE any API call, so a refused grant cannot take the notice down with it. Driven, not
+> only read: the resolution command itself was run against this repository (`gh issue list --state
+> open --search 'in:title "…"'` returns nothing for the standing title and returns #1131 for an
+> existing issue's exact title), and the step's own shell was executed end to end against a stubbed
+> `gh` in both branches. **NOT driven: the live API write.** The repository's default workflow
+> permission is `read` (`gh api repos/:owner/:repo/actions/permissions/workflow` →
+> `"default_workflow_permissions":"read"`), which a job-level `permissions:` block is documented to
+> widen ("Anyone with write access to a repository can modify the permissions granted to the
+> `GITHUB_TOKEN`, adding or removing access as required, by editing the `permissions` key in the
+> workflow file" — docs.github.com, *Managing GitHub Actions settings for a repository*). The first
+> scheduled run after this merges is what proves a comment actually posts, and belongs in the
+> release evidence.
 
 **A fixture that runs at two frontiers is not a gate.** A gate lets a cell stand down; a
 FRONTIER-COMPAT fixture keeps the cell running on both sides of the migration that changed a

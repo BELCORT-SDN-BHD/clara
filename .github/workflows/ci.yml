@@ -634,12 +634,37 @@ jobs:
   # depends on, and neither was caught for a stretch of time — which only happens
   # if nobody is regularly reading the scheduled run's result. No notification
   # channel (Slack, email, a webhook) exists anywhere in this repo today, so this
-  # posts a comment on the standing tracking issue instead, per the ticket's own
+  # posts a comment on a STANDING CI-health issue instead, per the ticket's own
   # recommendation. Scoped to `schedule` alone: a `workflow_dispatch` run was just
   # triggered by a human who is already watching it, and a pull_request/push
   # failure is already visible to its author on the PR itself. Depends on `ci`
   # ALONE — the one job that already decides "every leg green or lawfully
   # skipped" — so this can never disagree with the terminal gate's own verdict.
+  #
+  # THE CHANNEL IS FOUND, NEVER PINNED TO A NUMBER [review round, ADV-L06-03].
+  # The first cut hardcoded `gh issue comment 1127` — the ticket that ASKED for
+  # this notification, which the wave that delivers it closes. The standing
+  # channel would then have been a closed issue nobody has reason to reopen:
+  # the ticket's own failure mode, re-created by its own fix. This resolves an
+  # OPEN issue by its exact title instead and OPENS one when none exists, so the
+  # channel can never be a closed issue and never needs a human to create it
+  # first. (GitHub's issue SEARCH index is eventually consistent, so two
+  # failures inside the index's lag could open two standing issues. At a weekly
+  # cadence that does not arise, and a duplicate standing issue is a visible
+  # outcome, not a silent one — which is the property this job exists for.)
+  #
+  # AND THE RUN'S OWN SUMMARY PAGE CARRIES IT FIRST, before any API call. That
+  # write needs no token scope at all, so if the `issues: write` grant is ever
+  # refused the notice still lands somewhere a human reads, and the step then
+  # fails loudly rather than going quiet. The repository's DEFAULT workflow
+  # permission is `read` (`gh api repos/:owner/:repo/actions/permissions/workflow`
+  # → `"default_workflow_permissions":"read"`), which a job-level `permissions:`
+  # block is documented to widen: "Anyone with write access to a repository can
+  # modify the permissions granted to the GITHUB_TOKEN, adding or removing access
+  # as required, by editing the permissions key in the workflow file"
+  # (docs.github.com, "Managing GitHub Actions settings for a repository" §
+  # Setting the permissions of the GITHUB_TOKEN for your repository). The first
+  # scheduled run after this merges is what PROVES the comment posts.
   # ===========================================================================
   notify-schedule-failure:
     needs: ci
@@ -649,12 +674,28 @@ jobs:
     permissions:
       issues: write
     steps:
-      - name: Comment the weekly sweep's failure onto the tracking issue
+      - name: Comment the weekly sweep's failure onto the standing CI-health issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           CI_RESULT: ${{ needs.ci.result }}
+          TITLE: "CI health: the weekly scheduled sweep"
         run: |
-          gh issue comment 1127 --repo "$REPO" \
-            --body "Weekly scheduled CI sweep: \`ci\` reported **${CI_RESULT}**. Run: ${RUN_URL}"
+          set -euo pipefail
+          BODY="Weekly scheduled CI sweep: \`ci\` reported **${CI_RESULT}**. Run: ${RUN_URL}"
+          # Unconditionally, and BEFORE the API call: no token scope can refuse this one.
+          {
+            echo "### Weekly scheduled CI sweep FAILED"
+            echo
+            echo "\`ci\` reported **${CI_RESULT}**. Run: ${RUN_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+          NUM="$(gh issue list --repo "$REPO" --state open --limit 1 \
+                   --search "in:title \"$TITLE\"" --json number --jq '.[0].number // empty')"
+          if [ -n "$NUM" ]; then
+            gh issue comment "$NUM" --repo "$REPO" --body "$BODY"
+          else
+            gh issue create --repo "$REPO" --title "$TITLE" --body "$(printf '%s\n\n%s\n' \
+              "This issue is the standing channel for the weekly scheduled CI sweep's own failures (#1127). Leave it OPEN: \`.github/workflows/ci.yml\`'s \`notify-schedule-failure\` job comments each failure here, and opens a replacement if it is ever closed." \
+              "$BODY")"
+          fi

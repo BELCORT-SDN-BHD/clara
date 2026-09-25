@@ -90,10 +90,9 @@ test("p1127.notify.least-privilege the notify job requests issues:write for itse
 test("p1127.notify.channel the notify job posts a GitHub issue comment naming the run that failed, not just that something did", () => {
   const yaml = readFileSync(CI_WORKFLOW, "utf8");
   const job = jobBlock(yaml, "notify-schedule-failure");
-  assert.match(job, /gh issue comment 1127\b/,
-    "the notify job must comment on the standing tracking issue (#1127) through `gh issue comment` — the "
-    + "channel the ticket's own recommendation names, since no Slack/email/webhook channel exists anywhere "
-    + "in .github/ today");
+  assert.match(job, /gh issue comment "\$NUM"/,
+    "the notify job must comment on a GitHub issue through `gh issue comment` — the channel the ticket's own "
+    + "recommendation names, since no Slack/email/webhook channel exists anywhere in .github/ today");
   assert.match(job, /GH_TOKEN:\s*\$\{\{\s*secrets\.GITHUB_TOKEN\s*\}\}/,
     "gh issue comment authenticates off the GH_TOKEN environment variable inside a workflow step "
     + "(docs.github.com, \"Using GitHub CLI in workflows\") — without it the step has no token to call the API with");
@@ -104,6 +103,51 @@ test("p1127.notify.channel the notify job posts a GitHub issue comment naming th
   assert.match(job, /needs\.ci\.result/,
     "the comment body must read needs.ci.result (skipped/failure/cancelled), not a hardcoded word — a hardcoded "
     + "\"failed\" would misreport a cancelled run as a genuine gate failure");
+});
+
+// THE CHANNEL MUST BE AN ISSUE THAT IS OPEN (review round, ADV-L06-03). The first cut hardcoded
+// `gh issue comment 1127` — #1127 is the ticket that ASKED for this notification, and the wave that
+// delivers it closes it, so the standing channel for every future weekly red would have been a
+// CLOSED issue nobody has reason to reopen: the ticket's own failure mode, re-created by its own
+// fix. The job now RESOLVES an open issue by its exact title and OPENS one when none exists, so the
+// channel can neither be closed out from under it nor need a human to create it first.
+test("p1127.notify.standing the channel is an OPEN issue resolved by title, never an issue number pinned in the workflow", () => {
+  const yaml = readFileSync(CI_WORKFLOW, "utf8");
+  const job = jobBlock(yaml, "notify-schedule-failure");
+  assert.doesNotMatch(job, /gh issue (?:comment|view|edit|close)\s+-?-?\d+/,
+    "the notify job pins a literal issue NUMBER — every number in this repo belongs to a ticket that gets "
+    + "closed, and a comment on a closed issue is not a place anyone looks; resolve the channel by title "
+    + "instead (#1127)");
+  assert.match(job, /gh issue list[\s\S]*--state open[\s\S]*in:title/,
+    "the job must find its channel among the OPEN issues, by title — that is what makes the channel "
+    + "self-healing rather than a number that rots");
+  assert.match(job, /gh issue create --repo "\$REPO" --title "\$TITLE"/,
+    "…and must OPEN the standing issue when none is open, so the very first weekly failure has somewhere to "
+    + "land without a human having created it first");
+  const title = /^ {10}TITLE: "(.+)"$/m.exec(job);
+  assert.ok(title, "the job must carry its channel's exact title in `env:`, so the lookup and the create agree");
+  assert.ok(title[1].length > 10, `the channel title is too short to match on: ${JSON.stringify(title[1])}`);
+});
+
+// AND THE RUN'S OWN SUMMARY PAGE CARRIES IT WHATEVER THE TOKEN SAYS (review round, SPEC-1127-CHANNEL).
+// The repository's DEFAULT workflow permission is `read`; a job-level `permissions:` block is
+// documented to widen it, but the job's own failure would be invisible in exactly the Actions tab
+// nobody was reading if it ever did not. A `$GITHUB_STEP_SUMMARY` write needs no token scope at all.
+test("p1127.notify.summary the failure lands on the run's own summary page BEFORE any API call", () => {
+  const yaml = readFileSync(CI_WORKFLOW, "utf8");
+  const job = jobBlock(yaml, "notify-schedule-failure");
+  const summaryAt = job.indexOf('>> "$GITHUB_STEP_SUMMARY"');
+  const apiAt = job.indexOf("gh issue list");
+  assert.notEqual(summaryAt, -1,
+    "the notify job writes nothing to $GITHUB_STEP_SUMMARY — if the issues:write grant is ever refused, the "
+    + "job's own failure is invisible in the same Actions tab this ticket exists because nobody reads (#1127)");
+  assert.notEqual(apiAt, -1, "the notify job makes no gh API call at all");
+  assert.ok(summaryAt < apiAt,
+    "the $GITHUB_STEP_SUMMARY write must come BEFORE the first gh call — after it, a refused grant takes the "
+    + "notice down with it, which is the whole failure mode this ordering exists to survive");
+  assert.match(job, /^ {10}set -euo pipefail$/m,
+    "the step must run under `set -euo pipefail`, so a refused grant fails the job loudly instead of "
+    + "continuing past a gh call that did nothing");
 });
 
 test("p1127.notify.no-cycle the terminal `ci` gate's own needs list is untouched by the new job", () => {
