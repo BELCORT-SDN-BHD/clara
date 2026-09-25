@@ -845,6 +845,25 @@ async function sessionOfTaskV22(c: PgExec, taskId: string): Promise<string | nul
   return typeof row?.session_id === "string" ? row.session_id : null;
 }
 
+/**
+ * THE INTENT KEY OF A TRADE-INVOICE RECORDING, and the one thing it deliberately does NOT hash.
+ *
+ * `record_anyway` is the PERSON'S ANSWER to the look-alike question, not part of the invoice being
+ * recorded: the call that asks and the call that goes ahead are ONE recording, so they must carry
+ * ONE key and the admission door's own idempotency can answer the second as a REPLAY.
+ *
+ * MEASURED, cut-phase adversarial round ADV-C1-01: with the flag hashed in, a retry of an
+ * identical call produced a DIFFERENT key, and because the probe also self-matched the invoice the
+ * first call had admitted, the retry admitted a SECOND invoice carrying the same reference,
+ * document date and total. A duplicate supplier bill is a durable artifact on a client's books;
+ * the estate paid for an idempotent admission door precisely so a retry cannot mint one.
+ */
+export function tradeInvoiceIntentKeyV22(taskId: string, input: StartTradeInvoiceWorkInputV2): string {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { record_anyway: _answeredTheQuestion, ...recording } = input;
+  return stableOpKey(taskId, START_TRADE_INVOICE_WORK_TOOL, recording);
+}
+
 export async function runStartTradeInvoiceWorkV22(
   ctx: ToolCtx,
   input: StartTradeInvoiceWorkInputV2,
@@ -877,11 +896,9 @@ export async function runStartTradeInvoiceWorkV22(
   }
 
   const clientId = ctx.clientId;
-  // THE KEY HASHES THE WHOLE INPUT, `record_anyway` INCLUDED, and that is correct rather than
-  // unfortunate: the first call refused nothing and admitted nothing, so there is no earlier Work
-  // for the second call to collide with, and the acknowledgement this call writes carries the same
-  // key the admission below uses.
-  const intentKey = stableOpKey(ctx.taskId, START_TRADE_INVOICE_WORK_TOOL, input);
+  // ONE RECORDING, ONE KEY — `record_anyway` is NOT hashed (see `tradeInvoiceIntentKeyV22`). The
+  // acknowledgement this call may write and the admission below ride that same key.
+  const intentKey = tradeInvoiceIntentKeyV22(ctx.taskId, input);
   const particulars = tradeInvoiceFromInput(input);
   const basis = journalBasisFromInput(input);
   try {
@@ -1222,6 +1239,20 @@ export type StartStaffExpenseClaimWorkResultV22 =
     }
   | ToolRefusalV22;
 
+/**
+ * THE INTENT KEY OF A STAFF-CLAIM RECORDING. Same law as `tradeInvoiceIntentKeyV22`, same reason:
+ * `allocations_confirmed` is the conversation, not the claim. `claimFromInputV2` already strips it
+ * from `p_claim`, so two calls differing only in the flag send a BYTE-IDENTICAL payload — and
+ * `clara.admit_staff_expense_claim_work` carries no `_reserve_op` and no unique index on the
+ * claim's own shape (measured, cut-phase adversarial round ADV-C1-07), so the intent key is the
+ * only thing between one claim and two Works.
+ */
+export function claimIntentKeyV22(taskId: string, input: StartStaffExpenseClaimWorkInputV2): string {
+  const recording: Record<string, unknown> = { ...input };
+  delete recording.allocations_confirmed;
+  return stableOpKey(taskId, START_STAFF_EXPENSE_CLAIM_WORK_TOOL, recording);
+}
+
 export async function runStartStaffExpenseClaimWorkV22(
   ctx: ToolCtx,
   input: StartStaffExpenseClaimWorkInputV2,
@@ -1237,7 +1268,7 @@ export async function runStartStaffExpenseClaimWorkV22(
   if (local) return local;
 
   const clientId = ctx.clientId;
-  const intentKey = stableOpKey(ctx.taskId, START_STAFF_EXPENSE_CLAIM_WORK_TOOL, input);
+  const intentKey = claimIntentKeyV22(ctx.taskId, input);
   const claim = claimFromInputV2(input);
   try {
     const receipt = await pools().withRuntime(async (c: PgExec) => {

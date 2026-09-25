@@ -480,6 +480,57 @@ test("v22.identity: the engine stamp is this closure's, and the registry pins th
   assert.equal(registry.workflowPins.statementFacts, "statementFacts_v3", "statementFacts_v4 is lane C2's");
 });
 
+test("v22.loop: a look-alike question ENDS the segment — the model cannot answer its own question", async () => {
+  // ADV-C1-02 (cut-phase adversarial round). `duplicateQuestion()` returns an ordinary tool result
+  // (`ok:true, status:'duplicates_found'`), so before this arm the loop simply continued and the
+  // model could set `record_anyway` ITSELF and call the tool again inside ONE segment — while
+  // `clara.record_trade_invoice_duplicate_ack` wrote a durable row whose stated purpose is to show
+  // a reviewer months later that the preparer was warned and went ahead. The only wall was prose
+  // in the prompt. A question a person never saw is not an acknowledgement, so the answer has to
+  // reach the model as a NEW turn carrying a human message.
+  const stop = v22Impl.stoppedOnDuplicateQuestionV22;
+  assert.equal(typeof stop, "function");
+  const step = (toolName, output) => ({ steps: [{ toolResults: [{ toolName, output }] }] });
+  assert.equal(
+    stop(step("start_trade_invoice_work", { ok: true, status: "duplicates_found", match_count: 1 })),
+    true,
+  );
+  // …and it stops NOTHING else: a recorded invoice, a refusal, another tool's result, an empty step.
+  assert.equal(stop(step("start_trade_invoice_work", { ok: true, status: "queued" })), false);
+  assert.equal(stop(step("start_trade_invoice_work", { ok: false, code: "CLR10" })), false);
+  assert.equal(stop(step("read_opening_source", { ok: true, status: "duplicates_found" })), false);
+  assert.equal(stop({ steps: [] }), false);
+  assert.equal(stop({ steps: [{ toolResults: null }] }), false);
+});
+
+test("v22.loop: the question the segment stopped on is SAID, not swallowed", () => {
+  // Stopping the loop costs the model the step in which it would have narrated the result, and a
+  // `duplicates_found` result mints no part of its own — so without this the turn would end in
+  // silence and the person would never be asked. The door's own sentence is used verbatim.
+  const q = "This client already has a document from Alpha Supplies Sdn Bhd numbered ALPHA-2026-0042, "
+    + "dated 2026-03-04, for RM 1,060.00. Record this one anyway, or stop?";
+  const content = [{ type: "tool-result", toolName: "start_trade_invoice_work", output: { ok: true, status: "duplicates_found", question: q } }];
+  const said = v22Impl.withDuplicateQuestionTextV22([], content);
+  assert.deepEqual(said, [{ type: "text", text: q }]);
+  // …said ONCE: a model that already wrote the sentence is not echoed.
+  assert.deepEqual(v22Impl.withDuplicateQuestionTextV22([{ type: "text", text: `Careful — ${q}` }], content).length, 1);
+  // …and nothing is appended when no question was asked.
+  assert.deepEqual(
+    v22Impl.withDuplicateQuestionTextV22([], [{ type: "tool-result", toolName: "start_trade_invoice_work", output: { ok: true, status: "queued" } }]),
+    [],
+  );
+});
+
+test("v22.loop: the stop set NAMES the duplicate arm beside the terminal post", () => {
+  // The predicate above is only a wall if the loop is given it. Read from the source rather than
+  // from a comment: `stopWhen` is built inside `streamText`'s options and has no other seam.
+  const impl = codeOf(new URL("../workflows/chatTurn.v22.impl.ts", import.meta.url));
+  assert.match(
+    impl,
+    /stopWhen: \[isStepCount\(CHAT_STEP_BUDGET\), hasToolCall\("clarify"\), stoppedOnTerminalPost, stoppedOnDuplicateQuestionV22\]/,
+  );
+});
+
 test("v22.identity: the two names the bundle gate DERIVES are the ones this closure exports", () => {
   // `scripts/check-workflow-bundle.mjs:143-164` derives `runModelSegmentStepV<N>` and
   // `chatturn-v<N>` from whatever version the registry pins, and refuses a built bundle that does

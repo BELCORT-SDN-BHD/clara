@@ -97,6 +97,27 @@ test("v22.claim: the arm gains three keys and advance_id becomes optional", () =
 // 2 · the wire — the flag is the conversation's, never the record's
 // ---------------------------------------------------------------------------
 
+test("v22.claim: allocations_confirmed does NOT move the intent key either", () => {
+  // ADV-C1-07 (cut-phase adversarial round). The cell below proves the flag is stripped from
+  // `p_claim`; that is only half of it. `clara.admit_staff_expense_claim_work` carries NO content
+  // dedupe (no `_reserve_op`, no unique index on the claim's own shape), so the intent key IS the
+  // only thing standing between one claim and two Works. A tool-local flag that moves the key
+  // therefore admits a SECOND Work for one claim — measured on a single-advance claim, which
+  // reaches the door with and without the flag.
+  const one = { advance_allocations: [{ advance_id: ADV_A, amount_cents: 12850 }] };
+  const plain = v22Tools.claimIntentKeyV22(CTX.taskId, claim(one));
+  const confirmed = v22Tools.claimIntentKeyV22(CTX.taskId, claim({ ...one, allocations_confirmed: true }));
+  assert.equal(confirmed, plain, "confirming a split is not a different claim");
+  // …and a different SPLIT is a different claim, which is the half that must still hold.
+  assert.notEqual(
+    v22Tools.claimIntentKeyV22(CTX.taskId, claim({
+      advance_allocations: [{ advance_id: ADV_A, amount_cents: 10000 }, { advance_id: ADV_B, amount_cents: 2850 }],
+      allocations_confirmed: true,
+    })),
+    plain,
+  );
+});
+
 test("v22.claim: allocations_confirmed NEVER reaches the wire", () => {
   const wire = v2.claimFromInputV2(claim({
     advance_allocations: [{ advance_id: ADV_A, amount_cents: 10000 }, { advance_id: ADV_B, amount_cents: 2850 }],

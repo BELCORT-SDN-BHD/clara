@@ -35,7 +35,7 @@ import {
 } from "./chatTurn.v22.prompt.js";
 import { pools, resolveModel } from "./chatTurn.v15.infra.js";
 import { consumeChatTurnModelResult } from "./chatTurn.v10.impl.js";
-import { buildToolsV22 } from "./chatTurn.v22.tools.js";
+import { buildToolsV22, START_TRADE_INVOICE_WORK_TOOL } from "./chatTurn.v22.tools.js";
 import { POST_TOOL } from "./chatTurn.v13.post.js";
 import { recordChatUsage, chatEngineId } from "./chatTurn.v22.usage.js";
 import { CHAT_STEP_BUDGET } from "./chatTurn.v21.impl.js";
@@ -101,6 +101,65 @@ function stoppedOnTerminalPost({ steps }: { steps: ReadonlyArray<LoopStep> }): b
   return last.toolResults.some((r) => r.toolName === POST_TOOL && !!r.output && typeof r.output === "object");
 }
 
+/**
+ * A LOOK-ALIKE QUESTION ENDS THE SEGMENT. `start_trade_invoice_work`'s probe answers
+ * `{ok:true, status:"duplicates_found"}` — an ordinary tool result, not a refusal — and without
+ * this arm the loop continued, so the model could set `record_anyway` ITSELF and record inside the
+ * same segment while `clara.record_trade_invoice_duplicate_ack` wrote a durable row asserting the
+ * preparer had been warned. (Cut-phase adversarial round, ADV-C1-02.)
+ *
+ * WHY A STOP RATHER THAN A PARK. `claraWork_v4`'s shape for this is `clara.open_work_question`,
+ * which parks a RUN; the chat lane has no run to park and no hook token to park it on (measured,
+ * `chatTurn.v22.tools.ts`'s enrolment-question note). Ending the segment is the chat lane's
+ * equivalent: the matches reach the person, and the only way to `record_anyway` is a NEW turn,
+ * which by construction follows a human message.
+ */
+export function stoppedOnDuplicateQuestionV22({ steps }: { steps: ReadonlyArray<LoopStep> }): boolean {
+  const last = steps[steps.length - 1];
+  if (!last?.toolResults) return false;
+  return last.toolResults.some((r) => {
+    if (r.toolName !== START_TRADE_INVOICE_WORK_TOOL) return false;
+    const out = r.output as { status?: unknown } | null | undefined;
+    return !!out && typeof out === "object" && out.status === "duplicates_found";
+  });
+}
+
+/**
+ * THE QUESTION HAS TO REACH THE PERSON, and stopping the loop is what makes that non-obvious.
+ *
+ * `stoppedOnDuplicateQuestionV22` ends the segment on the tool result itself, so the model never
+ * gets the step in which it would normally narrate what it found — and a `duplicates_found` result
+ * mints no part of its own (`toTypedParts_v21` only lifts a result carrying a `work_id`). Without
+ * this the turn would end silently and the person would be asked nothing at all, which is a worse
+ * failure than the one the stop fixes.
+ *
+ * The door's own sentence is used verbatim (`duplicateQuestion()` composes it from the matches),
+ * never a re-spelling, and it is appended only when nothing already says it. No new wire kind: a
+ * `text` part is what the coding-recovery path already returns.
+ */
+export function withDuplicateQuestionTextV22(
+  parts: ClaraPartV22[],
+  content: readonly AiContentPart[],
+): ClaraPartV22[] {
+  const asked: string[] = [];
+  for (const p of content) {
+    if (p.type !== "tool-result") continue;
+    const tr = p as { toolName?: string; output?: unknown };
+    if (tr.toolName !== START_TRADE_INVOICE_WORK_TOOL) continue;
+    const out = tr.output as { status?: unknown; question?: unknown } | null | undefined;
+    if (!out || typeof out !== "object" || out.status !== "duplicates_found") continue;
+    if (typeof out.question === "string" && out.question.trim() !== "") asked.push(out.question);
+  }
+  if (asked.length === 0) return parts;
+  const alreadySaid = (q: string) =>
+    parts.some((p) => (p as { type?: string; text?: string }).type === "text"
+      && typeof (p as { text?: string }).text === "string"
+      && ((p as { text: string }).text).includes(q));
+  const out = [...parts];
+  for (const q of asked) if (!alreadySaid(q)) out.push({ type: "text", text: q } as unknown as ClaraPartV22);
+  return out;
+}
+
 export async function runModelSegmentStepV22(
   taskId: string,
   model: string,
@@ -143,7 +202,7 @@ export async function runModelSegmentStepV22(
     messages,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tools: tools as any,
-    stopWhen: [isStepCount(CHAT_STEP_BUDGET), hasToolCall("clarify"), stoppedOnTerminalPost],
+    stopWhen: [isStepCount(CHAT_STEP_BUDGET), hasToolCall("clarify"), stoppedOnTerminalPost, stoppedOnDuplicateQuestionV22],
   });
 
   const writer = getWritable<unknown>().getWriter();
@@ -171,7 +230,7 @@ export async function runModelSegmentStepV22(
   );
 
   return {
-    parts: toTypedParts_v22(content),
+    parts: withDuplicateQuestionTextV22(toTypedParts_v22(content), content),
     assistantContent: content,
     usageTokens,
     clarify: findClarifyCall(content),

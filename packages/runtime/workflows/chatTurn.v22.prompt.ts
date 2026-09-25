@@ -187,9 +187,10 @@ export const TRADE_INVOICE_V22_CHAT_GUIDANCE = [
   "total on the same date. If she finds one, the tool does NOT record: it hands you what she found.",
   "Say what she found — the number, the date and the total — and ask whether to record this one",
   "anyway. Never refuse it yourself: two identical-looking documents are often two real events, and",
-  "only the person in front of the paperwork knows. Never record it without asking either. If they",
-  "say go ahead, call the tool again with `record_anyway` set, and the choice is kept with the",
-  "recording so a reviewer months later can see the preparer was warned.",
+  "only the person in front of the paperwork knows. THE TURN ENDS THERE — you cannot answer your",
+  "own question, and `record_anyway` is not yours to set in the same breath as the question. When",
+  "the person comes back and says go ahead, call the tool again with `record_anyway` set; the",
+  "choice is kept with the recording so a reviewer months later can see the preparer was warned.",
 ].join("\n");
 
 

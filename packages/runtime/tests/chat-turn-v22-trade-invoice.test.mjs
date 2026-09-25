@@ -146,7 +146,25 @@ test("v22.trade-invoice: the input stays `.strict()` and record_anyway is a bool
   );
 });
 
-test("v22.trade-invoice: record_anyway is TOOL-LOCAL and never reaches the wire", () => {
+test("v22.trade-invoice: record_anyway does NOT move the intent key — two calls, one recording", () => {
+  // ADV-C1-01/ADV-C1-08 (cut-phase adversarial round). The sibling cell below proves the flag is
+  // absent from `p_particulars`; it says nothing about `p_intent_key`, which is the value that
+  // decides whether the admission door REPLAYS or admits a second invoice. The question the tool
+  // asks and the "go ahead" that answers it are ONE recording, so they must carry ONE key: the
+  // flag is the person's answer to a question, never part of what is being recorded.
+  const plain = v22Tools.tradeInvoiceIntentKeyV22(CTX.taskId, bill());
+  const acknowledged = v22Tools.tradeInvoiceIntentKeyV22(CTX.taskId, bill({ record_anyway: true }));
+  assert.equal(acknowledged, plain,
+    "record_anyway must not mint a second idempotency key for the same invoice");
+  // …and the key still moves for a change to the recording ITSELF, or the assertion above would
+  // be satisfied by a key that hashes nothing.
+  assert.notEqual(v22Tools.tradeInvoiceIntentKeyV22(CTX.taskId, bill({ total_cents: 106001 })), plain);
+  assert.notEqual(v22Tools.tradeInvoiceIntentKeyV22(CTX.taskId, bill({ reference: "ALPHA-2026-0043" })), plain);
+});
+
+test("v22.trade-invoice: record_anyway is absent from the particulars the door receives", () => {
+  // TITLE NARROWED to what this cell measures (ADV-C1-08): it proves the flag's absence from
+  // `p_particulars` and NOTHING about `p_intent_key`. The key is the cell above.
   // The particulars the probe sees are byte-identical to the particulars the door receives, and
   // neither carries the flag. `tradeInvoiceFromInput` is the FROZEN v1 function, reached by
   // reference rather than re-spelled.
