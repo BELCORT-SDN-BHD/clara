@@ -1207,9 +1207,13 @@ minting a sibling concept. #938's "a bill posted inside an accrued
 period" row (`clara.list_review_queue`, row_kind `accrual_bill_conflict`) is a NEIGHBOUR on the
 same Needs-you roster that reuses the mechanics — derived, stores nothing, self-clearing — without
 being a member of the settlement-candidate FAMILY itself: it offers no candidate to choose, only
-two remedies (skip the next occurrence, or reverse now) that act on the accrual plan directly.
+remedies that act on the accrual plan directly — skip the next occurrence, reverse now (a catch-up
+over the window from the flagged period to its scheduled reversal date), or reverse THIS PERIOD
+ONLY (one named occurrence, no window; #1073). The last two leave the same amount on the books for
+that period, and differ as ACTS rather than as outcomes: one is a window, one is a scoped entry
+with its own receipt and a refusal that names the occurrence.
 A derived row outlives its own REMEDIES: when the plan those remedies act on is ended or paused
-they both refuse, while the fact that produced the row is still on the books — so the row stays and
+they all refuse, while the fact that produced the row is still on the books — so the row stays and
 the surface renders the remedies unavailable with the reason, rather than the row disappearing or
 offering a control whose only possible outcome is a refusal.
 _Avoid_: A stored Work, question or task; a new `accounting_work.purpose`; a notification; a row

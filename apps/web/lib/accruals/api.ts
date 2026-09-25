@@ -499,6 +499,32 @@ export async function skipNextAccrualOccurrence(
   );
 }
 
+/**
+ * "Reverse this period only" (#1073) -- `clara.reverse_plan_occurrence` (0333), the THIRD remedy
+ * for the same conflict row and the only one that is a single scoped act. It takes the FLAGGED
+ * PERIOD's own due date and nothing else: the database resolves that period's scheduled reversal
+ * date itself (`clara._plan_reversal_date`) and admits exactly ONE occurrence, so this caller
+ * computes no window and mirrors no schedule rule -- unlike `reverseAccrualNow` above, which has
+ * to build `[dueDate, accrualReversalDate(dueDate)]` for the catch-up door.
+ *
+ * On this lane the two leave the SAME ledger for that period (measured, not assumed:
+ * `packages/db/tests/plan-occurrence-reversal-door.test.mjs`, `p1073.one_period`). What differs is
+ * the act: its own receipt, its own audit verb, and a refusal that names the OCCURRENCE rather
+ * than a window -- `not_yet_due` where the catch-up says `catch_up_in_future`. Every refusal is a
+ * real DoorRefusal and surfaces verbatim; nothing here pretends a reversal happened.
+ */
+export async function reverseAccrualPeriod(
+  planId: string,
+  dueDate: string,
+  o: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "reverse_plan_occurrence",
+    { p_plan: planId, p_due: dueDate, p_op_key: crypto.randomUUID() },
+    opts(o),
+  );
+}
+
 /** The two derived journal lines an accrual posts, for the DISABLED preview the form renders. It
  *  mirrors `clara._accrual_journal_basis` (0222) exactly; the database derives its own and is the
  *  authority, so nothing computed here is ever sent. */

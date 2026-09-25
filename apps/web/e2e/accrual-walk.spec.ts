@@ -440,6 +440,45 @@ test("accrual.walk.correction: correcting an accrual is a real transition — th
   await expect(page.getByRole("row").filter({ hasText: ACC.correctablePurpose })).toHaveCount(2);
 });
 
+// #1073 — THE THIRD REMEDY, on the Accruals page's own conflict item. It runs BEFORE the "reverse
+// now" cell below on purpose: this lane answers `reverse_plan_occurrence` with a REFUSAL, so
+// nothing about the derived row moves and the next cell still has its row to clear.
+//
+// WHAT ONLY A BROWSER SHOWS HERE. That the third control is on THIS surface at all (the ticket's
+// AC1 names both surfaces, and the Needs-you inbox mounts the very same component — asserted in
+// components/firm/accrual-bill-conflict-affordance.test.tsx), and that a governed refusal reaches
+// the person VERBATIM — code, reason and the database's own sentence — instead of the act
+// appearing to have worked. The walk had no refusal cell of any kind before this one. What it does
+// NOT prove is the remedy's effect: `packages/db/tests/plan-occurrence-reversal-door.test.mjs`
+// owns that against a real Postgres, seven cells of it.
+test("accrual.walk.reversePeriod: the third remedy is offered on the Accruals page, and its refusal reaches the person verbatim rather than looking like success", async ({ page }) => {
+  await signInTo(page, LIST_URL);
+
+  const conflict = page.getByText(/A document-sourced entry posted inside the accrued period/);
+  await expect(conflict).toBeVisible();
+
+  // THE CONTROL, AND THE SENTENCE THAT SAYS WHAT MAKES IT DIFFERENT. It claims no different
+  // ledger outcome, because there is none on this lane — only a different ACT.
+  const reversePeriod = page.getByRole("button", { name: "Reverse this period only" });
+  await expect(reversePeriod).toBeVisible();
+  await expect(page.getByText(/books the reversing entry for this period alone/)).toBeVisible();
+  await expect(page.getByText(/same amount on the books/)).toBeVisible();
+
+  await scan(page, "accrual bill conflict, the third remedy offered");
+
+  await reversePeriod.click();
+
+  // THE REFUSAL, VERBATIM: the CLR code, the typed reason and the database's own sentence. Nothing
+  // is re-worded and nothing pretends the period was reversed.
+  await expect(page.getByText("CLR10 · not_yet_due")).toBeVisible();
+  await expect(
+    page.getByText("this period's reversal was not admitted (not_yet_due)"),
+  ).toBeVisible();
+
+  // …AND THE CONFIGURED-ACCRUALS TABLE BELOW IT IS UNTOUCHED: a refused remedy moved nothing.
+  await expect(page.getByRole("row").filter({ hasText: ACC.purpose })).toContainText("Posted");
+});
+
 // #938 — "a bill posted inside an accrued period", rendered on the SAME Accruals page beside the
 // configured-accruals table (accrual-mock.mjs's own list_review_queue handler: ONE
 // accrual_bill_conflict row for POSTED's own plan, until "reverse now" is driven). Only one of

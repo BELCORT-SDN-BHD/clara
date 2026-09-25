@@ -2221,3 +2221,41 @@ from a refused one in the database's own word, and the who/when/why behind a per
 **Copy is EN only**, for the reason #940 records above: this build ships a single static locale, so
 the brief's "en and zh copy" has no zh catalogue to land in. The namespace is `DeferredRevenue`,
 plus six keys in `PrepaymentAccounts` for the panel's purpose control and its row badges.
+
+## #1073 — a third remedy for "a bill posted inside an accrued period", and what makes it a third
+
+The `accrual_bill_conflict` item offered two remedies (#938): **Reverse now**, which calls
+`clara.request_plan_catch_up` over the window `[the flagged due date, its scheduled reversal date]`,
+and **Skip this period's next occurrence**, which settles a FUTURE period and touches the flagged one
+not at all. Neither is "book the correcting entry for exactly this one period". **Reverse this period
+only** is, and it calls `clara.reverse_plan_occurrence` (0333) with the flagged period's own due
+date — `p_plan`, `p_due`, `p_op_key`, and nothing else.
+
+**The surface computes no window, because it no longer has to.** `reverseAccrualNow` still mirrors
+`clara._plan_reversal_date` by hand (`accrualReversalDate` in `lib/accruals/api.ts`) in order to
+build the catch-up's `p_to`; `reverseAccrualPeriod` sends a PERIOD and the database resolves that
+date itself. The mirror stays for the remedy that needs it and is not part of the new act — a
+schedule rule with two homes eventually has two answers.
+
+**The sentence beside the control claims no ledger difference, because there is none.** On this lane
+both remedies admit the same occurrence and leave the same amount on the books for the period —
+measured on two identically configured clients in
+`packages/db/tests/plan-occurrence-reversal-door.test.mjs` (`p1073.one_period`), not inferred. What
+differs is the ACT: its own receipt, its own audit verb, and a refusal that names the OCCURRENCE
+(`not_yet_due`) where the catch-up names the window (`catch_up_in_future`). The copy says exactly
+that: *"books the reversing entry for this period alone, and can never touch another period. It
+leaves the same amount on the books for this period as Reverse now does."*
+
+**One component, both surfaces.** `components/firm/accrual-bill-conflict-affordance.tsx` is what the
+firm-wide Needs-you inbox mounts through `NEEDS_YOU_AFFORDANCES` and what the Accruals page's own
+conflict section (`components/accruals/accrual-bill-conflicts.tsx`) mounts directly — the shape #938's
+fix round collapsed to one copy. A third control added there reaches both surfaces by construction,
+and the unit battery asserts the registry entry rather than assuming it. The browser walk
+(`accrual.walk.reversePeriod`) drives the control on the Accruals page and proves the one thing only
+a browser can: a governed refusal reaches the person VERBATIM — `CLR10 · not_yet_due` and the
+database's own sentence — instead of the act appearing to have worked. It is also the first refusal
+cell this walk has ever had.
+
+**The plan-not-active face says "none of the remedies", not "neither".** All three are plan-lane
+doors that refuse `plan_ended` / `plan_paused`; the row stays (the double count has not gone away)
+and the controls go, which is the same 裁-187 law #938's fix round applied to the first two.

@@ -92,6 +92,9 @@ export const ACCRUAL_RPC_VERBS = new Set([
   // with plans-mock.mjs / prepayments-mock.mjs, same declaration).
   "list_review_queue",
   "request_plan_catch_up",
+  // #1073 — the THIRD remedy for the same row. This lane is its ONLY claimant (it names a period,
+  // so no plan or prepayment surface sends it), which is why it needs no SHARED_RPC_VERBS entry.
+  "reverse_plan_occurrence",
 ]);
 
 const state = {
@@ -103,6 +106,10 @@ const state = {
   // on the NEXT list_review_queue read — the derived-row, no-cleanup law CONTEXT.md's "Settlement
   // candidate row" entry states), and every op key request_plan_catch_up was sent for it.
   reversed: false, reverseOpKeys: [],
+  // #1073 — every call "reverse this period only" made, with the keys the browser actually sent.
+  // This lane answers it with a REFUSAL, so `state.reversed` is untouched and the conflict row is
+  // still produced for the next spec: a refused act changes nothing, which is the claim.
+  periodReverseCalls: [],
 };
 
 export function resetAccruals() {
@@ -113,6 +120,12 @@ export function resetAccruals() {
   state.correctOpKeys = [];
   state.reversed = false;
   state.reverseOpKeys = [];
+  state.periodReverseCalls = [];
+}
+
+/** #1073 — every `reverse_plan_occurrence` call, oldest first, with the request's own key set. */
+export function accrualPeriodReverseCalls() {
+  return state.periodReverseCalls.map((c) => ({ ...c }));
 }
 
 /** Every op key `request_plan_catch_up` was sent for "reverse now", oldest first. */
@@ -616,6 +629,26 @@ export async function handleAccrualSupabase(request, response, path, url, sendJs
         attempt: 1, period_key: "2026-07-01", reverses_entry_id: ACC.entryId,
         intent_key: `plan:${ACC.planId}:r1:${body.p_to}`,
       }],
+    }, cors);
+    return true;
+  }
+
+  // #1073 — "REVERSE THIS PERIOD ONLY", clara.reverse_plan_occurrence (0333). It takes the flagged
+  // PERIOD and nothing else: no p_from, no p_to, because the database resolves that period's
+  // scheduled reversal date itself. This lane answers it with the door's OWN typed refusal, in
+  // PostgREST's error envelope and in the exact shape lib/doors.ts classifies as a governed
+  // DoorRefusal — the walk's claim is that a refusal surfaces VERBATIM and nothing pretends a
+  // reversal happened, which is the one thing only a browser can show. The SUCCESS path is
+  // packages/db/tests/plan-occurrence-reversal-door.test.mjs's, against a real Postgres.
+  if (verb === "reverse_plan_occurrence") {
+    if (body.p_plan !== ACC.planId) return false;
+    state.periodReverseCalls.push({
+      due: body.p_due ?? null, opKey: body.p_op_key ?? null, keys: Object.keys(body).sort(),
+    });
+    sendJson(response, 400, {
+      code: "CLR10",
+      message: "this period's reversal was not admitted (not_yet_due)",
+      details: '{"reason":"not_yet_due","plan_id":"' + ACC.planId + '","due_date":"2026-07-31","reversal_due_date":"2026-08-01"}',
     }, cors);
     return true;
   }
