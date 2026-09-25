@@ -240,10 +240,13 @@ function splitKeyList(list) {
     if (c === "'") {
       current += c;
       i++;
+      // Break ON the closing quote and let the loop's own `i++` step past it: advancing here as
+      // well swallowed the next character, which ate the `)` of `coalesce(x, 'PUBLIC')` and left
+      // the recorded key truncated and its parenthesis depth wrong.
       while (i < list.length) {
         current += list[i];
         if (list[i] === "'" && list[i + 1] === "'") { current += "'"; i += 2; continue; }
-        if (list[i] === "'") { i++; break; }
+        if (list[i] === "'") break;
         i++;
       }
       continue;
@@ -354,20 +357,143 @@ export function scanSqlText(source) {
  */
 export function scanJsText(source) {
   const findings = [];
+  // A battery holds its SQL in a JavaScript string, so `collate "C"` reaches the file as
+  // `collate \"C\"` whenever the string is double-quoted (firm-portfolio-pack:605). Read the
+  // escape as the character it stands for, or an already-fixed site keeps being reported.
+  // Unescaping removes no newline, so a line number taken on the unescaped text is the file's own.
+  const text = source.replace(/\\"/g, '"');
   AGGREGATE.lastIndex = 0;
   let match;
-  while ((match = AGGREGATE.exec(source))) {
-    const argument = callArgument(source, match.index + match[0].length - 1);
+  while ((match = AGGREGATE.exec(text))) {
+    const argument = callArgument(text, match.index + match[0].length - 1);
     const orderBy = ownOrderBy(argument);
     if (orderBy === null) continue;
     const keys = splitKeyList(orderBy).map(classifyOrderKey);
     if (!keys.length || keys.every((k) => k.free)) continue;
     findings.push({
-      line: source.slice(0, match.index).split("\n").length,
+      line: text.slice(0, match.index).split("\n").length,
       fn: match[1].toLowerCase(),
       why: "a census in a battery is asserted",
       keys,
     });
   }
   return findings;
+}
+
+// ---------------------------------------------------------------------------------------------
+// THE RECORD (#1047's acceptance criterion 1).
+//
+// Every pinned, text-ordered site the scanner finds in `packages/db/migrations` and
+// `packages/db/tests` as of #1047, with the reason each one cannot flip. Applied migrations are
+// never edited, so for each of them the entry IS the proof; the live half of the proof —
+// re-measured on whatever server the suite runs on — is `collation-pin-portability.test.mjs`.
+//
+// A site leaves this record by being fixed (`collate "C"` on the ORDER BY). A NEW site must be
+// fixed rather than added: the corpus cell in `collation-pin-scan.test.mjs` refuses it by name,
+// and an entry here is only right for a site in an APPLIED migration, which cannot be edited.
+//
+// The key is recorded, not the line: a battery's lines move under every lane that touches it,
+// while its censuses do not.
+// ---------------------------------------------------------------------------------------------
+
+/** @type {Array<{ path: string, keys: string[], why: string }>} */
+export const RECORDED_SITES = [
+  // --- migrations: 22 keys over 16 applied files ------------------------------------------------
+  { path: "migrations/0020_typed_consent.sql", keys: ["x.pin"],
+    why: "the key is `p.proname || '=' || <acl text>`, and an expression that carries a catalog `name` inherits its C collation (measured with pg_collation_for)" },
+  { path: "migrations/0038_wave_c_b_bank.sql", keys: ["x.pin"],
+    why: "0020:2304's census, re-pinned verbatim — same `name`-derived key, same C collation" },
+  { path: "migrations/0041_wave_d_a_fa_register.sql", keys: ["d.fn"],
+    why: "the reachability CTE seeds `unnest(v_seed) collate \"C\"`, and the verdict names one function" },
+  { path: "migrations/0057_wave_e_registry_snapshots.sql", keys: ["m[1]"],
+    why: "the distinct status literals of one body; the verdict is the single token `approved`, which no ordering can reach differently" },
+  { path: "migrations/0103_f_a7_pi_additive.sql", keys: ["item"],
+    why: "the seven `f_aN` shim names of clara.agent_receipt_source_census(); proved in collation-pin-portability" },
+  { path: "migrations/0106_f_a2_posting_core.sql", keys: ["g"],
+    why: "`case when grantee = 0 then 'PUBLIC' else pg_get_userbyid(grantee) end` — pg_get_userbyid returns `name`, so the CASE inherits C" },
+  { path: "migrations/0150_coa_template_pr_a.sql",
+    keys: ["account_code", "add_back_class", "f.family_key", "g.grantee::regrole::text", "g.grantee::regrole::text", "g.privilege_type", "special_acc_type", "t.inclusion"],
+    why: "the seeded chart vocabularies and the template grant matrix; each value set is proved in collation-pin-portability" },
+  { path: "migrations/0152_f_t3_pr_1_tax_platform.sql", keys: ["p.oid::regprocedure::text"],
+    why: "the set is the functions this file added, and the verdict is ONE signature — with a second member the verdict fails whatever the order" },
+  { path: "migrations/0162_fs7_e2_artifact_download_door.sql", keys: ["coalesce(rr.rolname,'PUBLIC')"],
+    why: "pg_roles.rolname is `name`; coalescing it with a literal keeps C" },
+  { path: "migrations/0190_document_byte_door_v2.sql", keys: ["coalesce(rr.rolname, 'PUBLIC')"],
+    why: "pg_roles.rolname is `name`; coalescing it with a literal keeps C" },
+  { path: "migrations/0215_counterparty_identity_provenance.sql", keys: ["privilege_type"],
+    why: "the SQL privilege names, every one `^[A-Z]+$`; proved in collation-pin-portability" },
+  { path: "migrations/0218_firm_setup.sql", keys: ["item_key"],
+    why: "the three firm-defaultable setup keys; proved in collation-pin-portability" },
+  { path: "migrations/0219_client_onboarding_facts.sql", keys: ["a::text", "a::text", "a::text"],
+    why: "the aclitem text of one function each — two entries, `clara_authenticated` before `clara_fn_owner` under both collations; proved in collation-pin-portability" },
+  { path: "migrations/0269_invite_issuer_lapsed_status.sql", keys: ["privilege_type", "privilege_type"],
+    why: "the SQL privilege names; proved in collation-pin-portability" },
+  { path: "migrations/0270_firm_document_limits_writer.sql", keys: ["privilege_type", "privilege_type"],
+    why: "the SQL privilege names; proved in collation-pin-portability" },
+  { path: "migrations/0295_wave4_chart_rows.sql", keys: ["special_acc_type", "version"],
+    why: "the five special markers (proved in collation-pin-portability); `version` is clara.coa_templates.version, an integer" },
+
+  // --- batteries: 44 keys over 21 files ---------------------------------------------------------
+  // A battery is EDITABLE, so a key here is a site this ticket deliberately did not touch: the six
+  // census files the sweep plan gave this lane are fixed in place, and the rest belong to lanes
+  // that own those files. Every key below draws on a value set the portability battery proves, or
+  // on a `name`-derived expression, or is quoted source text rather than a census.
+  { path: "tests/checkout-convergence.test.mjs", keys: ["g.grantee::regrole::text"], why: "the grantees of one relation; regrole text, proved in collation-pin-portability" },
+  { path: "tests/checkout-gate-c1.test.mjs", keys: ["indexrelid::regclass::text"], why: "the index names of one relation, all sharing their relation's prefix" },
+  { path: "tests/checkout-gate-c2.test.mjs", keys: ["p.oid::regprocedure::text"], why: "the signatures of one named door; regprocedure text, proved in collation-pin-portability" },
+  { path: "tests/checkout-gate-c3.test.mjs", keys: ["coalesce(r.rolname,'PUBLIC')"], why: "rolname is `name`; the coalesce keeps C" },
+  { path: "tests/checkout-gate-c6.test.mjs", keys: ["g.grantee::regrole::text"], why: "the grantees of one relation; regrole text" },
+  { path: "tests/client-work-pack.test.mjs", keys: ["privilege_type"], why: "the SQL privilege names" },
+  { path: "tests/coa-template-pr-a.test.mjs",
+    keys: ["account_code", "account_code", "account_code", "f.family_key", "family_key", "g.grantee::regrole::text", "g.grantee::regrole::text", "g.privilege_type"],
+    why: "the chart vocabularies and the template grant matrix; the family_key censuses take a `<none>` verdict, so their order reaches the message only" },
+  { path: "tests/coa-template-pr-b.test.mjs", keys: ["x", "x"],
+    why: "NOT a census: a byte-for-byte quotation of clara.apply_coa_template's live body for the §9.4 mutant substitution — collating it would break `src.includes(fixed)`" },
+  { path: "tests/counterparty-alias-kind.test.mjs", keys: ["role"], why: "the alias-role vocabulary of one relation" },
+  { path: "tests/dba-close-gate-codeability.test.mjs", keys: ["kind", "kind"], why: "a closed row-kind vocabulary" },
+  { path: "tests/dba-coding-lane-classification.test.mjs", keys: ["r ->> 'filing_id'"], why: "uuid text, whose dashes fall at the same offset in every value" },
+  { path: "tests/f-a2-generic.test.mjs", keys: ["kind", "kind", "kind", "kind", "r.field_path"], why: "a closed row-kind vocabulary, and the field-path grammar 0290 pins" },
+  { path: "tests/f-a5-reporting-agency-pr2-census.test.mjs", keys: ["case when a.grantee = 0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end"], why: "pg_get_userbyid returns `name`, so the CASE inherits C" },
+  { path: "tests/f-a5b-card1-seam-stage-b.test.mjs", keys: ["e.version"], why: "an evaluator version string of digits and dots" },
+  { path: "tests/f-t1-sst-reference.test.mjs", keys: ["pg_get_userbyid(rr)::text", "rolname::text"],
+    why: "both keep the `name` collation through the cast (measured); and the roster is used as a SET, never pinned as an ordered literal" },
+  { path: "tests/invite-preview-public.test.mjs", keys: ["t.name"], why: "the caller's own text[] roster, taken against the `(none)` sentinel" },
+  { path: "tests/masb-wording-seed-battery.test.mjs", keys: ["phrase_key"], why: "the seeded wording keys of one locale" },
+  { path: "tests/prepayment-wake-reroute.test.mjs", keys: ["wake_kind"], why: "clara.wake_fn_allowlist.wake_kind for one function — a one-member verdict" },
+  { path: "tests/rig-docs-download-door.test.mjs", keys: ["coalesce(rr.rolname,'PUBLIC')", "coalesce(rr.rolname,'PUBLIC')"], why: "rolname is `name`; the coalesce keeps C" },
+  { path: "tests/wave-a-upgrade.test.mjs", keys: ["a.grantee::regrole::text||a.privilege_type"], why: "the grantees of one relation; regrole text" },
+  { path: "tests/work-journal-post.test.mjs", keys: ["a.privilege_type", "g", "g"], why: "the SQL privilege names, and pg_get_userbyid's `name`" },
+];
+
+/**
+ * Compare what the corpus holds now against the record, and say what changed in the words the
+ * author needs: what to write, and why the estate cares.
+ *
+ * @param {Array<{path:string, keys:string[]}>} observed
+ * @param {Array<{path:string, keys:string[]}>} recorded
+ * @returns {string} empty when the corpus matches the record
+ */
+export function describeCollationFindings(observed, recorded = RECORDED_SITES) {
+  const key = (rows) => new Map(rows.map((r) => [r.path, [...r.keys].sort().join(" | ")]));
+  const now = key(observed);
+  const then = key(recorded);
+  const lines = [];
+  for (const [path, keys] of [...now.entries()].sort()) {
+    if (!then.has(path)) lines.push(`NEW  ${path}\n       ${keys}`);
+    else if (then.get(path) !== keys) lines.push(`MOVED ${path}\n       recorded: ${then.get(path)}\n       found:    ${keys}`);
+  }
+  for (const [path] of [...then.entries()].sort()) {
+    if (!now.has(path)) lines.push(`GONE ${path} — its census was fixed or removed; drop the entry from RECORDED_SITES`);
+  }
+  if (!lines.length) return "";
+  return (
+    "collation-pin: a pin taken over TEXT-ORDERED row content changed.\n" +
+    "A digest or a literal compared against an aggregate that is ORDER BY a text expression records\n" +
+    'the server\'s lc_collate, not the data: write `collate "C"` on that ORDER BY. Under en_US.UTF-8\n' +
+    "punctuation carries no primary weight and case is not primary either, so `taxation` sorts before\n" +
+    "`tax_liabilities` and `clara_x` before `PUBLIC`, the other way round from `C` — which is how 0295's\n" +
+    "first cut stopped the chain on CI (run 35954298990). See packages/db/README.md, " +
+    '"Collation and pinned order".\n\n' +
+    lines.join("\n")
+  );
 }

@@ -18,7 +18,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { classifyOrderKey, scanJsText, scanSqlText } from "./collation-pin-scan.mjs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import {
+  RECORDED_SITES,
+  classifyOrderKey,
+  describeCollationFindings,
+  scanJsText,
+  scanSqlText,
+} from "./collation-pin-scan.mjs";
 
 test("collation-pin · an ORDER BY key is classified by the TYPE that decides whether a collation can move it", () => {
   // The type argument, not a guess: `pg_proc.proname` is of type `name`, whose type collation is
@@ -195,4 +205,85 @@ end $pre$;
   const findings = scanSqlText(againstLiteral);
   assert.equal(findings.length, 1, "a digest checked against a hex literal IS a pin");
   assert.equal(findings[0].keys[0].domain, "regprocedure_text");
+});
+
+test("collation-pin · a battery writes its SQL with escaped quotes, and a key keeps its own parentheses", () => {
+  // firm-portfolio-pack:605 holds its SQL in a double-quoted JavaScript string, so the fix reads
+  // `collate \"C\"` in the source. A scanner that does not see through the escape would keep
+  // reporting a site that has already been fixed.
+  const escaped = 'const bad = await rootQuery("select string_agg(t, \',\' order by privilege_type collate \\"C\\") as bad from x");';
+  assert.deepEqual(scanJsText(escaped), [], 'collate \\"C\\" in a JavaScript string is collate "C"');
+
+  // And a key that is a function call is reported whole — `coalesce(rr.rolname, 'PUBLIC')`, not a
+  // truncation of it — because the record is read by people who then have to resolve the key.
+  const call = `select coalesce(string_agg(x, ',' order by coalesce(rr.name, 'PUBLIC')), '') as v from t`;
+  const findings = scanJsText(call);
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].keys[0].key, "coalesce(rr.name, 'PUBLIC')");
+});
+
+// ---------------------------------------------------------------------------------------------
+// The corpus. This is the guard proper: the estate's own migrations and batteries, read with the
+// same instrument the fixtures above drive.
+// ---------------------------------------------------------------------------------------------
+
+const DB_DIR = fileURLToPath(new URL("..", import.meta.url));
+
+/** Every pinned text-ordered site in the estate, as {path, keys}, one row per file. */
+function scanCorpus() {
+  const rows = new Map();
+  const add = (path, keys) => {
+    if (!rows.has(path)) rows.set(path, { path, keys: [] });
+    rows.get(path).keys.push(...keys);
+  };
+  for (const file of readdirSync(join(DB_DIR, "migrations")).sort()) {
+    if (!file.endsWith(".sql")) continue;
+    const found = scanSqlText(readFileSync(join(DB_DIR, "migrations", file), "utf8"));
+    for (const site of found) add(`migrations/${file}`, site.keys.filter((k) => !k.free).map((k) => k.key));
+  }
+  for (const file of readdirSync(join(DB_DIR, "tests")).sort()) {
+    // This battery's own fixtures are deliberate violations; scanning them would record the
+    // examples as estate sites.
+    if (!/\.(mjs|js)$/.test(file) || file.startsWith("collation-pin-")) continue;
+    const found = scanJsText(readFileSync(join(DB_DIR, "tests", file), "utf8"));
+    for (const site of found) add(`tests/${file}`, site.keys.filter((k) => !k.free).map((k) => k.key));
+  }
+  return [...rows.values()];
+}
+
+test("collation-pin · every pin over text-ordered row content in the estate is the RECORD, and a new one is refused", () => {
+  const observed = scanCorpus();
+  assert.equal(describeCollationFindings(observed), "", describeCollationFindings(observed));
+});
+
+test("collation-pin · the corpus is non-empty on both sides, so a green above cannot be vacuous", () => {
+  const observed = scanCorpus();
+  const keysFound = observed.reduce((n, r) => n + r.keys.length, 0);
+  const keysRecorded = RECORDED_SITES.reduce((n, r) => n + r.keys.length, 0);
+  // The numbers #1047 worked: 66 keys over 37 files (22 keys in 16 applied migrations, 44 in 21
+  // batteries). A corpus that scanned nothing, or a record that recorded nothing, would let the
+  // assertion above pass while proving nothing at all.
+  assert.ok(keysFound >= 40, `the scanner still reads the estate's censuses (found ${keysFound} movable keys)`);
+  assert.ok(keysRecorded >= 40, `the record is still populated (${keysRecorded} keys)`);
+  assert.ok(
+    observed.some((r) => r.path.startsWith("migrations/")) && observed.some((r) => r.path.startsWith("tests/")),
+    "both halves of the corpus are read",
+  );
+});
+
+test("collation-pin · POSITIVE CONTROL: a new uncollated pin is NAMED, and the refusal says what to write", () => {
+  const observed = scanCorpus();
+  const planted = [...observed, { path: "migrations/9999_a_future_file.sql", keys: ["p.oid::regprocedure::text"] }];
+  const message = describeCollationFindings(planted);
+  assert.match(message, /NEW {2}migrations\/9999_a_future_file\.sql/, "the new site is named");
+  assert.match(message, /collate "C"/, "...and the refusal says what to write");
+  assert.match(message, /35954298990/, "...and points at the run that paid for the rule");
+});
+
+test("collation-pin · POSITIVE CONTROL: a site that changes its keys is NAMED as moved, not silently accepted", () => {
+  const first = RECORDED_SITES.find((r) => r.path.startsWith("migrations/"));
+  const mutated = [{ path: first.path, keys: [...first.keys, "some_new_text_column"] }];
+  const message = describeCollationFindings(mutated, [first]);
+  assert.match(message, /MOVED/);
+  assert.match(message, /some_new_text_column/);
 });
