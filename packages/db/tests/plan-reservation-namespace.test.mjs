@@ -35,6 +35,7 @@ import {
   namespaceScene, accrualLaneIn, tenancyLaneIn, pastSpan,
   createPrepaymentSchedule, createAccrualAdjustment, correctAccrualAdjustment, accrual,
   confirmRentPlan, receiptsUnder, opk1150, caught, detailOf, spendReviseKey,
+  nestedPlanCensus, partitionProblems, LANE_OF_SUFFIX, PLAN_DOORS,
 } from "./plan-reservation-namespace-fixtures.mjs";
 
 const ACCRUAL_TZ = "Asia/Kuala_Lumpur";
@@ -250,4 +251,79 @@ async (t) => {
   assert.equal(changed.code, "CLR10");
   assert.equal(detailOf(changed).reason, "op_key_conflict",
     "the accrual door's own outer reuse wall stopped answering");
+});
+
+// ===========================================================================================
+// AC2 — THE CENSUS. Structural by necessity, and this repo's own documented shape for it
+// (WORK-ORDER rule 4's carve-out): the claim is about a body a LATER lane writes, which no cell
+// written today can drive. It reads the derivations off `pg_proc.prosrc` — no hand-written roster
+// of bodies anywhere — and the only thing it is told is which LANE each suffix belongs to.
+// ===========================================================================================
+
+test("p1150.namespace.census — every nested plan reservation in the estate belongs to exactly one "
+  + "lane: no suffix is undeclared, none has lost its deriver, and no body sits in two lanes",
+async (t) => {
+  if (unready(t)) return;
+
+  const rows = await nestedPlanCensus();
+  assert.ok(rows.length >= 10,
+    `the census found only ${rows.length} nested plan reservations — the instrument, not the estate, `
+    + "is what changed");
+  assert.deepEqual(partitionProblems(rows), [],
+    "the estate's nested plan reservations no longer partition by lane");
+
+  // THE FOUR LANES ARE ALL PRESENT AND ALL DISTINCT, named off the census rather than declared:
+  // this is the statement #1077 left for #1150, now true of four lanes instead of two.
+  const laneOf = (sig) => new Set(rows.filter((r) => r.sig === sig)
+    .map((r) => LANE_OF_SUFFIX.get(r.suffix)));
+  const bodiesOfLane = new Map();
+  for (const r of rows) {
+    const lane = LANE_OF_SUFFIX.get(r.suffix);
+    if (!bodiesOfLane.has(lane)) bodiesOfLane.set(lane, new Set());
+    bodiesOfLane.get(lane).add(r.sig);
+  }
+  assert.deepEqual([...bodiesOfLane.keys()].sort(),
+    ["accrual", "deferred_revenue", "prepayment", "tenancy"],
+    "a lane declared in LANE_SUFFIXES has no body deriving any of its suffixes");
+  const lanes = [...bodiesOfLane.entries()].sort();
+  for (let i = 0; i < lanes.length; i += 1) {
+    for (let j = i + 1; j < lanes.length; j += 1) {
+      const shared = [...lanes[i][1]].filter((s) => lanes[j][1].has(s)).sort();
+      assert.deepEqual(shared, [],
+        `${lanes[i][0]} and ${lanes[j][0]} share the deriving bod${shared.length === 1 ? "y" : "ies"} `
+        + shared.join(", "));
+    }
+  }
+  assert.deepEqual(
+    [...laneOf("clara.create_accrual_adjustment(uuid,text,jsonb,jsonb,text,text,integer,text,date,date,text)")],
+    ["accrual"], "the accrual configuration door is not in the accrual lane");
+  assert.deepEqual(
+    [...laneOf("clara._confirm_tenancy_rent_plan_core(uuid,uuid,text,uuid,uuid,text,text,text,text)")],
+    ["tenancy"], "the tenancy confirmation core is not in the tenancy lane");
+
+  // EVERY DERIVATION REACHES A PLAN DOOR, measured. `:approve`, `:match`, `:settle` and the rest
+  // exist on this catalog and belong to other families; the census must not have swept them in.
+  for (const r of rows) {
+    assert.ok(PLAN_DOORS.includes(r.door), `${r.sig} derives ${r.suffix} at ${r.door}`);
+  }
+
+  // THE VACUITY CONTROL (WORK-ORDER rule 4). A cell whose whole deliverable is structural must be
+  // shown FAILING against a deliberately broken subject. The subject here is the census's own
+  // reader, so it is fed TWO bodies that exist on no database: one reaching into a second lane's
+  // namespace, one inventing a suffix nobody declared.
+  const twoLanes = await nestedPlanCensus([{
+    sig: "clara._p1150_decoy_two_lanes(uuid)",
+    src: "begin\n  perform clara.create_accounting_plan(p_client, p_op_key || ':plan');\n"
+       + "  perform clara.revise_accounting_plan(p_plan, p_op_key || ':acrev');\nend",
+  }]);
+  assert.deepEqual(partitionProblems(twoLanes).filter((s) => s.includes("_p1150_decoy_two_lanes")).length, 1,
+    "the census does not notice a body that derives two lanes' nested reservations");
+  const undeclared = await nestedPlanCensus([{
+    sig: "clara._p1150_decoy_undeclared(uuid)",
+    src: "begin\n  perform clara.create_accounting_plan(p_client, p_op_key || ':nobodysaid');\nend",
+  }]);
+  assert.deepEqual(partitionProblems(undeclared).filter((s) => s.includes(":nobodysaid")).length, 1,
+    "the census does not notice a suffix no lane declares");
+  // …and the decoys really were the only difference: the live estate is still clean.
+  assert.deepEqual(partitionProblems(rows), [], "the vacuity control left the census reading dirty");
 });

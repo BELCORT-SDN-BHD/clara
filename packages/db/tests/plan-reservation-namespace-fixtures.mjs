@@ -56,47 +56,163 @@ export async function tenancyLanePresent() {
 // ===========================================================================================
 
 /**
- * Every nested plan-reservation suffix in the estate, BY LANE. The census below reads the bodies
+ * Every nested PLAN reservation suffix in the estate, BY LANE. The census below reads the bodies
  * off the live catalog; this map is the only hand-written thing in it, and it names SUFFIXES
  * rather than bodies on purpose: a new body reaching for another lane's suffix must be a red, and
- * a roster of bodies would have to be edited every time one is recut.
+ * a roster of bodies would have to be edited every time one of them is recut.
+ *
+ * `:revise` is the tenancy lane's revision half. It is the one token here that is not lane
+ * qualified — 0353 wrote it before this partition existed, nothing else derives it, and #1150
+ * moves only the `:plan` derivers the ticket names. The census is what makes that safe: the day a
+ * second lane reaches for `:revise`, this cell reds.
  */
 export const LANE_SUFFIXES = {
   prepayment: [":plan", ":end"],
   deferred_revenue: [":rrplan", ":rrend"],
   accrual: [":acplan", ":acrev"],
-  tenancy: [":tnplan"],
+  tenancy: [":tnplan", ":revise"],
 };
 
 /** The flat list of declared suffixes. */
 export const DECLARED_SUFFIXES = Object.values(LANE_SUFFIXES).flat();
 
+/** The lane each declared suffix belongs to. */
+export const LANE_OF_SUFFIX = new Map(
+  Object.entries(LANE_SUFFIXES).flatMap(([lane, xs]) => xs.map((x) => [x, lane])));
+
 /**
- * THE CENSUS INSTRUMENT. Every `clara` body that derives `p_op_key || '<suffix>'`, read off
- * `pg_proc.prosrc` — the suffix is discovered from the catalog too, so a lane that invents a
- * sixteenth one is visible rather than silently outside the map.
- *
- * Returns `[{ suffix, bodies: [signature, …] }]`, ordered under C (#1047's house rule: CI's
- * postgres:17 initdb's at en_US.utf8, where the underscore is ignored at the primary level and a
- * `clara._x` signature sorts after `clara.replace_x`).
+ * The plan doors a NESTED plan reservation is taken at. A derivation handed to anything else is
+ * another family's business — `:approve`, `:match`, `:settle`, `:post`, `:draft`, `:resolve`,
+ * `:assess`, `:add_client_identifier` and `:file_document_write` all exist on this catalog and
+ * belong to the bank, payroll, fixed-asset and document lanes — and is not this census's subject.
+ * Which derivation reaches which door is MEASURED below, never assumed.
  */
-export async function nestedSuffixCensus() {
-  const r = await rootQuery(
-    `select m.suffix, p.oid::regprocedure::text as sig
-       from pg_proc p
-       join pg_namespace n on n.oid = p.pronamespace
-       cross join lateral (
-         select distinct (regexp_matches(
-           p.prosrc, 'p_op_key[[:space:]]*\\|\\|[[:space:]]*''(:[a-z_]+)''', 'g'))[1] as suffix
-       ) m
-      where n.nspname = 'clara'
-      order by m.suffix collate "C", (p.oid::regprocedure::text) collate "C"`);
-  const out = new Map();
-  for (const row of r.rows) {
-    if (!out.has(row.suffix)) out.set(row.suffix, []);
-    out.get(row.suffix).push(row.sig);
+export const PLAN_DOORS = [
+  "create_accounting_plan", "revise_accounting_plan", "end_accounting_plan",
+  "_revise_accounting_plan_core",
+];
+
+/**
+ * Blanks every `--` comment and the CONTENTS of every single-quoted literal, so that a paren or a
+ * door name written in prose cannot be read as a call. Length is preserved, so offsets still line
+ * up with the original source. Measured need: `clara._confirm_tenancy_rent_plan_revision_core`'s
+ * own comment writes "clara.revise_accounting_plan (0193) is now a thin delegate", which a
+ * text-only matcher reads as a call to that door.
+ */
+function maskSql(src) {
+  const out = src.split("");
+  let i = 0;
+  while (i < out.length) {
+    const c = out[i];
+    if (c === "'") {
+      let j = i + 1;
+      while (j < out.length && out[j] !== "'") { if (out[j] !== "\n") out[j] = " "; j += 1; }
+      i = j + 1;
+    } else if (c === "-" && out[i + 1] === "-") {
+      let j = i;
+      while (j < out.length && out[j] !== "\n") { out[j] = " "; j += 1; }
+      i = j;
+    } else { i += 1; }
   }
-  return [...out.entries()].map(([suffix, bodies]) => ({ suffix, bodies }));
+  return out.join("");
+}
+
+/** The name of the call whose argument list encloses the offset `at`, or null. */
+function enclosingCall(masked, at) {
+  let depth = 0;
+  for (let i = at - 1; i >= 0; i -= 1) {
+    const c = masked[i];
+    if (c === ")") depth += 1;
+    else if (c === "(") {
+      if (depth === 0) {
+        const m = /(?:clara\.)?([a-z_][a-z0-9_]*)\s*$/i.exec(masked.slice(Math.max(0, i - 120), i));
+        return m ? m[1] : null;
+      }
+      depth -= 1;
+    }
+  }
+  return null;
+}
+
+/**
+ * THE CENSUS INSTRUMENT. Every `clara` body that hands a PLAN door a key derived from its own
+ * `p_op_key`: the suffix, the door and the body, all read off `pg_proc.prosrc` rather than listed,
+ * so a lane that invents a ninth suffix or a tenth deriving body is visible.
+ *
+ * Returns `[{ suffix, door, sig }]`, ordered under C (#1047's house rule: CI's postgres:17
+ * initdb's at en_US.utf8, where the underscore is ignored at the primary level and a `clara._x`
+ * signature sorts after `clara.replace_x`).
+ */
+export async function nestedPlanCensus(extraBodies = []) {
+  const r = await rootQuery(
+    `select p.oid::regprocedure::text as sig, p.prosrc as src
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara'
+        and p.prosrc ~ 'p_op_key[[:space:]]*\\|\\|[[:space:]]*'':[a-z_]+'''`);
+  return derivationsIn([...r.rows, ...extraBodies]);
+}
+
+/**
+ * The PURE half of the census: `[{sig, src}] -> [{suffix, door, sig}]`. Separated so the cell can
+ * feed it a body that does not exist on any database and see the census flag it — the vacuity
+ * control, without a `create function` on a shared rig.
+ */
+export function derivationsIn(bodies) {
+  const seen = new Set();
+  const rows = [];
+  for (const { sig, src } of bodies) {
+    const masked = maskSql(src);
+    const re = /p_op_key\s*\|\|\s*'(:[a-z_]+)'/g;
+    let m;
+    while ((m = re.exec(src)) !== null) {
+      const door = enclosingCall(masked, m.index);
+      if (!door || !PLAN_DOORS.includes(door)) continue;
+      const k = `${m[1]}|${door}|${sig}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      rows.push({ suffix: m[1], door, sig });
+    }
+  }
+  return rows.sort((a, b) => (a.suffix < b.suffix ? -1 : a.suffix > b.suffix ? 1
+    : a.sig < b.sig ? -1 : a.sig > b.sig ? 1 : 0));
+}
+
+/**
+ * THE PARTITION, stated once: what is WRONG with a set of derivations, as a list of sentences.
+ * Empty means every nested plan reservation in the estate belongs to exactly one lane, so no two
+ * lanes can collide on one — which is the whole claim #1150 makes.
+ */
+export function partitionProblems(rows) {
+  const problems = [];
+  const lanes = new Map();      // body -> Set(lane)
+  const derivers = new Map();   // suffix -> Set(body)
+  for (const { suffix, sig } of rows) {
+    const lane = LANE_OF_SUFFIX.get(suffix);
+    if (!lane) {
+      problems.push(
+        `${sig} derives the nested plan reservation '${suffix}', which no lane declares — add it `
+        + "to LANE_SUFFIXES under the lane that owns it, or give the body its lane's own suffix");
+      continue;
+    }
+    if (!lanes.has(sig)) lanes.set(sig, new Set());
+    lanes.get(sig).add(lane);
+    if (!derivers.has(suffix)) derivers.set(suffix, new Set());
+    derivers.get(suffix).add(sig);
+  }
+  for (const suffix of DECLARED_SUFFIXES) {
+    if (!derivers.has(suffix)) {
+      problems.push(
+        `no body derives '${suffix}' any more — the lane map has outlived its reason and must drop it`);
+    }
+  }
+  for (const [sig, ls] of [...lanes].sort()) {
+    if (ls.size > 1) {
+      problems.push(
+        `${sig} derives nested plan reservations of ${ls.size} lanes (${[...ls].sort().join(", ")}) `
+        + "— one body, one lane, or a key spent on both collides on a reservation neither caller names");
+    }
+  }
+  return problems.sort();
 }
 
 /** The `sha256(prosrc)` and source of one body, by signature. */
