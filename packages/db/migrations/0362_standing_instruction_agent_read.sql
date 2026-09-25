@@ -55,7 +55,7 @@ set local statement_timeout = '20min';  -- PRECAUTIONARY, not load-bearing: this
 -- =====================================================================================
 do $c0362_pre$
 declare
-  v_n int; v_src text;
+  v_n int; v_src text; v_read_src text; v_wd_mode text;
 begin
   -- 1 · THE RELATION THIS FILE READS IS 0338's, and it is the shape §A projects from. Structural
   --     rather than a sha: a relation has no prosrc, and the five columns §A reads are the claim.
@@ -105,13 +105,62 @@ begin
 
   -- 4 · THE NAME §A MINTS IS FREE, or is already this file's own (a redo, #957). Anything else
   --     refuses BY NAME rather than being silently replaced.
-  select p.prosrc into v_src from pg_proc p
+  select p.prosrc into v_read_src from pg_proc p
    where p.oid = to_regprocedure('clara.wake_get_firm_standing_instruction(text)');
-  if v_src is not null and position('#1147 [0362]' in v_src) = 0 then
+  if v_read_src is not null and position('#1147 [0362]' in v_read_src) = 0 then
     raise exception '0362 prestate: clara.wake_get_firm_standing_instruction(text) already exists and is not this file''s body'
       using errcode='CLR10';
   end if;
-  raise notice '0362 prestate OK -- read door %', case when v_src is null then 'FIRST' else 'REDO' end;
+  -- 5 . THE ONE BODY THIS FILE RECUTS, pinned by its `sha256(prosrc)` MEASURED ON THIS RIG (riders
+  --     closing wave lane 01, database `clara_c01`, 337 files, max `0361_reservation_release_advice`
+  --     -- no ticket of this lane landed before this one), never copied from an older migration's
+  --     header. It admits exactly TWO pre-images of its own -- 0338 SG's live body, or a body that
+  --     already carries this file's own `#1147 [0362]` attribution -- so a redo (#957) is admitted
+  --     and real drift still refuses BY NAME. 0338's and 0337's idiom, line for line.
+  --
+  --     NOT SHA-PINNED, DELIBERATELY: `clara._prepayment_schedule_core` and
+  --     `clara._revenue_recognition_core`, the two bodies the asymmetry census watches. A sha is
+  --     the right instrument for a body no other lane of this wave writes; the schedule family is
+  --     read here STRUCTURALLY (a closed lane set, off the live catalog) and this file recuts
+  --     neither, so a pin would turn another lane's lawful recut into an abort of the whole chain
+  --     (the closing plan's own seam rule (c), and its risk 4).
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = to_regprocedure('clara.withdraw_firm_standing_instruction(text,text,text)');
+  if v_src is null then
+    raise exception '0362 prestate: clara.withdraw_firm_standing_instruction(text,text,text) is absent -- 0338 SG is this file''s premise'
+      using errcode='CLR10';
+  end if;
+  if position('#1147 [0362]' in v_src) > 0 then
+    v_wd_mode := 'REDO';
+  elsif encode(sha256(convert_to(v_src, 'UTF8')), 'hex')
+        = 'c63c1fd09bc92713127a038b3565f399b8ee17fcbf27097272b7a919cbb7b6e5' then
+    v_wd_mode := 'FIRST';
+  else
+    raise exception '0362 prestate: clara.withdraw_firm_standing_instruction(text,text,text) is neither 0338 SG''s pinned body (sha c63c1fd0...) nor one carrying this file''s own attribution -- sha256(prosrc) is %', encode(sha256(convert_to(v_src, 'UTF8')), 'hex')
+      using errcode='CLR10';
+  end if;
+
+  -- 6 . THE RELATION SB COUNTS OVER, and the facts it reads on it. Structural: `authority_ref` is
+  --     an open jsonb object by 0193's own CHECK, so what must be true is the CHECK that admits
+  --     this file's kind and the column set the count keys on.
+  select count(*) into v_n from pg_constraint
+   where conrelid = 'clara.accounting_plans'::regclass
+     and conname = 'accounting_plans_authority_kind_check'
+     and pg_get_constraintdef(oid) like '%standing_instruction%';
+  if v_n <> 1 then
+    raise exception '0362 prestate: clara.accounting_plans does not admit the standing_instruction authority kind -- 0338 SC is this file''s premise'
+      using errcode='CLR10';
+  end if;
+  select count(*) into v_n from pg_attribute a
+   where a.attrelid = 'clara.accounting_plans'::regclass and a.attnum > 0 and not a.attisdropped
+     and a.attname in ('firm_id', 'status', 'authority_kind', 'authority_ref');
+  if v_n <> 4 then
+    raise exception '0362 prestate: clara.accounting_plans carries % of the 4 columns SB''s count keys on', v_n
+      using errcode='CLR10';
+  end if;
+
+  raise notice '0362 prestate OK -- read door %, withdraw door %',
+    case when v_read_src is null then 'FIRST' else 'REDO' end, v_wd_mode;
 end $c0362_pre$;
 
 set role clara_fn_owner;
@@ -223,6 +272,144 @@ comment on function clara.wake_get_firm_standing_instruction(text) is
   'read''s own floor is VIEWER (every member may see what their firm instructed); the credential''s '
   'own floor is strictly above it -- clara.wake_context re-validates the on_behalf_of human as an '
   'ACTIVE BOOKKEEPER+ of the credential''s firm on every use.';
+
+-- =====================================================================================
+-- §B — clara.withdraw_firm_standing_instruction — 0338 §G's BODY VERBATIM, plus ONE answer key.
+--
+-- WHAT MOVED, AND ONLY THIS: the receipt gains `plans_still_posting`, the number of LIVE plans
+-- this firm's withdrawn instruction authorised and which keep posting under the member who
+-- authorised them. Everything else is 0338 §G byte for byte -- the same admin floor, the same
+-- op-receipt reservation and its placement, the same refusal vocabulary (CLR10
+-- `firm_standing_instruction_invalid` with axis `withdraw_reason_missing` and
+-- `instruction_key_unknown`, CLR11 `firm_standing_instruction_absent`, CLR13
+-- `operation_in_flight`), the same single lawful UPDATE, the same audit row. The body below was
+-- taken from the LIVE catalog rather than retyped, and §0 refuses to apply over anything else.
+--
+-- WHY THE DOOR AND NOT THE SURFACE. A count a surface derived would be a SECOND definition of
+-- "which plans this instruction authorised", computed off a relation the web session reads under
+-- RLS and the chat lane cannot read at all. The door already holds the instruction row inside the
+-- transaction that withdraws it; one body, one answer.
+--
+-- WHAT WITHDRAWAL STILL DOES NOT DO. It does not pause, cancel or otherwise touch a plan. That is
+-- the ruling this file records rather than takes (issue #1147, "Out of scope"), and
+-- `p1147.withdraw.counts` asserts the plan rows are byte-identical after the withdrawal.
+-- =====================================================================================
+create or replace function clara.withdraw_firm_standing_instruction(
+    p_instruction_key text, p_reason text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $c0362_wd$
+declare
+  v_actor uuid; v_firm uuid; v_dedupe jsonb;
+  v_key text; v_reason text; v_row record;
+  v_plans int;                        -- #1147 [0362]: how many plans keep posting
+begin
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'withdrawing a standing instruction requires its idempotency key'
+      using errcode='CLR10', detail='{"reason":"invalid_op_key","constraint":"nonempty"}';
+  end if;
+  select a.actor, a.firm into v_actor, v_firm
+    from clara._human_ctx(clara.role_rank('admin')) a;
+
+  v_key    := nullif(btrim(coalesce(p_instruction_key, '')), '');
+  v_reason := nullif(btrim(coalesce(p_reason, '')), '');
+
+  -- RESERVE-BEFORE-MUTABLE-VALIDATION, §B's placement and its reasoning: identity and authz
+  -- first, then the replay short-circuit, then everything that reads the world.
+  v_dedupe := clara._reserve_op(v_firm, 'withdraw_firm_standing_instruction', p_op_key,
+    clara._hash(jsonb_build_object('key', v_key, 'reason', v_reason)));
+  if v_dedupe is not null then
+    if v_dedupe ? 'pending' then
+      raise exception 'this standing-instruction key is held by an in-flight sibling'
+        using errcode='CLR13', detail='{"reason":"operation_in_flight"}';
+    end if;
+    return v_dedupe;
+  end if;
+
+  -- A WITHDRAWAL OWES ITS OWN SENTENCE. §A's ck_fsi_withdrawn makes it structural; this is the
+  -- typed answer, so a caller is told which half is missing rather than handed a 23514.
+  if v_reason is null then
+    raise exception 'withdrawing a standing instruction requires the one-line reason it is withdrawn under'
+      using errcode='CLR10',
+        detail='{"reason":"firm_standing_instruction_invalid","axis":"withdraw_reason_missing"}';
+  end if;
+  if v_key is null or v_key not in ('prepayment_schedule_at_close') then
+    raise exception 'unknown standing instruction %', coalesce(v_key, '<null>')
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','firm_standing_instruction_invalid',
+          'axis','instruction_key_unknown', 'instruction_key', v_key)::text;
+  end if;
+
+  select * into v_row from clara.firm_standing_instructions
+   where firm_id = v_firm and instruction_key = v_key and withdrawn_at is null
+   limit 1 for update;
+  if not found then
+    raise exception 'this firm has no standing instruction of that kind to withdraw'
+      using errcode='CLR11',
+        detail=jsonb_build_object('reason','firm_standing_instruction_absent',
+          'instruction_key', v_key)::text;
+  end if;
+
+  -- THE ONE LAWFUL UPDATE §A.1 admits: the three withdrawal columns together, set once, on a row
+  -- that is not already withdrawn. Everything else on the row stays exactly as the member who
+  -- recorded it left it, so a plan that cites it still reads the basis it was written under.
+  update clara.firm_standing_instructions
+     set withdrawn_by = v_actor, withdrawn_at = now(), withdraw_reason = v_reason
+   where id = v_row.id;
+
+  -- #1147 [0362] — WHAT THE FIRM IS NOT STOPPING, COUNTED RATHER THAN LEFT TO BE FOUND.
+  --
+  -- WHAT THIS IS NOT. It is NOT a change to what withdrawal DOES. The plans this instruction
+  -- already authorised keep posting under the member who authorised them -- #940's own ruling for
+  -- a retired roster enrolment, restated in §G's header above and unmoved by this file. Whether
+  -- withdrawal should also PAUSE them is an accounting and product ruling #1050 was never given;
+  -- #1147 makes the consequence visible and records the question rather than taking it
+  -- (packages/db/README.md, the 0362 section).
+  --
+  -- WHY THE COUNT IS TAKEN HERE. After the stamp, inside the same transaction, so what it reports
+  -- is the world the withdrawal leaves behind rather than the one it found. A count taken before
+  -- the update would be a prediction.
+  --
+  -- WHAT `LIVE` MEANS, and it is measured rather than spelled: `status = 'active'`. 0193's CHECK
+  -- admits exactly {active, paused, ended}; a paused plan posts nothing and an ended one is over,
+  -- so neither is something a withdrawal leaves running. A person who has already paused a plan
+  -- is not told they still have to.
+  --
+  -- THE REFERENCE IS COMPARED AS TEXT, never cast to uuid: `authority_ref` is an open jsonb object
+  -- (its only CHECK is that it IS an object, 0193), so a row whose `id` is not uuid-shaped would
+  -- turn a count into a 22P02 at the exact moment a firm is trying to withdraw.
+  select count(*)::int into v_plans
+    from clara.accounting_plans ap
+   where ap.firm_id = v_firm
+     and ap.status = 'active'
+     and ap.authority_kind = 'standing_instruction'
+     and ap.authority_ref ->> 'kind' = 'firm_standing_instruction'
+     and ap.authority_ref ->> 'id' = v_row.id::text;
+
+  perform clara._audit(v_firm, v_actor, null, null, 'withdraw_firm_standing_instruction', null,
+    jsonb_build_object('instruction_key', v_key, 'instruction_id', v_row.id, 'op_key', p_op_key));
+
+  -- THE FOUR KEYS 0338 ANSWERED WITH DO NOT MOVE. `plans_still_posting` is an ADDITION, so a
+  -- surface built against 0338's receipt reads everything it read before; and it is always
+  -- present, including as 0, because a surface that had to tell "none" from "the door did not
+  -- say" would guess.
+  return clara._finish_op(v_firm, 'withdraw_firm_standing_instruction', p_op_key,
+    jsonb_build_object('instruction_id', v_row.id, 'instruction_key', v_key,
+      'recorded_by', v_row.recorded_by, 'withdrawn_by', v_actor, 'active', false,
+      'plans_still_posting', v_plans));
+end $c0362_wd$;
+revoke all on function clara.withdraw_firm_standing_instruction(text, text, text) from public;
+grant execute on function clara.withdraw_firm_standing_instruction(text, text, text)
+  to clara_authenticated;
+
+comment on function clara.withdraw_firm_standing_instruction(text, text, text) is
+  '#1050, recut by #1147 [0362]. A named member of the firm withdraws a firm-level standing '
+  'instruction, with the one-line reason it is withdrawn under. Admin floor, clara_authenticated '
+  'only. The row is kept forever with its withdrawal stamp, so a plan written while the '
+  'instruction stood still reads the basis it was written under; what stops is NEW work -- the '
+  'clocked lane refuses wake_authority_absent again. #1147 [0362]: the receipt also carries '
+  'plans_still_posting, the count of LIVE (status = ''active'') plans of this firm that the '
+  'withdrawn instruction authorised and that keep posting under the member who authorised them. '
+  'Withdrawal does NOT pause them -- whether it should is an owner ruling #1050 was not given, and '
+  'this file makes the consequence visible rather than deciding it.';
 
 reset role;
 
@@ -337,5 +524,59 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '0362 tail OK -- the model lane can ask what a firm has instructed, and can still neither give the instruction nor take it back';
+  -- 6 . THE RECUT WITHDRAW DOOR IS 0338 SG PLUS ONE KEY, AND LOST NOTHING. A recut that quietly
+  --     dropped a wall is the risk a `create or replace` of a 3.3 KB body carries, so the tokens
+  --     0338 refuses by are read back off the INSTALLED body rather than trusted.
+  select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara' and p.proname = 'withdraw_firm_standing_instruction';
+  if v_n <> 1 then
+    raise exception '0362 tail: clara.withdraw_firm_standing_instruction resolves at % pg_proc rows', v_n
+      using errcode='CLR10';
+  end if;
+  select count(*) into v_n from pg_proc p
+   where p.oid = 'clara.withdraw_firm_standing_instruction(text,text,text)'::regprocedure
+     and p.prosecdef and pg_get_userbyid(p.proowner) = 'clara_fn_owner'
+     and p.proconfig @> array['search_path=clara, pg_temp']
+     and p.prosrc like '%plans_still_posting%'
+     and p.prosrc like '%#1147 [0362]%'
+     -- 0338's own refusal vocabulary, unmoved: the admin floor, the withdrawal's own sentence,
+     -- the unknown key, nothing-to-withdraw, and the in-flight sibling.
+     and p.prosrc like '%clara._human_ctx(clara.role_rank(''admin''))%'
+     and p.prosrc like '%withdraw_reason_missing%'
+     and p.prosrc like '%instruction_key_unknown%'
+     and p.prosrc like '%firm_standing_instruction_absent%'
+     and p.prosrc like '%operation_in_flight%'
+     and p.prosrc like '%clara._reserve_op(%'
+     and p.prosrc like '%clara._finish_op(%';
+  if v_n <> 1 then
+    raise exception '0362 tail: the recut withdraw door is not 0338 SG plus the plans_still_posting key -- a wall or the key itself is missing'
+      using errcode='CLR10';
+  end if;
+
+  -- 7 . AND IT STILL DOES NOT TOUCH A PLAN. The ruling this file records rather than takes, read
+  --     off the installed body: the withdraw door writes to ONE relation, its own, and names no
+  --     plan-state verb at all.
+  select count(*) into v_n from pg_proc p
+   where p.oid = 'clara.withdraw_firm_standing_instruction(text,text,text)'::regprocedure
+     and (p.prosrc ilike '%update clara.accounting_plans%'
+          or p.prosrc ilike '%delete from clara.accounting_plans%'
+          or p.prosrc ilike '%clara.pause_accounting_plan%'
+          or p.prosrc ilike '%clara.end_accounting_plan%');
+  if v_n <> 0 then
+    raise exception '0362 tail: the withdraw door acts on an accounting plan -- whether withdrawal should pause the plans it authorised is an owner ruling #1050 was never given, and #1147 records it rather than taking it'
+      using errcode='CLR10';
+  end if;
+
+  -- 8 . THE DEFERRED-REVENUE TWIN STILL HAS NO WAKE LANE. 0338's tail item 10, re-read after this
+  --     file: #1147 gives that side nothing, and the census cell in
+  --     standing-instruction-agent-read.test.mjs holds the two sides against each other.
+  select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara' and p.proname like 'wake_%'
+     and p.prosrc like '%_revenue_recognition_core%';
+  if v_n <> 0 then
+    raise exception '0362 tail: a wake wrapper reaches the deferred-revenue core -- this file gives that side no standing instruction either'
+      using errcode='CLR10';
+  end if;
+
+  raise notice '0362 tail OK -- the model lane can ask what a firm has instructed, a withdrawal says how many plans keep posting, and neither gave anybody a way to act';
 end $c0362_tail$;

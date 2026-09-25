@@ -347,3 +347,117 @@ async (t) => {
   assert.equal(refused.code, "CLR10",
     `expected the minter's CLR10 authority_lost, got ${refused.code}: ${refused.message}`);
 });
+
+// =============================================================================================
+// S2 — WITHDRAWAL NAMES ITS CONSEQUENCE: HOW MANY PLANS KEEP POSTING.
+//
+// WHAT WITHDRAWAL DOES TO A PLAN DOES NOT CHANGE HERE. The plans an instruction already
+// authorised keep posting under the member who authorised them — #940's own ruling for a retired
+// roster enrolment, restated by 0338 §G. Whether withdrawal should ALSO pause them is an
+// accounting and product ruling #1050 was never given; #1147 makes the consequence VISIBLE and
+// records the question rather than taking it. These cells therefore assert BOTH halves: the count
+// is answered, AND the plans are still exactly as they were.
+// =============================================================================================
+
+/** The plan rows a firm's instruction authorised, read independently as root. */
+async function plansUnder(instructionId) {
+  const r = await rootQuery(
+    `select id, status from clara.accounting_plans
+      where authority_kind = 'standing_instruction'
+        and authority_ref ->> 'kind' = 'firm_standing_instruction'
+        and authority_ref ->> 'id' = $1::text
+      order by created_at, id`, [instructionId]);
+  return r.rows;
+}
+
+test("p1147.withdraw.counts -- the withdraw door's answer carries how many LIVE plans the "
+  + "instruction it is withdrawing authorised: one where the clocked lane wrote one, zero where "
+  + "the firm instructed and Clara never acted -- and the plan itself is untouched either way",
+async (t) => {
+  if (await readGate(t)) return;
+
+  // (1) A FIRM THAT INSTRUCTED AND WHOSE CLOCKED LANE ACTED. The plan is written by the real wake
+  //     wrapper on a real close_prep credential -- the production path, never a hand-built row.
+  const sc = await prepaidScene("p1147count1");
+  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
+  const si = await record(sc.alice, { opKey: opk("p1147-count-1") });
+  const w = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.ok(w.plan_id, `mandatory setup: the clocked lane configured a plan (${JSON.stringify(w)})`);
+
+  const before = await plansUnder(si.instruction_id);
+  assert.equal(before.length, 1, "mandatory setup: exactly one plan cites this instruction");
+  assert.equal(before[0].status, "active");
+
+  const out = await withdraw(sc.alice, { opKey: opk("p1147-count-1-wd") });
+  assert.equal(out.active, false, "the withdrawal did not close the instruction");
+  assert.equal(out.instruction_id, si.instruction_id);
+  assert.equal(out.plans_still_posting, 1,
+    `the withdrawal does not say how many plans keep posting: ${JSON.stringify(out)}`);
+
+  // …AND NOTHING WAS DONE TO THE PLAN. This is the ruling #1147 does not take, asserted rather
+  // than assumed: the plan is still ACTIVE, under the same directing human.
+  const after = await plansUnder(si.instruction_id);
+  assert.deepEqual(after, before,
+    "withdrawing the instruction changed a plan it authorised -- that is the ruling this ticket "
+    + "was NOT given (issue #1147, 'Out of scope')");
+
+  // (2) A FIRM THAT INSTRUCTED AND WHOSE CLOCKED LANE NEVER ACTED: zero, not null and not absent.
+  //     A surface that has to tell "no plans" from "the door did not say" would guess.
+  const sc0 = await prepaidScene("p1147count0");
+  const si0 = await record(sc0.alice, { opKey: opk("p1147-count-0") });
+  assert.deepEqual(await plansUnder(si0.instruction_id), [],
+    "mandatory setup: nothing was authorised under this instruction");
+  const out0 = await withdraw(sc0.alice, { opKey: opk("p1147-count-0-wd") });
+  assert.equal(out0.plans_still_posting, 0,
+    `a firm whose instruction authorised nothing is not told zero: ${JSON.stringify(out0)}`);
+
+  // (3) THE FOUR KEYS 0338 ANSWERED WITH DID NOT MOVE. The count is an ADDITION; a surface built
+  //     against 0338's receipt still reads everything it read before.
+  for (const k of ["instruction_id", "instruction_key", "recorded_by", "withdrawn_by", "active"]) {
+    assert.ok(k in out, `the withdrawal receipt lost 0338's own key \`${k}\`: ${JSON.stringify(out)}`);
+  }
+  assert.equal(out.recorded_by, sc.alice);
+  assert.equal(out.withdrawn_by, sc.alice);
+});
+
+test("p1147.withdraw.counts_only_what_still_posts -- the count is of LIVE plans of THIS firm under "
+  + "THIS instruction: a plan a person has paused is not still posting, and a plan another firm's "
+  + "instruction authorised was never this firm's to count",
+async (t) => {
+  if (await readGate(t)) return;
+
+  const sc = await prepaidScene("p1147countlive");
+  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-04-30" });
+  const si = await record(sc.alice, { opKey: opk("p1147-live-1") });
+  const w = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.ok(w.plan_id, "mandatory setup: the clocked lane configured a plan");
+
+  // A SECOND FIRM, instructing and acting for itself. Its plan must never reach firm A's count.
+  const other = await prepaidScene("p1147countother");
+  await recordPeriod(other.alice, { document: other.document, start: "2025-02-01", end: "2025-04-30" });
+  const siOther = await record(other.alice, { opKey: opk("p1147-live-other") });
+  const wOther = await wake12(other.s, { client: other.client, entry: other.entry, target: other.target });
+  assert.ok(wOther.plan_id, "mandatory setup: the sibling firm's clocked lane configured a plan");
+  assert.notEqual(other.firm, sc.firm, "mandatory setup: the two scenes are different firms");
+  assert.equal((await plansUnder(siOther.instruction_id)).length, 1);
+
+  // A PERSON PAUSES firm A's plan through the real door. A paused plan posts nothing, so it is
+  // not something a withdrawal leaves running.
+  await humanQuery(sc.alice, "select clara.pause_accounting_plan($1,$2,$3) as r",
+    [w.plan_id, "p1147: parked while the firm decides", opk("p1147-pause")]);
+  const paused = (await rootQuery(
+    "select status from clara.accounting_plans where id = $1", [w.plan_id])).rows[0];
+  assert.equal(paused.status, "paused", "mandatory setup: the plan is paused");
+
+  const out = await withdraw(sc.alice, { opKey: opk("p1147-live-wd") });
+  assert.equal(out.plans_still_posting, 0,
+    `a paused plan was counted as still posting, or the sibling firm's plan reached this count: `
+    + `${JSON.stringify(out)}`);
+  assert.equal(out.instruction_id, si.instruction_id);
+
+  // THE SIBLING FIRM IS UNTOUCHED, and its own withdrawal still counts its own plan -- without
+  // this half the cell above would pass on a door that always answers zero.
+  const outOther = await withdraw(other.alice, { opKey: opk("p1147-live-other-wd") });
+  assert.equal(outOther.plans_still_posting, 1,
+    `the sibling firm's own live plan is not counted at its own withdrawal: ${JSON.stringify(outOther)}`);
+});
