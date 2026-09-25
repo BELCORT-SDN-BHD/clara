@@ -25,7 +25,9 @@ import {
   readPrepaymentSourceFor, readPrepaymentSourceForAs, prepaymentLaneGrants,
   READ_SIG, READ_REASON,
   OBO_REASON, TWIN_SIG, HUMAN_SIG, AMORTISATION_KIND, PREPAY_BASIS,
+  PREPAY_REASON, PREPAID_NOT_ENROLLED_AXIS,
 } from "./prepayment-schedule-obo-fixtures.mjs";
+import { callerContractCode } from "./internal-refusal-errcode-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
@@ -156,7 +158,12 @@ async () => {
 
   // 1 — A NULL AUTHOR is its own mistake, and it is answered before the client is even read, so it
   //     can leak nothing about which clients exist.
-  const nullAuthor = await assertPair(CLR.badRequest, OBO_REASON.invalidAuthor,
+  //
+  //     #1114 — AND IT IS NOT A `bad-request`. The only caller of this door is a `clara_runtime`
+  //     body that always holds the actor, so a null here is the calling PROGRAM's fault, has no
+  //     sentence to show anyone and no remedy to offer. It carries CLR44, the caller-contract
+  //     class, and the distinctness from the renderable roster refusal is asserted below.
+  const nullAuthor = await assertPair(await callerContractCode(), OBO_REASON.invalidAuthor,
     () => call({ author: null }), "an OBO configuration naming no human at all");
   assert.equal(nullAuthor.detail.field, "author");
   assert.equal(nullAuthor.detail.constraint, "present");
