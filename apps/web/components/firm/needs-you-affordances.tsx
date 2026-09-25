@@ -32,6 +32,7 @@ import { LintFindingAffordance } from "./lint-finding-affordance";
 import { ComplianceWatchAffordance } from "./compliance-watch-affordance";
 import { WorkQuestionAffordance } from "./work-question-affordance";
 import { AccrualBillConflictAffordance } from "./accrual-bill-conflict-affordance";
+import { PayrollCompletenessQuestionAffordance } from "./payroll-completeness-question-affordance";
 
 export type NeedsYouAffordanceProps = {
   row: ReviewQueueRow;
@@ -162,6 +163,15 @@ export const NEEDS_YOU_AFFORDANCES: Record<ReviewQueueRowKind, NeedsYouAffordanc
     // (clara.skip_plan_occurrence, this ticket's own new door) — see
     // ./accrual-bill-conflict-affordance.tsx's own header for the grounding.
     accrual_bill_conflict: AccrualBillConflictAffordance,
+    // #1048 (0343, riders sweep wave lane 04): the ONE payroll kind with an inline act, and the
+    // reason it differs from the four payroll/rent kinds above it is worth stating rather than
+    // inferring. Each of those is cleared somewhere ELSE — add the missing account, accept a
+    // specific bank line among several, confirm a revision that needs written judgement — so the
+    // row's own link is the whole affordance. This row IS a question with exactly two answers, and
+    // there is no payroll workbench to send a person to: a link-only row here would be a question
+    // nobody can answer, which is the "nothing dark" failure the standing owner ruling names. See
+    // ./payroll-completeness-question-affordance.tsx's own header.
+    payroll_completeness_question: PayrollCompletenessQuestionAffordance,
   } satisfies Record<ReviewQueueRowKind, NeedsYouAffordance | null>,
 );
 

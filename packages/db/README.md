@@ -5234,6 +5234,21 @@ reports a run fully unsettled (ignoring every debit) was installed and the batte
 clearing cells, S6's clearing cell), then `CLARA_MIGRATION_REDO` restored the real body and all 17
 passed again.
 
+**S7 (a later fix round) and S8 (#1059) are cells this file's own body never grew for.** Both
+sections are additive test coverage only — NO body in the table above changed for either. S7
+(ADV-01/ADV-04) proves reversing a run's own POSTED CREDIT drops it out of the read without
+disturbing any other run's FIFO share, and that a high-stakes settlement is left a draft for a
+distinct checker. S8 (#1059, "give a wrongly accepted payroll net-pay settlement an explicit
+reopen path") proves the opposite direction — reversing the SETTLEMENT's own DEBIT — end to end:
+`clara.reverse_entry` refuses an entry that still rides a live `bank_matches` row (CLR10
+`live_bank_match_present`) so `clara.unmatch_bank_match` MUST run first; once both general-purpose
+doors have landed, in that order, `_payroll_net_pay_unsettled` counts the run unpaid again (the
+settlement's own debit now carries `reversed_by`; the reversal mirror's own 2040 leg is a CREDIT,
+never counted as a debit — the ADV-01 exclusion already covers it), `get_payroll_settlement_
+candidates` offers the run and its ORIGINAL bank line again, and `clara.bank_matches.status` reads
+`unmatched`. Neither door is new, widened or touched by #1059 — the client surface that composes
+them (apps/web's `PayrollSettlementsSection`) is documented in that component's own file header.
+
 ## #948 — hire-purchase and finance-lease agreements are read, and the acquisition they create is posted (0299)
 
 `0299_agreement_contract_acquisition.sql` does for an agreement contract what 0296 and 0297
@@ -8840,6 +8855,340 @@ redo: `clara.get_work_claim_origin`
 `fc679a2d4d96341d664d881b9e43da54ed1d8d2e5fe04f4ca45351ff7dbf8dbc`,
 `clara.get_accounting_work_row`
 `28aba20bdb39b0f6f5deb2ddf24937f1fa847c0b1128c3d6a4eeaae08781713e`.
+## 0342 — the payroll registry's `business_operation` catches up to the posting lane #946 already shipped (#1061, riders sweep wave, lane 04)
+
+`0342_payroll_registry_business_operation_supported.sql` closes a gap left across two riders wave
+4 tickets on the SAME lane: `0296_payroll_summary_typed_facts.sql` (#945) opened reading on the
+six `payroll_summary` pdf/image pairs and deliberately left `business_operation` at `stored_only`,
+because its own header says the drafting-and-posting half belonged to "a later file". That later
+file, `0297_payroll_summary_posting.sql` (#946), shipped and now posts a payroll run unattended
+whenever `clara._payroll_posting_verdict`'s closed rung roster holds — but it never touched
+`clara.document_capabilities`, so the registry kept publishing a claim the estate had already
+outgrown. #1061 is the follow-up filed against exactly that gap.
+
+**This file is a pure content republication, the same shape as #782's 0245 and #988's 0246
+before it.** It creates no function, table, trigger, check, policy or grant, and recuts nothing.
+Its whole content is two UPDATE statements on `clara.document_capabilities`: the six
+`payroll_summary` rows whose mime is `application/pdf` or `image/*` move `business_operation`
+from `stored_only` to `supported`, and the registry-wide version raise every prior republication
+has used (0299's most recent, 6 → 7, the same SET-TO-LITERAL `<> 7` form 0299's own header argues
+for over a bare `+ 1` — redo-safe on its own and composable with another lane raising to the same
+literal in the same wave, though no other lane in this wave touches this table).
+
+**Why `supported`, not a bare guess at "whatever value fits.".** The ticket names the value
+itself as negotiable ("or whatever value correctly describes 'posts unattended once the gate
+passes'") but also names the precedent to match: "matching what #948's own capability-registry
+row for financing agreements does for the same reason." 0299 already answered this exact question
+for the mirror-image `agreement_contract` lane — an unattended post is 0191's own published
+definition of `business_operation = supported` ("Clara does this today, and a test proves it" /
+"where Clara can carry typed facts into it"), not `proposal_only` (#988's later fifth level,
+"Clara proposes, a person confirms") — `clara._payroll_posting_verdict` posts the entry itself,
+nobody confirms a proposal first. `typed_facts` does not move: it has read `supported` since 0296.
+
+**Only the basis sentence's closing clause moves, by `replace()` rather than a full rewrite.** The
+old sentence — "Nothing is posted from these facts yet; the filing appears as work a person
+completes." — is swapped for one naming `clara._payroll_posting_verdict`'s own closed roster
+(0297 §D's brief quote, verbatim in shape): both reading channels agree, every arithmetic check
+passes, every account resolves in the client's own chart, the month is established and no entry
+for that client and month already exists, or the run appears under Needs you naming the condition
+that failed. Everything ahead of that sentence — the byte-extraction engine, the facts engine, the
+never-guess disclosure, the per-employee-strip disclosure — is provably untouched by construction,
+because `replace()` on a basis that does not contain the old sentence is a no-op rather than a
+literal that could silently retype the unchanged half wrong.
+
+**`limits.payroll_employee_detail` does not move, and that is the point.** The per-employee
+boundary 0296 named is not this ticket's subject: `clara.persist_payroll_facts` still strips every
+per-employee figure before storage and `clara._payroll_entry_plan` (0297 §C) drafts the posted
+entry from the run-level totals alone, so the boundary is exactly as true after 0342 as before it.
+Restating it would not be a re-derivation.
+
+**Scope is exactly the six rows #1061's AC1 names, and only them.** The two payroll-family tail
+checks in the prestate/tail both re-derive from the live router branch (mime = pdf or image/*)
+rather than an enumerated literal list, and a family-blind diff at the tail's step 5 re-asserts
+that no `document_kind` outside the small, already-`supported` set (the invoice family, agreement
+contract, bank statement, opening balance) gained the value — the tail's own guard against #1061's
+AC2 ("no other document kind's registry row changes as a side effect").
+
+**Prestate pins.** The five #779/#846/#782 wall trigger bodies this file's raise rides, measured
+live on this rig (never transcribed from an older header): `_tf_document_capabilities_version_
+monotone` `170df87b…e9c56`, `_tf_document_capabilities_version_high_water` `b4090687…618c9`,
+`_tf_document_capabilities_high_water_record` `839c51fb…9de40d`,
+`_tf_document_capabilities_version_uniform` `d21b6837…5ef776` — all four at their 0244/0245
+pre-images, unchanged since — and `_tf_document_capability_high_water_monotone` at
+`62e83a3b…974ec8c`, which is `0272_document_capability_wall_completion.sql`'s POST-image, not
+0244's or 0245's: 0272 (a different, already-merged fix round, live on `main` before this branch
+was cut) recut that one trigger a second time as a key-change BEFORE UPDATE trigger, and the
+migration's own prestate names the rig it measured on rather than copying an older file's sha.
+
+**`document-capability-registry.test.mjs` moves in the same commit** (`af3b5955`/#779's own
+precedent for editing this battery alongside the migration that moves its subject):
+`PUBLISHED_REGISTRY_VERSION` re-bases 6 → 7, the payroll cell now asserts `business_operation =
+'supported'` and a basis that has stopped promising the pre-0297 dead end, and the file's own
+running commentary gains a numbered paragraph (7) recording why. `EXPECTED_CELLS` is unchanged —
+no cell was added or removed, only two assertions inside the one payroll cell.
+
+**rig-meta cohort.** None — comment-only, the same posture 0245's and 0246's entries carry, for
+the same reason: no function, table or trigger is minted, so there is no name to roster and no
+cohort array would be anything but empty.
+
+**Gate.** No new preintegration gate file. `document-capability-registry.test.mjs` is already
+gated by `document-capability-preintegration-gate.mjs` (0191's cohort), which this file does not
+change, and `packages/db/package.json`'s `$GATES` list needs no new entry.
+
+**Web pins corpus.** `apps/web/tests/firm-scope-db-pins.corpus.ts` was checked (a migration file
+changed, work order rule (d)): 0342 contains no `pg_get_functiondef` splice and no other dynamic
+SQL construct the corpus's lexer would need a reviewed barrier for, so no entry was added.
+
+**Out of scope, by the ticket's own words.** The payroll posting gate's own logic and conditions
+(`clara._payroll_posting_verdict`, `clara._payroll_entry_plan`) are untouched, and no other
+document kind's registry row is re-derived.
+
+## 0343 — a payroll summary that prints no run total posts from its own row sum when the page witnesses its own completeness, and otherwise parks a question (#1048, riders sweep wave, lane 04)
+
+**What it settles.** `0297_payroll_summary_posting.sql` left one arm deliberately unbuilt and said so
+in its own header (0297:346-353): it would not draft from `computed_cents`, the row sum 0296's
+evaluator offers when a page prints employee rows but no totals row, "because whether the owner wants
+a row sum admitted as a posting basis is a product question this ticket does not answer for them."
+The ruling recorded on #946 on 2026-09-24 answers it, and #1048 is that answer: the row sum IS a
+posting basis when the document witnesses its own completeness, and when it does not, the lane PARKS
+A QUESTION for a person instead of refusing.
+
+**The accounting, and why the witness is the whole of it.** Posting from a row sum means posting a
+figure the page never states. A reading that missed an employee line understates staff cost,
+understates the net owed and understates the statutory payables (EPF, SOCSO, EIS, PCB) that are
+remitted against a filed return — a misstatement and a compliance exposure, not a rounding question.
+So the sum is admitted only against a witness that the lines read are ALL the lines:
+
+| witness | what it is worth |
+|---|---|
+| a printed employee headcount equal to the lines read | the strongest: the document itself asserts how many employees are in the run, and the reading found exactly that many |
+| a printed page count of one | weaker, and its exact worth is stated rather than assumed: it witnesses that the DOCUMENT is not truncated, not that the RUN is complete — which is precisely the gap the row sum opens |
+| a named person's `yes` | the professional judgement the standing owner ruling asks Clara to ask for, recorded with their name, their note and the reading it was about |
+
+A printed headcount the lines CONTRADICT is the one case where a witness is worse than silence: the
+reading is known incomplete and nothing posts, not even against a page count of one. A `no`, or no
+answer, keeps the document unposted.
+
+**The residual this file does NOT introduce and does NOT widen.** Only the six columns a payslip row
+prints have a sum, so a row-sum entry books the gross, the four employee deductions and the net, and
+the employer's own EPF/SOCSO/EIS and the HRDF levy get no leg. That is 0297:355-359's standing rule
+("an unprinted line produces no leg") applied unchanged: a printed totals row that omits those
+columns has produced the same partial entry since #946. This file changes WHICH FIGURE a leg may come
+from, never WHICH LEGS exist.
+
+**The entry balances by the row identity, not by luck.** `gross - (epf_ee + socso_ee + eis_ee + pcb)
+= net` is the identity 0296's evaluator already checks on every quoted row, and it holds at run level
+over the summed columns. The worked example (#945's own two rows) posts
+Dr 6000 500000 / Cr 2100 55000 / Cr 2110 2450 / Cr 2120 980 / Cr 2130 16000 / Cr 2040 425570, and
+the exact-balance rule 0297 set (no rounding leg, ever) is untouched.
+
+**Sections.**
+
+| section | what |
+|---|---|
+| A | prestate — bimodal pins (pre-image sha OR this file's own marker) on the six bodies it recuts or splices, plus v1's registered closure body and the month parser |
+| B | `clara.evaluate_payroll_run_state_v2(jsonb,jsonb)` + its freeze registration at version 2 |
+| C | `clara._payroll_answers_ok` recut — two OPTIONAL witness questions |
+| D | `clara.persist_payroll_facts` spliced — the lane banks a v2 state |
+| E | `clara._payroll_entry_plan` recut — a witnessed row sum is a posting basis |
+| F | `clara.payroll_completeness_answers` — what a named person said, and when |
+| G | `clara._payroll_completeness_answer(uuid)` — the reading-bound answer read |
+| H | `clara._payroll_posting_verdict` recut — the `completeness_witness` rung |
+| I | `clara._post_payroll_run` recut — the entry and its receipt name the basis |
+| J | `clara.list_review_queue` spliced twice — row_kind `payroll_completeness_question`, and #946's own arm stands down for it |
+| K | `clara.answer_payroll_completeness(uuid,text,text,text)` + its event type and taxonomy row |
+| Z | tail |
+
+**Why a `_v2` evaluator and not a recut.** 0296 registered `clara.evaluate_payroll_run_state_v1`'s
+single-member closure in `clara.evaluator_versions`, and `clara.verify_evaluator_freeze()` re-derives
+it LIVE between every migration body and its commit — so an in-place edit fails at APPLY, not merely
+at review. 0296:710-711 names the only lawful repair: "ship the change as
+clara.evaluate_payroll_run_state_v2 with its own version row." v2 is v1 byte for byte for the eleven
+run-level questions, the row census, the row identity, the column sums, the printed-total cross-check
+and the text-vs-vision comparison; the battery pins that by comparing v2's `facts`, `rows`,
+`established`, `disagreed` and `missing` against **v1's own output on the same two envelopes**. The
+same posture `clara.evaluate_metric_v2` took beside `evaluate_metric_v1` (0135).
+
+**Why the two witness facts live OUTSIDE `facts`.** `clara._payroll_posting_verdict` walks
+`jsonb_each(facts)` and folds any state in `('totals_mismatch','rows_unbalanced','unreadable',
+'unanswered')` into its `arithmetic_holds` rung. `payrollFacts_v1` is FROZEN and does not ask the two
+witness questions yet, so a witness inside `facts` would have arrived `unanswered` and blocked EVERY
+payroll run in the estate on the grounds that the page does not add up. Two new top-level keys
+(`witness`, `completeness`) cost one line in each consumer; one new fact would have cost the lane.
+For the same reason the two answers are KNOWN but OPTIONAL in `clara._payroll_answers_ok`: an
+eleven-key envelope — exactly what the frozen worker sends — is still admitted byte-unchanged.
+Optional never means malformed: a witness answer that IS present is held to the same two-state
+vocabulary, non-blank rendering and 200-character bound as one of the eleven.
+
+**A count is parsed as a count.** v1's normalization turns `"2"` into 200 cents, which is right for a
+figure and wrong for a headcount. The witness arm parses a plain non-negative integer of at most six
+digits (thousands separators and spaces dropped, nothing else admitted) and compares the two channels
+on THAT integer. `not_asked` is a verdict distinct from `not_printed`, because a prompt that never
+asked and a page that prints nothing are different facts about the world.
+
+**`rows.agreed` is what a headcount is compared against**, not a raw row count: the evaluator only
+sums a column over a row set it can honestly sum (0296:581-592), and comparing against anything
+larger would let a page whose last line the two channels read differently satisfy a headcount that
+covers a line no sum included.
+
+**A v1 state already banked stays v1 and still reaches the question.** Every payroll pair read before
+this file carries `state_version: v1` and no `completeness` object, and the rows the evaluator summed
+were stripped at the persist boundary (0296:1876-1883), so the state cannot be re-derived. §E admits
+both versions by name and treats a v1 state as "no witness" — which moves an already-read,
+never-posted summary off 0297's dead end and onto the parked question. That is a deliberate
+behaviour change for already-banked readings, including hosted ones, and it is the change the brief
+asks for.
+
+**One rung, three named reasons.** `completeness_witness` sits immediately after
+`run_totals_printed`, because it is only reachable when that question had no printed answer, and the
+two never both fail: §E emits `run_totals_not_printed` when there is no sum at all (no rows, a
+contested reading, an unreadable rendering) and a `completeness_*` reason when there is one.
+
+| reason | what a person does |
+|---|---|
+| `completeness_contradicted` | re-file a complete copy: the reading is known incomplete and nothing can be affirmed |
+| `completeness_unwitnessed` | ANSWER the parked question — the only one of the three that is answerable, and the only case where `completeness.parked` is true |
+| `completeness_declined` | re-file a complete copy: a named person already said this is not every employee |
+
+**The answer is bound to the READING, not to the document.** `clara.payroll_completeness_answers`
+carries a UNIQUE `extraction_id`, so if somebody affirms twelve lines and the page is then re-read
+with fifteen, the old `yes` does not authorise the new sum — there is simply no answer for the new
+reading and the question is parked again. `rows_read` freezes the line count the person was shown.
+Append-only (a changed mind is a new reading, with its own question), `clara_fn_owner`-owned, RLS
+enabled AND forced, `SELECT` to `clara_authenticated` and NOTHING to `clara_agent_ro` or
+`clara_runtime`: this table records a human's professional judgement about a client's payroll, and it
+reaches the agent lane through the entry it produced, not through the table (#949's own SPEC-08
+posture).
+
+**The queue splits, it does not double.** A parked question and a posting block are the same document
+in the same state, so #946's `payroll_rows` gains ONE predicate — stand down when
+`completeness.parked` — and the new `payroll_witness_rows` arm takes exactly the rows it stood down
+from. Both arms read the same flag, computed once by the gate, so neither can claim a row the other
+also claims and neither can miss one. Seventeenth row kind
+(`payroll_completeness_question`, section `needs_you`, lane `needs_you`, no new `counts.*` key and no
+new json key); the splice's own postcheck re-reads the COMMITTED catalog and asserts every one of the
+sixteen pre-existing kinds at its exact count, the new one exactly once, the shared column vector at
+exactly one more occurrence, and seventeen kinds in total.
+
+**The one human write this payroll family has.** `clara.answer_payroll_completeness(uuid, text, text,
+text)`, bookkeeper floor, op-keyed, audited, emitting `document.payroll_completeness_answered`
+(client-scoped, routed `ignore` — the door does everything the answer implies inside its own
+transaction). #945 and #946 both added no human door deliberately, because everything else in this
+lane is machine-decided; a completeness assertion is not. It refuses
+`no_parked_completeness_question` unless the gate says the question is actually parked, which is both
+the honesty rule (no judgement is recorded about a page that did not ask for one) and what makes a
+second answer to one question impossible; the UNIQUE on `extraction_id` is the belt behind that. A
+`yes` posts in the SAME call, through `clara._post_payroll_run` — the same body the unattended lane
+uses — so the entry, its legs, its receipt and its event are identical to a printed-total post except
+for the basis they name. If that post is refused for another reason (a closed period, an account
+since removed, a duplicate), the ANSWER still stands and the refusal comes back in the door's result.
+
+**The entry says where its figures came from.** `flags->'payroll_run'->'posting_basis'` is written at
+the draft insert (the only moment `clara._tf_entry_immutable` allows `flags` to be written) and names
+the kind (`printed_totals` / `row_sum`), the witness, the lines read, the printed headcount and page
+count, the summed questions and, for an answered question, the answer row. Each leg's `basis` carries
+a `#row_sum` suffix where the figure was summed. The receipt's rationale says the same in words: 0297's
+sentence ("two readings agreed, arithmetic held, accounts resolved") stays verbatim as its first half
+because it is still true, but it is true AND MISLEADING on its own about a row-sum post, and an
+auditor reading the LEDGER must be able to tell a figure the document states from one this estate
+computed.
+
+**Gate.** New: `packages/db/tests/payroll-completeness-witness-preintegration-gate.mjs`
+(`CLARA_ALLOW_MISSING_PAYROLL_COMPLETENESS_WITNESS`), appended at the tail of
+`packages/db/package.json`'s `$GATES` list. New battery:
+`packages/db/tests/payroll-completeness-witness.test.mjs` (11 cells).
+
+**rig-meta.** One cohort, `PAYROLL_COMPLETENESS_0343_HUMAN_FNS` — one granted name
+(`answer_payroll_completeness`, `clara_authenticated`). The two new internals
+(`evaluate_payroll_run_state_v2`, `_payroll_completeness_answer`) stay ungranted to every application
+role, which the sweep's `expected = false` asserts and §Z re-derives.
+
+**Web pins corpus.** `apps/web/tests/firm-scope-db-pins.corpus.ts` gains one reviewed barrier entry
+for 0343 (work order rule (d)): the file carries two `pg_get_functiondef` splices, over a CLOSED
+literal roster of exactly two named functions.
+
+**Two neighbour batteries move with this file, each with the reason at the line.**
+`payroll-summary-posting.test.mjs`'s S1 now expects `completeness_unwitnessed` where it expected
+`run_totals_not_printed` — that IS the ticket — and a new S1b keeps `run_totals_not_printed` honest
+for a page with no rows to sum at all. `payroll-summary-facts.test.mjs`'s S5 now pins
+`state_version: v2`.
+
+**Out of scope, by the ticket's own words.** No employee-level calculation and no statutory rate is
+read, computed or stored anywhere in this file: the persist door's strip is untouched, the witness is
+a RUN-level count of lines, and no `document_regions` row is minted for a witness (a count is not a
+monetary fact a person clicks on the page, and `clara._assert_field_path` would have to learn two
+paths for no reader). The prompt stanza that starts asking the two witness questions is a SUCCESSOR
+CONTRACT in the ticket report, because `payrollFacts_v1` is frozen.
+
+### 0343 — the fix round (riders sweep wave, lane 04 review)
+
+Seven findings from the lane's own review, all inside this unmerged file and all re-applied through
+the #957 redo path. They are recorded here rather than in a successor because 0343 has not merged:
+an applied migration is immutable, an unmerged one is not.
+
+**A completeness witness never vetoes a page that prints its own totals (ADV-01, blocker).** The
+first cut folded a witness the two channels read differently into the gate's `channels_agree` rung.
+Driven on the rig, that refused a fully printed #946 page — all eleven run totals, both channels
+agreeing, the arithmetic holding — because one channel quoted a "Total employees" label the other
+read as `not_printed`. The witness is a FALLBACK FOR SILENCE, so its failure now belongs only to the
+rung that is reached when the page IS silent, where it becomes the parked question. The evaluator
+also names a value-against-a-`not_printed` `one_channel_printed` rather than `channels_disagree`:
+one reading and one silence is not two readings of one number.
+
+**A human-initiated post meets the maker-checker ladder (ADV-02, blocker).** `clara._post_payroll_run`
+now knows who authorised a post — nobody for the unattended arm, exactly one named person when the
+witness is `answered_question`. That person is written to `last_human_editor`, and a HIGH-STAKES
+entry they authorised is left a DRAFT for `clara.approve_entry`, which is 0298:494's own posture and
+`clara.reverse_entry`'s before it. The unattended arm is untouched. The gate's duplicate sentence now
+distinguishes a draft awaiting a checker from a run already posted.
+
+**The entry names the evaluator it was judged by (ADV-04).** The plan carries `state_version` beside
+`plan_version`, and the entry's flag is written from it. The two were the same string by accident
+while only one state version existed.
+
+**The published capability claim catches up (ADV-05).** SectionL republishes the six payroll_summary
+pdf/image rows at `registry_version` 8 with a basis that names the completeness witness, the parked
+question and the row-sum entry's own six-leg shape. #1061's 0342 is not edited; a correction to an
+applied migration is published by its successor.
+
+**The parked question says what a yes does not book (ADV-06).** The plan reports `unbookable` — the
+questions no figure exists for from either source, computed independently of whether the sum was
+admitted — and the sentence names them. The affordance component is deliberately untouched: the
+sentence is the database's own.
+
+**A second answer is a refusal, not a 23505 (ADV-07).** The door takes
+`pg_advisory_xact_lock(203431048, hashtext(document))` before it reads the verdict (0006:952's house
+idiom), so the loser of a race waits, re-reads and is refused `no_parked_completeness_question` by
+name. The UNIQUE on `extraction_id` stays as the belt and its violation is converted rather than left
+to escape.
+
+**Two sentences (ADV-11, ADV-12).** A printed page count of zero gets its own reason instead of
+borrowing the truncation one; the declined sentence names the re-read that clears a mis-clicked `no`,
+not only the re-file that clears an incomplete document.
+
+**Battery.** 19 cells (W1–W16 plus W4b/W4c/W4d). **Registry version.** 8 —
+`packages/db/tests/document-capability-registry.test.mjs`'s `PUBLISHED_REGISTRY_VERSION` re-bases
+there with the reason beside the number.
+
+**Rig repair, disclosed.** Redoing this file with a changed evaluator body needs its own
+`clara.evaluator_versions` row gone first: SectionB.1 refuses a re-registration at a different
+closure hash, which is exactly right for a merged file and is an artifact of an earlier apply for an
+unmerged one. The lane database's version-2 row and its member were deleted by hand (append-only
+triggers bypassed as superuser) before each redo that moved the evaluator. The COMMITTED file is
+unchanged in shape and registers the final body on a first apply.
+
+**What is LIVE today, and what is not (spec finding L04-SPEC-03).** The PARKED QUESTION half is
+live end to end: a summary that prints no run totals reaches a named person under Needs you, their
+yes becomes the posting basis and the run posts in that same call. The TWO PAGE-PRINTED WITNESSES
+— a headcount equal to the lines read, and a page count of one — cannot fire in production, because
+the only channel that could supply them is `packages/runtime/workflows/payrollFacts.v1.prompts.mjs`,
+whose `PAYROLL_RUN_FIELDS` is a FROZEN eleven-element array carrying neither key. They are exercised
+by this file's own battery and by nothing else until a `payrollFacts_v2` asks the two optional
+questions (the prompt stanza and its wire shape are a successor contract in
+`reports/waveS-lane04-ticket1048.md` §9.1). **No release note and no ticket close may say that Clara
+posts from a printed headcount today.** The database half is deliberately built first: a frozen
+workflow's successor is cheap to ship against a door that already exists, and expensive the other
+way round.
 ## 0361 — one map of "which door releases this claim", and the carry-down stops naming one that cannot (#1078 fix round, riders sweep wave, lane 02)
 
 [0361_reservation_release_advice.sql](migrations/0361_reservation_release_advice.sql) closes the

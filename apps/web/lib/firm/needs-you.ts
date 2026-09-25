@@ -92,12 +92,20 @@
 //     (accrual_side, accrual_plan_status), the same idiom authority_id uses, so no arm's column
 //     vector moves. Section `needs_you`, lane `needs_you`; derived, stores nothing, clears itself
 //     when a reversal is admitted for the period. No counts.* key.
-// The LIVE row_kind set is therefore SIXTEEN values, not the four the 0011 body
+//   - 0343_payroll_completeness_witness.sql (#1048, riders sweep wave lane 04) — adds
+//     row_kind='payroll_completeness_question', the SEVENTEENTH kind, and SPLITS #946's own arm
+//     rather than sitting beside it: `payroll_rows` gains one predicate (stand down when
+//     clara._payroll_posting_verdict says the completeness question is parked) and the new
+//     `payroll_witness_rows` arm takes exactly the rows it stood down from, so one document never
+//     produces two rows about one question. It reuses the EXISTING shape unchanged and mints no
+//     counts.* key and no json key.
+// The LIVE row_kind set is therefore SEVENTEEN values, not the four the 0011 body
 // alone would suggest: draft, uncoded_filing, open_question, coding_task,
 // compliance_watch, lint_finding, fixed_asset_incomplete, staff_advance_incomplete,
 // work_question, depreciation_authority_pending, payroll_posting_blocked,
 // payroll_net_pay_unsettled, agreement_posting_blocked, rent_payable_unsettled,
-// rent_escalation_pending, accrual_bill_conflict — see REVIEW_QUEUE_ROW_KINDS below, the single source
+// rent_escalation_pending, accrual_bill_conflict, payroll_completeness_question — see
+// REVIEW_QUEUE_ROW_KINDS below, the single source
 // components/firm/needs-you-row.tsx's label lookup is built from (never a hand-cast key path).
 //
 // THE ORDINALS COUNT THE LIVE ARRAY, and they say so because they got it wrong once: 0288
@@ -302,6 +310,26 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   // carries the flagged occurrence's own due date as ISO `YYYY-MM-DD` text — never a formatted
   // month — because a remedy must name the exact occurrence back, byte for byte.
   "accrual_bill_conflict",
+  // #1048 (0343_payroll_completeness_witness.sql, riders sweep wave lane 04): the SEVENTEENTH
+  // kind, and the only payroll kind in the estate that carries an inline ACT. ONE row per filed
+  // payroll summary that was READ, prints no run total, and says nothing about its own
+  // completeness -- so the deterministic evaluator's row sum over the employee lines it read is
+  // the only figure available and nothing may post on it unwitnessed. The row IS the question
+  // ("this summary prints no total; is this every employee for the month?"), carried verbatim in
+  // `question_text` from clara._payroll_posting_verdict's own sentence, with the line count and
+  // the gross and net those lines total already in it. Section `needs_you`, lane `needs_you`.
+  // DERIVED and stores nothing: it clears the moment a named person answers
+  // (clara.answer_payroll_completeness -- a `yes` posts the run from that row sum and names the
+  // answer as the entry's witness, a `no` hands the document back to `payroll_posting_blocked`
+  // with a sentence naming who declined) or the moment a re-read changes what the page says,
+  // because the ANSWER is bound to the reading and not to the document. It is a SPLIT of
+  // `payroll_posting_blocked` rather than a second row beside it: 0343 gives that arm one
+  // predicate (stand down when the verdict says the question is parked) and this arm takes
+  // exactly the rows it stood down from, so one document never produces two rows about one
+  // question. `id`/`filing_id` carry the filing, `document_id` the payslip, `period` the month,
+  // `amount_cents` the gross an answer would post. No counts.* key and NO new json key, so both
+  // db-side FULL_ROW_KEYS rosters stay byte-unchanged.
+  "payroll_completeness_question",
 ] as const;
 
 export type ReviewQueueRowKind = (typeof REVIEW_QUEUE_ROW_KINDS)[number];

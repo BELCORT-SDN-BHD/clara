@@ -429,6 +429,7 @@ lib/firm/navigation-label.test.ts
 lib/firm/needs-you-agreement-posting.test.ts
 lib/firm/needs-you-gaps.test.ts
 lib/firm/needs-you-links.test.ts
+lib/firm/needs-you-payroll-completeness.test.ts
 lib/firm/needs-you-payroll-posting.test.ts
 lib/firm/needs-you-payroll-settlement.test.ts
 lib/firm/needs-you-tenancy-rent.test.ts

@@ -773,6 +773,40 @@ reload or a shared link could not reach the Matching tab at all. **No new route 
 workbench, and the right answer for a sub-nav, where a tab is a view of one page rather than a
 place. **A multi-selection stays OUT of the URL**: a selection set is a draft, not an address.
 
+**#1060 — the registry's `bank` ROW now names that query.** No new route, still: `ACCOUNTING_ITEMS`'s
+existing `bank` entry (`lib/navigation/tree.ts`) gained `tab: "matching"`, the same field
+`receivables`/`assets` already carry to deep-link past the registers workbench's own default. The
+bank workbench's own default stays "accounts" (unchanged, above); the registry now points every
+caller — the sidebar, the accounting hub, ⌘K's Go palette, and `lib/firm/needs-you-links.ts`'s
+`payroll_net_pay_unsettled`/`rent_payable_unsettled` rows — at Matching instead, since that is
+where `PayrollSettlementsSection` and `RentSettlementsSection` actually render the accept act each
+row exists to dispatch to.
+
+**#1059 fix round — the reverse route is DURABLE and RESUMABLE.** The first cut kept the accept
+receipt in `PayrollSettlementsSection`'s React state, so the route to undo a settlement existed only
+inside the mount that made it; a reload left the person back on the two general-purpose doors the
+ticket exists to replace. `lib/bank/payroll-settlement-reversals.ts` derives the list from the ledger
+on every hydration instead, through RLS-scoped table reads this estate already grants
+(`journal_entries.flags` carries 0298's `payroll_settlement` marker;
+`bank_match_entry_members`/`bank_matches` carry the match) — **no new door, no new view, no
+migration**, and no jsonb filter operator guessed: the marker test is done in TypeScript over rows
+the server filtered on ordinary columns. It reports three states, because the ledger has three:
+`settled` (both doors owed), `unmatched` (the bank line was already freed — only `reverse_entry`
+is owed) and `awaiting_checker` (0298's high-stakes DRAFT, whose remedy is `clara.withdraw_draft`,
+not a reversal). That third state is what makes the ceremony resumable: a `reverse_entry` refusal
+after a successful unmatch used to leave a half-reversed ledger whose only visible next step could
+never succeed, because `unmatch_bank_match` refuses an already-unmatched match by name. The panel
+also reads a CLR10 `already_unmatched` DURING the composition as "that half landed", never as a
+failure. **The panel remembers nothing.**
+
+**#1060 fix round — one decider for the bank destination.** `components/bank/bank-workbench.tsx`'s
+`TABS` tuple and `lib/navigation/tree.ts`'s `BankTab` union were two hand-copies with no link, so a
+renamed view would not have redded the registry entry that deep-links to it; the workbench now
+imports `BankTab` and is checked against it in both directions at compile time. And
+`client-bank-summary.tsx` — the one surface that spelled `/clients/:id/bank` by hand — goes
+through `accountingHref` like every other caller, so the sidebar, the accounting hub, ⌘K and the
+client-home card give ONE answer. `lib/navigation/tree.test.ts` scans for a second decider.
+
 **ONE DECISION, ONE KEY, on `match_bank_line` only** (`lib/bank/match-opkey.ts`). Its operation
 key is DERIVED from the intent tuple `{client, sorted line ids, sorted entry ids, cents, ack
 flag}` — the same tuple `clara._reserve_op` hashes server-side — plus each selected entry's

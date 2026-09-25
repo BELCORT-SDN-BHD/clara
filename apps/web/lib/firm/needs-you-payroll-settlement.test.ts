@@ -51,7 +51,10 @@ test("#947: it carries a real label and a real openTab phrase, never a raw key p
 });
 
 test("#947: it opens the bank tab — where a person finds and accepts the payment", () => {
-  assert.equal(needsYouRowHref({ row_kind: KIND, client_id: CLIENT }), `/clients/${CLIENT}/bank`);
+  // #1060 — REPOINTED from the bare `/bank` (the workbench's own default, "accounts") to
+  // `?tab=matching`: the navigation registry's `bank` row now names that view, so this row no
+  // longer has to land a professional one tab away from `PayrollSettlementsSection`.
+  assert.equal(needsYouRowHref({ row_kind: KIND, client_id: CLIENT }), `/clients/${CLIENT}/bank?tab=matching`);
   assert.equal(hasOwningTab({ row_kind: KIND }), true);
   // A row with no client has nowhere honest to go, exactly like every other kind.
   assert.equal(needsYouRowHref({ row_kind: KIND, client_id: null }), null);

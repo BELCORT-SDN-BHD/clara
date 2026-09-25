@@ -816,7 +816,12 @@ test("S5 · NO employee-level figure is persisted anywhere — the quotes exist 
       [doc.documentId],
     )
   ).rows[0].s;
-  assert.equal(state.state_version, "v1");
+  // #1048 (migration 0343) moved the door onto clara.evaluate_payroll_run_state_v2: a new
+  // completeness-witness field read off the page needs a _vN beside the frozen v1, because this
+  // file's own §D.1 freeze refuses an in-place recut by name. v2 is v1 plus two NEW TOP-LEVEL keys
+  // (`witness`, `completeness`) and nothing else moved, which the three assertions below re-prove
+  // on the same page: eleven established questions over two agreed, balanced rows.
+  assert.equal(state.state_version, "v2");
   assert.equal(state.established.length, 11, "every question on this page was established");
   assert.equal(state.rows.agreed, 2, "…over two agreed rows");
   assert.equal(state.rows.balanced, 2);
@@ -890,8 +895,14 @@ test("S6 · the payroll summary's typed-facts axis stops being stored-only on th
     assert.equal(c.custody, "supported", `${format}: custody is unmoved by #945`);
     assert.equal(c.byte_extraction, "supported", `${format}: byte extraction is unmoved by #945`);
     assert.equal(c.typed_facts, "supported", `${format}: the pair now has a reader`);
-    assert.equal(c.business_operation, "stored_only",
-      `${format}: #945 is the READING half — nothing is posted from a payroll read yet, and the registry must not promise otherwise`);
+    // RE-BASED BY #1061 IN A LATER LANE (0342_payroll_registry_business_operation_supported.sql).
+    // #945 (this file's own ticket) left business_operation at stored_only because the
+    // drafting-and-posting half belonged to "a later file" (0297, #946). That later file shipped
+    // and #1061 re-derived the registry to say so — the same rebase this file's own comment two
+    // cells down already anticipates for the registry_version literal. This assertion moves with
+    // it: #945's claim ("nothing is posted from a payroll read yet") is no longer true.
+    assert.equal(c.business_operation, "supported",
+      `${format}: #946 (0297) posts an arithmetic-checked payroll read unattended, and #1061 (0342) re-derived the registry to say so`);
     assert.match(c.basis, /Typed facts are persisted with source regions by/,
       `${format}: the reason sentence names the engine that reads it`);
     assert.equal(/terminates this pair cleanly/.test(c.basis), false,
@@ -925,13 +936,17 @@ test("S6 · the registry re-publishes at ONE new version, and nobody else's row 
     )
   ).rows[0];
   assert.equal(r.versions, 1, "the registry publishes exactly one version — a re-derivation is whole or it is drift");
-  // RE-BASED BY #948 IN THE SAME LANE (fix round, finding SPEC-01). #945 raised the published
-  // registry to 5; #948's 0299 re-derived it again for the agreement pairs and raised it to 6,
-  // and this pin — #945's own — was left behind, so the lane's head did not pass its own gates.
-  // The SINGLE SOURCE for the number is document-capability-registry.test.mjs's
-  // PUBLISHED_REGISTRY_VERSION; a wave that republishes re-bases BOTH, and this comment is here
-  // so the next one finds the second site.
-  assert.equal(r.v, 6, "…and it is 6 (0228 raised to 2, #782's 0245 to 3, a wave-2 file to 4, #945 to 5, #948 to 6)");
+  // RE-BASED BY #948, THEN TWICE IN THE SWEEP WAVE'S LANE 04 (fix round, finding SPEC-01, then
+  // #1061 and #1048). #945 raised the published registry to 5; #948's 0299 re-derived it again for
+  // the agreement pairs and raised it to 6; #1061's 0342 re-derived it a third time for the SAME
+  // six payroll pairs this file's own S6 battery covers (business_operation, stored_only ->
+  // supported) and raised it to 7; #1048's 0343 then corrected the sentence 0342 had just
+  // published — a page with no run totals parks a question rather than falling through, and a
+  // row-sum entry books gross, the four employee deductions and the net and nothing else — and
+  // raised it to 8. The SINGLE SOURCE for the number is
+  // document-capability-registry.test.mjs's PUBLISHED_REGISTRY_VERSION; a wave that republishes
+  // re-bases BOTH, and this comment is here so the next one finds the second site.
+  assert.equal(r.v, 8, "…and it is 8 (0228 raised to 2, #782's 0245 to 3, a wave-2 file to 4, #945 to 5, #948 to 6, #1061 to 7, #1048 to 8)");
   assert.equal(r.rows, 240, "#945 inserts and deletes no registry row");
 
   const drift = (

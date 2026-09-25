@@ -246,6 +246,7 @@
       "rent_payable_unsettled": "Rent payment not found yet",
       "rent_escalation_pending": "Rent escalation awaiting confirmation",
       "accrual_bill_conflict": "A document arrived for an accrued period",
+      "payroll_completeness_question": "Payroll summary — is this every employee?",
       "unknown": "Unrecognized item ({kind})"
     },
     "openClient": "Open client",
@@ -264,7 +265,8 @@
       "agreement_posting_blocked": "Open the documents tab",
       "rent_payable_unsettled": "Open the bank tab",
       "rent_escalation_pending": "Open the documents tab",
-      "accrual_bill_conflict": "Open the accruals tab"
+      "accrual_bill_conflict": "Open the accruals tab",
+      "payroll_completeness_question": "Open the documents tab"
     },
     "accrualBillConflictReverseNow": "Reverse now",
     "accrualBillConflictReversePeriod": "Reverse this period only",
@@ -278,6 +280,11 @@
     "accrualBillConflictRemedyHint": "Reverse now settles this period: the accrual is reversed, so only the document's own amount is left. Skipping affects the NEXT period only — this one stays flagged until its reversal is admitted.",
     "accrualBillConflictPlanEnded": "This plan has ended, so none of the remedies is available. Reverse the accrual with a journal entry of its own.",
     "accrualBillConflictPlanPaused": "This plan is paused, so none of the remedies is available. Resume the plan, or reverse the accrual with a journal entry of its own.",
+    "payrollCompletenessYes": "Yes — this is everyone",
+    "payrollCompletenessNo": "No — lines are missing",
+    "payrollCompletenessConfirmYes": "Clara will post this payroll run from the employee lines it read, and record your answer as the basis.",
+    "payrollCompletenessConfirmNo": "Nothing will be posted. Clara will record that you looked, so nobody is asked again — re-file a complete copy of the summary when you have one.",
+    "payrollCompletenessNotePlaceholder": "Optional: what did you check this against?",
     "askClara": "Ask Clara about this",
     "askPrefill": "About this {kind} in my Needs-you inbox — what should I look at first?",
     "askPrefillWithQuestion": "About this {kind} in my Needs-you inbox: \"{question}\" — what should I look at first?",
@@ -3401,7 +3408,17 @@
       "colAmount": "Amount",
       "colAccept": "Accept",
       "accept": "Accept",
-      "acceptAria": "Accept {description} as this run's settlement"
+      "acceptAria": "Accept {description} as this run's settlement",
+      "justSettled": "{period} — settled for {amount}. Accepted the wrong candidate? Reverse it here.",
+      "reverseSettlement": "Reverse settlement",
+      "reverseAria": "Reverse the {period} settlement",
+      "reverseReasonLabel": "Reason",
+      "reverseReasonPlaceholder": "Why is this being reversed?",
+      "confirmReverseSettlement": "Confirm reverse",
+      "settledUnmatched": "{period} — the bank line was released but the settlement entry is still posted. Reverse it to finish.",
+      "settledAwaitingChecker": "{period} — settlement drafted, waiting for a checker to approve it. Withdraw the draft to undo it.",
+      "withdrawSettlementDraft": "Withdraw draft",
+      "confirmWithdrawSettlementDraft": "Confirm withdraw"
     },
     "rentSettlements": {
       "heading": "Tenancy rent and deposits",
