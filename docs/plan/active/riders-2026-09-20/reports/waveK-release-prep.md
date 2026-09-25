@@ -151,7 +151,7 @@ cluster `127.0.0.1:55742`, read-only.
 
 | run | target | verdict |
 |---|---|---|
-| `--plan` | no database | **exit 0, 0 GAP.** 4 pending, 341 files, **22 pins (22 measurable / 0 chained / 0 newborn)**, 10 hand checks, 0 relations created, 0 roles minted, the registry reading `bodies=62 … 362 entries, 15 UNLOCKED, SUCCESSOR BODIES chatTurn_v23, claraWork_v7` |
+| `--plan` | no database | **exit 0, 0 GAP.** 4 pending, 341 files, **22 pins (22 measurable / 0 chained / 0 newborn)**, **14 hand-check lines across 10 distinct ids** (`D-CHAIN-PREREQUISITE` twice, `D-OPKEY-NAMESPACE` four times), 0 relations created, 0 roles minted, the registry reading `bodies=62 … 362 entries, 15 UNLOCKED, SUCCESSOR BODIES chatTurn_v23, claraWork_v7` |
 | pre-window + `--baseline fp-wK-pre.json` | `clara_intS6`, the pristine 337-file template (337 / `0361`, `C.UTF-8`) | **12 ok, 2 report-only, 3 STOP.** 11457 keys compared, **11457 equal, 0 env**; **22 of 22** measurable pins at a value their own file admits; every hand check ok |
 | `--post` + `--baseline fp-wK-post.json` | `clara_intK`, the merger's ordered chain (341 / `0365`, `C.UTF-8`) | ledger **337 + 4 = 341 at 0365**, four rows at their file checksums, drift 341/341, fingerprint **11459 keys, 11459 equal, 0 env**, **every (f) read answered** |
 | `--census` | `clara_intK` | the version-cut census and the quiescence census alone, which is what step 6b re-reads with the machine stopped |

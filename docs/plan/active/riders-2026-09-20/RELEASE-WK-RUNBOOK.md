@@ -182,8 +182,8 @@ reachable and which no machine stop quiesces.
 
   Expect `bodies=62`, fourteen pins with **`chatTurn=chatTurn_v23 claraWork=claraWork_v7
   statementFacts=statementFacts_v4`**, `frozen manifest 362 entries, 15 UNLOCKED`, `SUCCESSOR BODIES
-  … chatTurn_v23, claraWork_v7`, 4 pending files, **22 pins (22 measurable / 0 chained)**, 10 hand
-  checks, **0 GAP**, exit 0. Running the same command with `CLARA_REPO` pointed at the MAIN checkout
+  … chatTurn_v23, claraWork_v7`, 4 pending files, **22 pins (22 measurable / 0 chained)**, **14
+  hand-check lines across 10 distinct ids**, **0 GAP**, exit 0. Running the same command with `CLARA_REPO` pointed at the MAIN checkout
   must print `bodies=60`, `chatTurn=chatTurn_v22 claraWork=claraWork_v6` and `347 entries, 0
   UNLOCKED`, which is what "this wave repoints exactly two pins" means in a form that can be checked.
 - **Web rollback lever** (one command, no DB implication): `pnpm --dir apps/web exec wrangler
@@ -945,7 +945,7 @@ database was created, altered or dropped.
 
 | run | target | verdict |
 |---|---|---|
-| `--plan` | no database | **exit 0, 0 GAP.** 4 pending, 341 files, **22 pins (22 measurable / 0 chained)**, 10 hand checks, 0 relations created, 0 roles minted, the registry reading `bodies=62 … 362 entries, 15 UNLOCKED, SUCCESSOR BODIES chatTurn_v23, claraWork_v7` |
+| `--plan` | no database | **exit 0, 0 GAP.** 4 pending, 341 files, **22 pins (22 measurable / 0 chained)**, **14 hand-check lines across 10 distinct ids** (`D-CHAIN-PREREQUISITE` twice, `D-OPKEY-NAMESPACE` four times, one per suffix 0364 censuses), 0 relations created, 0 roles minted, the registry reading `bodies=62 … 362 entries, 15 UNLOCKED, SUCCESSOR BODIES chatTurn_v23, claraWork_v7` |
 | pre-window + `--baseline fp-wK-pre.json` | `clara_intS6`, the pristine 337-file template (337 / `0361`, `C.UTF-8`) | **12 ok, 2 report-only, 3 STOP.** 11457 keys compared, **11457 equal, 0 env**; **22 of 22** measurable pins admitted; every hand check ok. The three STOPs are the run census and the two checks derived from it |
 | `--post` + `--baseline fp-wK-post.json` | `clara_intK`, the merger's ordered chain (341 / `0365`, `C.UTF-8`) | ledger **337 + 4 = 341 at 0365**, four rows at their file checksums, drift 341/341, fingerprint **11459 keys, 11459 equal, 0 env**, **every (f) read answered** - no `42703`, no unmeasured question. Same three run-census STOPs |
 | `--census` | `clara_intK` | the version-cut census and the quiescence census alone, which is what step 6b re-reads with the machine stopped |
