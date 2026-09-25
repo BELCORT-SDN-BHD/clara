@@ -216,7 +216,10 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "deactivate_client_egress_purpose", "dismiss_attribution_candidate", "dismiss_coding_task",
   "dismiss_open_question", "enrol_staff_advance_account", "evaluate_sst_watch", "evaluate_sst_watches_all",
   "fail_classify", "fail_invoice_facts", "fail_statement_facts", "finalize_document_intake", "get_bank_reconciliation",
-  "get_context_pack", "list_review_queue", "list_vendor_bindings", "mark_document_intake_received",
+  // `list_review_queue` LEFT this base array at #1136 (migration 0352): its body moved into
+  // clara._list_review_queue_core, and the clock token went with the computation. It is now the
+  // MOVE-gated pair REVIEW_QUEUE_0352_* below, the same shape begin_client_onboarding takes.
+  "get_context_pack", "list_vendor_bindings", "mark_document_intake_received",
   "mark_wiki_citations_stale", "match_bank_line", "merge_counterparties", "mint_wake_credential", "open_interruption",
   "persist_document_extraction", "persist_invoice_facts", "persist_statement_facts", "prepare_egress_dispatch",
   "propose_bank_rule", "propose_vendor_identity_binding", "reconcile_sweep_runs", "record_future_attestation",
@@ -270,6 +273,19 @@ const RULE_MACHINERY_RETIRED_F_A2_PR3_CLOCK_NAMES = [
 const BIRTH_WALL_0287_MOVED_CLOCK_NAMES = ["begin_client_onboarding"];
 // …and the body it moved INTO, born at 0287, so it is forward-gated rather than pushed back.
 const BIRTH_WALL_0287_CLOCK_NAMES = ["_client_birth_core"];
+// (a2) #1136 [0352_agent_read_twins_payroll_agreement.sql]. `clara.list_review_queue`'s body was
+// moved into the new ungranted `clara._list_review_queue_core(p_firm, …)` so the model lane reads
+// the same body a person does. The clock token went WITH the computation; the door it left behind
+// is a thin wrapper with none. Exactly (a)'s shape, one migration later.
+const REVIEW_QUEUE_0352_MOVED_CLOCK_NAMES = ["list_review_queue"];
+const REVIEW_QUEUE_0352_CLOCK_NAMES = ["_list_review_queue_core"];
+// (a3) #1137 [0353_tenancy_agent_twins_obo_confirmations.sql]. `clara.revise_accounting_plan`'s
+// body was moved into the new ungranted `clara._revise_accounting_plan_core(p_firm, p_actor, …)`
+// so the tenancy lane's on-behalf-of escalation confirmation revises through the same body a
+// person does. The pre-split name lives in ACCOUNTING_PLANS_0193_CLOCK_NAMES below, so only the
+// SUCCESSOR needs an array here and the swap happens where 0193's cohort is pushed — the nested
+// shape #1000 [0320] already uses for the financial pack.
+const REVISE_PLAN_0353_CLOCK_NAMES = ["_revise_accounting_plan_core"];
 // (b) Ticket 1012 [0288_seeding_lane_retired.sql]. All three prior-GL seeding write doors are
 // recut to ONE typed refusal (CLR34 `seeding_lane_retired`) that raises before anything else, so
 // none of them stamps a timestamp any more -- there is no body left to stamp one. The two
@@ -1564,6 +1580,8 @@ export async function s5BareTokenRoster(query) {
   if (!(await appliedStem("f_a2_cutover_retirement$"))) names.push(...RULE_MACHINERY_RETIRED_F_A2_PR3_CLOCK_NAMES);
   if (await appliedStem("client_birth_wall$")) names.push(...BIRTH_WALL_0287_CLOCK_NAMES);
   else names.push(...BIRTH_WALL_0287_MOVED_CLOCK_NAMES);
+  if (await appliedStem("agent_read_twins_payroll_agreement$")) names.push(...REVIEW_QUEUE_0352_CLOCK_NAMES);
+  else names.push(...REVIEW_QUEUE_0352_MOVED_CLOCK_NAMES);
   if (!(await appliedStem("seeding_lane_retired$"))) names.push(...SEEDING_LANE_RETIRED_0288_CLOCK_NAMES);
   if (await applied("0046_%")) names.push(...SALES_LANE_0046_CLOCK_NAMES);
   if (await applied("0046_%") && !(await appliedStem("f_a2_cutover_retirement$"))) {
@@ -1655,7 +1673,14 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("legal_acceptance$")) names.push(...LEGAL_ACCEPTANCE_0185_CLOCK_NAMES);
   if (await appliedStem("checkout_convergence$")) names.push(...CHECKOUT_CONVERGENCE_0186_CLOCK_NAMES);
   if (await appliedStem("client_knowledge_records$")) names.push(...KNOWLEDGE_RECORDS_0192_CLOCK_NAMES);
-  if (await appliedStem("accounting_plans$")) names.push(...ACCOUNTING_PLANS_0193_CLOCK_NAMES);
+  if (await appliedStem("accounting_plans$")) {
+    // #1137 [0353] — the MOVE gate, (a3) above: above 0353 the CORE carries the bare token and
+    // the door it left behind carries none.
+    const revisionSplit = await appliedStem("tenancy_agent_twins_obo_confirmations$");
+    names.push(...ACCOUNTING_PLANS_0193_CLOCK_NAMES.filter(
+      (n) => !(revisionSplit && n === "revise_accounting_plan")));
+    if (revisionSplit) names.push(...REVISE_PLAN_0353_CLOCK_NAMES);
+  }
   if (await appliedStem("work_egress_purpose_and_execution_trace$")) names.push(...WORK_EGRESS_0195_CLOCK_NAMES);
   // WAVE 2026-09-15 (0214..0224) - stem-gated, never number-gated, for the reason :207-214 gives.
   if (await appliedStem("client_work_pack$")) names.push(...CLIENT_WORK_PACK_0214_CLOCK_NAMES);
