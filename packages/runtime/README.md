@@ -863,6 +863,14 @@ listed exception in `CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE`, and
 ruled, so the exception list is empty; adding a contract ahead of its rule on purpose means adding
 its id there, with a reason, not leaving the guard red.
 
+**The exception list is held at BOTH ends** (review round, ADV-L06-09). An entry is listed there
+precisely because its rule has not landed yet, so the normal end of its life is the migration that
+lands the rule — and a guard that only looks for unruled roster entries would never say the entry
+had become dead, which is the same "sits forever, silently" failure moved onto the list that
+excuses it. `deadContractRuleExceptions` names every excepted id that now HAS a `FRONTIER_RULES`
+row, so the PR that adds a contract's rule is the PR that has to drop its exception, and a
+`CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE` entry can never quietly outlive its reason.
+
 ### The release runbook's step 9, since #1035
 
 Every wave's release runbook has a **step 9 — rollback preflight demonstration, READ ONLY**. Before

@@ -265,9 +265,34 @@ export const CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE = Object.freeze([]);
  */
 export function contractsMissingFrontierRule(contracts, rules = FRONTIER_RULES, exceptions = CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE) {
   if (!Array.isArray(contracts)) throw new TypeError("contractsMissingFrontierRule needs a `contracts` array");
-  const ruled = new Set(rules.flatMap((r) => r.requiresContracts ?? []));
+  const ruled = ruledContractIds(rules);
   const excepted = new Set(exceptions);
   return contracts.filter((c) => !ruled.has(c.id) && !excepted.has(c.id)).map((c) => c.id);
+}
+
+function ruledContractIds(rules) {
+  return new Set(rules.flatMap((r) => r.requiresContracts ?? []));
+}
+
+/**
+ * THE OTHER END OF THE SAME EXCEPTION LIST (#1129, review round ADV-L06-09) — every id in
+ * `exceptions` that now HAS a `FRONTIER_RULES` row naming it, i.e. every exception that has
+ * outlived its reason.
+ *
+ * `contractsMissingFrontierRule` alone was write-only. An entry is listed there precisely because
+ * its rule has not landed YET, so the NORMAL end of its life is the migration that lands the rule —
+ * and nothing told anyone the entry was dead afterwards. That is the same "sits forever, silently"
+ * failure the roster half exists to catch, moved onto the list that excuses it: the list could
+ * quietly accumulate ids nobody could tell apart from live ones. With both directions checked, the
+ * PR that adds a contract's rule is the PR that has to drop its exception.
+ *
+ * @param {ReadonlyArray<{requiresContracts?:ReadonlyArray<string>}>} [rules]
+ * @param {ReadonlyArray<string>} [exceptions]
+ * @returns {string[]} excepted ids that are ruled after all, in the exception list's own order
+ */
+export function deadContractRuleExceptions(rules = FRONTIER_RULES, exceptions = CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE) {
+  const ruled = ruledContractIds(rules);
+  return [...exceptions].filter((id) => ruled.has(id));
 }
 
 /**

@@ -64,6 +64,7 @@ import {
   censusUnboundTasks,
   classOfBody,
   contractsMissingFrontierRule,
+  deadContractRuleExceptions,
   frontierRefusalLines,
   frontierRuleViolations,
   frontierViolationPhrase,
@@ -1093,6 +1094,25 @@ test("#1129: a roster entry with neither a rule nor a listed exception fails the
     contractsMissingFrontierRule(contracts, rules, exceptions),
     ["unruled_marker_v1"],
     "the guard must name the one entry with neither a rule nor an exception, and only that one",
+  );
+});
+
+test("#1129: an exception that now HAS its rule is named too — the list cannot quietly outlive its reason", () => {
+  // ADV-L06-09. The guard above was write-only: once the migration that requires a contract lands
+  // its FRONTIER_RULES row — the NORMAL end state of a declared-ahead entry — the exception stops
+  // being needed and nothing said so, so the list could accumulate dead entries exactly the way an
+  // unruled roster entry could sit forever. Both directions are now closed, and the PR that adds
+  // the rule is the PR that has to drop the exception.
+  const rules = [{ migration: "0999_placeholder", requires: [], requiresContracts: ["now_ruled_v1", "never_excepted_v1"] }];
+  assert.deepEqual(
+    deadContractRuleExceptions(rules, ["now_ruled_v1", "still_ahead_v1"]),
+    ["now_ruled_v1"],
+    "the guard must name the excepted id that has since gained a rule, and only that one",
+  );
+  assert.deepEqual(
+    deadContractRuleExceptions(FRONTIER_RULES, CONTRACTS_DECLARED_AHEAD_OF_THEIR_RULE),
+    [],
+    "…and this image's own exception list carries no dead entry",
   );
 });
 
