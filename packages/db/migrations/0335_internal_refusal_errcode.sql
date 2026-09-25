@@ -386,4 +386,216 @@ begin
                             'term_source', v_sched_source) end);
 end $c0335_rpsf$;
 
--- (vertical-slice loop: sections 123 only; the tail lands last.)
+-- =====================================================================================
+-- §D — clara.read_revenue_recognition_source_for (0317's cut). VERBATIM except the same scope.
+-- =====================================================================================
+create or replace function clara.read_revenue_recognition_source_for(p_firm uuid, p_client uuid, p_source_entry uuid)
+returns jsonb language plpgsql stable security definer
+set search_path = clara, pg_temp as $c0335_rrsf$
+declare
+  v_entry record; v_legs int;
+  v_leg_code text; v_leg_cents bigint;
+  v_sp_id uuid; v_sp_start date; v_sp_end date; v_sp_kind text; v_sp_basis text;
+  v_st_id uuid; v_st_start date; v_st_end date; v_st_reason text;
+  v_sched_id uuid; v_sched_plan uuid; v_sched_source text;
+  v_term jsonb;
+begin
+  -- #1114 [0335] — CLR44, THE CALLER-CONTRACT CLASS. This read is `clara_runtime` ONLY and
+  -- its scope is three explicit arguments the run always holds; a null is a mis-wired caller,
+  -- never a person's mistake, and the successor contract already says it is never shown
+  -- (reports/wave4-lane04-ticket915.md line 389). CLR10 stays the code of a refusal a
+  -- surface renders, so the two can no longer be confused by a handler reading the code.
+  if p_firm is null or p_client is null or p_source_entry is null then
+    raise exception 'the runtime recognition-source read names firm, client and source entry'
+      using errcode='CLR44', detail='{"reason":"revenue_recognition_read_scope_required"}';
+  end if;
+  select je.id, je.status, je.document_id, je.posting_date into v_entry
+    from clara.journal_entries je
+   where je.id = p_source_entry and je.client_id = p_client and je.firm_id = p_firm;
+  if v_entry.id is null then
+    raise exception 'recognition source entry not found in your firm' using errcode='CLR11',
+      detail='{"reason":"revenue_recognition_source_not_found"}';
+  end if;
+
+  -- THE DEFERRED LEG, by the door's own predicate: exactly one CREDITED LIABILITY line that is not
+  -- the tax leg. Zero or many is reported as a COUNT rather than guessed at, for the same reason
+  -- the door refuses it.
+  select count(*)::int into v_legs
+    from clara.journal_lines jl
+    join clara.coa_accounts ca
+      on ca.client_id = jl.client_id and ca.account_code = jl.account_code
+   where jl.entry_id = p_source_entry and jl.credit_cents > 0
+     and ca.account_type = 'liability'
+     and coalesce(ca.special_acc_type, '') <> 'sst_output';
+  if v_legs = 1 then
+    select jl.account_code, jl.credit_cents into v_leg_code, v_leg_cents
+      from clara.journal_lines jl
+      join clara.coa_accounts ca
+        on ca.client_id = jl.client_id and ca.account_code = jl.account_code
+     where jl.entry_id = p_source_entry and jl.credit_cents > 0
+       and ca.account_type = 'liability'
+       and coalesce(ca.special_acc_type, '') <> 'sst_output';
+  end if;
+
+  -- THE RECORDED TERM. The document carrier first, because a document-bound receipt is the lane
+  -- 0140 built; then #939's person-stated carrier. A receipt that binds a document does not carry
+  -- a stated term at all (0305 refuses one), so the two arms cannot both answer.
+  if v_entry.document_id is not null then
+    select sp.id, sp.period_start, sp.period_end, sp.basis_kind, sp.basis
+      into v_sp_id, v_sp_start, v_sp_end, v_sp_kind, v_sp_basis
+      from clara.document_service_periods sp
+     where sp.document_id = v_entry.document_id and sp.superseded_at is null;
+  end if;
+  select t.id, t.period_start, t.period_end, t.reason
+    into v_st_id, v_st_start, v_st_end, v_st_reason
+    from clara.prepayment_stated_terms t
+   where t.source_entry_id = p_source_entry and t.superseded_at is null;
+
+  if v_sp_id is not null then
+    v_term := jsonb_build_object('source', 'document_service_period',
+      'service_period_id', v_sp_id, 'stated_term_id', null,
+      'period_start', to_char(v_sp_start,'YYYY-MM-DD'),
+      'period_end', to_char(v_sp_end,'YYYY-MM-DD'),
+      'basis_kind', v_sp_kind, 'basis_text', v_sp_basis);
+  elsif v_st_id is not null then
+    v_term := jsonb_build_object('source', 'human_stated',
+      'service_period_id', null, 'stated_term_id', v_st_id,
+      'period_start', to_char(v_st_start,'YYYY-MM-DD'),
+      'period_end', to_char(v_st_end,'YYYY-MM-DD'),
+      'basis_kind', 'human_stated', 'basis_text', v_st_reason);
+  else
+    -- ABSENCE IS REPORTED AS ABSENCE, with the DOOR that fills it — never as an empty term a run
+    -- could read as "no term is needed". The remedy named is the HUMAN one, because a service
+    -- period is human-only by law and no agent path to it exists or ever will.
+    v_term := jsonb_build_object('source', null,
+      'service_period_id', null, 'stated_term_id', null,
+      'period_start', null, 'period_end', null, 'basis_kind', null, 'basis_text', null,
+      'remedy', case when v_entry.document_id is not null
+                     then 'clara.record_document_service_period'
+                     else 'clara.record_prepayment_stated_term' end);
+  end if;
+
+  select s.id, s.plan_id, s.term_source into v_sched_id, v_sched_plan, v_sched_source
+    from clara.revenue_recognition_schedules s
+   where s.source_entry_id = p_source_entry and s.firm_id = p_firm and s.superseded_at is null;  -- 0317 (#939 AC4 / #941 AC3): the LIVE one
+
+  return jsonb_build_object(
+    'status', 'ok', 'firm_id', p_firm, 'client_id', p_client,
+    'source_entry_id', p_source_entry,
+    'entry', jsonb_build_object('status', v_entry.status, 'document_id', v_entry.document_id,
+      'posting_date', to_char(v_entry.posting_date,'YYYY-MM-DD')),
+    'deferred', jsonb_build_object('account_code', v_leg_code,
+      'total_cents', v_leg_cents, 'candidate_legs', v_legs),
+    'term', v_term,
+    'schedule', case when v_sched_id is null then null
+                     else jsonb_build_object('schedule_id', v_sched_id, 'plan_id', v_sched_plan,
+                            'term_source', v_sched_source) end);
+end $c0335_rrsf$;
+
+-- =====================================================================================
+-- §E — TAIL. Read off the LIVE catalog, never off this file's own text.
+-- =====================================================================================
+do $c0335_tail$
+declare
+  v_sig text; v_src text; v_i int; v_n int;
+  v_moved text[][] := array[
+    ['clara.create_prepayment_schedule_for(uuid,uuid,uuid,text,text,text,jsonb,text)', 'invalid_author'],
+    ['clara.create_revenue_recognition_schedule_for(uuid,uuid,uuid,text,text,text,jsonb,text,text)', 'invalid_author'],
+    ['clara.read_prepayment_source_for(uuid,uuid,uuid)', 'prepayment_read_scope_required'],
+    ['clara.read_revenue_recognition_source_for(uuid,uuid,uuid)', 'revenue_recognition_read_scope_required']
+  ];
+begin
+  -- 1 · EACH MOVED RAISE CARRIES CLR44, AND ITS TOKEN IS NO LONGER ON A CLR10 RAISE ANYWHERE IN
+  --     THE BODY. Matched across the newline the estate wraps these raises on.
+  for v_i in 1 .. array_length(v_moved, 1) loop
+    v_sig := v_moved[v_i][1];
+    select p.prosrc into v_src from pg_proc p where p.oid = v_sig::regprocedure;
+    if v_src is null then
+      raise exception '0335 tail: % is absent after the recut', v_sig using errcode='CLR10';
+    end if;
+    if v_src !~ ('errcode=''CLR44'',[[:space:]]*detail=''\{"reason":"' || v_moved[v_i][2] || '"') then
+      raise exception '0335 tail: %''s % raise does not carry CLR44', v_sig, v_moved[v_i][2]
+        using errcode='CLR10';
+    end if;
+    if v_src ~ ('errcode=''CLR10'',[[:space:]]*detail=''\{"reason":"' || v_moved[v_i][2] || '"') then
+      raise exception '0335 tail: %''s % raise still carries CLR10', v_sig, v_moved[v_i][2]
+        using errcode='CLR10';
+    end if;
+  end loop;
+
+  -- 2 · THE PAYLOADS AND SENTENCES ARE BYTE-IDENTICAL. The ticket puts payload reshaping out of
+  --     scope, so the two author walls still say `field`/`constraint` and still say it in the same
+  --     words, and the two reads still carry `reason` alone.
+  for v_i in 1 .. 2 loop
+    select p.prosrc into v_src from pg_proc p where p.oid = v_moved[v_i][1]::regprocedure;
+    if v_src not like '%{"reason":"invalid_author","field":"author","constraint":"present"}%' then
+      raise exception '0335 tail: %''s invalid_author payload was reshaped', v_moved[v_i][1]
+        using errcode='CLR10';
+    end if;
+    if v_src not like '%an on-behalf-of configuration names the human it acts for%' then
+      raise exception '0335 tail: %''s invalid_author sentence changed', v_moved[v_i][1]
+        using errcode='CLR10';
+    end if;
+  end loop;
+  for v_i in 3 .. 4 loop
+    select p.prosrc into v_src from pg_proc p where p.oid = v_moved[v_i][1]::regprocedure;
+    if v_src not like ('%{"reason":"' || v_moved[v_i][2] || '"}%') then
+      raise exception '0335 tail: %''s scope payload was reshaped', v_moved[v_i][1]
+        using errcode='CLR10';
+    end if;
+  end loop;
+
+  -- 3 · THE PARTITION IS EXACT. Over the WHOLE clara schema, CLR44 is raised by these four bodies
+  --     and by nothing else, so the new code carries ONE meaning — which is the ticket's ask.
+  select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara' and p.prosrc ~ 'errcode\s*=\s*''CLR44''';
+  if v_n <> 4 then
+    raise exception '0335 tail: CLR44 is raised by % clara bodies, expected exactly 4', v_n
+      using errcode='CLR10';
+  end if;
+
+  -- 4 · THE RENDERABLE HALF DID NOT MOVE. Both roster refusals still carry CLR10 inside the two
+  --     shared cores, and neither core learned CLR44. This is the OTHER half of AC1: the
+  --     account-not-enrolled refusal and the invalid-author refusal are now distinguishable by
+  --     errcode alone.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text)'::regprocedure;
+  if v_src !~ 'errcode=''CLR10'',[[:space:]]*detail=jsonb_build_object\(''reason'',''prepayment_source_unfit'''
+     or v_src ~ 'CLR44' then
+    raise exception '0335 tail: the prepayment roster refusal no longer carries CLR10, or the core learned CLR44'
+      using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara._revenue_recognition_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text,text)'::regprocedure;
+  if v_src !~ 'errcode=''CLR10'',[[:space:]]*detail=jsonb_build_object\(''reason'',''deferred_revenue_source_unfit'''
+     or v_src ~ 'CLR44' then
+    raise exception '0335 tail: the deferred-revenue roster refusal no longer carries CLR10, or the core learned CLR44'
+      using errcode='CLR10';
+  end if;
+
+  -- 5 · NO OVERLOAD WAS MINTED, and the ACLs are exactly 0307/0308/0317's: `clara_runtime` and
+  --     nobody else, PUBLIC included. `create or replace function` preserves a grant, and this
+  --     re-measures it rather than trusting it.
+  for v_i in 1 .. array_length(v_moved, 1) loop
+    v_sig := v_moved[v_i][1];
+    select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'clara'
+       and p.proname = split_part(split_part(v_sig, '.', 2), '(', 1);
+    if v_n <> 1 then
+      raise exception '0335 tail: % has % catalog entries, expected exactly 1', v_sig, v_n
+        using errcode='CLR10';
+    end if;
+    if not has_function_privilege('clara_runtime', v_sig::regprocedure, 'EXECUTE') then
+      raise exception '0335 tail: clara_runtime lost EXECUTE on %', v_sig using errcode='CLR10';
+    end if;
+    if has_function_privilege('clara_authenticated', v_sig::regprocedure, 'EXECUTE')
+       or has_function_privilege('clara_agent_ro', v_sig::regprocedure, 'EXECUTE')
+       or has_function_privilege('clara_wake_interactive', v_sig::regprocedure, 'EXECUTE')
+       or has_function_privilege('clara_wake_proactive', v_sig::regprocedure, 'EXECUTE')
+       or has_function_privilege('public', v_sig::regprocedure, 'EXECUTE') then
+      raise exception '0335 tail: a role outside clara_runtime reached %', v_sig using errcode='CLR10';
+    end if;
+  end loop;
+
+  raise notice '0335 OK: the four caller-contract refusals (invalid_author on both on-behalf-of twins, and the two machine-lane read scopes) now raise CLR44 and nothing else in clara raises it; every payload, sentence, reason and axis is byte-identical; the two renderable roster refusals (prepayment_source_unfit / prepaid_account_not_enrolled and deferred_revenue_source_unfit / deferred_account_not_enrolled) still raise CLR10 inside the two shared cores, which this file did not touch; all four doors remain clara_runtime-only with one catalog entry each and no PUBLIC execute.';
+end $c0335_tail$;

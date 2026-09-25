@@ -770,7 +770,10 @@ cell("p941.read.recorded_term — the machine-lane read answers the RECORDED ter
   await assertPair(CLR.notFound, DR_REASON.sourceNotFound,
     () => readRecognitionSourceFor({ ...scope, firm: nowhere() }),
     "reading a recognition source under another firm's scope");
-  await assertPair(CLR.badRequest, DR_REASON.readScopeRequired,
+  // #1114 — THE SCOPE REFUSAL IS A CALLER-CONTRACT FAULT (CLR44), not a bad request a surface
+  // renders. Same class as the null author on this lane's own twin; a different class from
+  // `deferred_revenue_source_unfit`, which keeps CLR10 because a bookkeeper acts on it.
+  await assertPair(await callerContractCode(), DR_REASON.readScopeRequired,
     () => readRecognitionSourceFor({ ...scope, client: null }),
     "reading with no client in scope");
 
