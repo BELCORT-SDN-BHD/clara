@@ -115,7 +115,7 @@ async function mountPanel(loaders: FirmSettingsLoaders) {
   return h;
 }
 
-test("p635.web.panel_composition six cards plus the two pinned legacy ones, from four reads and no more (#1050 added the sixth and the fourth)", async () => {
+test("p635.web.panel_composition six cards plus the two pinned legacy ones, from four reads and no more (ticket 1050 added the sixth and the fourth)", async () => {
   let calls = 0;
   const h = await mountPanel({
     legalStanding: async () => { calls += 1; return STANDING; },
@@ -136,7 +136,7 @@ test("p635.web.panel_composition six cards plus the two pinned legacy ones, from
     assert.match(text, /The Change-threshold control is retired/);
     assert.match(text, /grant_firm_capability and revoke_firm_capability are live/);
     assert.match(text, /Standing instructions to Clara/);
-    assert.equal(calls, 4, "one read per door — capacity and the firm's created-at ride the commercial answer, and #1050's standing instruction is its own relation");
+    assert.equal(calls, 4, "one read per door — capacity and the firm's created-at ride the commercial answer, and ticket 1050's standing instruction is its own relation");
     // ONE READ, THREE RENDERERS: the capacity numbers and the created-at both come from it.
     assert.match(text, /In Clara since/);
     assert.match(text, /2,500/, "the capacity card renders the same answer the plan card did");
