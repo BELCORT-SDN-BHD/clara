@@ -2368,6 +2368,16 @@ export const PLAN_REVERSAL_POSTED_BASIS_0332_COHORT = [...PLAN_REVERSAL_POSTED_B
 const PLAN_OCCURRENCE_REVERSAL_DOOR_0333_HUMAN_FNS = ["reverse_plan_occurrence"];
 export const PLAN_OCCURRENCE_REVERSAL_DOOR_0333_COHORT = [...PLAN_OCCURRENCE_REVERSAL_DOOR_0333_HUMAN_FNS];
 
+// #1075 [0334, the accrual register's side filter moves server-side] — NO COHORT CHANGE, NO NEW
+// NAME, for the same "still the SAME name and ACL" shape #905's (0267) own note beside 0189's
+// cohort records. `clara.list_accrual_adjustments` is a DROP-and-CREATE (a new parameter cannot
+// be added by `create or replace`, the same reason 0202/#770 and 0267/#905 give for
+// `list_activity`/`p_work` and `list_accounting_work`/`p_receipt_since`), but a drop-and-create of
+// the SAME name is not a new name: 0334's own tail re-reads owner clara_fn_owner, SECURITY
+// DEFINER, STABLE and the literal ACL {clara_fn_owner, clara_authenticated} unchanged after the
+// recut, so `ACCRUAL_ADJUSTMENTS_0222_HUMAN_FNS` above (which already lists
+// "list_accrual_adjustments") covers the widened door as-is.
+
 // #979 [0251, the depreciation authority read tells "never had one" apart from "had one, and it
 // was retired"] — NO COHORT, NO NEW NAME, NO GRANT CHANGE, each measured rather than assumed, for
 // the same reason #797's (0212) and #720's (0198) blocks state theirs. 0251 creates no function:

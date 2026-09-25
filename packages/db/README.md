@@ -7714,3 +7714,79 @@ the prestate's own redo branch (the prestate then printed `REDO APPLY` and the c
 branches of the bimodal pin were therefore exercised for real, so the wave-3 addendum's hand proof of
 the first-apply branch was not needed. The file has no data-dependent branch: every prestate and tail
 arm reads `pg_proc` and `pg_namespace` only.
+
+## 0334 — the accrual register's side filter moves server-side (#1075, riders sweep wave, lane 01)
+
+**The gap, in the ticket's own words.** `clara.list_accrual_adjustments` (0222, side projected by
+#942/0304) takes a client and a date window and answers EVERY accrual of that client inside it. The
+register's own side control (`apps/web/components/accruals/accruals-list.tsx`) narrows that
+fully-read array in the browser — fine while the register reads one page, but a client-side filter
+over a future paginated page would silently miss matching rows on other pages. The register does
+not paginate today (`loadAccruals` calls the door with no limit; `useAsyncRead` renders the whole
+answer), so this ticket prepares the read ahead of that future change and does not build it.
+
+### The whole of it
+
+`clara.list_accrual_adjustments` gains a fourth parameter, `p_side text default null`, applied
+INSIDE the relation's own `where` (`and (p_side is null or a.side = p_side)`), ahead of the
+`jsonb_agg`. A non-null value outside `clara._accrual_sides()` (`{expense, revenue}`) refuses
+`CLR10 accrual_side_filter_unsupported` — the same closed-set judgement
+`clara._assert_accrual_particulars` already applies to a CONFIGURED side (0304), so a caller learns
+the same way a preparer does that the value is unsupported rather than reading back an empty page it
+could mistake for "this client has none of either". An omitted `p_side` reproduces the
+three-argument door exactly: same rows, same order, same envelope shape plus one more key,
+`side`, echoing the filter that was applied (`null` for "every side" — the same way `from`/`to`
+already echo the window).
+
+### Why a drop and a create, not a `create or replace` — the 0202/#770 and 0267/#905 precedent
+
+`create or replace function` cannot add a parameter: PostgreSQL identifies a function by (schema,
+name, argument types), so a longer type list is a DIFFERENT overload left resolvable BESIDE the
+three-argument body rather than replacing it — exactly the shape `list_activity`/`p_work` (0202)
+and `list_accounting_work`/`p_receipt_since` (0267) record for the same reason. So the
+three-argument signature is DROPPED and the four-argument one is (re-)created in the same
+transaction, and the tail proves the old signature no longer resolves as a callable overload.
+
+Nothing depended on the dropped signature (measured: zero non-internal `pg_depend` rows, and no
+other `clara` body mentions `list_accrual_adjustments` by name in its own `prosrc`). A drop takes
+four things a `create or replace` would have kept — owner, the SECURITY DEFINER + STABLE + pinned
+`search_path` posture, and the literal ACL — all four re-issued by hand and re-read from the catalog
+at the tail. No comment existed on this door before this file (`obj_description` was `null`,
+measured); 0334 MINTS the first one rather than re-issuing a lost one.
+
+**Redo-safe (#957) by construction**, the 0267 idiom: `drop function if exists <three-arg>` (a
+no-op on a redo, where it is already gone) followed by `create or replace function <four-arg>`
+(idempotent either way). The prestate recognises two starting shapes — the ordinary three-argument
+door (first apply) or this file's own four-argument door already carrying its `p_side` /
+`accrual_side_filter_unsupported` markers (a redo of this exact file) — and refuses anything else,
+including a foreign four-argument body it does not recognise.
+
+### No rig-meta cohort — the same "still the same name and ACL" shape 0267 records
+
+`list_accrual_adjustments` is already in `ACCRUAL_ADJUSTMENTS_0222_HUMAN_FNS`
+(`packages/db/tests/rig-meta.mjs`), and a drop-and-create of the SAME name at the SAME grant is not
+a new name: the tail re-reads owner, posture and ACL unchanged, so that roster entry already covers
+the widened door. A cohort of its own would be wrong here, not merely redundant —
+`cohortFailures()` fails a half-present cohort, and `list_accrual_adjustments` is present on every
+database from 0222 onward regardless of whether 0334 has applied.
+
+### What this file deliberately does not do
+
+It does not touch `apps/web/components/accruals/accruals-list.tsx` or
+`apps/web/lib/accruals/api.ts`'s `loadAccruals`. The ticket's own second acceptance criterion is
+that the register's control adopts the server-side parameter "once pagination exists", and
+pagination does not exist on this branch; rewiring the control now would trade the register's
+existing instant client-side filter (every row already in hand) for an unnecessary network round
+trip, which neither acceptance criterion asks for. The capability lands now; the caller lands with
+pagination, as a follow-up. It does not touch `clara.get_accrual_adjustment` (measured: nothing in
+0334 reaches it, and it still resolves, untouched, at the tail). It does not touch the accrual's own
+`side` column or `clara._accrual_sides()` (#942/0304's), both sha-pinned in the prestate and
+consumed, never redefined.
+
+**Redo (#957).** Applied first-apply on `clara_l04` (the prestate printed the three-argument,
+pre-widen branch), then re-applied once with `CLARA_MIGRATION_REDO=0334_accrual_list_side_filter`
+after the four-argument door already carried this file's own markers (the prestate then printed the
+four-argument, prior-redo branch). Both starting shapes were therefore exercised for real, and the
+door's `prosrc` sha (`2fbad3aa…`) was identical before and after the redo. The file has no
+data-dependent branch: every prestate and tail arm reads `pg_proc`, `pg_depend` and `pg_namespace`
+only.
