@@ -7604,3 +7604,52 @@ this file's `0337` attribution) and a tail that reads the live catalog. Both bra
 database: the REDO branch five times as the file grew section by section, and the FIRST-APPLY
 branch with all five bodies restored to their measured pre-images by hand (prestate reported
 `5 FIRST, 0 REDO`, file checksum unchanged at `42b2281f6c1156ed0a22632260d00cca92a26729f1bdde025f74fc57dd4d69b6`).
+
+## 0338 — the clocked prepayment lane gets a directing human (#1050, riders sweep wave, lane 02)
+
+`clara.wake_establish_prepayment_schedule` refuses. #1036's fix round
+([0315_prepayment_wake_reroute.sql](migrations/0315_prepayment_wake_reroute.sql)) made the
+`close_prep` wake lane answer `CLR03 wake_authority_absent` and write nothing, because an unattended
+wake names no directing human and a plan authorised by `clara.agent_user_id()` could never admit a
+single occurrence — that user holds zero `clara.firm_memberships` rows, and
+`clara._plan_admit_occurrence` hands the plan's `authorised_by` straight to
+`clara.admit_journal_work`. The owner ruled a **directing human**, not a widened admission wall.
+
+**The ticket as filed could not be built.** It named "the member who enabled `close_prep` for the
+firm". There is no such person: `clara.wake_engine_sources` holds ONE GLOBAL ROW per `source_key`
+([0133_g1_wake_engine.sql](migrations/0133_g1_wake_engine.sql):204-239), `clara.set_wake_source_enabled`
+is operator-only, and the broadcast audit row sent to every other firm deliberately carries
+`actor = NULL`. The **2026-09-25 ruling** on #1050 (which amends the earlier ruling on #1036)
+re-briefs it: a NAMED MEMBER of the firm records a **firm-level standing instruction**, that member
+is the wake plan's directing human, admission runs under that member's own authority and membership,
+and `clara.accounting_plans.authority_kind` gains ONE value.
+
+### What 0338 changes
+
+| § | object | what it is |
+|---|---|---|
+| A | `clara.firm_standing_instructions` | a new append-only relation: one live instruction per (firm, key), recorded by a named member, withdrawn by a stamp |
+| B | `clara.record_firm_standing_instruction` | the recording door — admin floor, `clara_authenticated` only |
+
+### Why the relation is append-only rather than a toggle
+
+`clara.wake_engine_sources` carries its state as mutable `enabled` / `enabled_by` columns, and this
+file deliberately does not copy that. An accounting plan **cites** the instruction row that
+authorised it, so a row that could be re-recorded in place by a different member would let a plan's
+citation silently come to name someone who never gave it. A row per recording act, withdrawn by a
+stamp and never overwritten, keeps `authority_ref` → `recorded_by` equal to the plan's
+`authorised_by` for as long as the plan exists. The shape is `clara.prepayment_account_enrolments`'
+([0306](migrations/0306_prepayment_account_roster.sql) §A), which is itself 0043's and 0041's.
+
+### Why the admin floor
+
+The act the instruction authorises — configuring one client's amortisation schedule — is bookkeeper
+work (`clara.create_prepayment_schedule`). **Standing** it, so that an unattended run performs it for
+every client of the firm until somebody withdraws it, is a firm-level governance act, which in this
+estate sits at admin (`clara.record_client_fact`, [0055](migrations/0055_client_facts_trio.sql))
+rather than at the floor of the act it authorises. Owner rank clears it.
+
+**Redo-safe by construction** (#957): `create table if not exists`, `create or replace function`,
+`drop trigger if exists` before each `create trigger`, `drop policy if exists` before each policy.
+The file writes no row and backfills nothing, and its prestate reports REDO rather than refusing on
+its own objects.
