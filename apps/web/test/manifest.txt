@@ -438,6 +438,7 @@ lib/firm/portfolio-focus-return.test.ts
 lib/firm/portfolio-url-state.test.ts
 lib/firm/reads.test.ts
 lib/firm/receipt-kinds.test.ts
+lib/firm/standing-instructions.test.ts
 lib/firm/usage-csv.test.ts
 lib/firm/usage-period.test.ts
 lib/firm/use-async-read.test.ts
