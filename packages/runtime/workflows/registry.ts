@@ -41,6 +41,7 @@ import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
 import { statementFacts_v1 } from "./statementFacts.v1.js";
 import { statementFacts_v2 } from "./statementFacts.v2.js";
 import { statementFacts_v3 } from "./statementFacts.v3.js";
+import { statementFacts_v4 } from "./statementFacts.v4.js";
 import { payrollFacts_v1 } from "./payrollFacts.v1.js";
 import { agreementFacts_v1 } from "./agreementFacts.v1.js";
 import { witnessFacts_v1 } from "./witnessFacts.v1.js";
@@ -361,7 +362,17 @@ export const workflows = {
   // vocabulary to the same unchanged verb under v2's own engine snapshot and services bundle,
   // so a v3 task's DB-stamped engine_id matches this image the moment this line deploys, and a
   // rollback to v2 is fail-closed for free. statementFacts_v2 stays exported and frozen.
-  statementFacts: statementFacts_v3,
+  // #1037 (the cut of 2026-09-25): REPOINTED v3 -> v4 — the producer half of #990's per-line
+  // source citation. The text channel is asked which numbered region it read each statement line
+  // from, and the body resolves that index back to the region's own page and
+  // `clara.document_regions.locator` before the payload is built, so a bank line a person is
+  // asked to match can finally say where it was read from. Like the v2 -> v3 repoint and unlike
+  // v1 -> v2, this one carries NO coupled migration and NO deploy-order obligation: the verb
+  // (`clara.persist_statement_facts_v2`) is unchanged and migration 0291 widened what it accepts
+  // on 2026-09-20, long before this image. A rollback to v3 is fail-closed for free — a v3
+  // payload simply states no citation, which is the state every line is in today.
+  // statementFacts_v3 stays exported and frozen.
+  statementFacts: statementFacts_v4,
   // F-A2 openers ①②: REPOINTED v1 -> v2. Unlike PR-4's statementFacts hold-back, this repoint is
   // the intended act — `llm_witness` tasks are minted by a router literal this window's DB
   // migration moves to `:v2` in the same ceremony, and the frozen behaviour WAITS (never
@@ -810,6 +821,12 @@ export const workflowsByName: Readonly<Record<string, (input: any) => Promise<un
 export { statementFacts_v1 };
 export { statementFacts_v2 };
 export { statementFacts_v3 };
+// #1037 ADDS `statementFacts_v4` and repoints `statementFacts:` at it. statementFacts_v3 stops
+// being the pointer and must stay EXPORTED — policy (c). Its parks are the ordinary kind, and a
+// run resuming into the frozen v3 body after the cutover is the expected case: it must find its
+// own body and the SAME `__claraStatementWitnessServices` bundle v4 reads, which is why v4 reuses
+// v2's services slot rather than minting a second one.
+export { statementFacts_v4 };
 // F-A2 openers ①②: witnessFacts_v1 stops being the `witnessFacts:` pointer and must stay
 // EXPORTED — policy (c). The `llm_witness` lane's parks are the deployment-window kind (the
 // behaviour WAITS on an engine-stamp mismatch rather than failing), so a run still resuming into
@@ -1065,6 +1082,7 @@ export const workflowBodies: readonly string[] = Object.freeze([
   "statementFacts_v1",
   "statementFacts_v2",
   "statementFacts_v3",
+  "statementFacts_v4",
   "witnessFacts_v1",
   "witnessFacts_v2",
   "witnessFacts_v3",
@@ -1102,7 +1120,7 @@ export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
   claraWork: "claraWork_v5",
   documentIngest: "documentIngest_v2",
   invoiceFacts: "invoiceFacts_v1",
-  statementFacts: "statementFacts_v3",
+  statementFacts: "statementFacts_v4",
   witnessFacts: "witnessFacts_v3",
   payrollFacts: "payrollFacts_v1",
   agreementFacts: "agreementFacts_v1",

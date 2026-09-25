@@ -1,0 +1,503 @@
+// #1037 — statementFacts_v4: THE PRODUCER HALF of #990's per-line source citation.
+//
+// #990 (migration 0291) shipped the RECEIVING half: `clara.bank_statement_lines` carries
+// `citation_extraction_id` / `citation_page` / `citation_region`, the persist core banks them off
+// reader1's raw payload lines, and the Matching tab renders the three-state sentence. No live
+// producer could state one, because `statementFacts.v3.prompts.mjs`'s `lineShape` declares five
+// keys and `toWriterLines` rebuilds every line from six named keys — both frozen. So every real
+// machine-lane line showed "No source citation was recorded for this line."
+//
+// THIS FILE IS THE UNIT HALF of the successor. The seams are the v4 prompt closure's own exports
+// and the pure citation mapper; the LIVE seam (the persist door, and that the region reaches
+// `clara.document_regions`) is `statement-facts-v4-citation-db.test.mjs` beside this file.
+//
+// WHY THE TEXT CHANNEL AND NOT THE VISION ONE. `docs/plan/active/riders-2026-09-20/CUT-PLAN.md`
+// §3.2 and `reports/wave3-lane08-ticket990.md`'s successor contract both say "the vision-channel
+// prompt". That is the one thing in the contract that cannot be built as written, and the reason
+// is measured, not argued: the numbered region list is shown ONLY to the TEXT channel
+// (`buildStatementWitnessTextPrompt`; the vision channel gets `buildStatementWitnessVisionPrompt`,
+// which carries no regions at all), and 0291's splice reads the citation off `v_r1->'lines'` —
+// reader1, which `persistStatementWitnessPair` fills from the TEXT read. A vision-side idx would
+// have nothing to resolve against and would land in reader2, which the core never reads. So the
+// stanza goes to the channel that can honour it.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { zodSchema } from "ai";
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import { deriveVersionPair, rewriteRegistryToPrevious } from "./scratch-image.mjs";
+
+import {
+  runStatementWitnessTextRead,
+  runStatementWitnessVisionRead,
+} from "../workflows/statementFacts.v4.behavior.mjs";
+import {
+  statementWitnessPromptHash as promptHashV4,
+  STATEMENT_WITNESS_TEXT_SYSTEM_PROMPT as TEXT_SYSTEM_V4,
+  STATEMENT_WITNESS_VISION_SYSTEM_PROMPT as VISION_SYSTEM_V4,
+  STATEMENT_LINE_CITATION_FIELDS,
+  statementWitnessTextSchema,
+  statementWitnessSchema as statementWitnessVisionSchemaV4,
+} from "../workflows/statementFacts.v4.prompts.mjs";
+import {
+  attachStatementLineCitations,
+  indexStatementRegionCitations,
+  renderedRegionIndexes,
+} from "../workflows/statementFacts.v4.citations.mjs";
+import {
+  buildStatementWitnessTextPrompt,
+  statementWitnessPromptHash as promptHashV3,
+  STATEMENT_HEADER_FIELDS,
+  STATEMENT_WITNESS_TEXT_SYSTEM_PROMPT as TEXT_SYSTEM_V3,
+  STATEMENT_WITNESS_VISION_SYSTEM_PROMPT as VISION_SYSTEM_V3,
+} from "../workflows/statementFacts.v3.prompts.mjs";
+
+/** A wire header every field of which the model answered null — the shape both schemas require
+ *  (each header field is nullable but PRESENT; see statementFacts.v3.prompts.mjs's "no
+ *  discriminated union" note). Built from the module's own field roster, never re-typed. */
+const wireHeader = () => Object.fromEntries(STATEMENT_HEADER_FIELDS.map((f) => [f, null]));
+
+/** One wire line as the model answers it, with only the keys the cell under test cares about. */
+const wireLine = (over = {}) => ({
+  entry_date: "2026-04-02",
+  value_date: null,
+  description: "TRANSFER",
+  amount_cents: -12500,
+  running_balance_cents: 87500,
+  ...over,
+});
+
+test("1037.p1 the v4 TEXT channel is asked to name the region index it read each line from — and the VISION channel, which is shown no regions, is not", () => {
+  // The instruction reaches the model through the prompt (the ADV-S-1 lesson recorded in
+  // CUT-PLAN §4.5: an identifier the harness supplies out of band is not a capability).
+  assert.match(TEXT_SYSTEM_V4, /region_idx/, "the v4 text system prompt names the answer key");
+  assert.ok(
+    TEXT_SYSTEM_V4.startsWith(TEXT_SYSTEM_V3),
+    "v4's text system prompt is v3's, extended — the seven shared rules are carried, not re-cut",
+  );
+  assert.equal(VISION_SYSTEM_V4, VISION_SYSTEM_V3, "the vision system prompt is unchanged by this cut");
+  assert.doesNotMatch(VISION_SYSTEM_V4, /region_idx/, "the vision channel sees no numbered regions, so it is never asked to cite one");
+
+  // The wire vocabulary moves with the prompt: the text schema admits the key, the vision one
+  // refuses it, so a vision answer can never smuggle a citation into reader2.
+  assert.deepEqual([...STATEMENT_LINE_CITATION_FIELDS], ["region_idx"]);
+  const text = statementWitnessTextSchema.parse({
+    header: wireHeader(), lines: [wireLine({ region_idx: 7 }), wireLine({ region_idx: null })],
+  });
+  assert.equal(text.lines[0].region_idx, 7);
+  assert.equal(text.lines[1].region_idx, null, "an honest null is an admissible answer, not a parse failure");
+  const vision = statementWitnessVisionSchemaV4.parse({ header: wireHeader(), lines: [wireLine({ region_idx: 7 })] });
+  assert.equal("region_idx" in vision.lines[0], false, "the vision schema strips a region_idx the model volunteered");
+});
+
+test("1037.p2 the prompt hash names v4 on BOTH channels — including the one whose prompt text did not change", () => {
+  // v3's own rule (3): the hash exists to say WHICH prompt version produced a stored read, so it
+  // moves with the version. The vision text is byte-identical to v3's (cell 1037.p1 asserts that
+  // above), which is exactly why a hash that did NOT move would be the defect: two different
+  // bodies would stamp the same receipt on `clara.llm_usage_events.prompt_hash`.
+  for (const channel of ["text", "vision"]) {
+    assert.match(promptHashV4(channel), /^[0-9a-f]{64}$/, `the ${channel} hash is a sha256 hex digest`);
+    assert.notEqual(
+      promptHashV4(channel),
+      promptHashV3(channel),
+      `the ${channel} channel's v4 hash must differ from v3's, or a v4 read is indistinguishable from a v3 one`,
+    );
+  }
+  assert.notEqual(promptHashV4("text"), promptHashV4("vision"), "the two channels stay distinguishable from each other");
+});
+
+// ---------------------------------------------------------------------------------------
+// The pure mapper. `region_idx` is an index into the PROMPT; what the DB stores is the region's
+// own `clara.document_regions.locator` and the page `clara.witness_citation_regions` published
+// for it. The mapper is what turns the first into the second, and it is the piece that has to
+// guarantee 0291's table CHECK — `(citation_page is null) = (citation_region is null)` — can
+// never be reached in a broken state by a payload this body builds.
+// ---------------------------------------------------------------------------------------
+
+/** One row as `select w.idx, w.page, r.locator from clara.witness_citation_regions($1) w join
+ *  clara.document_regions r on r.id = w.region_id` returns it. */
+const regionRow = (idx, page, locator) => ({ idx, page, locator });
+
+test("1037.c1 a region row is citable only if the prompt printed it AND it can satisfy the column CHECK — a citation is both page and region, or it is nothing", () => {
+  const good = { page: 3, polygon: [0.1, 0.2, 0.9, 0.3] };
+  // Every idx below is in the shown set, so this cell isolates the STORABILITY half; the
+  // shown half is cell 1037.t2's and the two are asserted apart on purpose.
+  const shown = new Set([1, 2, 3, 4, 5, 6]);
+  const byIdx = indexStatementRegionCitations([
+    regionRow(1, 3, good),
+    regionRow(2, null, { polygon: [0, 0, 1, 1] }),   // the region prints no page — nothing to cite
+    regionRow(3, 0, { polygon: [0, 0, 1, 1] }),      // 0291: citation_page >= 1
+    regionRow(4, 2, null),                            // no locator — nothing to point at
+    regionRow(5, 2, [0, 0, 1, 1]),                    // a jsonb ARRAY is not an object (0291's ck)
+    regionRow(null, 2, good),                         // an unnumbered row cannot be cited
+  ], shown);
+  assert.deepEqual([...byIdx.keys()], [1], "only the one row that can satisfy the CHECK is citable");
+  assert.deepEqual(byIdx.get(1), { page: 3, region: good }, "the region IS the document_regions locator, relayed whole");
+
+  // And a perfectly STORABLE row the prompt never printed is not citable either (ADV-1037-01):
+  // the same row, the same lookup, the only difference being whether the reader saw it.
+  assert.deepEqual(
+    [...indexStatementRegionCitations([regionRow(1, 3, good)], new Set()).keys()], [],
+    "a region outside the shown set is dropped however well-formed it is",
+  );
+  assert.deepEqual(
+    [...indexStatementRegionCitations([regionRow(1, 3, good)], undefined).keys()], [],
+    "…and a caller that hands no shown set at all gets no citations, never every citation",
+  );
+});
+
+test("1037.c2 the mapper attaches page AND region together or neither, and region_idx never reaches the writer", () => {
+  const locator = { page: 2, polygon: [0.1, 0.4, 0.8, 0.5] };
+  const byIdx = indexStatementRegionCitations([regionRow(11, 2, locator)], new Set([11]));
+  const wire = [
+    wireLine({ region_idx: 11 }),    // cited
+    wireLine({ region_idx: null }),  // honestly uncited
+    wireLine({ region_idx: 99 }),    // an index that names no region the reader was shown
+    wireLine(),                      // no key at all
+  ];
+  const writer = wire.map((l, i) => ({
+    line_no: i + 1,
+    entry_date: l.entry_date, value_date: l.value_date, description: l.description,
+    amount_cents: l.amount_cents, running_balance_cents: l.running_balance_cents,
+  }));
+  const out = attachStatementLineCitations(writer, wire, byIdx);
+
+  assert.equal(out.length, 4, "every line survives — an uncitable row is never dropped");
+  assert.deepEqual(
+    { page: out[0].page, region: out[0].region },
+    { page: 2, region: locator },
+    "the cited line carries the region's own page and locator",
+  );
+  for (const i of [1, 2, 3]) {
+    assert.equal("page" in out[i], false, `line ${i + 1} carries no page`);
+    assert.equal("region" in out[i], false, `line ${i + 1} carries no region`);
+  }
+  for (const line of out) {
+    assert.equal("region_idx" in line, false, "region_idx is an index into the prompt, never a payload field");
+    assert.equal(("page" in line), ("region" in line), "0291's shape guard can never be reached broken");
+  }
+  assert.deepEqual(out.map((l) => l.line_no), [1, 2, 3, 4], "line_no, the writer's own positional key, is untouched");
+});
+
+// ---------------------------------------------------------------------------------------
+// The TEXT CHANNEL, end to end over a scripted database. The model is a stub; everything the
+// body does around it — which schema it hands over, which numbering it resolves against, what it
+// puts on the writer line — is real. The scripted client refuses any query it was not scripted
+// for: an unscripted query is a behaviour these cells did not intend and must be loud.
+// ---------------------------------------------------------------------------------------
+
+const ENGINE_ID = "llm-openai:gpt-5.6-terra:stmt-witness-v1";
+
+/** Two numbered regions on two pages, exactly as the estate publishes them: `idx` is
+ *  `clara.witness_citation_regions`'s own ordinal, `locator` is `clara.document_regions.locator`. */
+const REGIONS = Object.freeze([
+  { idx: 1, page: 1, text_content: "02/04 TRANSFER 125.00", locator: { page: 1, polygon: [0.10, 0.20, 0.90, 0.24] } },
+  { idx: 2, page: 2, text_content: "04/04 CHEQUE 300.00", locator: { page: 2, polygon: [0.10, 0.31, 0.90, 0.35] } },
+]);
+
+function happyClient({ regions = REGIONS } = {}) {
+  const log = [];
+  return {
+    log,
+    async query(sql, params) {
+      const text = String(sql);
+      log.push({ sql: text, params });
+      if (text === "begin" || text === "commit" || text === "rollback") return { rows: [] };
+      if (text.includes("from clara.document_extractions") && text.includes("engine_kind='ocr'")) {
+        return { rows: [{ id: "00000000-0000-4000-8000-0000000e0e0e", page_count: 2 }] };
+      }
+      if (text.includes("clara.witness_citation_regions") && text.includes("w.text_content")) {
+        return { rows: regions.map((r) => ({ idx: r.idx, page: r.page, text_content: r.text_content, locator: r.locator })) };
+      }
+      if (text.includes("clara.witness_citation_regions") && text.includes("r.locator")) {
+        return { rows: regions.map((r) => ({ idx: r.idx, page: r.page, locator: r.locator })) };
+      }
+      if (text.includes("select version_n, engine_id, status from clara.document_processing_tasks")) {
+        return { rows: [{ version_n: 1, engine_id: ENGINE_ID, status: "running" }] };
+      }
+      if (text.includes("clara.resolve_document_client")) {
+        return { rows: [{ r: { status: "unique", client_id: randomUUID() } }] };
+      }
+      if (text.includes("to_regprocedure") && text.includes("as surface")) return { rows: [{ surface: true }] };
+      if (text.includes("select status from clara.document_processing_tasks")) return { rows: [{ status: "running" }] };
+      if (text.includes("clara.prepare_egress_dispatch")) {
+        return { rows: [{ v: { verdict: "granted", authorization_id: randomUUID() } }] };
+      }
+      if (text.includes("clara.consume_egress_dispatch")) return { rows: [{ v: { verdict: "granted" } }] };
+      if (text.includes("clara.record_llm_usage_event")) return { rows: [{ id: randomUUID() }] };
+      throw new Error(`happyClient: unscripted query — ${text.slice(0, 140)}`);
+    },
+  };
+}
+
+function stubServices(calls, object) {
+  return {
+    engineSnapshot: { engineId: ENGINE_ID },
+    callStatementWitnessModel: async (call) => { calls.push(call); return { object, usage: { input_tokens: 10, output_tokens: 5 } }; },
+    statementWitnessMediaType: () => "application/pdf",
+    taskTempPath: () => "/tmp/clara-1037-unused",
+    removeTempFile: async () => {},
+    downloadCanonical: async () => {},
+    log: () => {},
+  };
+}
+
+const DOC = Object.freeze({
+  firm_id: "00000000-0000-4000-8000-00000000f1f1",
+  document_id: "00000000-0000-4000-8000-00000000d0c0",
+  sha256: "0".repeat(64),
+  mime_type: "application/pdf",
+  byte_size: 1024,
+  storage_path: "docs/statement.pdf",
+  lane: "statement_facts",
+});
+
+test("1037.b1 the v4 TEXT read resolves the reader's region_idx against the published numbering and puts the REGION's own page and locator on the writer line", async () => {
+  const calls = [];
+  const client = happyClient();
+  const answer = {
+    header: wireHeader(),
+    lines: [
+      { ...wireLine({ amount_cents: -12500 }), region_idx: 1 },
+      { ...wireLine({ amount_cents: -30000 }), region_idx: 2 },
+      { ...wireLine({ amount_cents: 5000 }), region_idx: null },
+    ],
+  };
+  const out = await runStatementWitnessTextRead(stubServices(calls, answer), (fn) => fn(client), randomUUID(), DOC);
+
+  assert.equal(calls.length, 1, "exactly one model call");
+  assert.equal(calls[0].channel, "text");
+  assert.equal(calls[0].schema, statementWitnessTextSchema, "the TEXT channel is handed the schema that admits region_idx");
+  assert.match(calls[0].system, /region_idx/, "…and the v4 instruction reaches the model through the prompt, not out of band");
+
+  // The page and the locator come from the REGION ROW, never from the model's answer: the model
+  // named an index, and the estate's own numbering decided what that index points at.
+  assert.deepEqual(
+    out.lines.map((l) => ({ line_no: l.line_no, page: l.page, region: l.region })),
+    [
+      { line_no: 1, page: 1, region: REGIONS[0].locator },
+      { line_no: 2, page: 2, region: REGIONS[1].locator },
+      { line_no: 3, page: undefined, region: undefined },
+    ],
+  );
+  assert.equal("page" in out.lines[2], false, "an honestly uncited row carries neither key");
+  assert.equal("region" in out.lines[2], false);
+  for (const l of out.lines) assert.equal("region_idx" in l, false, "region_idx never reaches the writer payload");
+  assert.equal(out.pages_used, 2, "the pinned extraction's page count still rides the text read");
+});
+
+test("1037.b2 the v4 VISION read is handed v3's schema and its own v4 prompt hash — it is never asked to cite", async () => {
+  const calls = [];
+  const client = happyClient();
+  const answer = { header: wireHeader(), lines: [wireLine()] };
+  const out = await runStatementWitnessVisionRead(stubServices(calls, answer), (fn) => fn(client), randomUUID(), DOC);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].channel, "vision");
+  assert.equal(calls[0].schema, statementWitnessVisionSchemaV4, "the vision channel keeps the schema with no region_idx");
+  assert.doesNotMatch(calls[0].system, /region_idx/);
+  assert.equal(out.lines.length, 1);
+  assert.equal("page" in out.lines[0], false, "reader2 never carries a citation — 0291's core reads reader1 alone");
+  assert.equal("region" in out.lines[0], false);
+
+  // The usage row the vision channel meters must carry the V4 hash: a v4 read stamped with v3's
+  // prompt_hash would be indistinguishable from a read the previous body produced.
+  // NOT a bare substring match: `hasStatementWitnessSurface`'s probe names the same verb inside a
+  // to_regprocedure literal and carries no params at all.
+  const usage = client.log.find((q) => q.sql.startsWith("select clara.record_llm_usage_event("));
+  assert.ok(usage, "the vision call is metered");
+  assert.equal(usage.params[5], promptHashV4("vision"), "the metered prompt hash names v4");
+});
+
+// ---------------------------------------------------------------------------------------
+// THE TWO-BUILD CUTOVER'S OWN REQUIREMENT ON THIS CUT.
+//
+// `two-build-cutover-e2e.mjs` builds its "previous" image by REWRITING registry.ts so the class
+// pins its predecessor, and `scratch-image.mjs`'s `rewriteRegistryToPrevious` asserts five EXACT
+// textual shapes, throwing if a substitution does not apply — because a rewrite that silently did
+// not take would produce a build A identical to build B, and the drill would then pass while
+// proving nothing at all. CUT-PLAN section 2.2 states the consequence plainly: "Formatting is
+// load-bearing, not cosmetic. Deviate and the two-build drill breaks."
+//
+// So this cell drives that rewriter against the REAL registry.ts, for THIS class: it is the cheap,
+// direct proof that a build pinned at statementFacts_v3 can still be constructed from this cut's
+// five edits, which is the machinery the drill's "a run parked on v3 completes on v3" leg rests
+// on. It is not a substitute for the drill itself; see the ticket report.
+// ---------------------------------------------------------------------------------------
+
+const REGISTRY_SRC = readFileSync(
+  fileURLToPath(new URL("../workflows/registry.ts", import.meta.url)), "utf8");
+
+test("1037.x1 the statementFacts cut keeps the registry in the shape the two-build drill rewrites — v4 derives v3 as its predecessor, and all five substitutions apply", () => {
+  const pair = deriveVersionPair(REGISTRY_SRC, "statementFacts");
+  assert.deepEqual(
+    { pinned: pair.pinned, pinnedVersion: pair.pinnedVersion, previous: pair.previous, previousVersion: pair.previousVersion },
+    { pinned: "statementFacts_v4", pinnedVersion: 4, previous: "statementFacts_v3", previousVersion: 3 },
+    "the drill derives the pair from registry.ts itself — it carries no version literal of its own",
+  );
+
+  // Throws if ANY of the five substitutions does not apply. The assertions after it are what make
+  // a rewrite that took but took wrongly visible too.
+  const previous = rewriteRegistryToPrevious(REGISTRY_SRC, pair);
+  assert.match(previous, /\n {2}statementFacts: statementFacts_v3,/, "build A dispatches statementFacts to v3");
+  assert.match(previous, /\n {2}statementFacts: "statementFacts_v3"/, "…and its provenance pin says so");
+  // Each of the five CODE shapes is gone. Asserted shape by shape rather than as a bare
+  // "statementFacts_v4 does not appear": the rewriter deliberately leaves PROSE alone, so a
+  // whole-file absence test would be asserting something the drill never needed and would red on
+  // the first explanatory comment naming the successor.
+  for (const [shape, what] of [
+    [/import \{ statementFacts_v4 \} from/, "the import"],
+    [/export \{ statementFacts_v4 \};/, "the re-export"],
+    [/\n {2}"statementFacts_v4",/, "the workflowBodies entry"],
+    [/\n {2}statementFacts: statementFacts_v4,/, "the dispatch entry"],
+    [/\n {2}statementFacts: "statementFacts_v4"/, "the provenance pin"],
+  ]) {
+    assert.doesNotMatch(previous, shape, `build A carries no ${what} for the body it is meant not to carry`);
+  }
+  // v3 is still fully present in build A, which is the whole point of a predecessor image.
+  assert.match(previous, /import \{ statementFacts_v3 \} from "\.\/statementFacts\.v3\.js";/);
+  assert.match(previous, /export \{ statementFacts_v3 \};/);
+  assert.match(previous, /\n {2}"statementFacts_v3",/);
+});
+
+// ---------------------------------------------------------------------------------------
+// ADV-1037-01 — THE LOOKUP MUST BE WHAT THE READER WAS SHOWN, NOT WHAT THE EXTRACTION HOLDS.
+//
+// `buildStatementWitnessTextPrompt` (v3's, re-exported) stops rendering regions at a 60,000-char
+// budget and says so in `built.truncated`. The first cut of this body resolved a reader's
+// `region_idx` against the WHOLE join, so on a statement long enough to exhaust that budget an
+// index naming a region the prompt never printed still resolved — to a real row, with a real
+// page and a real polygon, none of which the reader ever saw. That is the one outcome
+// statementFacts.v4.citations.mjs's own header refuses ("a wrong number is worse than no
+// number"), and it is reachable: the builder's own comment says a bank statement's OCR text runs
+// long, and the published idx set has GAPS with respect to reading order (idx is row_number over
+// uuid), so a model interpolating a bracket number lands on a real-but-unshown region rather
+// than on nothing.
+// ---------------------------------------------------------------------------------------
+
+/** A region big enough to move the 60,000-char budget. `n` is the OCR text's own length. */
+const bulkRegion = (idx, page, n, fill) => ({
+  idx, page, text_content: String(fill).repeat(n),
+  locator: { page, polygon: [0.1, 0.1 * idx, 0.9, 0.1 * idx, 0.9, 0.06 + 0.1 * idx, 0.1, 0.06 + 0.1 * idx] },
+});
+
+/** Four regions, of which the builder can afford exactly the first two: 30,008 + 25,008 = 55,016
+ *  characters used, and the third would need 20,008 more against a 60,000 budget. The arithmetic
+ *  is written out rather than computed so the cell is checkable by hand. */
+const TRUNCATING_REGIONS = Object.freeze([
+  bulkRegion(1, 1, 30_000, "a"),
+  bulkRegion(2, 1, 25_000, "b"),
+  bulkRegion(3, 2, 20_000, "c"),
+  bulkRegion(4, 3, 100, "d"),
+]);
+
+test("1037.t1 a region the TRUNCATED prompt never printed is not citable — the reader can only cite what it was shown", async () => {
+  const calls = [];
+  const client = happyClient({ regions: TRUNCATING_REGIONS });
+  const answer = {
+    header: wireHeader(),
+    lines: [
+      { ...wireLine({ amount_cents: -12500 }), region_idx: 3 },  // a REAL region, never rendered
+      { ...wireLine({ amount_cents: -30000 }), region_idx: 2 },  // rendered — still citable
+      { ...wireLine({ amount_cents: 5000 }), region_idx: 4 },    // a REAL region, never rendered
+    ],
+  };
+  const out = await runStatementWitnessTextRead(stubServices(calls, answer), (fn) => fn(client), randomUUID(), DOC);
+
+  // The premise: this prompt really is truncated, and really does print 1 and 2 and neither 3
+  // nor 4. Asserted from the prompt the model was handed, so the cell cannot pass vacuously on a
+  // budget change that stopped truncating.
+  const prompt = calls[0].prompt;
+  assert.match(prompt, /TRUNCATED/, "the premise: the region list did not fit the builder's budget");
+  assert.match(prompt, /\n\[1 p1\] /, "region 1 was printed");
+  assert.match(prompt, /\n\[2 p1\] /, "region 2 was printed");
+  assert.doesNotMatch(prompt, /\n\[3 p2\] /, "region 3 was NOT printed");
+  assert.doesNotMatch(prompt, /\n\[4 p3\] /, "region 4 was NOT printed");
+
+  assert.equal("page" in out.lines[0], false, "an index naming a region the reader never saw is no citation at all");
+  assert.equal("region" in out.lines[0], false);
+  assert.deepEqual(
+    { page: out.lines[1].page, region: out.lines[1].region },
+    { page: 1, region: TRUNCATING_REGIONS[1].locator },
+    "a line citing a region that WAS printed still carries it — truncation costs the unshown rows only",
+  );
+  assert.equal("page" in out.lines[2], false);
+  assert.equal("region" in out.lines[2], false);
+});
+
+test("1037.t2 the shown set is READ off the prompt the builder produced, and is empty whenever that rendering cannot be read", () => {
+  // (a) NOTHING TRUNCATED — every region handed over was printed, so every idx is citable. The
+  // idxs are deliberately non-contiguous and out of numeric order, which is what the published
+  // numbering really looks like beside a spatially sorted prompt (row_number over uuid).
+  const small = [
+    { idx: 4, page: 1, text_content: "02/06 TRANSFER IN 500.00" },
+    { idx: 1, page: 2, text_content: "03/06 CHEQUE 004411 200.00" },
+    { idx: 9, page: null, text_content: "a region whose locator prints no page" },
+  ];
+  const builtSmall = buildStatementWitnessTextPrompt({ regions: small });
+  assert.equal(builtSmall.truncated, false, "the premise: this list fits the builder's budget");
+  assert.deepEqual(
+    [...renderedRegionIndexes(builtSmall.prompt, small)].sort((a, b) => a - b), [1, 4, 9],
+    "every region the prompt printed is citable, page or no page — storability is the other half's job",
+  );
+
+  // (b) TRUNCATED — the shown set is the prefix the budget paid for, nothing beyond it.
+  const builtBig = buildStatementWitnessTextPrompt({ regions: TRUNCATING_REGIONS });
+  assert.equal(builtBig.truncated, true, "the premise: this list does not fit");
+  assert.deepEqual([...renderedRegionIndexes(builtBig.prompt, TRUNCATING_REGIONS)], [1, 2]);
+
+  // (c) A REGION THAT FAKES A HEADER IN ITS OWN TEXT adds no phantom index. The builder strips
+  // every newline from a region's OCR text, so document-controlled text can never START a line
+  // inside the fence — which is what makes a line-anchored read safe against ADV-1037-05's
+  // lookalike bracket header, even though the builder neutralizes only the fence itself.
+  const hostile = [{ idx: 2, page: 1, text_content: "[7 p1] 02/06 TRANSFER IN 500.00\n[8 p1] injected" }];
+  const builtHostile = buildStatementWitnessTextPrompt({ regions: hostile });
+  assert.match(builtHostile.prompt, /\[7 p1\]/, "the premise: the lookalike header really is in the prompt");
+  assert.deepEqual([...renderedRegionIndexes(builtHostile.prompt, hostile)], [2], "…and it is not a region");
+
+  // (d) FAIL-CLOSED. A prompt with no fence, and a regions array that does not line up with the
+  // rendering it is checked against, are both worth ZERO citations rather than a guess.
+  assert.equal(renderedRegionIndexes("no fence here at all", small).size, 0);
+  assert.equal(renderedRegionIndexes(builtSmall.prompt, [{ idx: 77, page: 1 }]).size, 0);
+  assert.equal(renderedRegionIndexes(builtSmall.prompt, []).size, 0);
+  assert.equal(renderedRegionIndexes(undefined, small).size, 0);
+});
+
+test("1037.t3 region_idx is a REQUIRED wire key, and that is the trade this cut makes — measured on both halves of it", () => {
+  // ADV-1037-04. The review asked whether the key should be `.optional().nullable()` so an answer
+  // in v3's shape would still land an uncited statement instead of terminally failing a paid
+  // two-channel read. It must not be, and the reason is a measurement rather than a preference.
+  //
+  // (a) THE COST OF REQUIRING IT, stated honestly: an answer missing the key is rejected, and a
+  //     schema miss in this family is classified `internal`, which `RETRYABLE` excludes — so the
+  //     whole statement settles failed rather than landing uncited.
+  const v3Shaped = { header: wireHeader(), lines: [wireLine()] };
+  const rejected = statementWitnessTextSchema.safeParse(v3Shaped);
+  assert.equal(rejected.success, false, "an answer in v3's shape does not satisfy v4's text schema");
+  assert.deepEqual(rejected.error.issues[0].path, ["lines", 0, "region_idx"]);
+  assert.equal(
+    statementWitnessTextSchema.safeParse({ header: wireHeader(), lines: [wireLine({ region_idx: null })] }).success,
+    true,
+    "…while an honest null is accepted, which is the answer the prompt actually asks for when the reader cannot name a region",
+  );
+
+  // (b) WHY IT IS NOT PAID, and why the alternative would cost more. `@ai-sdk/openai` defaults
+  //     `strictJsonSchema` to true and `statementFacts.v2.services.mjs` passes no provider
+  //     options, so the provider is handed a STRICT schema — under which OpenAI both guarantees
+  //     every required key in its answer and REFUSES a schema whose `required` does not list
+  //     every property. Making the key optional therefore does not buy tolerance; it moves the
+  //     failure from "a provider bug we have never seen" to "every statement read", and it
+  //     breaks the repo's own documented wire rule (witnessFacts.v1.prompts.mjs:24-27: "a
+  //     provider's strict structured-output mode is happiest with a FLAT, all-required,
+  //     nullable-valued object"). Asserted against the JSON Schema the SDK actually sends.
+  const wire = zodSchema(statementWitnessTextSchema).jsonSchema;
+  const line = wire.properties.lines.items;
+  assert.equal(line.additionalProperties, false, "the line object goes out closed, as strict mode demands");
+  assert.ok(line.required.includes("region_idx"), "the key the model must answer is on the wire's own required list");
+  for (const f of ["entry_date", "value_date", "description", "amount_cents", "running_balance_cents"]) {
+    assert.ok(line.required.includes(f), `${f} is required too — region_idx is not a special case`);
+  }
+});

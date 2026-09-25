@@ -1268,9 +1268,10 @@ path`/`Typed fact`: a statement line is not a `clara.document_regions` row, so i
 as three plain columns on the line itself rather than a link to one.
 _Avoid_: A journal line; a transaction the product created; an amount a human may edit to make
 something tie; treating an absent citation on the CSV/hand-keyed lanes as a defect rather than a
-structural fact about that lane; assuming a citation exists on every machine-lane line today —
-the persist door accepts one when a payload states it, but no live producer states one yet
-(0291's own residual, closed as a successor contract in #990's report).
+structural fact about that lane; assuming a citation exists on every machine-lane line — since
+`statementFacts_v4` (#1037) the witness pair's text reader names the region it read each row from
+and the body resolves it to that region's own page and locator, but a row it could not honestly
+cite still persists uncited, and every line banked before that cut has no citation at all.
 
 **Remaining capacity**:
 How much of one approved journal entry's movement on a given bank account is still unallocated,

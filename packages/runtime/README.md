@@ -19,6 +19,44 @@ The registry selects the current chat, autodraft, statement/witness facts, docum
 firm interview, client onboarding, and bank/close wake workflows. Read it for the exact versions
 and retained exports; repository state alone is not evidence of a deployed image.
 
+### The pin the wave 2026-09-25 cut moved
+
+`statementFacts → statementFacts_v4`. Every superseded body stays exported and in `workflowBodies`
+— v1, v2 and v3 — because the boot census refuses to start the world database-wide if a body a
+parked run needs is missing, and that is policy (c) enforced rather than promised. What the new
+body carries, and nothing more:
+
+* **`statementFacts_v4`** (#1037, the producer half of #990) — ONE fact, on ONE channel. The TEXT
+  reader, which is the only one shown the numbered `clara.witness_citation_regions` rendering, is
+  asked to answer `region_idx` per statement line: the bracketed number of the region it read that
+  row from. `statementFacts.v4.citations.mjs` resolves that index back to the region's own page
+  and its `clara.document_regions.locator` — the same join the v2 dispatch already performs, run
+  for the column that one discards — and attaches `{page, region}` to the matching reader1 line
+  BEFORE the payload is built. So a bank statement line a person is asked to match can finally say
+  where it was read from, which is what migration 0291 (#990, applied 2026-09-20) built the
+  `citation_extraction_id` / `citation_page` / `citation_region` columns for and what no live
+  producer could state. The VISION channel is untouched: it sees no regions, and 0291's splice
+  reads reader1 alone. NO new wire kind, NO new door, NO widened `WORK_ACCEPTED_PURPOSES`, and NO
+  migration — `clara.persist_statement_facts_v2(p_task uuid, p_payload jsonb)` is unchanged in
+  name and argument order, and the refusal mapping is inherited (a malformed per-line shape is
+  CLR10 `{"reason":"chain_broken"}`, a citation on a lane with no second reader is CLR10
+  `{"reason":"internal"}`). **No deploy order**: 0291 has been live since 2026-09-20, so a v4
+  payload cannot meet a database that does not understand it, and a rollback to v3 is fail-closed
+  for free — a v3 payload simply states no citation, which is the state every line is in today.
+  A line the reader could not honestly cite persists uncited and the Matching tab says so in
+  words; #990's three-state face is unchanged by this version.
+* **Three properties of that resolution worth knowing before reading the code.** (1) An index is
+  resolved only against the regions THE PROMPT ACTUALLY PRINTED, not every region on the
+  extraction: the builder stops at a 60,000-char budget, so on a long statement those two sets
+  differ, and resolving against the wrong one would point a person at a patch of their own bank
+  statement the reader never saw. (2) The lookup carries a FIRM PREDICATE of its own —
+  `clara.witness_citation_regions` is SECURITY DEFINER with no firm check and the runtime read
+  policy on `clara.document_regions` has a `true` qual, and v4 is the first version that WRITES
+  what that read returns. (3) `citation_extraction_id` names the READER-1 extraction the persist
+  transaction created, not the OCR extraction the region was read from — the core stamps it and a
+  producer cannot influence it. So a stored citation is the region's locator COPIED, not a link:
+  the viewer renders it, and nothing re-walks it back to `clara.document_regions`.
+
 ### The two pins the wave 2026-09-18 cut moved
 
 `chatTurn → chatTurn_v21`, `claraWork → claraWork_v5`. Every superseded body stays exported and in
@@ -962,6 +1000,33 @@ exit path — and the leg has its own skip probe over `clara.open_interruption` 
 `clara.answer_interruption`. Local evidence 2026-09-15: both legs green in one run; hosted evidence
 pending.
 <!-- /#794 -->
+<!-- #1037 -->
+**Since #1037 it has a THIRD leg, on the lane with no human in it at all.** `statementFacts` has no
+`clara.accounting_work` row, no typed Work question and no chat clarification — its body is claim ->
+two model reads -> one persist — so there is nothing for a drill to park on the way the other two
+legs park. What it has instead is a paid read, and that is what the leg holds: the shared scripted
+model (`tests/two-build-serve.mjs`) keeps the TEXT channel open until the drill writes its answer
+file, which it does only once the predecessor image is stopped, and the successor image's engine
+REDELIVERS that step to a process that answers it. The leg builds a third scratch image
+(`className: "statementFacts"`, its own scratch-image `name`), derives its pair from `registry.ts`
+with no version literal, seeds a bank statement through the estate's own doors with its canonical
+bytes in the per-run local object store (so the vision channel runs the real `downloadCanonical`,
+digest check included), and then asserts the same law the other two legs assert: the run's own body
+identifier never moves, the preflight refuses a target that drops the predecessor body and names it,
+and the successor's `/api/build-info` roster still carries the retained body. It goes one step
+further than the other two on the product question #990 asked, because the rows are readable: the
+run resumed on the PREDECESSOR persists its lines UNCITED (that body's line schema carries no
+region) inside an image pinned to the successor, and a SECOND statement admitted inside that image
+binds the successor and persists every line with its page and the `clara.document_regions` locator
+itself. Three numbers are worth keeping, all measured on the 2026-09-25 rig before the leg was
+written: SIGTERM with the read in flight exits in 37ms; the successor resumes and settles the run
+2.2s after it is ready; and the two shapes that do NOT work are a `statementWitnessWait` retry
+(`DEFAULT_STEP_MAX_RETRIES` is 3 with a 1s/2s/4s backoff — a ~7s window, shorter than one image
+boot) and a SIGKILL (it leaves the queue row locked). The leg has its own skip probe over
+`clara.persist_statement_facts_v2`, `clara.witness_citation_regions` and
+`clara.claim_document_processing_task`, and its own cleanup: both document tasks are SETTLED, never
+deleted, and the per-run storage/spool/answer directories are removed on every exit path.
+<!-- /#1037 -->
 <!-- #850 -->
 **Since #850 the two legs' scratch builds OVERLAP instead of running back to back.** The
 `clara.open_interruption` / `clara.answer_interruption` probe that decides whether the chatTurn leg
