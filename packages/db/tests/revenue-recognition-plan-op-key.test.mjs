@@ -28,11 +28,12 @@ import {
 } from "./revenue-recognition-fixtures.mjs";
 import {
   RR_PLAN_OP_KEY_GATE, RR_PLAN_OP_KEY_STEM, rrPlanOpKeyApplied,
+  NESTED_KEY, DEFERRED_NESTING_BODIES, PREPAYMENT_NESTING_BODIES, bodiesDeriving,
 } from "./revenue-recognition-plan-op-key-fixtures.mjs";
 
 let ready = false;
 let executed = 0;
-const EXPECTED_CELLS = 3;
+const EXPECTED_CELLS = 4;
 
 before(async () => { ready = await rrPlanOpKeyApplied().catch(() => false); });
 
@@ -238,4 +239,56 @@ async () => {
     "one nested reservation for two identical calls");
   assert.equal((await opReceiptsFor(scene.firm, `${dKey}:plan`)).length, 0,
     "…and nothing under the prepayment lane's suffix");
+});
+
+// ===========================================================================================
+// THE CENSUS THAT HOLDS THE FIX AFTERWARDS.
+//
+// The three cells above measure what two callers experience. This one measures the PARTITION over
+// the whole `clara` schema, so a later body that reaches for the deferred-revenue lane's suffixes —
+// or a recut that hands the prepayment lane's back to it — fails here by name instead of quietly
+// re-creating the collision. It reads `pg_proc.prosrc` and nothing else: the CATALOG as it stands
+// after whatever later migration recut these bodies, never a migration's own text.
+//
+// It deliberately does NOT enumerate every `:plan` deriver in the estate. Three more exist
+// (`clara.create_accrual_adjustment`, `clara.correct_accrual_adjustment`,
+// `clara.confirm_tenancy_rent_plan`); #1077 names the prepayment and deferred-revenue pair and only
+// that pair, and those three sit in bodies other lanes of this wave are recutting.
+// ===========================================================================================
+
+cell("p1077.namespace.census — over the whole clara schema the deferred-revenue lane's derived "
+  + "suffixes belong to its two bodies and to nothing else, the prepayment siblings still hold "
+  + "theirs, and no body derives from both namespaces",
+async () => {
+  assert.deepEqual(await bodiesDeriving(NESTED_KEY.deferredPlan), DEFERRED_NESTING_BODIES.slice().sort(),
+    "`:rrplan` is the deferred-revenue lane's, and a third body reaching for it is a second "
+    + "namespace collision waiting to happen");
+  assert.deepEqual(await bodiesDeriving(NESTED_KEY.deferredEnd),
+    ["clara.replace_revenue_recognition_schedule(uuid,uuid,text,jsonb,text)"],
+    "`:rrend` belongs to the one door that ends a predecessor");
+
+  // THE PREPAYMENT SIBLINGS STILL HOLD THEIRS — asserted by membership rather than by an exact
+  // list, because other lanes of the estate derive `:plan` too and enumerating them here would
+  // make this cell a tripwire for work that has nothing to do with #1077.
+  const planDerivers = await bodiesDeriving(NESTED_KEY.prepaymentPlan);
+  for (const sig of PREPAYMENT_NESTING_BODIES) {
+    assert.ok(planDerivers.includes(sig), `${sig} no longer derives ':plan'`);
+  }
+  for (const sig of DEFERRED_NESTING_BODIES) {
+    assert.equal(planDerivers.includes(sig), false, `${sig} still derives ':plan'`);
+  }
+  assert.deepEqual((await bodiesDeriving(NESTED_KEY.prepaymentEnd)),
+    ["clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text)"],
+    "`:end` is derived by the prepayment correction door alone, now that its sibling has `:rrend`");
+
+  // NO BODY DERIVES FROM BOTH NAMESPACES. This is the partition itself, and it is the one statement
+  // that stays true however the two lanes grow.
+  const deferredSet = new Set([
+    ...await bodiesDeriving(NESTED_KEY.deferredPlan),
+    ...await bodiesDeriving(NESTED_KEY.deferredEnd)]);
+  const prepaySet = new Set([
+    ...planDerivers,
+    ...await bodiesDeriving(NESTED_KEY.prepaymentEnd)]);
+  assert.deepEqual([...deferredSet].filter((s) => prepaySet.has(s)), [],
+    "a body on both sides of the partition can collide with itself across the two lanes");
 });
