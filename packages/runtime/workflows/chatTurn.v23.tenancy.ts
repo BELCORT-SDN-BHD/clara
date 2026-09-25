@@ -40,10 +40,10 @@ import { z } from "zod";
 import { stableOpKey } from "./chatTurn.v11.tools.js";
 import { pools, readScoped, type PgExec, type ToolCtx } from "./chatTurn.v15.infra.js";
 import {
-  clientMismatchRefusalV23,
   governedRefusalV23,
   internalFaultV23,
-  noClientRefusalV23,
+  notPermittedV23,
+  requireClientPinV23,
   type ToolRefusalV23,
 } from "./chatTurn.v23.refusals.js";
 
@@ -58,6 +58,11 @@ export const READ_TENANCY_TERMS_TOOL = "read_tenancy_terms";
  * #949's input, unchanged. NO `client_id`, and none should be added: all three doors take the
  * DOCUMENT, and each core resolves the client itself under the credential's firm — a client
  * argument would be one more existence surface for no gain.
+ *
+ * THAT IS NOT THE SAME AS NO CLIENT WALL, and the first cut of this tool conflated the two
+ * (ADV-K04-01). The doors are FIRM-scoped, so out of a conversation pinned to one client this tool
+ * answered with ANOTHER client's tenancy — driven on `clara_c04`. The wall is in the BODY, against
+ * the terms door's own answer, and it costs no argument and no extra door.
  */
 export const readTenancyTermsInputSchema = z
   .object({
@@ -105,6 +110,16 @@ function recordedTerms(answer: unknown): unknown[] {
   return Array.isArray(bag.terms) ? (bag.terms as unknown[]) : [];
 }
 
+/** The client `clara.wake_get_contract_terms` resolved for this document, or null when the answer
+ *  does not carry one. The door builds it as
+ *  `jsonb_build_object('document_id', …, 'client_id', v_client, …)` from the live filing, so it is
+ *  the estate's own answer to "whose document is this" rather than anything this module derives. */
+export function clientOfTerms(answer: unknown): string | null {
+  if (answer === null || typeof answer !== "object" || Array.isArray(answer)) return null;
+  const value = (answer as Record<string, unknown>).client_id;
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
 /**
  * The class verdict, as a pure function of the draft door's own answer.
  *
@@ -140,6 +155,26 @@ export async function runReadTenancyTerms(
         [input.document_id],
       );
       const terms = (termsRow.rows[0]?.terms ?? null) as unknown;
+      // v21's PROVENANCE WALL, and this tool was the only one of the fifty-two without it. The
+      // three doors are FIRM-scoped (each refuses a client-pinned credential outright), so a
+      // document id carried forward from an earlier turn, or pasted, read ANOTHER client's rent,
+      // term, deposit and drafted plan inside this client's workspace — driven on `clara_c04`
+      // during the review round. The terms door's own answer NAMES the client it resolved, so the
+      // comparison needs no new door and no new argument, and an UNPINNED (firm-level) session —
+      // the one this tool was designed for — has no client to contradict and is untouched.
+      const termsClient = clientOfTerms(terms);
+      if (ctx.clientId !== null && termsClient !== null && termsClient !== ctx.clientId) {
+        return {
+          ok: false as const,
+          code: "CLR11",
+          reason: "not_found",
+          fix: "Open this conversation from the client whose tenancy you mean, then ask again.",
+          // THE SAME SENTENCE a document the firm does not hold gets. A tool that distinguished
+          // them would be an existence oracle over the firm's other clients' filings.
+          message: TENANCY_TERMS_REFUSALS.not_found!,
+          details: {},
+        };
+      }
       const draftRow = await c.query(
         "select clara.wake_get_tenancy_rent_plan_draft($1::uuid) as draft",
         [input.document_id],
@@ -183,14 +218,18 @@ export async function runReadTenancyTerms(
  * a document the firm does not hold), so a map that replaced only the message would hand the model
  * `reason: null` and lose the token #1137's refusal table tells a caller to branch on.
  */
-export function tenancyReadRefusal(error: unknown): ToolRefusalV23 {
+export function tenancyReadRefusal(error: unknown, internalMessage = "That tenancy could not be read."): ToolRefusalV23 {
   return governedRefusalV23(
     error,
-    (_reason, _detail, code) =>
-      code === "CLR11"
-        ? { reason: "not_found", message: TENANCY_TERMS_REFUSALS.not_found! }
-        : null,
-    "That tenancy could not be read.",
+    (_reason, _detail, code) => {
+      // CLR03 IS THIS READ'S OWN SENTENCE. `authoringRefusal` replaces the message of any CLR03
+      // with the AUTHORING lane's literal, so #1137's sentence shipped as a constant nothing
+      // reached — and a READ is not an authoring action.
+      if (code === "CLR03") return notPermittedV23(TENANCY_TERMS_REFUSALS.not_permitted!);
+      if (code === "CLR11") return { reason: "not_found", message: TENANCY_TERMS_REFUSALS.not_found! };
+      return null;
+    },
+    internalMessage,
   );
 }
 
@@ -252,20 +291,16 @@ export async function runReadRentSettlementCandidates(
   ctx: ToolCtx,
   input: ReadRentSettlementCandidatesInput,
 ): Promise<ReadRentSettlementCandidatesResult> {
-  if (!ctx.clientId) {
-    return noClientRefusalV23(
-      "rent_candidates_needs_client_pin",
+  const pin = requireClientPinV23(ctx, input.client_id, {
+    noPinReason: "rent_candidates_needs_client_pin",
+    noPinMessage:
       "This conversation is not bound to a client, so there is no rent of theirs to report on.",
-    );
-  }
-  if (input.client_id !== ctx.clientId) {
-    return clientMismatchRefusalV23(
-      "client_not_in_conversation",
+    mismatchReason: "client_not_in_conversation",
+    mismatchMessage:
       "That is not the client this conversation is about, so I will not read their rent here.",
-      input.client_id,
-    );
-  }
-  const clientId = ctx.clientId;
+  });
+  if (pin.ok !== true) return pin;
+  const clientId = pin.clientId;
   try {
     return await readScoped(ctx, async (c: PgExec) => {
       const monthsRow = await c.query(
@@ -290,10 +325,11 @@ export async function runReadRentSettlementCandidates(
   } catch (error) {
     return governedRefusalV23(
       error,
-      (_reason, _detail, code) =>
-        code === "CLR11"
-          ? { reason: "client_not_found", message: RENT_CANDIDATES_REFUSALS.client_not_found! }
-          : null,
+      (_reason, _detail, code) => {
+        if (code === "CLR03") return notPermittedV23(RENT_CANDIDATES_REFUSALS.not_permitted!);
+        if (code === "CLR11") return { reason: "client_not_found", message: RENT_CANDIDATES_REFUSALS.client_not_found! };
+        return null;
+      },
       "That client's rent settlement state could not be read.",
     );
   }
@@ -398,6 +434,12 @@ export const CONFIRM_RENT_PLAN_REFUSALS: Readonly<Record<string, string>> = Obje
    *  word, now raised by `clara._tenancy_plan_core` too. */
   client_inactive:
     "This client is not active, so no new accounting plan can be created for it. Reactivate the client first.",
+  /** The reservation is held by a sibling that has not finished. NOT a door refusal: these two
+   *  cores return `clara._reserve_op`'s `{"pending": true}` VERBATIM rather than raising `CLR13`
+   *  the way the estate's other reserving doors do, so the tool names the rung itself. */
+  operation_in_flight:
+    "That confirmation is already being recorded. Ask again in a moment rather than confirming a "
+    + "second time.",
 });
 
 /** The receipt `clara.confirm_tenancy_rent_plan_for` returns, as much of it as the tool reports. */
@@ -441,8 +483,48 @@ export function rentPlanPart(receipt: Record<string, unknown>): RentPlanReceipt 
 }
 
 export type ConfirmTenancyRentPlanResult =
-  | { ok: true; status: "confirmed"; plan: RentPlanReceipt; replayed: boolean }
+  | { ok: true; status: "confirmed"; plan: RentPlanReceipt }
   | ToolRefusalV23;
+
+/**
+ * WHETHER THE RESERVATION IS STILL HELD BY A SIBLING.
+ *
+ * `clara._reserve_op` answers `{"pending": true}` when the key exists but the first call has not
+ * finished, and both tenancy cores `return v_dedupe` at that point rather than raising `CLR13`
+ * `operation_in_flight` the way `replace_revenue_recognition_schedule`, `skip_plan_occurrence` and
+ * `set_firm_document_limits` do. Read as "no plan id" that became "nothing was recorded", which is
+ * the opposite of the truth: something may be being recorded at that very moment.
+ */
+export function reservationPending(receipt: Record<string, unknown> | null): boolean {
+  return receipt !== null && receipt.pending === true;
+}
+
+/** The refusal for it. CLR13 is the sqlstate the estate's other reserving doors raise for exactly
+ *  this condition, so it is the one a caller branching on the code should see. */
+export function reservationInFlightV23(message: string): ToolRefusalV23 {
+  return {
+    ok: false,
+    code: "CLR13",
+    reason: "operation_in_flight",
+    fix: "Ask again in a moment; the first confirmation is still being recorded.",
+    message,
+    details: {},
+  };
+}
+
+/**
+ * NO `replayed` FLAG, AND THAT IS A MEASUREMENT.
+ *
+ * `waveS-lane08-fix.md` §7.2 spells the return with `replayed: receipt.replayed === true`, and
+ * that expression is a CONSTANT FALSE against the doors as they ship: `clara._finish_op` stores
+ * the core's own `jsonb_build_object`, which carries no `replayed` key in either core, and
+ * `clara._reserve_op` hands that stored payload back VERBATIM on a converged replay (both read out
+ * of `pg_proc` on `clara_c04`; the review round drove two calls with the same task id and the same
+ * input, got the same `confirmation_id` and `plan_id`, and both reported `replayed: false`). A
+ * field the estate cannot answer is worse than an absent one — the model would tell a person it
+ * had just confirmed a plan that was confirmed earlier in the same conversation — so it is absent,
+ * and the successor contract for a core that STAMPS a replay marker is recorded in the fix report.
+ */
 
 /**
  * The op key, exported so a cell can drive it without a database.
@@ -463,20 +545,16 @@ export async function runConfirmTenancyRentPlan(
   ctx: ToolCtx,
   input: ConfirmTenancyRentPlanInput,
 ): Promise<ConfirmTenancyRentPlanResult> {
-  if (!ctx.clientId) {
-    return noClientRefusalV23(
-      "rent_plan_needs_client_pin",
+  const pin = requireClientPinV23(ctx, input.client_id, {
+    noPinReason: "rent_plan_needs_client_pin",
+    noPinMessage:
       "This conversation is not bound to a client, so I cannot confirm a rent plan here.",
-    );
-  }
-  if (input.client_id !== ctx.clientId) {
-    return clientMismatchRefusalV23(
-      "rent_plan_client_mismatch",
+    mismatchReason: "rent_plan_client_mismatch",
+    mismatchMessage:
       "That is not the client this conversation is about, so I will not confirm a rent plan on their books.",
-      input.client_id,
-    );
-  }
-  const clientId = ctx.clientId;
+  });
+  if (pin.ok !== true) return pin;
+  const clientId = pin.clientId;
   const opKey = confirmTenancyRentPlanOpKey(ctx, input);
   try {
     const receipt = await pools().withRuntime(async (c: PgExec) => {
@@ -503,6 +581,7 @@ export async function runConfirmTenancyRentPlan(
       );
       return (r.rows[0]?.r ?? null) as Record<string, unknown> | null;
     });
+    if (reservationPending(receipt)) return reservationInFlightV23(CONFIRM_RENT_PLAN_REFUSALS.operation_in_flight!);
     if (!receipt || receipt.plan_id == null) {
       return internalFaultV23("The rent plan could not be confirmed. Nothing was recorded.");
     }
@@ -510,7 +589,6 @@ export async function runConfirmTenancyRentPlan(
       ok: true,
       status: "confirmed",
       plan: rentPlanPart(receipt),
-      replayed: receipt.replayed === true,
     };
   } catch (error) {
     return governedRefusalV23(
@@ -622,8 +700,15 @@ export function rentPlanRevisionPart(receipt: Record<string, unknown>): RentPlan
   };
 }
 
+/**
+ * `offer` IS A DELIBERATE WIDENING of §7.2's shape, and it is recorded rather than smuggled
+ * (SPEC-K-L04-06). §7.2 writes `{ ok, status, plan, replayed }`; this returns the escalation
+ * offer beside them because the read that produced it ran BEFORE the act — it is what lets the
+ * turn say what the plan charged and what it now charges out of the same answer the person was
+ * shown, rather than out of the receipt alone. `replayed` is gone for the reason above.
+ */
 export type ConfirmTenancyRentPlanRevisionResult =
-  | { ok: true; status: "revised"; plan: RentPlanRevisionReceipt; offer: unknown; replayed: boolean }
+  | { ok: true; status: "revised"; plan: RentPlanRevisionReceipt; offer: unknown }
   | ToolRefusalV23;
 
 /** The revision's own op key. It is STABLE for §7.3's reason, and it lives in its OWN namespace:
@@ -641,20 +726,16 @@ export async function runConfirmTenancyRentPlanRevision(
   ctx: ToolCtx,
   input: ConfirmTenancyRentPlanRevisionInput,
 ): Promise<ConfirmTenancyRentPlanRevisionResult> {
-  if (!ctx.clientId) {
-    return noClientRefusalV23(
-      "rent_revision_needs_client_pin",
+  const pin = requireClientPinV23(ctx, input.client_id, {
+    noPinReason: "rent_revision_needs_client_pin",
+    noPinMessage:
       "This conversation is not bound to a client, so I cannot confirm a rent revision here.",
-    );
-  }
-  if (input.client_id !== ctx.clientId) {
-    return clientMismatchRefusalV23(
-      "rent_revision_client_mismatch",
+    mismatchReason: "rent_revision_client_mismatch",
+    mismatchMessage:
       "That is not the client this conversation is about, so I will not revise a rent plan on their books.",
-      input.client_id,
-    );
-  }
-  const clientId = ctx.clientId;
+  });
+  if (pin.ok !== true) return pin;
+  const clientId = pin.clientId;
   const opKey = confirmTenancyRentPlanRevisionOpKey(ctx, input);
   let offer: unknown = null;
   try {
@@ -668,14 +749,7 @@ export async function runConfirmTenancyRentPlanRevision(
       return (r.rows[0]?.offer ?? null) as unknown;
     });
   } catch (error) {
-    return governedRefusalV23(
-      error,
-      (_reason, _detail, code) =>
-        code === "CLR11"
-          ? { reason: "not_found", message: TENANCY_TERMS_REFUSALS.not_found! }
-          : null,
-      "That tenancy's escalation could not be read.",
-    );
+    return tenancyReadRefusal(error, "That tenancy's escalation could not be read.");
   }
   try {
     // 2 — THE ACT, on the runtime pool, through the OBO twin.
@@ -691,6 +765,7 @@ export async function runConfirmTenancyRentPlanRevision(
       );
       return (r.rows[0]?.r ?? null) as Record<string, unknown> | null;
     });
+    if (reservationPending(receipt)) return reservationInFlightV23(CONFIRM_RENT_PLAN_REFUSALS.operation_in_flight!);
     if (!receipt || receipt.revision_id == null) {
       return internalFaultV23("The rent revision could not be recorded. Nothing was changed.");
     }
@@ -699,7 +774,6 @@ export async function runConfirmTenancyRentPlanRevision(
       status: "revised",
       plan: rentPlanRevisionPart(receipt),
       offer,
-      replayed: receipt.replayed === true,
     };
   } catch (error) {
     return governedRefusalV23(

@@ -261,11 +261,14 @@ test("v23.confirm_plan: the door is the OBO twin, with all seven arguments named
 
 test("v23.confirm_plan: the refusal ladder carries §7.1's client_inactive as its LAST wall", () => {
   const map = v23Tenancy.CONFIRM_RENT_PLAN_REFUSALS;
-  // Every token #1137's table names, plus the one waveS-lane08-fix.md §7.1 ADDED.
+  // Every token #1137's table names, plus the one waveS-lane08-fix.md §7.1 ADDED, plus the rung
+  // the fix round gave a sentence: `operation_in_flight` was already IN the ladder and had none,
+  // so a reservation held by a sibling was answered "nothing was recorded" (ADV-K04-06).
   assert.deepEqual(Object.keys(map).sort(), [
     "account_not_in_chart",
     "client_inactive",
     "confirm_wrong_kind",
+    "operation_in_flight",
     "payable_account_in_use",
     "plan_credits_bank_account",
     "rent_plan_already_confirmed",
@@ -388,4 +391,181 @@ test("v23.confirm_revision: the receipt carries BOTH figures, and the op key is 
   const input = { client_id: CTX.clientId, document_id: DOC, judgement: null };
   assert.match(v23Tenancy.confirmTenancyRentPlanRevisionOpKey(CTX, input),
     /^eta-confirm_tenancy_rent_plan_revision-/);
+});
+
+// ---------------------------------------------------------------------------
+// 5 · THE FIX ROUND (waveK lane LC review). Every cell DRIVES the shipped body against a pools
+//     double: the round's finding was that a constant asserted by name is not a wall anybody
+//     reaches, and not a sentence anybody reads.
+// ---------------------------------------------------------------------------
+
+/** The supervisor slot `pools()` reads. `read` answers the READ pool, `runtime` the act pool. */
+function withPools({ read = () => ({ rows: [], rowCount: 0 }), runtime = null } = {}) {
+  const calls = [];
+  const prior = globalThis.__claraPools;
+  globalThis.__claraPools = {
+    mintWakeCredentialObo: async () => ({ credentialId: "cred", secret: "s3cr3t" }),
+    mintWakeCredential: async () => ({ credentialId: "cred", secret: "s3cr3t" }),
+    mintWakeCredentialClientObo: async () => ({ credentialId: "cred", secret: "s3cr3t" }),
+    withReadWakeScoped: async (secret, fn) => fn({
+      query: async (sql, params) => { calls.push({ pool: "read", sql, params }); return read(sql, params); },
+    }),
+    withWriteWakeScoped: async () => { throw new Error("no tenancy tool takes the write-wake pool"); },
+    withRuntime: async (fn) => {
+      if (runtime === null) throw new Error("this tool does not take the act credential");
+      return fn({ query: async (sql, params) => { calls.push({ pool: "runtime", sql, params }); return runtime(sql, params); } });
+    },
+  };
+  calls.restore = () => { globalThis.__claraPools = prior; };
+  return calls;
+}
+
+/** A thrown Postgres error in node-postgres's own shape; `detail` omitted where a door omits it. */
+function pgError(code, message, detail) {
+  return Object.assign(new Error(message), {
+    code,
+    detail: detail === undefined ? undefined : JSON.stringify(detail),
+  });
+}
+
+/** `clara.wake_get_contract_terms`'s answer, whose own shape carries the client it resolved
+ *  (`jsonb_build_object('document_id', …, 'client_id', v_client, 'agreement_class', …)`, read out
+ *  of `clara._get_contract_terms_core` on `clara_c04`). */
+const termsAnswer = (clientId) => ({
+  document_id: DOC, client_id: clientId, agreement_class: "tenancy",
+  terms: [{ term_key: "monthly_rent", value: 360000 }], history: [],
+});
+const draftAnswer = { agreement_class: "tenancy", refusals: [], plan: { monthly_rent_cents: 360000 } };
+
+const tenancyDoors = (termsClientId) => (sql) => {
+  if (sql.includes("wake_get_contract_terms")) return { rows: [{ terms: termsAnswer(termsClientId) }], rowCount: 1 };
+  if (sql.includes("wake_get_tenancy_rent_plan_draft")) return { rows: [{ draft: draftAnswer }], rowCount: 1 };
+  if (sql.includes("wake_propose_contract_terms")) return { rows: [{ proposal: null }], rowCount: 1 };
+  throw new Error("unexpected door: " + sql);
+};
+
+test("v23.fix: read_tenancy_terms does NOT read another client's tenancy out of a pinned conversation", async () => {
+  // ADV-K04-01. The three doors are FIRM-scoped and each refuses a client-PINNED credential
+  // outright, so the tool reached them with a plain `interactive` credential and no wall of its
+  // own — the only one of the fifty-two that took a document and no client. DRIVEN on `clara_c04`
+  // during the review: a ctx pinned to one client returned another client's rent, term, deposit
+  // and drafted plan, inside the first client's workspace. The terms door's own answer NAMES the
+  // client, so the comparison needs no new door and no new argument.
+  const calls = withPools({ read: tenancyDoors(OTHER_CLIENT) });
+  try {
+    const r = await v23Tenancy.runReadTenancyTerms(CTX, { document_id: DOC });
+    assert.equal(r.ok, false, "the conversation is pinned to another client");
+    assert.equal(r.reason, "not_found");
+    assert.equal(r.message, v23Tenancy.TENANCY_TERMS_REFUSALS.not_found,
+      "the same sentence a document the firm does not hold gets — the tool distinguishes nothing");
+    assert.ok(!calls.some((c) => c.sql.includes("wake_propose_contract_terms")),
+      "and it stops before proposing anything about a tenancy it will not report");
+  } finally {
+    calls.restore();
+  }
+
+  // the SAME document, in the conversation it belongs to: an ordinary read
+  const own = withPools({ read: tenancyDoors(CTX.clientId) });
+  try {
+    const r = await v23Tenancy.runReadTenancyTerms(CTX, { document_id: DOC });
+    assert.equal(r.ok, true);
+    assert.equal(r.status, "read");
+    assert.equal(r.terms.client_id, CTX.clientId);
+  } finally {
+    own.restore();
+  }
+
+  // and the FIRM-LEVEL session the tool was designed for is untouched: no pin, no comparison.
+  const firmLevel = withPools({ read: tenancyDoors(OTHER_CLIENT) });
+  try {
+    const r = await v23Tenancy.runReadTenancyTerms({ ...CTX, clientId: null }, { document_id: DOC });
+    assert.equal(r.ok, true, "an unpinned conversation has no client to contradict");
+    assert.equal(r.status, "read");
+  } finally {
+    firmLevel.restore();
+  }
+});
+
+test("v23.fix: a refused tenancy READ answers the read's own CLR03 sentence", async () => {
+  // SPEC-K-L04-03, the tenancy half: both sentences shipped as constants no mapper reached.
+  const terms = withPools({ read: () => { throw pgError("CLR03", "no valid wake credential"); } });
+  try {
+    const r = await v23Tenancy.runReadTenancyTerms(CTX, { document_id: DOC });
+    assert.equal(r.code, "CLR03");
+    assert.equal(r.message, v23Tenancy.TENANCY_TERMS_REFUSALS.not_permitted);
+    assert.equal(r.reason, "not_permitted");
+  } finally {
+    terms.restore();
+  }
+
+  const rent = withPools({ read: () => { throw pgError("CLR03", "no valid wake credential"); } });
+  try {
+    const r = await v23Tenancy.runReadRentSettlementCandidates(CTX, { client_id: CTX.clientId });
+    assert.equal(r.code, "CLR03");
+    assert.equal(r.message, v23Tenancy.RENT_CANDIDATES_REFUSALS.not_permitted);
+  } finally {
+    rent.restore();
+  }
+});
+
+test("v23.fix: neither confirmation ships a `replayed` flag that can never be true", async () => {
+  // ADV-K04-06. `clara._finish_op` stores the core's own jsonb, which carries NO `replayed` key
+  // (read out of `pg_proc` on `clara_c04`: both cores' `jsonb_build_object` are listed key by key
+  // and neither has one), and `clara._reserve_op` returns that stored payload VERBATIM on a
+  // replay. So `receipt.replayed === true` was a constant false: the model was told every
+  // converged replay was a fresh act, which is the one thing the stable op key exists to make
+  // visible. A field whose value is a constant is worse than an absent one, so it is absent, and
+  // the successor contract for a core that stamps it is in the fix report.
+  const receipt = {
+    document_id: DOC, client_id: CTX.clientId, confirmation_id: "c1", plan_id: "p1",
+    revision_id: null, status: "active", occurrences: 24, next_occurrences: [],
+    overlap_warning: null, treatment: { standard: "MFRS 16" }, professional_judgement: null,
+  };
+  const calls = withPools({ runtime: () => ({ rows: [{ r: receipt }], rowCount: 1 }) });
+  try {
+    const r = await v23Tenancy.runConfirmTenancyRentPlan(CTX, {
+      client_id: CTX.clientId, document_id: DOC, rent_account: null, payable_account: null, judgement: null,
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.status, "confirmed");
+    assert.ok(!("replayed" in r), "a flag the estate cannot answer is not shipped");
+  } finally {
+    calls.restore();
+  }
+});
+
+test("v23.fix: a reservation still in flight is named, not reported as a lost act", async () => {
+  // The ONE replay the tool CAN see, and it was answered with an internal fault. `clara._reserve_op`
+  // returns `{"pending": true}` when the key is held by a sibling that has not finished; the
+  // tenancy cores return that verbatim (the estate's other callers raise CLR13 operation_in_flight
+  // at exactly this point — `replace_revenue_recognition_schedule`, `skip_plan_occurrence`,
+  // `set_firm_document_limits` — and these two do not, which is a successor contract). Until then
+  // the tool must not say "nothing was recorded": something may be being recorded right now.
+  const calls = withPools({ runtime: () => ({ rows: [{ r: { pending: true } }], rowCount: 1 }) });
+  try {
+    const r = await v23Tenancy.runConfirmTenancyRentPlan(CTX, {
+      client_id: CTX.clientId, document_id: DOC, rent_account: null, payable_account: null, judgement: null,
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, "operation_in_flight");
+    assert.equal(r.message, v23Tenancy.CONFIRM_RENT_PLAN_REFUSALS.operation_in_flight);
+    assert.ok(v23Tenancy.CONFIRM_RENT_PLAN_LADDER.includes("operation_in_flight"),
+      "the ladder already named the rung; this is the sentence for it");
+  } finally {
+    calls.restore();
+  }
+
+  const rev = withPools({
+    read: () => ({ rows: [{ offer: { current_cents: 250000, new_cents: 275000 } }], rowCount: 1 }),
+    runtime: () => ({ rows: [{ r: { pending: true } }], rowCount: 1 }),
+  });
+  try {
+    const r = await v23Tenancy.runConfirmTenancyRentPlanRevision(CTX, {
+      client_id: CTX.clientId, document_id: DOC, judgement: "Stepped, and above expected inflation.",
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, "operation_in_flight");
+  } finally {
+    rev.restore();
+  }
 });

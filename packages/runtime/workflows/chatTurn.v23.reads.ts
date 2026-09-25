@@ -26,11 +26,10 @@
 import { z } from "zod";
 import { readScoped, type PgExec, type ToolCtx } from "./chatTurn.v15.infra.js";
 import {
-  clientMismatchRefusalV23,
   governedRefusalV23,
   internalFaultV23,
-  noClientRefusalV23,
   notPermittedV23,
+  requireClientPinV23,
   type ToolRefusalV23,
 } from "./chatTurn.v23.refusals.js";
 
@@ -273,20 +272,16 @@ export async function runReadPayrollPostingState(
   ctx: ToolCtx,
   input: ReadPayrollPostingStateInput,
 ): Promise<ReadPayrollPostingStateResult> {
-  if (!ctx.clientId) {
-    return noClientRefusalV23(
-      "payroll_posting_state_needs_client_pin",
+  const pin = requireClientPinV23(ctx, input.client_id, {
+    noPinReason: "payroll_posting_state_needs_client_pin",
+    noPinMessage:
       "This conversation is not bound to a client, so there is no payroll summary of theirs to report on.",
-    );
-  }
-  if (input.client_id !== ctx.clientId) {
-    return clientMismatchRefusalV23(
-      "client_not_in_conversation",
+    mismatchReason: "client_not_in_conversation",
+    mismatchMessage:
       "That is not the client this conversation is about, so I will not read their payroll state here.",
-      input.client_id,
-    );
-  }
-  const clientId = ctx.clientId;
+  });
+  if (pin.ok !== true) return pin;
+  const clientId = pin.clientId;
   try {
     return await readScoped(ctx, async (c: PgExec) => {
       const blocked = await findBlockedRow(c, clientId, "payroll_posting_blocked", input.document_id);
@@ -429,20 +424,16 @@ export async function runReadPayrollSettlementState(
   ctx: ToolCtx,
   input: ReadPayrollSettlementStateInput,
 ): Promise<ReadPayrollSettlementStateResult> {
-  if (!ctx.clientId) {
-    return noClientRefusalV23(
-      "payroll_settlement_state_needs_client_pin",
+  const pin = requireClientPinV23(ctx, input.client_id, {
+    noPinReason: "payroll_settlement_state_needs_client_pin",
+    noPinMessage:
       "This conversation is not bound to a client, so there is no payroll run of theirs to report on.",
-    );
-  }
-  if (input.client_id !== ctx.clientId) {
-    return clientMismatchRefusalV23(
-      "client_not_in_conversation",
+    mismatchReason: "client_not_in_conversation",
+    mismatchMessage:
       "That is not the client this conversation is about, so I will not read their payroll here.",
-      input.client_id,
-    );
-  }
-  const clientId = ctx.clientId;
+  });
+  if (pin.ok !== true) return pin;
+  const clientId = pin.clientId;
   try {
     return await readScoped(ctx, async (c: PgExec) => {
       const r = await c.query(
@@ -573,20 +564,16 @@ export async function runReadAgreementTerms(
   ctx: ToolCtx,
   input: ReadAgreementTermsInput,
 ): Promise<ReadAgreementTermsResult> {
-  if (!ctx.clientId) {
-    return noClientRefusalV23(
-      "agreement_terms_needs_client_pin",
+  const pin = requireClientPinV23(ctx, input.client_id, {
+    noPinReason: "agreement_terms_needs_client_pin",
+    noPinMessage:
       "This conversation is not bound to a client, so there is no agreement of theirs to read.",
-    );
-  }
-  if (input.client_id !== ctx.clientId) {
-    return clientMismatchRefusalV23(
-      "client_not_in_conversation",
+    mismatchReason: "client_not_in_conversation",
+    mismatchMessage:
       "That is not the client this conversation is about, so I will not read their agreement here.",
-      input.client_id,
-    );
-  }
-  const clientId = ctx.clientId;
+  });
+  if (pin.ok !== true) return pin;
+  const clientId = pin.clientId;
   try {
     return await readScoped(ctx, async (c: PgExec) => {
       const r = await c.query(

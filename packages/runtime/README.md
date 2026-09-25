@@ -66,6 +66,28 @@ lines of the same amount in one window are two lines a PERSON adjudicates); a re
 call to an ungranted verdict or plan core; and the two payroll witnesses of #1144 item 3, which
 belong to `payrollFacts`'s own next version.
 
+**What the review round changed in the seven, and why each one is a behaviour rather than a
+tidy-up.** Every item was reproduced by driving the shipped body against `clara_c04` before it was
+touched, and every one of them is a cell that drives the body rather than reading a constant.
+
+| what was shipped | what a person got | what ships now |
+|---|---|---|
+| the queue read took ONE page of 200 and ignored `next_cursor` | a blocked payroll summary sorting past the cap read as **posted**; a blocked agreement read as **read** with the gate's sentence dropped | the scan follows the cursor, terminates on the SHORT page (the door's `next_cursor` is non-null on the last page too), and at its ceiling says it could not read the queue to the end rather than concluding an absence |
+| `read_payroll_posting_state` returned `status: "posted"` whenever no block matched | `clara.get_document_state` answers SQL NULL — it does not refuse — for a document that does not exist and for another client's, so both were answered "the run posted" | an **approved** entry on the filing is what posted means (`ck_journal_entries_status`), the entries are named, and everything else is the contract's `payroll_not_read` refusal naming the reading task's own status |
+| `clara.get_document_extract`'s third argument was `200` | it is `p_max_chars`, a CHARACTER budget over the concatenated envelopes (default 20000), so the agreement's terms envelope came back EMPTY (measured: `0/198/2` at 200, `4814/898/2` at the default) while the prompt asks the model to quote eleven recorded terms | the tool states no budget and takes the door's own |
+| the `CLR10` arm keyed on `detail.reason` | `clara._list_review_queue_core` raises it with NO detail, so the arm never fired and the person read "queue scope is malformed" | both maps key on the SQLSTATE as well, which is the shape the tenancy reads already used |
+| five `CLR03` sentences declared, none reachable | `authoringRefusal` replaces any CLR03 message with the AUTHORING lane's literal, so a refused READ answered "That authoring action is not permitted in this session." | each read maps CLR03 to its own sentence; a door that sent its own token still keeps it |
+| `read_tenancy_terms` had no client wall | its three doors are FIRM-scoped, so out of a conversation pinned to one client it answered with ANOTHER client's rent, term, deposit and drafted plan | the terms door's own `client_id` is compared against the conversation's pin; the firm-level (unpinned) session it was designed for is untouched |
+| the settlement read computed the panel's empty sentence AFTER narrowing | a client with open runs, asked about one settled summary, was told no payroll run is waiting | the panel's sentence comes from the unfiltered answer; the narrowed miss gets the contract's own `not_offered` row, which points at the posting half rather than guessing |
+| both confirmations returned `replayed: receipt.replayed === true` | neither core stores a `replayed` key and `clara._reserve_op` returns the stored payload verbatim, so the flag was a constant false: every converged replay was reported as a fresh act | the flag is gone (a successor contract asks a core to stamp one), and the ONE replay the tool can see — `clara._reserve_op`'s `{"pending": true}`, which these two cores return verbatim instead of raising `CLR13` — is named `operation_in_flight` instead of "nothing was recorded" |
+
+`CLR44` is also NEVER RENDERED from this closure: `isGovernedRefusalV23` subtracts it, so a
+never-shown refusal becomes the tool's own fault sentence instead of a wiring diagnosis on screen.
+That is CLOSING-PLAN roster item 3's RULE. Its other half — the stale "CLR10, and NEVER SHOWN"
+comment in `lib/prepayment-schedule-basis.ts` — could not ride this cut: the module's only consumer
+is deploy-locked `chatTurn.v22.tools.ts`, which cannot be repointed at a successor copy, so the copy
+would be unreachable code free to drift from the original.
+
 **What `claraWork_v7` carries: ONE step body.** `loadFaProposalInputsStepV7` replaces v6's, and
 three things move, each of them a ground a PERSON already wrote down that v6 could not see: the
 completeness predicate becomes the estate's OWN six conditions (`clara._fa_particulars_complete`;

@@ -723,3 +723,59 @@ test("v23.fix: a queue longer than the scan's ceiling REFUSES rather than conclu
     calls.restore();
   }
 });
+
+test("v23.fix: the two-wall client check is ONE sequence, and all six client-scoped tools take it", async () => {
+  // STD-1. The identical five-statement shape stood six times across the two tool modules — the
+  // control flow, the two constructors and the rebinding byte for byte, with only the four
+  // sentences varying. `chatTurn.v23.refusals.ts`'s own header says why that matters: "a second
+  // copy of an envelope is how two tools in one version come to disagree about what a refusal
+  // looks like". It generalised the two CONSTRUCTORS and stopped one layer short of the sequence
+  // that calls them; the sequence now lives beside them.
+  const pin = await import("../workflows/chatTurn.v23.refusals.ts");
+  const sentences = {
+    noPinReason: "x_needs_client_pin", noPinMessage: "no pin here",
+    mismatchReason: "client_not_in_conversation", mismatchMessage: "not this client",
+  };
+  const none = pin.requireClientPinV23({ clientId: null }, CTX.clientId, sentences);
+  assert.equal(none.ok, false);
+  assert.equal(none.code, "CLR03");
+  assert.equal(none.reason, "x_needs_client_pin");
+  const other = pin.requireClientPinV23({ clientId: CTX.clientId }, "11111111-1111-4111-8111-111111111111", sentences);
+  assert.equal(other.ok, false);
+  assert.equal(other.reason, "client_not_in_conversation");
+  assert.deepEqual(other.details, { client_id: "11111111-1111-4111-8111-111111111111" });
+  const held = pin.requireClientPinV23({ clientId: CTX.clientId }, CTX.clientId, sentences);
+  assert.deepEqual(held, { ok: true, clientId: CTX.clientId });
+
+  // and the two modules take it rather than repeating the sequence: no call site of either
+  // constructor is left outside the helper.
+  for (const file of ["chatTurn.v23.reads.ts", "chatTurn.v23.tenancy.ts"]) {
+    const src = codeOf(new URL(`../workflows/${file}`, import.meta.url));
+    assert.equal((src.match(/requireClientPinV23\(/g) ?? []).length, 3, `${file}: three client-scoped tools`);
+    assert.equal((src.match(/noClientRefusalV23\(/g) ?? []).length, 0, `${file}: no hand-rolled copy left`);
+    assert.equal((src.match(/clientMismatchRefusalV23\(/g) ?? []).length, 0, `${file}: nor of the second wall`);
+  }
+});
+
+test("v23.fix: CLR44 is NEVER rendered, and this cut's own helper is where that is enforced", async () => {
+  // SPEC-K-L04-05, the half this cut CAN take. CLOSING-PLAN roster item 3 asks for the
+  // `invalid_author` comment in `lib/prepayment-schedule-basis.ts` to be corrected on a successor
+  // copy: migration `0335` moved the never-shown refusals to CLR44 and left CLR10 meaning only a
+  // refusal a surface MAY render (`waveS-lane02-ticket1114.md` § Successor contract). The COMMENT
+  // cannot ride this cut — its only consumer is `chatTurn.v22.tools.ts`, which is deploy-locked,
+  // so a successor copy would be unreachable code free to drift (the fix report argues it in
+  // full). The RULE it implies is this closure's own, and it belongs in one place rather than in
+  // each of seven maps.
+  const refusals = await import("../workflows/chatTurn.v23.refusals.ts");
+  assert.equal(refusals.isGovernedRefusalV23("CLR10"), true);
+  assert.equal(refusals.isGovernedRefusalV23("CLR11"), true);
+  assert.equal(refusals.isGovernedRefusalV23("CLR44"), false, "0335's never-shown class");
+  const out = refusals.governedRefusalV23(
+    pgError("CLR44", "the successor always has the actor, so this is a wiring error", { reason: "invalid_author" }),
+    () => "a sentence no map should get the chance to write",
+    "That could not be done.",
+  );
+  assert.equal(out.code, "internal");
+  assert.equal(out.message, "That could not be done.", "the tool's own fault sentence, not the door's");
+  assert.equal(out.reason, null);
+});

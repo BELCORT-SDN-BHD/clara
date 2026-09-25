@@ -954,15 +954,15 @@
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v23.reads.ts": {
-      "sha256": "84ce198a192458262378d07e3b5cabff96f760c13093f7bfa9420071b0ad4afd",
+      "sha256": "aaa9675c15997e8ad3df456c2a39532bd9c6d7244a222fcd5b74244bf0cc7b26",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v23.refusals.ts": {
-      "sha256": "eed399308c1c3e6b42503c363bd63ae5d31beea64220e11fdd64fed297b1f35f",
+      "sha256": "2ebe46d6614bdf14e12f7d54d97326b9e1c599cc787f1b1b9b31ca4ea1588cf4",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v23.tenancy.ts": {
-      "sha256": "2d5e3d1bc3f1c4dfdc877ac20322623a4370040f70ef6a8fbfa63b89f1fcf656",
+      "sha256": "a25be08b6831eb842a6eae8571a5791d77b89050cd1df0f8110bfb033dc5198c",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v23.tools.ts": {

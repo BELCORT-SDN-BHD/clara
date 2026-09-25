@@ -20,10 +20,26 @@ export type ToolRefusalV23 = ToolRefusalV22;
 /** The shape node-postgres hands a caught door error. */
 export type DbErrorV23 = { code?: string; message?: string; detail?: string };
 
+/**
+ * THE NEVER-SHOWN CLASS. Migration `0335` moved every refusal that means "the caller built its own
+ * call wrong" to `CLR44` and left `CLR10` meaning only a refusal a SURFACE MAY RENDER
+ * (`waveS-lane02-ticket1114.md` § Successor contract). A `CLR44` reaching a person would put a
+ * wiring diagnosis on screen in place of an answer.
+ *
+ * CLOSING-PLAN roster item 3 asks the cut to carry that rule. The COMMENT half —
+ * `lib/prepayment-schedule-basis.ts:119`, which still documents `invalid_author` as "CLR10, and
+ * NEVER SHOWN" — cannot ride this cut: its only consumer is `chatTurn.v22.tools.ts`, which is
+ * deploy-locked and cannot be repointed at a successor copy, so the copy would be unreachable code
+ * free to drift from the original. The RULE can, and it lives HERE rather than in each of the seven
+ * maps, which is what this closure's own follow-up asked for.
+ */
+export const NEVER_SHOWN_SQLSTATE = "CLR44";
+
 /** A GOVERNED REFUSAL IS A CLR SQLSTATE, AND NOTHING ELSE IS — v22's `isGovernedRefusalV22`,
- *  carried. Anything else is a fault this lane owns, not a sentence a person should read. */
+ *  carried, with `CLR44` subtracted for the reason above. A `CLR44` is therefore a FAULT here: the
+ *  caller gets its tool's own generic sentence and the door's words never reach a person. */
 export function isGovernedRefusalV23(code: unknown): boolean {
-  return typeof code === "string" && /^CLR\d{2}$/.test(code);
+  return typeof code === "string" && /^CLR\d{2}$/.test(code) && code !== NEVER_SHOWN_SQLSTATE;
 }
 
 /** A fault of this lane's own making. It carries no CLR code because the database did not refuse:
@@ -59,6 +75,44 @@ export function clientMismatchRefusalV23(reason: string, message: string, client
     message,
     details: { client_id: clientId },
   };
+}
+
+/** The four sentences one client-scoped tool needs for the two walls. Only these vary between the
+ *  six call sites; the control shape, the constructors and the rebinding do not. */
+export type ClientPinSentencesV23 = {
+  noPinReason: string;
+  noPinMessage: string;
+  mismatchReason: string;
+  mismatchMessage: string;
+};
+
+/** Either the client this act runs under, or the refusal that stopped it. */
+export type ClientPinV23 = { ok: true; clientId: string } | ToolRefusalV23;
+
+/**
+ * THE TWO WALLS, IN ORDER, ONCE — v21's provenance wall and v22's shape.
+ *
+ * The conversation is about a client at all, and the client the model named IS that client. This
+ * sequence stood SIX TIMES across `chatTurn.v23.reads.ts` and `chatTurn.v23.tenancy.ts`, byte for
+ * byte but for the four sentences, which is the exact shape this module's own header warns about
+ * one layer down: "a second copy of an envelope is how two tools in one version come to disagree
+ * about what a refusal looks like". A new client-scoping rule — an audit hook, a rate limit, a
+ * reordering — is one edit here rather than six, and the seventh client-scoped tool of this family
+ * inherits the order rather than copying it.
+ *
+ * IT RETURNS BEFORE ANY CREDENTIAL IS MINTED, which is what every call site's cell measures: a
+ * refusal from here has reached no door.
+ */
+export function requireClientPinV23(
+  ctx: { clientId: string | null },
+  inputClientId: string,
+  sentences: ClientPinSentencesV23,
+): ClientPinV23 {
+  if (!ctx.clientId) return noClientRefusalV23(sentences.noPinReason, sentences.noPinMessage);
+  if (inputClientId !== ctx.clientId) {
+    return clientMismatchRefusalV23(sentences.mismatchReason, sentences.mismatchMessage, inputClientId);
+  }
+  return { ok: true, clientId: ctx.clientId };
 }
 
 /**
