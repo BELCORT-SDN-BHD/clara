@@ -41,7 +41,7 @@ import {
 } from "./s6-fixtures.mjs";
 
 const STEM = "work_source_correction_rederivation$";
-const EXPECTED_CELLS = 10;
+const EXPECTED_CELLS = 12;
 const RUNTIME = "clara_runtime";
 
 let live = false;
@@ -222,6 +222,73 @@ cell("r1030.cosmetic.control: a REAL change to those same two fields still commi
   });
   assert.equal(day.facts_version, 3, "a different calendar day is a real correction and commits");
   noteLane("r1030.cosmetic.control: currency and date corrections still commit (facts_version 2 then 3)");
+});
+
+cell("r1030.cosmetic.ambiguous_day: a slash date whose meaning depends on DateStyle is NOT a canonical form, so correcting it to an ISO day COMMITS", async () => {
+  // ADV-C1-04 (cut-phase adversarial round). `03/05/2026` is 3 May on a Malaysian invoice and
+  // 5 March to a cluster whose DateStyle is MDY — which this one's is. The first cut parsed both
+  // sides with a bare `::date`, so the guard read the printed date as 5 March, told the bookkeeper
+  // correcting it to `2026-03-05` that "this revision does not change what the document is
+  // recorded as saying", and refused a real correction with no extraction, no revision row and no
+  // retirement. Worse, the verdict FLIPPED with the session's DateStyle: the same pair read as a
+  // real change under DMY.
+  //
+  // THE RULE NOW: a value is a calendar day only where its spelling means ONE day whatever the
+  // session says — an ISO `YYYY-MM-DD`, or a spelled-out month. Everything else falls through to
+  // the trimmed-text comparison, which is exactly what 0268 did before the widening, so the
+  // conservative direction is the one this takes: a correction is allowed through, never refused.
+  const s = await invoiceWithFacts({
+    client: A1(), totalCents: 61000, tag: "ambigday", currency: "MYR", invoiceDate: "03/05/2026",
+  });
+  const receipt = await reviseFact(KEEPER(), {
+    document: s.documentId, fieldPath: "invoice.invoice_date", value: "2026-03-05",
+    observedVersion: 1, reason: "#1030 rig: the page prints 03/05/2026 and it is 3 May",
+  });
+  assert.equal(receipt.facts_version, 2,
+    "an ambiguous printed date corrected to an unambiguous one is a REAL correction");
+
+  // …AND THE VERDICT DOES NOT MOVE WITH THE SESSION. Driven under all three orderings, which is
+  // the assertion the first cut could not have made.
+  for (const style of ["ISO, MDY", "ISO, DMY", "ISO, YMD"]) {
+    // A multi-statement simple query runs in ONE implicit transaction, so `set local` governs the
+    // select beside it and leaks to no pooled connection afterwards. node-postgres answers a
+    // multi-statement query with an ARRAY of results; the last one is the select.
+    const rs = await rootQuery(
+      `set local DateStyle = '${style}';
+       select clara._fact_value_changed('{"text":"03/05/2026"}'::jsonb,
+         '{"text":"2026-03-05"}'::jsonb, 'invoice.invoice_date') as changed`);
+    const last = Array.isArray(rs) ? rs[rs.length - 1] : rs;
+    assert.equal(last.rows[0].changed, true, `DateStyle ${style}: still a real change`);
+  }
+  // The two spellings that ARE one day whatever the session says still read as unchanged.
+  const same = await rootQuery(
+    `select clara._fact_value_changed('{"text":"2026-03-05"}'::jsonb,
+       '{"text":"5 March 2026"}'::jsonb, 'invoice.invoice_date') as changed`);
+  assert.equal(same.rows[0].changed, false, "ISO and a spelled month are still the same day");
+
+  noteLane("r1030.cosmetic.ambiguous_day: 03/05/2026 -> 2026-03-05 commits, and reads the same under MDY, DMY and YMD");
+});
+
+cell("r1030.cosmetic.currency_prose: a currency region carrying PROSE gets the text rule, not the ISO one", async () => {
+  // ADV-C1-06 (cut-phase adversarial round). The date arm is gated on both sides spelling a
+  // calendar day; the currency arm had no matching gate on both sides spelling an ISO 4217 code,
+  // so free text on that field was case-folded too — the opposite of the rule this file's own
+  // header states for a value with no canonical form.
+  const r = await rootQuery(
+    `select clara._fact_value_changed('{"text":"Ringgit Malaysia"}'::jsonb,
+              '{"text":"ringgit malaysia"}'::jsonb, 'invoice.currency') as prose,
+            clara._fact_value_changed('{"text":"MYR"}'::jsonb, '{"text":"myr"}'::jsonb,
+              'invoice.currency') as code,
+            clara._fact_value_changed('{"text":"MYR"}'::jsonb, '{"text":"SGD"}'::jsonb,
+              'invoice.currency') as other,
+            clara._fact_value_changed('{"text":"RM"}'::jsonb, '{"text":"rm"}'::jsonb,
+              'invoice.currency') as two_letter`);
+  const o = r.rows[0];
+  assert.equal(o.prose, true, "prose has no canonical form: re-casing it is a real correction");
+  assert.equal(o.code, false, "…and a three-letter code is still folded, which is the rule");
+  assert.equal(o.other, true, "…and a different code is still a change");
+  assert.equal(o.two_letter, true, "a two-letter symbol is not an ISO 4217 code");
+  noteLane("r1030.cosmetic.currency_prose: the ISO fold applies to a three-letter code and to nothing else");
 });
 
 cell("r1030.cosmetic.text: a re-cased value the estate keeps as TEXT is a REAL correction, kept on purpose — the document's own spelling is the fact", async () => {

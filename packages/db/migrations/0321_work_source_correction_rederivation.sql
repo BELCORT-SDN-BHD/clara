@@ -209,6 +209,13 @@ begin
   -- refusal: hosted carries such rows, a freshly seeded rig does not, and neither state is wrong.
   select count(*)::int into v_n from clara.op_receipts
    where fn = 'cancel_accounting_work' and op_key like 'source\_corrected:%';
+  -- (0.6) THE MODE, HANDED TO §TAIL. 0115's `_fa5pr2d_pre` idiom: a tail assertion about what this
+  -- FILE wrote cannot be stated on a redo, because between the first apply and the redo a rig runs
+  -- the battery and the lane writes real settlements. `on commit drop` so the row cannot outlive
+  -- this migration's own transaction and be read by a later file in the same runner session.
+  create temporary table _r1030_mode (mode text) on commit drop;
+  insert into _r1030_mode values (v_mode);
+
   raise notice '#1030 prestate: clean — mode %, 0268 cohort present, 16 neighbour bodies byte-identical, % source-corrected cancellation receipt(s) on this rig', v_mode, v_n;
 end
 $r1030_pre$;
@@ -219,16 +226,37 @@ set role clara_fn_owner;
 -- §A — THE TYPED NO-OP NOTION. Two new bodies; 0268's own two-argument notion is UNTOUCHED.
 -- =====================================================================================
 
--- A CALENDAR DAY, OR NULL, AND IT NEVER RAISES.
+-- A CALENDAR DAY, OR NULL, AND IT NEVER RAISES — AND IT MEANS THE SAME DAY IN EVERY SESSION.
 --
 -- `::date` accepts every spelling PostgreSQL accepts (`2026-03-05`, `5 March 2026`, `March 5,
 -- 2026`) and RAISES on everything else, so the cast has to be caught rather than guarded — a
--- regex that tried to predict which strings cast would be a second, weaker parser. STABLE rather
--- than IMMUTABLE because the cast reads `DateStyle`; that is also why this is a separate body,
--- so 0268's immutable two-argument notion can stay exactly what it is.
+-- regex that tried to predict which strings cast would be a second, weaker parser.
+--
+-- THE `DateStyle` CLAUSE IS THE LOAD-BEARING LINE, and it was missing from the first cut (found by
+-- the cut-phase adversarial round, ADV-C1-04). A Malaysian invoice prints `03/05/2026` for 3 May;
+-- this cluster's DateStyle is `ISO, MDY`, under which the bare cast read that as 5 March. The
+-- bookkeeper correcting the region to `2026-03-05` — a real correction of a genuinely ambiguous
+-- printed date — was then told "this revision does not change what the document is recorded as
+-- saying", and nothing was written: no extraction, no revision row, no retirement. Under `DMY` the
+-- same pair read as a real change, so the guard's verdict depended on a session setting.
+--
+-- PINNED TO `ISO, YMD`, the parser answers a day only where the spelling means ONE day whatever a
+-- session says: an ISO `YYYY-MM-DD` (the year is unambiguous at four digits) or a spelled-out
+-- month. `03/05/2026`, `03-05-2026` and `05.03.2026` all RAISE under YMD and are therefore NULL
+-- here — so `clara._fact_value_changed(jsonb,jsonb,text)` falls through to the trimmed-text
+-- comparison, which is exactly what 0268 answered before the widening. The conservative direction
+-- is deliberate: this guard may let a cosmetic edit through, and it may never refuse a real one.
+-- Measured on `clara_l01` across all three orderings before the clause was written.
+--
+-- STILL STABLE rather than IMMUTABLE. The clause makes the answer session-independent in practice,
+-- but the cast it wraps is catalogued STABLE and this body does not claim to know better; nothing
+-- indexes it. That is also why this is a separate body, so 0268's immutable two-argument notion
+-- can stay exactly what it is.
 create or replace function clara._fact_calendar_day(p_text text)
   returns date
-  language plpgsql stable set search_path = clara, pg_temp as $$
+  language plpgsql stable
+  set search_path = clara, pg_temp
+  set DateStyle to 'ISO, YMD' as $$
 begin
   if p_text is null or btrim(p_text) = '' then return null; end if;
   begin
@@ -241,16 +269,26 @@ revoke all on function clara._fact_calendar_day(text) from public;
 comment on function clara._fact_calendar_day(text) is
   '#1030: the CALENDAR DAY a fact value spells, or NULL when it spells none. Exception-safe by '
   'construction -- it exists so clara._fact_value_changed(jsonb,jsonb,text) can ask "is this the '
-  'same day, differently spelled?" without a second, weaker date parser.';
+  'same day, differently spelled?" without a second, weaker date parser. DateStyle is PINNED to '
+  'ISO, YMD, so it answers a day only for a spelling that means ONE day in every session (an ISO '
+  'date or a spelled-out month); an ambiguous slash or dot date answers NULL and falls through to '
+  'the text rule rather than being read as whichever day the session happens to prefer.';
 
 -- DOES A FACT REVISION CHANGE THE RECORDED VALUE, GIVEN THE FIELD IT IS ON?
 --
 -- THE RULE IS PER FIELD AND THE TEST IS WHETHER THE ESTATE HAS A CANONICAL FORM (this file's
 -- header states the decision and its reasoning in full):
 --   · both sides carry cents        -> the CENTS            (0268's rule, by delegation)
---   · invoice.currency              -> the ISO 4217 CODE, case-insensitively
---   · invoice.invoice_date          -> the CALENDAR DAY, when both sides spell one
+--   · invoice.currency              -> the ISO 4217 CODE, case-insensitively, WHEN BOTH SIDES
+--                                      SPELL ONE (three letters and nothing else)
+--   · invoice.invoice_date          -> the CALENDAR DAY, when both sides spell one UNAMBIGUOUSLY
 --   · anything else                 -> clara._fact_value_changed(jsonb,jsonb), UNCHANGED
+--
+-- BOTH CANONICAL ARMS ARE GATED ON BOTH SIDES, and the currency gate was missing from the first
+-- cut (cut-phase adversarial round, ADV-C1-06): a currency region carrying PROSE ("Ringgit
+-- Malaysia") was case-folded too, which is the opposite of the rule stated above it for a value
+-- with no canonical form. ISO 4217 defines a THREE-LETTER code; anything else on that field is
+-- text, and the recorded text is the fact.
 --
 -- A NULL `p_field_path` IS THE TWO-ARGUMENT ANSWER, so a caller that does not know the field can
 -- never accidentally get the widened one.
@@ -261,6 +299,8 @@ create or replace function clara._fact_value_changed(p_prior jsonb, p_new jsonb,
     when p_prior is null or p_new is null then true
     when (p_prior ? 'cents') and (p_new ? 'cents') then clara._fact_value_changed(p_prior, p_new)
     when p_field_path = 'invoice.currency'
+         and btrim(coalesce(p_prior->>'text', '')) ~ '^[A-Za-z]{3}$'
+         and btrim(coalesce(p_new->>'text', '')) ~ '^[A-Za-z]{3}$'
       then upper(btrim(coalesce(p_prior->>'text', ''))) is distinct from upper(btrim(coalesce(p_new->>'text', '')))
     when p_field_path = 'invoice.invoice_date'
          and clara._fact_calendar_day(p_prior->>'text') is not null
@@ -272,7 +312,8 @@ $$;
 revoke all on function clara._fact_value_changed(jsonb,jsonb,text) from public;
 comment on function clara._fact_value_changed(jsonb,jsonb,text) is
   '#1030: does a fact revision CHANGE the recorded value, given the FIELD it is on? The cents '
-  'when both sides carry them, the ISO 4217 code for invoice.currency, the calendar day for '
+  'when both sides carry them, the ISO 4217 code for invoice.currency WHEN BOTH SIDES SPELL A '
+  'THREE-LETTER CODE, the unambiguous calendar day for '
   'invoice.invoice_date, and otherwise clara._fact_value_changed(jsonb,jsonb) unchanged -- a '
   'field the estate keeps as TEXT has no canonical form, so its recorded spelling IS the fact. '
   'The ONE notion clara.revise_document_fact refuses a no-op with and '
@@ -913,6 +954,37 @@ begin
     raise exception '#1030 §TAIL: an unparseable date replaced by a real one reads as unchanged'
       using errcode = 'CLR10';
   end if;
+  -- AN AMBIGUOUS PRINTED DATE IS NOT A CANONICAL FORM (ADV-C1-04). `03/05/2026` is 3 May on a
+  -- Malaysian invoice and 5 March under this cluster's MDY, so correcting it to an ISO day is a
+  -- REAL correction and refusing it would be refusing the only edit the person wanted to make.
+  if not clara._fact_value_changed('{"text":"03/05/2026"}'::jsonb, '{"text":"2026-03-05"}'::jsonb,
+                                   'invoice.invoice_date') then
+    raise exception '#1030 §TAIL: an ambiguous slash date corrected to an ISO day reads as unchanged'
+      using errcode = 'CLR10';
+  end if;
+  if not clara._fact_value_changed('{"text":"03/05/2026"}'::jsonb, '{"text":"2026-05-03"}'::jsonb,
+                                   'invoice.invoice_date') then
+    raise exception '#1030 §TAIL: the mirror correction of the same ambiguous date reads as unchanged'
+      using errcode = 'CLR10';
+  end if;
+  -- …AND THE ISO ARM IS NOT WEAKENED: the two spellings that mean one day in every session still
+  -- read as the same day, which is what makes the gate a gate rather than a retreat.
+  if clara._fact_value_changed('{"text":"2026-3-5"}'::jsonb, '{"text":"March 5, 2026"}'::jsonb,
+                               'invoice.invoice_date') then
+    raise exception '#1030 §TAIL: an unpadded ISO day and a spelled month read as different days'
+      using errcode = 'CLR10';
+  end if;
+  -- A CURRENCY REGION CARRYING PROSE GETS THE TEXT RULE (ADV-C1-06). ISO 4217 defines a
+  -- three-letter code; a field spelling anything else has no canonical form on this lane.
+  if not clara._fact_value_changed('{"text":"Ringgit Malaysia"}'::jsonb,
+                                   '{"text":"ringgit malaysia"}'::jsonb, 'invoice.currency') then
+    raise exception '#1030 §TAIL: re-casing currency PROSE reads as unchanged — the ISO fold is for a code'
+      using errcode = 'CLR10';
+  end if;
+  if not clara._fact_value_changed('{"text":"RM"}'::jsonb, '{"text":"rm"}'::jsonb, 'invoice.currency') then
+    raise exception '#1030 §TAIL: a two-letter symbol was folded as though it were an ISO 4217 code'
+      using errcode = 'CLR10';
+  end if;
   -- MONEY still goes through 0268's own cents rule whatever the field name says.
   if clara._fact_value_changed('{"text":"RM 880.00","cents":88000}'::jsonb,
                                '{"text":"880.00","cents":88000}'::jsonb, 'invoice.total') then
@@ -927,8 +999,18 @@ begin
     raise exception '#1030 §TAIL: clara._fact_calendar_day answered a date for a non-date'
       using errcode = 'CLR10';
   end if;
-  if clara._fact_calendar_day('5 March 2026') <> date '2026-03-05' then
-    raise exception '#1030 §TAIL: clara._fact_calendar_day does not read a spelled-out day'
+  if clara._fact_calendar_day('5 March 2026') <> date '2026-03-05'
+     or clara._fact_calendar_day('2026-03-05') <> date '2026-03-05' then
+    raise exception '#1030 §TAIL: clara._fact_calendar_day does not read a spelled-out or ISO day'
+      using errcode = 'CLR10';
+  end if;
+  -- …AND IT ANSWERS NOTHING FOR A SPELLING WHOSE MEANING DEPENDS ON THE SESSION (ADV-C1-04). The
+  -- `set DateStyle` clause is what makes this true; without it these three answered a day, and
+  -- WHICH day moved with the session.
+  if clara._fact_calendar_day('03/05/2026') is not null
+     or clara._fact_calendar_day('03-05-2026') is not null
+     or clara._fact_calendar_day('05.03.2026') is not null then
+    raise exception '#1030 §TAIL: clara._fact_calendar_day read an AMBIGUOUS date as a day'
       using errcode = 'CLR10';
   end if;
 
@@ -1026,11 +1108,21 @@ begin
   -- claims a link, declines a re-derivation, or moves a Work that a person has not been told
   -- about. A correction retired before this migration stays exactly where 0268 left it until the
   -- runtime lane reaches it.
+  --
+  -- ON A REDO THE CLAIM IS UNSTATEABLE, and saying so is better than a check that reds for the
+  -- wrong reason. Between the first apply and a redo of an unmerged file a rig RUNS the battery,
+  -- and the lane then legitimately holds settlements this file did not write. The count is
+  -- reported instead, so a reader still sees it. A from-scratch chain — the one the integrator
+  -- runs, and the only one that can state this — always takes the FIRST APPLY branch.
   select count(*)::int into v_n from clara.op_receipts
    where fn = 'source_correction_rederivation';
-  if v_n <> 0 then
-    raise exception '#1030 §TAIL: % settlement receipt(s) exist at apply — this file settles nothing',
-      v_n using errcode = 'CLR10';
+  if (select m.mode from _r1030_mode m) = 'FIRST APPLY' then
+    if v_n <> 0 then
+      raise exception '#1030 §TAIL: % settlement receipt(s) exist at apply — this file settles nothing',
+        v_n using errcode = 'CLR10';
+    end if;
+  else
+    raise notice '#1030 §TAIL: redo — % settlement receipt(s) on this rig, written by the battery rather than by this file', v_n;
   end if;
 
   raise notice '#1030 §TAIL: clean — both recut bodies reverse to their pinned pre-images, the two-argument notion is untouched, the typed rule answers all four arms, and the lane is three clara_runtime doors over one ungranted builder';
