@@ -342,6 +342,7 @@ e2e/settle-before-scan-census.test.ts
 e2e/sign-in-census.test.ts
 e2e/spec-discovery.test.ts
 lib/accruals/api.test.ts
+lib/accruals/use-accruals-register.test.ts
 lib/bank/agency-doors.test.ts
 lib/bank/citation.test.ts
 lib/bank/doors.test.ts

@@ -192,28 +192,50 @@ test("942.list.side — each row names its side and prints its two legs in POSTI
   );
 });
 
-test("942.list.filter — the register can be narrowed to one side, and says so rather than looking empty", async () => {
-  await withMockedEnv(
-    rpcRouter({ list_accrual_adjustments: { client_id: CLIENT, accruals: [ROW, REVENUE_ROW] } }),
-    async () => {
-      const h = await renderComponent(app(createElement(AccrualsList, { clientId: CLIENT })));
-      try {
-        for (let i = 0; i < 6; i++) await h.settle();
-        const filter = h.find((n) => (n as { getAttribute?: (k: string) => string | null })
-          .getAttribute?.("id") === "accruals-side-filter");
-        assert.ok(filter, "the register offers a side filter");
-        await h.fireEvent(filter, "change", (n) => setFieldValue(n, "revenue"));
-        for (let i = 0; i < 3; i++) await h.settle();
-        const text = h.text();
-        assert.match(text, /Unbilled advisory fees/);
-        assert.doesNotMatch(text, /Monthly office rent accrual/,
-          "the expense accrual is filtered out, not hidden behind a scroll");
-      } finally {
-        await h.unmount();
-        for (let i = 0; i < 3; i++) await h.settle();
-      }
-    },
-  );
+// #1152 — THE FILTER IS NOW A SERVER ROUND TRIP, NEVER A BROWSER-SIDE NARROWING (the pre-#1152
+// version of this cell drove `rpcRouter`'s single static answer and asserted on what the
+// component narrowed LOCALLY; that claim no longer holds — the component renders exactly the
+// rows the door hands it). This router answers per `p_side`, so the assertion below can only pass
+// if the SECOND read genuinely reached the server with `p_side: "revenue"` and the server did the
+// narrowing.
+test("942.list.filter — the register can be narrowed to one side, and the narrowing is a SERVER round trip, not a component-side filter", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const sideAwareRouter = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+    if (!url.includes("/rpc/list_accrual_adjustments")) return jsonResponse({ message: `unmocked ${url}` }, 404);
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    bodies.push(body);
+    const side = body.p_side ?? null;
+    const rows = side === "revenue" ? [REVENUE_ROW] : side === "expense" ? [ROW] : [ROW, REVENUE_ROW];
+    return jsonResponse({ client_id: CLIENT, from: null, to: null, side, accruals: rows, next_cursor: null });
+  }) as typeof fetch;
+
+  await withMockedEnv(sideAwareRouter, async () => {
+    const h = await renderComponent(app(createElement(AccrualsList, { clientId: CLIENT })));
+    try {
+      for (let i = 0; i < 6; i++) await h.settle();
+      assert.equal(bodies.length, 1, "one read on mount");
+      assert.equal(bodies[0]?.p_side, null, "the first read asks for every side, no filter set yet");
+      assert.match(h.text(), /Unbilled advisory fees/);
+      assert.match(h.text(), /Monthly office rent accrual/);
+
+      const filter = h.find((n) => (n as { getAttribute?: (k: string) => string | null })
+        .getAttribute?.("id") === "accruals-side-filter");
+      assert.ok(filter, "the register offers a side filter");
+      await h.fireEvent(filter, "change", (n) => setFieldValue(n, "revenue"));
+      for (let i = 0; i < 3; i++) await h.settle();
+
+      assert.equal(bodies.length, 2, "changing the side control makes a SECOND round trip to the door");
+      assert.equal(bodies[1]?.p_side, "revenue", "…carrying the newly selected side to the server");
+      const text = h.text();
+      assert.match(text, /Unbilled advisory fees/);
+      assert.doesNotMatch(text, /Monthly office rent accrual/,
+        "the expense accrual is gone because the SERVER excluded it from the answer, not a component-side filter");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 3; i++) await h.settle();
+    }
+  });
 });
 
 // ==============================================================================================

@@ -655,17 +655,26 @@ export async function handleAccrualSupabase(request, response, path, url, sendJs
 
   if (verb === "list_accrual_adjustments") {
     if (body.p_client === ACC.otherClientId) {
-      sendJson(response, 200, { client_id: ACC.otherClientId, from: null, to: null, accruals: [] }, cors);
+      sendJson(response, 200, { client_id: ACC.otherClientId, from: null, to: null, side: null, accruals: [], next_cursor: null }, cors);
       return true;
     }
     if (body.p_client !== ACC.clientId) return false;
-    // THE WINDOW IS THE DATABASE'S FILTER, and the mock applies it for the same reason it models
-    // the refusal: the surface's behaviour is written against a filtered answer.
+    // THE WINDOW AND THE SIDE ARE THE DATABASE'S FILTERS, and the mock applies both for the same
+    // reason it models the refusal: the surface's behaviour is written against a filtered
+    // answer. #1152 — the side control is now a SERVER round trip (accrual-walk.spec.ts's own
+    // "AND IT NARROWS TO ONE SIDE" cell drives exactly this), never a browser-side narrowing of
+    // a fully-read list.
     const from = typeof body.p_from === "string" ? body.p_from : null;
     const to = typeof body.p_to === "string" ? body.p_to : null;
+    const side = typeof body.p_side === "string" ? body.p_side : null;
     const rows = LIST().filter(
-      (r) => (from === null || r.effective_from >= from) && (to === null || r.effective_from <= to));
-    sendJson(response, 200, { client_id: ACC.clientId, from, to, accruals: rows }, cors);
+      (r) => (from === null || r.effective_from >= from) && (to === null || r.effective_from <= to)
+        && (side === null || r.side === side));
+    // Pagination itself is not this lane's subject (no walk here exceeds a page), so the mock
+    // answers everything that matched in one page and never emits a next_cursor: a caller that
+    // sent a limit would just see an unbounded answer, the same shape a real database gives an
+    // unpaginated caller.
+    sendJson(response, 200, { client_id: ACC.clientId, from, to, side, accruals: rows, next_cursor: null }, cors);
     return true;
   }
 

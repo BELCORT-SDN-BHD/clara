@@ -44,9 +44,12 @@ import { useAsyncRead } from "@/lib/firm/use-async-read";
 export function PlanReviseForm({ clientId, planId }: { clientId: string; planId: string }) {
   const t = useTranslations("Plans");
   const plan = useAsyncRead(() => loadPlan(planId));
+  // #1152 — UNPAGED, DELIBERATELY: no `page` argument reads every accrual of the client
+  // (`lib/accruals/api.ts`'s own header), which this read needs — it is looking for the ONE
+  // accrual bound to THIS plan, and a first page alone could miss it entirely.
   const accruals = useAsyncRead(() => loadAccruals(clientId));
   const row = plan.data;
-  const backingAccrual = row === null ? null : liveAccrualForPlan(accruals.data ?? [], row.plan_id);
+  const backingAccrual = row === null ? null : liveAccrualForPlan(accruals.data?.accruals ?? [], row.plan_id);
 
   return (
     <DataState
