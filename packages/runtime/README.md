@@ -954,6 +954,18 @@ cannot park the run instead. See *Why the boot census is the ONLY guard* above (
 predecessor image, admits Work to it, stops it, releases this tree's build, admits Work to the
 successor, and resumes the first Work on its ORIGINAL body inside the second image, with two
 distinct bundle digests and one receipt each. It is wired into the per-PR `db-live-gates` job.
+
+**Its own CLI-level leg is what proves the exit code, not only the object.** Everything above this
+paragraph proves `preflight()`'s object shape; a release script reads an exit code and stderr, and
+those are a SEPARATE thing to get right (the CLI's own arg parsing, its `--supported` /
+`--supported-contracts` doors, its refusal-line rendering). The drill spawns
+`scripts/rollback-preflight.mjs` as a real subprocess and asserts its real exit code for BOTH rule
+kinds: a pre-`claraWork_v3` roster exits 1 naming `frontier_requires_body` (#637), and — since
+#1131 — a roster that carries every required body but declares NO contract at all exits 1 naming
+`frontier_requires_contract` for both `0254_intake_refusal_record` and `0279_fa_closed_year_arrears`.
+Before #1131 the second proof existed only as a hand-run invocation against a disposable WDK World
+clone, on nobody's schedule; now it runs on every PR, through the same `db-live-gates` job as the
+body-rule leg.
 <!-- #794 -->
 **Since #794 it has a SECOND leg, on the lane that has no Work row.** The same file builds a second
 scratch image with `className: "chatTurn"` and its own scratch-image `name`, derives
