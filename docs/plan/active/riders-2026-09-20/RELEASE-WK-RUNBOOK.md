@@ -1028,61 +1028,242 @@ check existed to prove the successor set was EMPTY; here, it exists to prove it 
 
 ---
 
-## § RESULTS (as run, ____-__-__, UTC)
+## § RESULTS (as run, 2026-09-26, UTC)
 
-**Authority.** _(the owner's riders plan of 2026-09-20, the release-ownership ruling of 2026-09-17,
-and the beta ruling that hosted users and data are test data - #826, 2026-09-15, `ARCHITECTURE.md`
-§5.F. Record whether "owner says go" was captured in-session or only asserted by gate 0a's
-checklist.)_
+**Authority.** The owner's riders plan of 2026-09-20 (each wave ends with its hosted release and the
+tickets close on hosted evidence), the release-ownership ruling of 2026-09-17, and the beta ruling
+that hosted users and data are test data (#826, 2026-09-15, carried in `ARCHITECTURE.md` §5.F).
+"Owner says go" is gate 0a's own checklist item; no separate go/no-go capture exists among this
+window's named logs, so it is recorded here as asserted by the checklist rather than independently
+verified, the same disclosure the sweep wave's own RESULTS made.
 
-**Gates 0a.** _(RELEASE_SHA, tree clean, `ci` SUCCESS, the `--plan` gate's exit code and its four
-counts, the freeze-lint's 362/62/3 and its `--compare-base` line, the selftest, parts-parity, the
-registry-view cell, the web rollback lever's pre-window listing, gate C's two-build drill verdict.)_
+**Gates 0a.** `main` = RELEASE_SHA = `111196753305886a0891560ca122adca5d6d6991` (PR #1154, merge of
+`integration/riders-closing`), tree clean at RELEASE_SHA (`prep.log`). `--plan` gate exit=0: pending
+set is exactly the 4 files above the frontier (`0362_standing_instruction_agent_read`,
+`0363_payroll_posting_state_read`, `0364_plan_reservation_namespace_obo_fold`,
+`0365_accrual_register_pagination`), frozen manifest **362 entries, 15 UNLOCKED (deployed:false)**
+covering `chatTurn_v23` and `claraWork_v7`, matching main's own reading and unchanged at every
+pre-lock read in this window (`prep.log`, `reads-pre.log`, and `window.log`'s own post and cut-only
+prints all still read 15 UNLOCKED, as expected since step 11a's lock only runs after the image is
+live). Registry-view cell: **# pass 7 # fail 0**. Two baseline exports, both **CLEAN**:
+`fp-wK-hosted.json` from `clara_intS6` at **337** (11457 structural keys, hash `551cb413598f1b67`)
+and `fp-wK-upg.json` from `clara_w4_hosted` at **341** (11459 structural keys, hash
+`aa9befaf5d78f842`). **`ci` SUCCESS, the freeze-lint `--compare-base` line, the selftest,
+parts-parity and gate C's two-build drill are not captured among this window's named pre-window
+logs**, so they are not independently confirmed here; the only freeze-lint reading this window has
+evidence for is step 11a's own, taken after the image is live (see Step 11). Step 1's `fly auth
+whoami` is likewise not captured as its own log; every fly call across this window
+(`probe-create.log`, `step7.log`, `web-promote.log`, `probe-prev-create.log`) succeeded under one
+session and `step7.log` reads exactly one machine before and after.
 
-**Step 1.** _(fly identity, machine count, checks.)_
+**Step 1.** Not separately logged this window (see Gates 0a).
 
-**Step 2.** _(probe id, image, digest, state. Note whether the positional `sleep infinity` form was
-needed, as the factory reset found.)_
+**Step 2.** Probe `2872127c1e4d58` created on `refresh-322fdf29`
+(`registry.fly.io/clara-runtime@sha256:20ab8c8352fd4372f1c8a6f50f2f163f742e92c65c7fa6dc1f227435a608344f`,
+265 MB), state `created` then started (`probe-create.log`). Nothing in `probe-create.log` names the
+positional `sleep infinity` form, so whether it was needed again is not re-demonstrated by this log.
 
-**Step 3, pre-window reads.** _(times, server identity and COLLATION, ledger, drift gate, pending
-set, PARSE GAP count; the fingerprint's keys/equal/env and the env-line count against the post-reset
-estate; the pin ledger's 22 of 22 and the arm distribution; each of the ten hand checks, naming
-D-ROLE-REACH's reading, D-DROPPED-DOOR's overload count and D-MACHINE-LANE-GRANTS' role roster; the
-run census and the quiescence census; the verdict.)_
+**Step 3, pre-window reads (06:07:19Z to 06:07:30Z, `reads-wK.mjs --pre --prod`, `reads-pre.log`).**
+Server `db=postgres port=5432`, PostgreSQL 17.6, `en_US.UTF-8`; every one of this wave's 22 pins
+uses `convert_to(...,'UTF8')` rather than the `prosrc::bytea` recipe the sweep wave met a `22P02`
+on, measured rather than assumed. Ledger **337 / `0361_reservation_release_advice`**, drift gate
+337/337, pending set exactly the 4 files above the frontier, nothing missing below it. Estate
+fingerprint vs the rig baseline: **11466 keys compared, 11450 equal, 16 env lines**, the same
+role-level Supabase-managed facts every wave since the sweep has met, plus one new one this window:
+`role:clara_storage_docs` and its `rolemember` grants read `<absent>` on the rig baseline because
+that role postdates the baseline capture, not because anything is wrong. **Pin ledger: 22 of 22
+measurable body pins at a value their own file admits, 0 CHAIN-INTERNAL, 0 NEWBORN**; arm
+distribution hoisted=1, roster=14, scalar=7; **0 of the 22 are BIMODAL**, a simpler reading than the
+sweep's 11 of 145. The ten hand checks, all **ok** except the two `note`-only ones:
+**D-WAVE-PREMISE** (6 of 6 present), **D-CHAIN-PREREQUISITE** (both rows found, 1 each, for
+`0336_revenue_recognition_plan_op_key` and `0353_tenancy_agent_twins_obo_confirmations`),
+**D-WAVE-MINTED-NAMES** (both of the 2 new names resolve to nothing today, confirming neither recuts
+an existing body), **D-REDO-MARKERS** (`note` only: 0362/0363/0364's own attribution tags each read
+0, i.e. FIRST APPLY; 0365's five substrings read `#1075`=1, `accrual_cursor_malformed`=0,
+`next_cursor`=4, `p_cursor`=6, `p_side`=1, all matches on unrelated bodies elsewhere in the schema
+rather than a REDO signal for the body 0365 replaces), **D-ROLE-REACH** (`current_user=postgres`,
+not a superuser, `clara_fn_owner exists=true MEMBER=true USAGE=true`, so every `set role
+clara_fn_owner` this wave takes is covered; re-taken fresh per the runbook's own warning that the
+factory reset re-minted the role census), **D-DROPPED-DOOR** (1 overload of
+`clara.list_accrual_adjustments` resolves today, the dropped four-argument target among them),
+**D-HUMAN-DOOR-SIGNATURES** (`note` only: the 3 doors this wave grants `clara_authenticated` named,
+their pre-image ACLs read), **D-OPKEY-NAMESPACE** (four readings: 2 bodies already derive
+`:rrplan` outside this wave's own set, 0 derive `:acplan`/`:acrev`/`:tnplan`, matching the file's own
+expectation of a clean namespace for the three new suffixes), **D-WAKE-ALLOWLIST** (the 1 row this
+wave inserts is absent today, allowlist would go 114 to 115), **D-MACHINE-LANE-GRANTS** (the 1
+EXECUTE grant this wave hands `clara_agent_ro` is not already held; 21 `clara%` roles present, the
+same roster the sweep read). Body census: 0 non-terminal `workflow_runs`, 0 stranded, no successor
+body introduced yet; `chatTurn_v23=0, claraWork_v7=0` as of 06:07:30.203Z. Quiescence census: no F10
+holder, no lock on `wake_fn_allowlist`, 11 idle `clara_runtime_login` sessions, and every other
+watched relation reads `(none)`, including `document_processing_tasks`, whose long-known
+`statement_facts` orphan row (carried since 2026-09-19 across every prior runbook) **no longer
+exists**: the factory reset erased it along with everything else row-shaped. **Verdict CLEAN.**
 
-**Step 3f, backup.** _(times, artefact path, byte count, sha256; whether the CA-path workaround was
-still needed on the direct host; how much smaller the dump is than the pre-reset one.)_
+**Step 3f, backup.** The first attempt over the direct host failed outright: `backup.log` shows
+`connect ENETUNREACH` on the direct host's IPv6 address, because WSL2 has no IPv6 route there, a
+different failure from the earlier waves' TLS/CA gap. The second attempt, `pooler-wrap.sh` over the
+shared pooler, succeeded: full dump of `clara, graphile_worker, workflow, workflow_drizzle`,
+artefact `clara-clara-graphile-worker-workflow-workflow-drizzle-2026-09-26T06-06-39-908Z.sql`,
+**9,320,527 bytes**, plus globals `clara-globals-2026-09-26T06-07-10-682Z.sql` (`backup2.log`). This
+is about 4% the size of the sweep wave's 221,258,058-byte dump, consistent with the factory-reset
+estate's near-empty tables rather than any dump defect. **The CA-path workaround is still needed,
+but for a new reason this window**: not the earlier TLS certificate gap it was built for, but the
+direct host's own unreachability from WSL2; the backup path and the runtime's own connection path
+(which dials the direct host directly, see Steps 6-11 and `RIG.md`) have diverged since the factory
+reset, and this window is the first evidence of it.
 
-**Steps 4 and 5, before the window.** _(image tag and digest, size, build times and any source-map
-noise; web Worker version id, tag, build sha, upload time. Not promoted.)_
+**Steps 4 and 5, before the window.** Runtime image `refresh-11119675` =
+`sha256:a3a07a992b60208a4fe5e5a1cc26cb9a93a36c9b5fd84e69173f61632a062394` (265 MB, unchanged size),
+built 06:05:51Z to 06:08:25Z from a detached checkout at RELEASE_SHA (`prep.log`, `image-build.log`).
+The build log carries the same three benign `ERROR failed to read input source map` lines from
+`@ai-sdk/openai`/`@ai-sdk/gateway`/`@ai-sdk/provider-utils` the sweep wave met, plus one new benign
+line this window: a Serde warning that several Gateway/OpenAI model classes have "No class
+registration IIFE was generated" for `WORKFLOW_SERIALIZE`/`WORKFLOW_DESERIALIZE`; the build still
+exited 0 and pushed the manifest, so both read as dependency noise rather than a build defect. Web
+Worker version `cb003d14-9239-4653-b289-7c8a0faa7f6a`, tag `refresh-11119675`, built at
+`HEAD=111196753305886a0891560ca122adca5d6d6991`, `porcelain=[]`, created 06:08:16.856Z, uploaded
+(`web-build.log`, `web-promote.log`'s own `Created:` stamp), not promoted.
 
-**Step 6, the window.** _(6a stop times; 6b census; 6c migrate times and the `4 new … 341 total`
-line, with each file's prestate and tail notice quoted; 6d the ledger reading and which branch.)_
+**Step 6, the window.** 6a: `machine stop 48ee715b763048` 06:08:38Z, `stopping` 06:08:41Z, `stopped`
+06:08:47Z. 6b: census through the probe (06:08:47Z, `census-6b.log`): **CLEAN**: no F10 holder, no
+lock on `wake_fn_allowlist`, 0 non-terminal `workflow_runs`, every watched relation `(none)`
+(runtime sessions also read `(none)`, because the machine was already stopped), `chatTurn_v23=0,
+claraWork_v7=0` reconfirmed at 06:08:52.391Z. 6c: `migrate.mjs` through the probe DSN, 06:08:53Z to
+06:09:14Z (21 s for 4 files): **`migrate: 4 new migration(s) applied · 341 total`**, all 4 files on
+their FIRST-APPLY branch, every prestate and tail notice OK, no CLR, no lock wait, no `55P03`, no
+`42501`, no `22P02`. The notices worth naming: 0362 `read door FIRST, withdraw door FIRST`, tail
+confirming the model lane can ask what a firm has instructed and a withdrawal reports how many plans
+keep posting without granting anybody a way to act; 0363's read door FIRST APPLY, its internal
+verdict still nobody's to call; 0364's `6 FIRST, 0 REDO` across the six lane cores it recuts, tail
+confirming the accrual and tenancy lanes hold namespaces of their own and the third on-behalf-of plan
+step is now a caller rather than a fourth snapshot; 0365 (`#1152`)'s prestate reading the single
+starting shape of `clara.list_accrual_adjustments` (four-argument, pre-page, `#1075`/`0334`) and its
+tail confirming the door resolves exactly once at six arguments, the four-argument overload gone
+rather than left resolvable, both refusal codes present, and every existing arm surviving
+byte-for-byte. 6d: ledger **337 + 4 = 341 / `0365_accrual_register_pagination`**: branch (ii), drive
+forward.
 
-**Post reads.** _(times, ledger arithmetic, checksum rows, drift gate, fingerprint vs the upgraded
-baseline, and section (f) lane by lane including the two #1147 rulings' readings and the suffix
-census.)_
+**Post reads (06:09:14Z to 06:09:24Z, `reads-wK.mjs --post --prod`, `reads-post.log`).** Ledger
+337 + 4 = 341 at 0365, all 4 new rows at their file checksum, drift gate 341/341 clean. Fingerprint
+vs the UPGRADED baseline: **11468 keys, 11452 equal, 16 env lines** (the same set as pre-window, plus
+`clara_storage_docs`). Section (f), read through the probe while the machine was still stopped: the
+1 wake-allowlist row this wave writes is present, allowlist now **115**; the 1 machine-lane EXECUTE
+grant (`clara.wake_get_firm_standing_instruction`) at exactly `clara_fn_owner=X/clara_fn_owner
+clara_agent_ro=X/clara_fn_owner` and nothing beyond; the 3 human doors this wave grants
+`clara_authenticated` (`get_payroll_posting_state`, `list_accrual_adjustments`,
+`withdraw_firm_standing_instruction`) all SECURITY DEFINER, owned by `clara_fn_owner`, pinned
+`search_path=clara, pg_temp`. **The two `#1147` rulings both read as recorded rather than as
+defects**: the deferred-revenue asymmetry (the prepayment core's closed lane set carries `wake`,
+the revenue core's does not, and no wake wrapper exists for the revenue side) and the withdraw
+door's receipt now carrying `plans_still_posting` while what withdrawal does to a plan stays
+unchanged. The reservation-namespace census, suffix by suffix (`#1150`): `:acplan` 1
+(`create_accrual_adjustment`), `:acrev` 1 (`correct_accrual_adjustment`), `:end` 1, `:plan` 2,
+`:revise` 1, `:rrplan` 2, `:tnplan` 1, one lane per namespace as the file claims; **nothing is
+back-filled**, every suffix's receipts-spent count reads 0. `clara.list_accrual_adjustments`
+resolves **exactly once**, at six arguments; its neighbours `_accrual_sides()` and
+`get_accrual_adjustment` are byte-unchanged. The register's own first-screen numbers, on this blank
+estate: 0 accrual rows in total, 0 clients carrying any, 0 on any one client. The reference counts
+this wave moves: **the wake allowlist by one row, and nothing else**
+(`clara.document_capabilities` 240, `clara.knowledge_keys` 15, `clara.trigger_taxonomy` 157,
+`clara.onboarding_plan_items` 0, `clara.accounting_plans` 0, `clara.accrual_adjustments` 0,
+`clara.firm_standing_instructions` 0, all unchanged; `clara.wake_fn_allowlist` **114 to 115**). Body
+census and quiescence census: unchanged from pre-window (0 non-terminal, 0 stranded);
+`chatTurn_v23=0, claraWork_v7=0` reconfirmed at 06:09:24.307Z. **Verdict CLEAN.**
 
-**Step 7.** _(probe destroyed, deploy times, start, `/ready` 200, the OUTAGE window; the boot line in
-full with `bodies=62` and both moved pins; `stranded bodies n=0` before `durable world started`;
-SEVEN bundle banners and the v7 digest; `/ready` pool states; `/api/build-info`.)_
+**Step 7.** Probe destroyed 06:09:43Z (`machines: 1` after). `fly deploy
+--image ...@sha256:a3a07a992b60...` 06:09:46Z to 06:10:28Z (reached `stopped`); `machine start`
+06:10:29Z; `/ready` 200 at 06:10:49Z. **Outage: 06:08:38Z to 06:10:49Z, 2 min 11 s (06:08:47Z stopped
+to 06:10:49Z ready, 2 min 2 s of that without a runtime)**. Boot line: `serving
+git_sha=111196753305886a0891560ca122adca5d6d6991 frontier=0365_accrual_register_pagination(341)
+bodies=62 pins closeExample=closeExampleV1 chatTurn=chatTurn_v23 claraWork=claraWork_v7
+documentIngest=documentIngest_v2 invoiceFacts=invoiceFacts_v1 statementFacts=statementFacts_v4
+witnessFacts=witnessFacts_v3 payrollFacts=payrollFacts_v1 agreementFacts=agreementFacts_v1
+autoDraft=autoDraft_v1...`; **the log capture itself cuts off mid-value after ten of the fourteen
+pins**, the same capture-length artefact the sweep wave's own runbook noted (`step7.log`'s boot line
+ends inside `autoDraft`'s own value). The four missing from the capture (`firmInterview`,
+`clientOnboarding`, `bankAgent`, `closePrep`) are not independently confirmed by this line, but
+`reads-pre.log`, `census-6b.log`, `reads-post.log` and `reads-cut-only.log` all print the identical,
+complete 14-pin string from the same unchanged `registry.ts`, which is the corroboration available.
+**`bodies` MOVED (60 to 62) and BOTH pins moved** (`chatTurn_v23`, `claraWork_v7`), the other twelve
+unchanged, `statementFacts` explicitly staying at `statementFacts_v4`; `stranded bodies n=0` printed
+BEFORE `durable world started pid=643`; **SEVEN** `clara-work/v1..v7` bundle banners, v7 digest
+`a0fb27648d301891637357a14efe9eb648e934a93f176fda6837cef899cc6515`, matching the digest the draft's
+own text named for `#1144`. `CONTROL listening`; `LEADER acquired`. `/ready` pools: `runtime`,
+`read`, `write`, `freeform`, `stripe_webhook`, `auth_wall`, `invite_preview` all `ok:true`; `bank`
+skipped (`dsn_not_configured`, expected). Signed-in `/api/build-info` was not read this window.
 
-**Step 8.** _(promotion times and the previous version id; the signed-out smoke roster; the
-signed-in walk - which rows were driven, which were not drivable on a blank estate, and whether the
-owner created a client. Note the accrual register's behaviour, which is where a stale PostgREST
-cache would show.)_
+**Step 8.** `wrangler versions deploy cb003d14-...@100%` 06:11:14Z to 06:11:20Z (previous
+`fa2c6c0b-474c-40dc-9f6e-5064a2488a47`, tag `refresh-322fdf29`). Signed-out smoke: `/login`,
+`/favicon.ico`, `/icon.png` 200; `/pending`, `/api/build-info`, `/checkout/cancel` 307 to
+`/login?next=...`; `/settings/registrations`, `/admin/registrations` 307 to `/operator`; cross-origin
+POST `/auth/confirm/resend` 403; runtime `/ready` 200, matching the draft's expected roster exactly,
+consistent with no signed-out surface change this release. **Signed-in per-lane walks: NOT done in
+this window** (no operator browser session captured among this window's logs, the same disclosure
+the sweep wave made); the estate carries one firm and no client, so the draft's own table says only
+L1/`#1147`'s standing-instruction row is drivable without seeding, and that remains the owner's next
+check.
 
-**Step 9, rollback preflight demonstration.** _(second probe id, bundle bytes and sha256 verified
-both sides, the run through the LIVE DSN, each of the three gates, the verdict and exit code, the
-TIMESTAMP, and - because this snapshot expires - whether any `chatTurn_v23` or `claraWork_v7` run
-existed at the moment it was taken.)_
+**Step 9, rollback preflight demonstration (second probe `e820720a272e48` on `refresh-322fdf29`,
+bundle streamed over `ssh console`).** Probe created 06:11:43Z; bundle streamed, **11,764,268
+bytes**, sha256 `75ad1ec848066f95b5bfb2a87aaae8b459d56682f9dcb3121383d30471246ec3`, matching the
+local `old-index.mjs` bundle used for the preflight (same byte count, same hash on both). Run
+through the **live machine's DSN**, per the runbook. **Gate (a)/(b)** (frontier and door-contract
+rules): both satisfied: `clara.schema_migrations frontier: 0365_accrual_register_pagination`, rules
+checked `0195_work_egress_purpose_and_execution_trace`, `0254_intake_refusal_record`,
+`0279_fa_closed_year_arrears`, contracts declared `fa_parked_run_v1`, `intake_refusal_record_v1`,
+"the target satisfies every rule the applied schema carries." **Gate (c)** (stranded-body census):
+GLOBAL reading **0 non-terminal workflow runs across 0 names**, 0 live tasks bound to no run, target
+supports 60 bodies and declares 2 door contracts. The blank estate makes this vacuous rather than a
+demonstrated 60-of-60 carry, as the draft itself warned it would be. **Verdict ALLOWED at
+06:11:43Z-06:12:38Z** (`rollback-preflight.log`, `btjbo1sla.output`, matching output). Probe
+destroyed 06:12:38Z, one machine left. **One procedural deviation from the draft's own ordering
+rule**: this step ran AFTER step 8's web promotion rather than immediately after step 7 as the draft
+asked (run step 9 immediately after step 7, before anybody drives anything). It did not cost the
+snapshot: step 8's smoke checks are unauthenticated route probes, not a chat turn or a Work item, so
+the GLOBAL census still read 0 non-terminal runs across 0 names at step 9's own read. Consistent with
+the draft's own conclusion that this snapshot does not degrade with time while no pin moves and no
+successor-body run exists, but the ordering itself was not as drafted.
 
-**Step 10.** _(covered by the post reads above; record the one reference count that moved and
-confirm the others did not.)_
+**Step 10.** Covered by the post reads above (06:09:14Z-06:09:24Z, machine still stopped, DSN via
+the probe): ledger 337 + 4 = 341 at 0365, drift gate over all 341 rows, fingerprint vs the UPGRADED
+baseline unchanged at 16 env lines. **The one reference count that moved**:
+`clara.wake_fn_allowlist` **114 to 115** (`interactive`/`wake_get_firm_standing_instruction`).
+**Everything else the draft named did not move**: `clara.document_capabilities` unchanged at 240
+rows; `clara.knowledge_keys` unchanged at 15; `clara.trigger_taxonomy` unchanged at 157;
+`clara.onboarding_plan_items`, `clara.accounting_plans`, `clara.accrual_adjustments` and
+`clara.firm_standing_instructions` all read 0, confirmed both pre- and post-window on an estate with
+nothing to move. Quiescence census re-read clean.
 
-**Step 11.** _(11a: the unlocked count before and after, the `locked N` line with N = 15, the
-freeze-lint afterwards, and the branch and commit the manifest change landed on. 11b: the eight
-closures, naming the three that are not plain DONE.)_
+**Step 11.** **11a**: unlocked count read **15** at every pre-lock check this window (`prep.log`,
+`reads-pre.log`, `window.log`'s post and cut-only prints), confirming step 11a had not yet run.
+After the image went live, `check-frozen-workflows --lock-deployed` ran at RELEASE_SHA and committed
+as `b6e675ca1` on this branch (`docs/riders-closing-as-run`): the `chatTurn_v23` and `claraWork_v7`
+entries move to `deployed:true`, **locked N = 15**, every manifest entry now deploy-locked, and the
+commit's own freeze-lint line reads **362 verified / 62 use-workflow modules / 3 retired**. **11b**:
+see `reports/waveK-closures.md` for the ticket-by-ticket closures.
 
-**Deviations from the draft.** _(everything the window met that this page did not predict, in one
-list, with the reading that showed it.)_
+**Deviations from the draft.** The migrate ran in 21 s for 4 files, about 5 s/file, far faster than
+the cut's 22 s for 3 or the sweep's 1 min 51 s for 25, proportionate to file count and consistent
+with a database half that creates no relation and back-fills nothing. Five findings the draft could
+not have fully anticipated: (1) the first backup attempt failed outright with `ENETUNREACH` on the
+direct host's IPv6 address because WSL2 has no route there, a different failure from the earlier
+CA/TLS gap the pooler workaround was originally built for, and the backup path now genuinely
+diverges from the runtime's own direct-host connection since the factory reset; (2) the image build
+carries one new benign warning beyond the three now-familiar source-map lines, a Serde
+class-registration notice for the AI-SDK Gateway/OpenAI classes, exit 0 either way; (3)
+`step7.log`'s own boot-line capture truncates after ten of the fourteen pins, the same
+capture-length artefact the sweep runbook noted, corroborated by four other reads of the same
+unchanged `registry.ts`; (4) step 9's rollback preflight ran after step 8 rather than immediately
+after step 7 as the draft's own ordering rule asked, though the outcome (ALLOWED, 0 non-terminal
+runs) was unaffected because nothing in step 8's smoke drives a run; (5) the
+`document_processing_tasks` `statement_facts` orphan row, named by every runbook since 2026-09-19,
+no longer exists: the factory reset erased it along with every other row-shaped fact. Everything
+else read exactly as the draft predicted: the ledger arithmetic (`337 + 4 = 341`), all 22 body pins
+at their pinned value with 0 BIMODAL, the `D-ROLE-REACH` and `D-MACHINE-LANE-GRANTS` readings
+re-taken fresh per the draft's own warning that the factory reset re-minted the role census, the
+frozen-manifest reading (362/15 unchanged until step 11a, then 362/0), `bodies=62` with both pins
+moved and the seventh `clara-work` bundle banner present at its expected digest, and step 9's
+rollback preflight verdict itself (ALLOWED, matching the draft's inverted expectation from the cut
+phase). The one thing genuinely not done in the window, disclosed rather than hidden: step 8's
+signed-in per-lane walk, which needs the owner's own browser session and a seeded client, and
+remains the owner's next check.
