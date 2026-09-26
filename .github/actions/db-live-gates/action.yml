@@ -441,6 +441,20 @@ runs:
         RELAY_TEST_MODE=1 \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/chat-turn-v22-e2e.mjs
+        # #1144 (the 2026-09-26 CLOSING wave) — the chatTurn_v23 / claraWork_v7 walk. A SEPARATE
+        # file per version again, for its predecessors' reason. What only a real World can show,
+        # and what this leg is for: (1) the seven tools v22's roster cell asserts absent "and that
+        # is a ruling" are REACHABLE — `read_tenancy_terms` against a document this firm does not
+        # hold gets 0353's own CLR11 through the pooled clara_agent_ro credential, and a CLR03
+        # there would mean the credential never reached the door, which is the exact state the
+        # ruling turned on; (2) `read_rent_settlement_candidates` answers for a REAL client, so the
+        # wall holding in (1) is not the door being shut to everyone; (3) every identifier reaches
+        # the model through the PERSON's own message, never this leg's environment (v21's ADV-S-1);
+        # (4) claraWork_v7 serves the Work a chat turn admits and the committed receipt records ITS
+        # digest, read from the registry's own pin rather than a version literal.
+        #
+        # It SKIPS CLEANLY (exit 0, printed reason) when migration 0225, 0352 or 0353 is absent.
+        PGPORT=$PGC_PORT         PGDATABASE=clara_wave_b_ci         RELAY_TEST_MODE=1         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci"           node "${GITHUB_WORKSPACE:?the repo root; set by GitHub Actions}/scripts/ci/world-gate.mjs" tests/chat-turn-v23-e2e.mjs
         # #637 — the TWO-BUILD cutover e2e, LAST on this rig because it is the only step here that
         # BUILDS A SECOND IMAGE (as of #794, TWO second images — see #850 below). It copies the
         # runtime package to <repo>/.scratch/two-build/previous, rewrites that copy's registry to

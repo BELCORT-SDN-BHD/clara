@@ -15,6 +15,13 @@
 //
 // THE MONEY IS EXACT AND THE DATES ARE ISO. `formatCents` groups for readability and never rounds;
 // the dates come back from the door as `YYYY-MM-DD` and are printed as they arrived.
+//
+// #1152 — THE REGISTER READS A PAGE AT A TIME, AND THE SIDE FILTER IS A SERVER ROUND TRIP. Before
+// this ticket the side control narrowed a FULLY READ answer in the browser — honest only because
+// every row was already in hand. Now that the register paginates, a client-side filter could
+// disagree with a page it had not yet read, so `useAccrualsRegister` sends `side` to the door
+// (`clara.list_accrual_adjustments`'s own `p_side`) and this component renders exactly the rows
+// it is handed, never a second, local narrowing on top.
 
 import Link from "next/link";
 import { useState } from "react";
@@ -24,26 +31,20 @@ import { DataState } from "@/components/firm/data-state";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { SectionHeader } from "@/components/common/section-header";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AccrualBoundaryStatement } from "./accrual-statement";
 import { AccrualBillConflicts } from "./accrual-bill-conflicts";
 import { NativeSelect } from "@/components/common/native-select";
-import { ACCRUAL_SIDES, loadAccruals, type AccrualListRow, type AccrualSide } from "@/lib/accruals/api";
+import { ACCRUAL_SIDES, type AccrualListRow, type AccrualSide } from "@/lib/accruals/api";
+import { useAccrualsRegister } from "@/lib/accruals/use-accruals-register";
 import { accrualCreateHref, accrualDetailHref } from "@/lib/navigation/tree";
-import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { formatCents } from "@/lib/bank/money";
 
 export function AccrualsList({ clientId }: { clientId: string }) {
   const t = useTranslations("Accruals");
-  const accruals = useAsyncRead(() => loadAccruals(clientId));
-  const all = accruals.data ?? [];
-  // #942 — THE SIDE FILTER IS A VIEW OF WHAT WAS ALREADY READ, not a second round trip:
-  // `clara.list_accrual_adjustments` takes a client and a date window and answers with every
-  // accrual of that client, so narrowing here shows exactly the rows the register already holds
-  // and can never disagree with the count beside it.
   const [side, setSide] = useState<AccrualSide | "">("");
-  const rows = side === "" ? all : all.filter((r) => r.side === side);
+  const { rows, loading, loadingMore, error, hasMore, loadMore } = useAccrualsRegister(clientId, {}, side);
 
   return (
     <div className="flex flex-col gap-6">
@@ -85,8 +86,8 @@ export function AccrualsList({ clientId }: { clientId: string }) {
           </NativeSelect>
         </div>
         <DataState
-          loading={accruals.loading}
-          error={accruals.error}
+          loading={loading}
+          error={error}
           isEmpty={rows.length === 0}
           emptyMessage={t("empty")}
         >
@@ -107,6 +108,18 @@ export function AccrualsList({ clientId }: { clientId: string }) {
               ))}
             </TableBody>
           </DataTableCard>
+          {hasMore ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2 self-start"
+              onClick={() => void loadMore()}
+              disabled={loadingMore}
+            >
+              {loadingMore ? t("loadingMore") : t("loadMore")}
+            </Button>
+          ) : null}
         </DataState>
       </section>
     </div>

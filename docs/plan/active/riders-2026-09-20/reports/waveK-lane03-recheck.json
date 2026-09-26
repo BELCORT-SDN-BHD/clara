@@ -1,0 +1,48 @@
+{
+  "lens": "RECHECK",
+  "lane": "riders wave K, lane 03",
+  "branch": "riders/wK-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\703",
+  "fixed_point": "ffb629d73",
+  "head_rechecked": "2437dca83",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/waveK-lane03-fix.md",
+  "diff_command": "git diff ffb629d73...HEAD",
+  "verdict": "accept",
+  "method": "Re-ran the actual cell/gate carrying each review finding's claim, on clara_c03 (127.0.0.1:55742) and, for the world-gated runtime cell, on a fresh world-bootstrapped clone (createdb clara_rt_test template clara_c03, pnpm --filter @clara/runtime exec bootstrap, then dropped afterwards — clara% role count 20 before and after, no other lane database opened). Also independently read the diff for each fix to confirm the mechanism, not only the pass count.",
+  "checks_performed": [
+    "packages/db/tests/accrual-register-pagination.test.mjs on clara_c03 -> 5 pass / 0 fail / 0 skip (covers ADV-01's 4 new JSON-null cursor cases, ADV-02's explicitNulls fixture, ADV-03's two-sided interleaved client)",
+    "git diff ffb629d73..HEAD -- packages/db/migrations/0365_accrual_register_pagination.sql confirms the 'v_cursor[1] is null or v_cursor[2] is null or v_cursor[3] is null' guard (ADV-01) is present before the cast probe",
+    "schema_migrations on clara_c03: version 0365_accrual_register_pagination, checksum 4983f44a3e27e6997fd1a82c5cb181eadd148ec0c17b3cf362937c8ab86bb8a4, 338 files -- matches the fix report's redo claim exactly",
+    "apps/web components/accruals/accruals-list.test.tsx on the worktree -> 7 pass / 0 fail, including 1152.list.loadMore (SPEC-K3-01); read the cell: asserts p_limit:50 on the first request, a rendered+enabled Load more control, the cursor echoed verbatim on the second request, appended rows, and the control's removal after a short page -- non-vacuous",
+    "git diff ffb629d73..HEAD --stat -- packages/runtime/lib/ -> empty (SPEC-K3-03: the shipped rollback-preflight.mjs is byte-identical to the base again; the firm scope moved into packages/runtime/tests/queue-drain.mjs)",
+    "packages/runtime queue-drain.test.mjs + rollback-preflight.test.mjs on clara_c03 (no World) -> 58 tests, 35 pass / 0 fail / 23 skip -- matches the fix report",
+    "same two files on a freshly built world-bootstrapped clone (clara_rt_test, template of clara_c03) -> 58 tests, 58 pass / 0 fail / 0 skip, including '637.pf: #1151' unskipped (SPEC-K3-04 genuinely fixed, not just claimed); clone dropped afterwards",
+    "git diff ffb629d73..HEAD -- packages/runtime/tests/intake-batch-e2e.mjs: confirms the SPEC-K3-05 identity assertion (opReceipts.rows.length === cancelledWorkIds.size), the SPEC-K3-06/ADV-04 shared-condition drive (assert.ok(spontaneousTask,...), unguarded settleRun, terminal-before-belt assertion) and the ADV-05 preBelt snapshot + liveAtBelt bound are all present as described",
+    "git diff ffb629d73..HEAD -- packages/runtime/tests/intake-e2e.mjs -> empty; the file still calls waitForQueueDrain(rig, {log}) with no firmIds, consistent with FIX-8's claim that this caller is structurally unchanged",
+    "packages/runtime/README.md #1151 section: '4, 5 and 6 polls ... on three consecutive rounds, and a fourth ... 6 polls / 2,780 ms' now matches the fix report's own round table and the ticket-report figures cited by SPEC-K3-07 -- no more '6-9 polls / ~2-2.6s every time'",
+    "packages/db/README.md ## 0365 section carries 'A SECOND NULL trap in the same guard' with the measured duplicate-row consequence, matching SPEC-K3-07/ADV-01 docs claim",
+    "queue-drain.mjs: an empty firmIds array is refused by name (ADV-06, a note-severity finding not on the required list, fixed as a side effect of FIX-5's rewrite) and queue-drain.test.mjs carries a cell for it",
+    "FREEZE_BASE_REF=ffb629d73 node scripts/check-frozen-workflows.mjs -> OK, 347 frozen files, append-only, no manifest diff (rule a)",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK",
+    "pnpm typecheck (apps/web, packages/runtime) -> Done, no errors",
+    "CI=true GITHUB_ACTIONS=true pnpm lint -> exit 0",
+    "apps/web node scripts/run-tests.mjs (whole unit suite) on clara_c03 -> 5253 tests, 5251 pass / 0 fail / 2 skip -- identical to the fix report's own count, confirming nothing else broke",
+    "apps/web tests/firm-scope-db-pins.test.ts (rule d, owed because 0365 changed) -> 22 pass / 0 fail / 0 skip",
+    "packages/db touched-fixture files (accrual-register-pagination, accrual-list-side-filter, accrual-adjustments) + operation-census.test.mjs + rig-isolation.test.mjs on clara_c03 -> 62 tests, 61 pass / 0 fail / 1 skip (T19 poison-role, the known reset-gated skip)",
+    "git status in the worktree is clean at HEAD 2437dca83 after this recheck; no stray file, no other lane's database touched"
+  ],
+  "findings": [
+    {
+      "id": "RECHECK-STD-1-note",
+      "ticket": 1152,
+      "kind": "judgement-call-confirmed",
+      "severity": "note",
+      "title": "STD-1 stays as a documented judgement call, not a defect: confirmed, not reopened",
+      "evidence": "git log ffb629d73..HEAD still shows 6ee02513d (575-line migration, no test file) followed by the separate 05aad4851 (test file). The fix report's §8 gives three reasons to leave it (the commits are already landed and cited by hash elsewhere; the original review's own required_fix said 'None required for this ticket given precedent'; the redo evidence in packages/db/README.md's ## 0365 section shows the loop was in fact red/green locally). All three reasons check out against the current head. This is not something a fix round could remedy without rewriting landed history, which rule 1 of WORK-ORDER.md forbids.",
+      "required_fix": "None. Carried as follow-up 4 in the fix report (a WORK-ORDER clarification on whether a migration's own structural cells satisfy rule 4) -- an orchestrator/house-law decision, not a lane defect."
+    }
+  ],
+  "open_above_minor": [],
+  "newly_broken": [],
+  "summary": "Every major and minor finding across all three review axes (SPEC's SPEC-K3-01 through SPEC-K3-07, standards' STD-1, and the adversarial lens's ADV-01 through ADV-05) was re-verified on the current head, not merely re-read: the malformed-cursor guard, the Load-more render cell, the shipped-library revert, the world-gated unskip, the batch-drill identity/bound fixes and the README round-count corrections all reproduced exactly as the fix report claims, including one independently rebuilt world-bootstrapped clone for SPEC-K3-04 (the fix report's own database no longer exists). SPEC-K3-02 was not 'fixed' in the sense of a passing run -- intake-e2e.mjs still cannot finish a drain on this used estate -- but the fix report took the reviewer's own disclosed alternative (run it, record the exit code and why) rather than silently closing the AC, and the structural argument for why the OTHER caller is unchanged (FIX-5's byte-identical shipped library) is independently confirmed. Full gate chain (typecheck, CI-mode lint, frozen-workflows, parts-parity, the whole apps/web unit suite, firm-scope-db-pins, and the touched packages/db files plus operation-census and rig-isolation) is green and matches the fix report's own counts exactly, so nothing else broke. Only one item remains at all, STD-1, and it is a minor judgement call the fix round correctly declined to touch and documented rather than a defect. Accept."
+}

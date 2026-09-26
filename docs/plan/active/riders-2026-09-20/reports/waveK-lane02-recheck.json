@@ -1,0 +1,65 @@
+{
+  "axis": "RECHECK",
+  "lane": "L2",
+  "branch": "riders/wK-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\702",
+  "base": "ffb629d73",
+  "head_rechecked": "0a6deba7af007cd8d7286dad959b1adaa2896eb0",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/waveK-lane02-fix.md",
+  "source_reviews": [
+    "waveK-lane02-codereview-spec.json",
+    "waveK-lane02-codereview-standards.json",
+    "waveK-lane02-review-adversarial.json"
+  ],
+  "tickets": [1150, 1149],
+  "verdict": "accept",
+  "summary": "Every finding at major or higher, and every minor finding the fix report claims to have closed, was independently re-driven on clara_c02 (127.0.0.1:55742) at head 0a6deba7a and confirmed fixed rather than merely trusted. The two findings the fix round correctly left open (SPEC-1150-02 / ADV-01's within-lane residual; ADV-07's two-doors-answer-differently note) are out of #1150's scope by both reviewers' own required_fix, are named body-by-body in ACKNOWLEDGED_SHARED_DERIVERS, and are recorded as follow-ups rather than silently dropped -- their reason for staying holds. Nothing above minor remains. Nothing new broke: every gate count reproduces the fix report's own numbers exactly, and the worktree is clean.",
+  "findings": [],
+  "verified_by_rerun": [
+    "SPEC-1150-01/ADV-01 (major, the load-bearing one): re-derived nestedPlanCensus()+partitionProblems() live on clara_c02 -- 10 rows, problems: []. Fed the review's own decoy (a THIRD body deriving ':plan' under create_accounting_plan) -> now fails by name naming the acknowledged pair. Fed a fresh, previously-unacknowledged suffix shared by two bodies (':tnplan') -> also fails by name. CONFIRMED FIXED.",
+    "ADV-02 (minor, census blind spot): fed derivationsIn() the review's own coalesce-wrapped decoy (`create_accounting_plan(p_client, coalesce(p_op_key || ':plan', 'x'))`) -> now correctly attributed to the door, not dropped. A two-statement control (an unrelated call before the real derivation) correctly stops the outward walk at the statement boundary and does not cross into it. CONFIRMED FIXED. The documented residual (a key carried through a local variable first) is correctly still undetected and is stated as a limit in the README rather than claimed fixed -- consistent with the fix report.",
+    "ADV-03 (minor, marker-tolerant pin): first attempt at reproducing the decoy was invalidated by my own test bug (the explanatory comment I wrote accidentally contained the literal marker string '#1150 [0364]'). Corrected and re-run in a rolled-back transaction against the REAL migration file and the correct 14-arg signature: a decoy _obo_plan_core body carrying the bare token '0364' in prose but not the file's own '#1150 [0364]' attribution is now REFUSED with 'is neither its pinned pre-image ... nor this file's own recut', naming the live sha. CONFIRMED FIXED. Live ledger checksum for 0364 reads b416ea4521b4275ee00bd125df32d05bb3c1d2b82dcaa3ba5cf9438bc9f557e7, 338 files -- matches the fix report's redo record exactly.",
+    "ADV-06 (note, misattribution): packages/db/migrations/0364...sql and packages/db/README.md both now read 'correct_accrual_adjustment is 0284's door as 0303 and 0304 left it' in every place ADV-06 named. CONFIRMED FIXED.",
+    "SPEC-1149-01/ADV-04 (minor, exactly-one-entry + written-meaning): re-ran errcode-catalog.test.mjs's two new cells' vacuity controls independently (not merely re-reading the report). Planting a second key `duplicateOfDailyLimit: \"CLR14\"` reds ONLY p1149.catalog.exactly_one_entry_per_code, naming 'CLR14 is carried by dailyLimit and duplicateOfDailyLimit'; all six other cells stay green. Removing provenance's trailing comment reds ONLY p1149.catalog.every_entry_has_a_written_meaning, naming 'provenance'; all six others stay green. Both restored with `git checkout --`; sha256(rig-helpers.mjs) = e42e408417293013f0bcaf1294f51a452b401dfa7f579ebcef595655faa817f1 before, during-diff and after, matching the fix report. CONFIRMED FIXED.",
+    "SPEC-1149-02/ADV-05 (minor, one-declaration guard): re-ran the file-level vacuity control independently -- two scratch modules planted under packages/db/tests (one `export const CLR = Object.freeze({...})`, one a deferred `const CLR = {...}; export { CLR };`) -> p1149.catalog.one_declaration reds naming all three sites (rig-helpers.mjs, zz-scratch-deferred-clr.mjs, zz-scratch-frozen-clr.mjs). Both scratch files deleted; git status clean afterward. CONFIRMED FIXED.",
+    "SPEC-1150-06 (note, miscount): re-ran tests/tenancy-agent-twins.test.mjs alone with the full gate chain -> 21 tests, 21 pass, matching the corrected figure, not the original report's 22.",
+    "Full lane gate re-run, the seven packages/db files: node --test --test-concurrency=1 $GATES tests/plan-reservation-namespace.test.mjs tests/errcode-catalog.test.mjs tests/accrual-correction.test.mjs tests/accrual-plan-authority-wall.test.mjs tests/authority-ref-human-instruction.test.mjs tests/tenancy-agent-twins.test.mjs tests/plan-overlap-template-arm-retired.test.mjs -> 64 tests, 64 pass, 0 fail. Matches fix report exactly.",
+    "AC4's own 15-file importer set, full gate chain, one invocation -> 339 tests, 337 pass, 2 fail. The 2 failures reproduce exactly (f-t1-sst-reference.test.mjs cells 3 and 7, sst_rate_schedule row count 12 vs 10 and a duplicate-key on uq_sst_rate_schedule_live). Independently confirmed these are template contamination, not this lane's doing: `git diff ffb629d73...HEAD | grep -c sst_rate_schedule` = 0, and a direct query shows 10 rows at recorded_at 2026-09-25T05:55:35 (the migration seed) plus 2 stray rows at 2026-09-25T18:11:23 (a prior run's leftovers, inherited with the clara_intS6 template).",
+    "operation-census.test.mjs + rig-isolation.test.mjs -> 33 tests, 32 pass, 1 skipped (T19 poison-role, correctly gated behind CLARA_RIG_ALLOW_RESET which this rig never sets). Matches.",
+    "apps/web tests/firm-scope-db-pins.test.ts (rule (d), a migration file changed) -> 22 tests, 22 pass, 0 fail. Matches.",
+    "pnpm typecheck from the worktree root -> exit 0.",
+    "CI=true GITHUB_ACTIONS=true pnpm lint from the worktree root -> exit 0.",
+    "node scripts/check-frozen-workflows.mjs -> OK, 347 frozen file(s) verified, 60 use-workflow modules, 3 retired; git diff --name-only ffb629d73..HEAD -- packages/runtime apps/web frozen-workflows.json is empty. Frozen law holds.",
+    "git diff ffb629d73...HEAD --stat -> 15 files, all under packages/db, matching the fix report's own count.",
+    "git status --short in the worktree -> clean, both before and after every probe (all scratch files self-deleted)."
+  ],
+  "correctly_still_open_by_design": [
+    {
+      "id": "SPEC-1150-02 / ADV-01-residual",
+      "ticket": 1150,
+      "severity": "minor",
+      "status": "stays, out of scope, now named rather than silent",
+      "note": "The within-lane :plan / :rrplan sharing (clara._prepayment_schedule_core + clara.replace_prepayment_schedule; clara._revenue_recognition_core + clara.replace_revenue_recognition_schedule) is still live. Both reviewers' own required_fix said 'No code change owed in this lane' / 'No code change is owed inside #1150's scope' -- closing it means recutting four more bodies in two more families, which CLOSING-PLAN.md scopes out ('the accrual and tenancy doors' only). The fix round did not attempt to close it and should not have. It is now enumerated in ACKNOWLEDGED_SHARED_DERIVERS, measured by p1150.namespace.one_suffix_one_body every run, and documented in packages/db/README.md's 0364 section with the driven transcript. Confirmed present and consistent with the fix report's description of follow-up 1."
+    },
+    {
+      "id": "ADV-07",
+      "ticket": 1150,
+      "severity": "note",
+      "status": "stays, recorded",
+      "note": "clara._reserve_op's outer-reservation raise is still typed on the accrual door (op_key_conflict) and untyped (detail=null) on the tenancy door. Typing the primitive is explicitly #1077's follow-up 2, outside #1150's scope. No code change was made or owed; recorded as follow-up 2 in the fix report with the measured pair attached."
+    }
+  ],
+  "gates_run": {
+    "lane_seven_files": "64 pass / 0 fail",
+    "ac4_fifteen_importers": "339 tests, 337 pass, 2 fail (both pre-existing template contamination unrelated to either ticket)",
+    "operation_census_and_rig_isolation": "33 tests, 32 pass, 0 fail, 1 skipped (known gate)",
+    "web_pins_corpus_rule_d": "22 pass, 0 fail",
+    "typecheck": "exit 0",
+    "lint_ci_mode": "exit 0",
+    "check_frozen_workflows": "OK, 347/347, empty diff on packages/runtime, apps/web, frozen-workflows.json"
+  },
+  "anything_unverified": [
+    "The whole packages/db suite and the from-scratch chain remain the integrator's, per CLOSING-PLAN.md risk 1 and the fix report's own §7 -- correctly not re-attempted in this lane's recheck either.",
+    "SPEC-1150-03/04/05 (notes: the unreachable standing_instruction divergence, the (T.4)/(T.6) roster move, and the pre-0364 arms of three neighbouring cells) were not independently re-driven in this recheck beyond confirming the relevant test file contents are present and green; the fix round made no claim to have changed anything about them, and nothing in the diff since the review reports touches that behaviour (no pin moved on 0364's redo, confirmed via the live ledger checksum and the unchanged post-image shas the fix report lists)."
+  ]
+}

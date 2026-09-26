@@ -240,33 +240,62 @@ export type AccrualCreated = {
 
 // ── reads ───────────────────────────────────────────────────────────────────
 
-/** Every accrual of one client, optionally windowed on `effective_from`. A malformed client id
- *  never reaches PostgREST (the `lib/client-id.ts` guard `lib/work/reads.ts` states in full): on a
- *  `uuid` argument it is a 400 `22P02`, which throws and lands on the route's error boundary
- *  instead of this page's own not-found state.
+/** #1152 — the door's own opaque page marker: `clara.list_accrual_adjustments`'s `next_cursor`,
+ *  echoed back verbatim on the following call and never constructed or inspected here (the
+ *  `lib/firm/needs-you.ts` `ReviewQueueCursor` idiom, restated for this register). */
+export type AccrualsCursor = { tuple: string[] };
+
+/** The envelope `clara.list_accrual_adjustments` answers with — `client_id`/`from`/`to`/`side`
+ *  echoed back, a page of rows, and the cursor that reaches the next one. */
+export type AccrualsPage = {
+  client_id: string;
+  from: string | null;
+  to: string | null;
+  side: AccrualSide | null;
+  accruals: AccrualListRow[];
+  /** #1152 — non-null even on the true LAST page of a LIMITED read (a caller derives "any more?"
+   *  from the page's own SIZE, never from this field's presence — `lib/firm/use-review-queue.ts`'s
+   *  own header states why for the sibling register). Null when the read was UNBOUNDED (no
+   *  `limit` was sent): an unbounded read already answered everything, so there is no "next" of
+   *  it — see `loadAccruals`'s own header. */
+  next_cursor: AccrualsCursor | null;
+};
+
+/** Every accrual of one client, optionally windowed on `effective_from`, filtered by side and
+ *  paged (#1075 migration 0334's `p_side`; #1152 migration 0365's `p_cursor`/`p_limit`). A
+ *  malformed client id never reaches PostgREST (the `lib/client-id.ts` guard `lib/work/reads.ts`
+ *  states in full): on a `uuid` argument it is a 400 `22P02`, which throws and lands on the
+ *  route's error boundary instead of this page's own not-found state.
  *
- *  THE SIDE FILTER IS SERVER-SIDE AND DELIBERATELY NOT SENT YET (#1075, migration 0334).
- *  `clara.list_accrual_adjustments` now takes a fourth argument, `p_side text default null`
- *  (`expense` | `revenue`), which narrows the rows in the database. This caller still sends only
- *  `{p_client, p_from, p_to}` and `components/accruals/accruals-list.tsx` still narrows the fully
- *  read page in the browser, because without pagination both return the same rows and a refetch
- *  per keystroke on the filter would be worse. #1075's AC2 — "the register's side filter control
- *  uses the server-side parameter ONCE PAGINATION EXISTS, rather than filtering a fully-read page
- *  client-side" — is therefore still OWED, and it is owed HERE: whoever adds pagination to this
- *  register adds `p_side` to this call and deletes the client-side narrowing beside it. Recorded
- *  in code rather than only in a ticket report (spec review 2026-09-25, SPEC-03). */
+ *  AN OMITTED `page` (or an explicit `{cursor: null, limit: null}`) READS EVERY ROW, UNPAGED —
+ *  the pre-#1152 door's own behaviour, byte-for-byte (0365's own migration text proves it: a NULL
+ *  `p_limit` reproduces the pre-#1152 answer exactly, no default page size). This is
+ *  DELIBERATE: `components/plans/plan-revise-form.tsx` calls this with no `page` argument at all,
+ *  because it needs EVERY accrual of the client to find the one bound to a given plan
+ *  (`liveAccrualForPlan`) — reading only a first page there would risk missing the very accrual
+ *  the page exists to find, which #936's whole "the books never disagree with themselves" claim
+ *  cannot afford. `components/accruals/accruals-list.tsx` is the ONE caller that sends a `page`
+ *  (a `side` and a `limit`), and it is the one this ticket paginates. */
 export async function loadAccruals(
   clientId: string,
   window: { from?: string | null; to?: string | null } = {},
+  page: { side?: AccrualSide | null; cursor?: AccrualsCursor | null; limit?: number | null } = {},
   o: Opts = {},
-): Promise<AccrualListRow[]> {
-  if (!isUuidShape(clientId)) return [];
-  const answer = await callDoor<{ accruals?: AccrualListRow[] } | null>(
+): Promise<AccrualsPage> {
+  const empty: AccrualsPage = {
+    client_id: clientId, from: window.from ?? null, to: window.to ?? null,
+    side: page.side ?? null, accruals: [], next_cursor: null,
+  };
+  if (!isUuidShape(clientId)) return empty;
+  const answer = await callDoor<AccrualsPage | null>(
     "list_accrual_adjustments",
-    { p_client: clientId, p_from: window.from ?? null, p_to: window.to ?? null },
+    {
+      p_client: clientId, p_from: window.from ?? null, p_to: window.to ?? null,
+      p_side: page.side ?? null, p_cursor: page.cursor ?? null, p_limit: page.limit ?? null,
+    },
     opts(o),
   );
-  return answer?.accruals ?? [];
+  return answer ?? empty;
 }
 
 /**

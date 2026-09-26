@@ -1,0 +1,128 @@
+{
+  "axis": "SPEC",
+  "wave": "riders closing wave K",
+  "lane": "L2",
+  "branch": "riders/wK-lane02",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\702",
+  "fixed_point": "ffb629d73",
+  "head": "20e73c102",
+  "diff_command": "git diff ffb629d73...HEAD",
+  "commits": [
+    "e8163915e feat(db): #1150 the accrual and tenancy lanes take nested plan reservation namespaces of their own",
+    "127fb9209 feat(db): #1150 the accrual correction's nested revision reservation takes the lane's own :acrev",
+    "24f1f82ce test(db): #1150 the nested plan reservation census reads the whole partition off the live catalog",
+    "4536b96a2 feat(db): #1150 both tenancy confirmation cores close their lane set",
+    "ca61591ae refactor(db): #1150 the tenancy plan step becomes a caller of clara._obo_plan_core",
+    "83dfeb8f0 fix(db): #1150 three neighbouring cells follow the suffix and the fold rather than pinning them",
+    "7b529240d test(db): #1149 the shadowing second CLR map folds into rig-helpers.mjs's one",
+    "f10a6479c feat(db): #1149 CLR13 to CLR43 (and CLR00, CLR99) get written meanings",
+    "20e73c102 docs(db): #1149 the errcode-catalog census, in packages/db/tests/README.md"
+  ],
+  "spec_sources": [
+    "gh issue view 1150 (OPEN, labels bug + ready-for-agent, ZERO comments - the body is the only Agent Brief)",
+    "gh issue view 1149 (OPEN, labels bug + ready-for-agent, ZERO comments - the body is the only Agent Brief)",
+    "docs/plan/active/riders-2026-09-20/CLOSING-PLAN.md (lane table, shared files, rules (a)-(d), risk 1)",
+    "docs/plan/active/riders-2026-09-20/WORK-ORDER.md plus the wave-2 and wave-3 addenda"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "Both tickets are substantially implemented and every cell I re-ran is green (34/34 on the three #1150 files, 5/5 on errcode-catalog, 90/90 on four CLR importers the lane never sampled). The frozen law holds: no packages/runtime or apps/web diff at all, check-frozen-workflows.mjs clean at 347/347. One acceptance criterion is materially unmet rather than merely narrowed: #1150's AC2 census does NOT fail when two bodies share a suffix, so a new body joining an existing lane's namespace is invisible to it - I proved the gap by feeding the live census a decoy deriving ':plan' and getting problems: []. Everything else is minor: two census-tightness gaps in #1149, the within-lane ':plan' / ':rrplan' residual #1150 discloses, and one unreachable behaviour difference the fold introduces and documents.",
+  "findings": [
+    {
+      "id": "SPEC-1150-01",
+      "ticket": 1150,
+      "severity": "major",
+      "kind": "requirement implemented wrongly",
+      "title": "AC2's census does not fail when two bodies share a suffix, so a new deriver joining an existing lane's namespace is invisible",
+      "evidence": "Ticket #1150 AC2, quoted: \"A census cell reads every body that derives a nested plan reservation off the live catalog and fails if any two share a suffix, with no hand-written roster of bodies\" (desired behaviour 1: \"a census cell reads the full list of derivers off the live catalog and fails on any two that share one, so the list can no longer drift\"). What was built is a LANE partition, not a suffix partition. packages/db/tests/plan-reservation-namespace-fixtures.mjs partitionProblems() raises a problem in exactly three cases: a suffix no lane declares, a declared suffix with no deriver, and one body deriving suffixes of two lanes. There is no check that two DISTINCT bodies share one suffix. Re-run on clara_c02 (127.0.0.1:55742), the live census reads ten derivations and partitionProblems(rows) is [] while ':plan' is shared by clara._prepayment_schedule_core and clara.replace_prepayment_schedule and ':rrplan' by clara._revenue_recognition_core and clara.replace_revenue_recognition_schedule. I then fed the live census one decoy body whose only derivation is p_op_key || ':plan' inside clara.create_accounting_plan(...) - exactly the shape the three bodies 0364 moves had before it - and partitionProblems returned []. So the cell would NOT notice a future accrual, payroll or tenancy door reaching into the prepayment lane's namespace: the drift AC2 exists to stop. The report's own PRE-0364 vacuity transcript confirms the reading: its three reds are \"no body derives ':acplan' any more\" etc. - the hand-written LANE_SUFFIXES map noticing its own orphans, not the instrument measuring a collision. The report discloses the reading (section 2, AC2 \"How the criterion is read, and why\") and argues the letter conflicts with 0336's shape and with CLOSING-PLAN.md's narrowing to \"the accrual and tenancy doors\"; that argument covers the RESIDUAL (SPEC-1150-02) but not the CELL, because nothing in either source asks the census to stop measuring per-suffix uniqueness.",
+      "required_fix": "Tighten p1150.namespace.census so a suffix with more than one deriving body is a red, with the two known within-lane pairs (clara._prepayment_schedule_core + clara.replace_prepayment_schedule on ':plan'; clara._revenue_recognition_core + clara.replace_revenue_recognition_schedule on ':rrplan') named in a small acknowledged-pairs roster so that a THIRD deriver, or any new body reaching for either suffix, fails by name. Prove it with the same decoy shape I used (a body whose only derivation is ':plan' under create_accounting_plan). If the orchestrator instead rules AC2 narrowed to the lane partition, that ruling must be recorded on #1150 before it is closed, because the criterion as written is not met."
+    },
+    {
+      "id": "SPEC-1150-02",
+      "ticket": 1150,
+      "severity": "minor",
+      "kind": "requirement partial",
+      "title": "\"No two plan-creating bodies share a nested reservation namespace\" is still false for the prepayment and deferred-revenue lanes",
+      "evidence": "Ticket #1150 desired behaviour 1, first sentence: \"No two plan-creating bodies share a nested reservation namespace.\" Measured on clara_c02 after 0364: ':plan' under create_accounting_plan is derived by clara._prepayment_schedule_core(uuid,uuid,uuid,text,uuid,text,text,text,jsonb,text) AND clara.replace_prepayment_schedule(uuid,uuid,text,jsonb,text); ':rrplan' by clara._revenue_recognition_core(...) AND clara.replace_revenue_recognition_schedule(...). One operation key spent on create_prepayment_schedule and again on replace_prepayment_schedule therefore still collides on <key>:plan and still answers clara._reserve_op's untyped CLR10 with no detail - the exact defect the ticket's Current behavior section describes. CLOSING-PLAN.md scopes the ticket to \"the remaining nested :plan derivations on the accrual and tenancy doors\" and the brief itself says \"A lane that keeps its existing suffix keeps every key already spent\", so the narrowing is defensible; the report records it as follow-up 1 and is explicit that the census does not red on it \"by design\". Recorded here so the criterion is not read as met.",
+      "required_fix": "No code change owed in this lane. File the follow-up ticket for the within-lane pairs (both families, four bodies) quoting CLOSING-PLAN.md's scoping sentence, and make sure the wave's closure record does not tick #1150's desired-behaviour 1 as fully delivered."
+    },
+    {
+      "id": "SPEC-1149-01",
+      "ticket": 1149,
+      "severity": "minor",
+      "kind": "requirement partial",
+      "title": "\"exactly one catalog entry\" per raised code is not asserted by any cell - two keys on one code would pass silently",
+      "evidence": "Ticket #1149 AC2, quoted: \"Every errcode raised in packages/db/migrations has exactly one catalog entry with a written meaning\". packages/db/tests/errcode-catalog.test.mjs asserts membership only: every_raised_code_has_a_meaning filters the raised set against new Set(Object.values(CLR)), and census_is_exact compares [...new Set(Object.values(CLR))].sort() to the raised set - the Set de-duplicates, so conflict: \"CLR13\" plus a second key on \"CLR13\" would be invisible to all five cells. Nothing asserts the \"written meaning\" either: a key with no comment passes. I verified the catalog is clean TODAY (46 keys, 46 distinct values, no duplicates, grouping Object.entries(CLR) by value on HEAD), so this is a guard gap, not a live defect, and the census the ticket asks for (\"cannot silently outlive or trail the estate\") is weaker than asked in that one direction. All five cells re-run green: node --test --test-concurrency=1 $GATES tests/errcode-catalog.test.mjs gives 5 pass, 0 fail.",
+      "required_fix": "In errcode-catalog.test.mjs assert Object.values(CLR).length === new Set(Object.values(CLR)).size and name the duplicated code and both keys in the message, so a second key on one code fails by name as AC2's \"exactly one\" requires."
+    },
+    {
+      "id": "SPEC-1149-02",
+      "ticket": 1149,
+      "severity": "minor",
+      "kind": "requirement partial",
+      "title": "the second-declaration scanner only matches `export const CLR = {`, so a plain declaration plus a bare re-export slips past",
+      "evidence": "Ticket #1149 AC1, quoted: \"Exactly one CLR map is declared under packages/db/tests; the other module re-exports it under the same name, and a cell fails if a second declaration appears\" (desired behaviour: \"a second CLR declaration under packages/db/tests fails by name\"). clrMapDeclarationSites() in packages/db/tests/errcode-catalog.test.mjs tests /\\bexport\\s+const\\s+CLR\\s*=\\s*\\{/. A second declaration written `const CLR = { ... };` followed by `export { CLR };` - the very shape the docstring says a re-export takes - is a fresh binding that would not be flagged, and p1149.catalog.one_object would only catch it in a module errcode-catalog.test.mjs happens to import (it imports two). I confirmed the estate is clean today: grep -rn 'const CLR\\b|let CLR\\b|var CLR\\b' packages/db/tests --include=*.mjs returns exactly rig-helpers.mjs:58. So again a guard gap, not a live defect.",
+      "required_fix": "Widen the scanner to /(?:export\\s+)?(?:const|let|var)\\s+CLR\\s*=\\s*\\{/ and allow only rig-helpers.mjs, keeping the current re-export tolerance (a bare `export { CLR };` of an IMPORTED binding still must not match)."
+    },
+    {
+      "id": "SPEC-1149-03",
+      "ticket": 1149,
+      "severity": "minor",
+      "kind": "evidence short of the criterion",
+      "title": "AC4's \"every existing test that imports either map still passes\" is evidenced by an 8-file sample; no whole-suite run happened after the fold",
+      "evidence": "Ticket #1149 AC4, quoted: \"Every existing test that imports either map still passes with no change to its own import line\", and AC6 \"The full database gate chain is green\". The fold rewrites a module 28+ test files chain through, but the only whole-packages/db runs in this lane are the two passes in the #1150 report, both taken at 83dfeb8f0 - BEFORE the CLR fold landed. The #1149 report's own \"Anything unverified\" says so. I corroborated it two ways rather than leaving it open: (1) statically, every CLR.<key> reference in all 856 .mjs files under packages/db/tests resolves against the merged 46-key map (0 misses), and no test enumerates the map (Object.keys/values/entries(CLR) appears nowhere outside errcode-catalog.test.mjs, and there is no ...CLR spread); (2) I ran four importers the lane never sampled with the full 153-flag gate chain against clara_c02 - tests/work-list.test.mjs, tests/activity-feed.test.mjs, tests/compliance-watch-disposition.test.mjs, tests/work-source-correction-supersede.test.mjs - giving 90 tests, 90 pass, 0 fail. Residual risk is low; the criterion's word \"every\" is still not evidenced on this branch.",
+      "required_fix": "The integrator runs the whole packages/db suite once on the integrated chain (first pass on a fresh clone, so the reuse-accumulation reds documented in the #1150 report do not mask a real one) and records the counts against #1149's AC4 and AC6."
+    },
+    {
+      "id": "SPEC-1150-03",
+      "ticket": 1150,
+      "severity": "note",
+      "kind": "behaviour changed that the brief said would not",
+      "title": "\"Nothing admitted or refused moves\" has one disclosed exception: standing_instruction at clara._tenancy_plan_core",
+      "evidence": "Ticket #1150 desired behaviour 2, quoted: \"Nothing admitted or refused moves: the parity that cell measures becomes exact by construction\". After the fold, clara._tenancy_plan_core routes authority_kind = 'standing_instruction' into clara._obo_plan_core's own section E arm (0338's second authority kind) where before it went to clara._assert_plan_authority, which refuses that kind invalid_authority_kind. The report discloses this in section 2 AC4, in 0364 section F's own comment and in packages/db/README.md's ## 0364. I verified the unreachability rather than taking it: on clara_c02 both clara._tenancy_plan_core and clara._obo_plan_core are owned by clara_fn_owner with ACL clara_fn_owner=X/clara_fn_owner (ungranted), and the only body on the catalog whose prosrc names _tenancy_plan_core( is clara._confirm_tenancy_rent_plan_core, whose section C text passes the literal 'explicit_instruction'. So no door, chat tool or surface can reach the difference today.",
+      "required_fix": "None in this lane. The integrator carries the disclosure into the merge note, and any future entrance to clara._tenancy_plan_core that passes authority_kind as an argument must re-open it."
+    },
+    {
+      "id": "SPEC-1150-04",
+      "ticket": 1150,
+      "severity": "note",
+      "kind": "behaviour in the diff beyond the ask (justified)",
+      "title": "p1137.obo.plan_step_parity was re-aimed rather than deleted, and clara._obo_plan_core was newly added to the (T.4) roster",
+      "evidence": "Ticket #1150 desired behaviour 2, quoted: \"p1137.obo.plan_step_parity becomes unnecessary and goes with it ... the parity that cell measures becomes exact by construction, because both entrances reach the same body\". That premise is false on the branch and I confirmed it: 0364 section C's lane branch sends p_lane = 'obo' to clara._tenancy_plan_core (now a delegate of clara._obo_plan_core) and the human lane to clara.create_accounting_plan with p_op_key => p_op_key || ':tnplan', so the two entrances still reach DIFFERENT bodies. The lane therefore deleted the cell from tenancy-agent-twins.test.mjs (leaving a pointer comment where it stood) and re-aimed it as p1150.obo.wall_census over both bodies, and additionally put clara._obo_plan_core on plan-overlap-template-arm-retired.test.mjs's (T.4) roster (at 1e366547...) plus a new (T.6) delegate pin for clara._tenancy_plan_core (67fd7548...). The roster ADDITION is beyond \"its (T.4) roster entry then drops\", but it closes the unwatched-plan-writer gap SPEC-L08-1137-E closed for 0353 and both cells are green (p929.tail and p1150.obo.wall_census in my re-run). Recorded so the integrator knows two test-file pins moved: any later lane recutting either body moves them.",
+      "required_fix": "None. Keep the two test-file shas in the integrator's pin reconciliation list."
+    },
+    {
+      "id": "SPEC-1150-05",
+      "ticket": 1150,
+      "severity": "note",
+      "kind": "criterion deferred by instruction",
+      "title": "AC7's from-scratch chain is owed to the integrator, and the three neighbouring cells' pre-0364 branches were never executed",
+      "evidence": "Ticket #1150 AC7, quoted: \"The migration applies from scratch and on a populated database, first-apply branch proved, and the from-scratch chain is green.\" The lane ran none, correctly: CLOSING-PLAN.md risk 1 says \"Nobody runs a second from-scratch chain on this cluster; the from-scratch proof is the integrator's, on a disposable cluster.\" Separately, the three neighbouring cells 83dfeb8f0 made ledger-conditional (accrual-correction.test.mjs's live-suffix read, accrual-plan-authority-wall.test.mjs's tenancyStepFolded, authority-ref-human-instruction.test.mjs's folded branch) only ever ran their POST-0364 arm; clara_c02 carries 0364 and no database here predates it. Both gaps are disclosed in the report's section 11.",
+      "required_fix": "The integrator's from-scratch chain covers AC7; it should also exercise the three neighbouring files at a point in the ordered chain BEFORE 0364 so their pre-fold arms are driven once."
+    },
+    {
+      "id": "SPEC-1150-06",
+      "ticket": 1150,
+      "severity": "note",
+      "kind": "evidence miscount",
+      "title": "the report's \"tenancy-agent-twins.test.mjs runs 22/22\" is 21 on re-run",
+      "evidence": "The #1150 report's section 2 AC4 says \"After the fold, tenancy-agent-twins.test.mjs runs 22/22\", while section 7 says \"the whole rest of that battery (26 of 28) green\". My re-run of the lane's own three-file command (node --test --test-concurrency=1 $GATES tests/plan-reservation-namespace.test.mjs tests/plan-overlap-template-arm-retired.test.mjs tests/tenancy-agent-twins.test.mjs) reproduces the report's headline count exactly - 34 tests, 34 pass, 0 fail, 0 skipped - and tenancy-agent-twins contributes ok 14 through ok 34, i.e. 21 cells, not 22. Immaterial to any acceptance criterion; noted because the report's counts are what the integrator carries forward.",
+      "required_fix": "Correct the figure to 21 when the report is folded into the merge record."
+    }
+  ],
+  "verified_by_rerun": [
+    "node --test --test-concurrency=1 $GATES tests/plan-reservation-namespace.test.mjs tests/plan-overlap-template-arm-retired.test.mjs tests/tenancy-agent-twins.test.mjs -> 34 tests, 34 pass, 0 fail, 0 skipped (all seven p1150.* cells green)",
+    "node --test --test-concurrency=1 $GATES tests/errcode-catalog.test.mjs -> 5 tests, 5 pass, 0 fail",
+    "node --test --test-concurrency=1 $GATES tests/work-list.test.mjs tests/activity-feed.test.mjs tests/compliance-watch-disposition.test.mjs tests/work-source-correction-supersede.test.mjs -> 90 tests, 90 pass, 0 fail (four CLR importers the lane never sampled)",
+    "live nestedPlanCensus() on clara_c02 -> ten derivations in four lanes, partitionProblems() = []",
+    "decoy probe: nestedPlanCensus([{ derives ':plan' under create_accounting_plan }]) -> partitionProblems() = [] (SPEC-1150-01)",
+    "static: every CLR.<key> reference in 856 .mjs files under packages/db/tests resolves in the merged 46-key map; no Object.keys/values/entries(CLR) and no ...CLR spread outside errcode-catalog.test.mjs",
+    "static: the 46 CLR codes the cell's own regex derives from the migrations equals every CLR-nn token mentioned anywhere in packages/db/migrations (no raise form the census misses)",
+    "catalog integrity: 46 keys, 46 distinct values, no duplicate code",
+    "grep -rn 'const CLR|let CLR|var CLR' packages/db/tests --include=*.mjs -> rig-helpers.mjs:58 only",
+    "ACL: clara._tenancy_plan_core and clara._obo_plan_core both clara_fn_owner, ACL clara_fn_owner=X/clara_fn_owner; only caller of _tenancy_plan_core is clara._confirm_tenancy_rent_plan_core",
+    "git diff --name-only ffb629d73...HEAD -- packages/runtime frozen-workflows.json apps/web -> empty",
+    "node scripts/check-frozen-workflows.mjs -> OK, 347 frozen file(s) verified, 60 'use workflow' modules frozen+registered, 3 retired",
+    "shared-file discipline: packages/db/package.json one $GATES flag appended in migration order; packages/db/README.md one new '## 0364' section appended with no edit to an existing one; no insert/update/delete on clara.op_receipts anywhere in 0364",
+    "gh issue view 1150 and 1149 -> both OPEN with ZERO comments, so no owner ruling later than the issue bodies bears on either"
+  ]
+}

@@ -34,10 +34,14 @@ import { markSkip, printSkipCount } from "./wave-a-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { upsertAccountClassed } from "./s6-helpers.mjs";
 import { withTxnOrNull } from "./f-a2-post-fixtures.mjs";
+// #1149 — CLR is declared ONCE, in rig-helpers.mjs; this module re-exports that SAME object
+// (below) rather than declaring its own. See rig-helpers.mjs's own CLR comment for the full
+// 46-code catalog and `errcode-catalog.test.mjs` for the census that holds both directions.
+import { CLR } from "./rig-helpers.mjs";
 
 export {
   ROLES, rootQuery, roleQuery, wakeQuery, humanQuery, namedCall, opk, buildWorld, endPool,
-  AGENT_USER_ID, assertRaises, noteLane, printLaneNotes, printSkipCount, withTxnOrNull,
+  AGENT_USER_ID, assertRaises, noteLane, printLaneNotes, printSkipCount, withTxnOrNull, CLR,
 };
 
 // ===========================================================================================
@@ -112,18 +116,11 @@ export const REASON = {
   closedPeriod: "write_into_closed_period",
 };
 
-// The estate keeps its errcode catalog in TWO places and this is the smaller one: the roster of
-// codes this battery and the lanes that re-export it assert on. `rig-helpers.mjs`'s own `CLR` is
-// the fuller list (CLR01-CLR12 plus #1114's CLR44) and the two must agree about what a code MEANS;
-// #1114's whole finding is that a code carrying two meanings is a code nothing can branch on.
-export const CLR = {
-  wake: "CLR03", authz: "CLR04", balance: "CLR07", immutable: "CLR08",
-  badRequest: "CLR10", notFound: "CLR11", conflict: "CLR13", period: "CLR19",
-  // #1114 [0335] — a caller-contract violation: a `clara_runtime`-only door handed a null its own
-  // caller's contract guarantees. Never rendered. SEPARATE from `badRequest` so a handler reading
-  // the code alone cannot swallow a real refusal or surface an internal fault.
-  callerContract: "CLR44",
-};
+// #1149 — the estate USED TO keep its errcode catalog in two places: this file declared its own
+// `CLR` (a subset of `rig-helpers.mjs`'s, PLUS `conflict`/CLR13 and `period`/CLR19 which
+// `rig-helpers.mjs` did not carry), and the two could disagree by omission with no error either
+// way. `rig-helpers.mjs` now carries the ONE, complete 46-code catalog (CLR00-CLR44, CLR99,
+// each with a written meaning) and this module re-exports that same object, above.
 
 /** The chart this battery posts against. Codes are distinct from `rig-fixtures`' own COA so a
  *  shared world can carry both. */

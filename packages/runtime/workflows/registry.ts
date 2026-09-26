@@ -31,12 +31,14 @@ import { chatTurn_v19 } from "./chatTurn.v19.js";
 import { chatTurn_v20 } from "./chatTurn.v20.js";
 import { chatTurn_v21 } from "./chatTurn.v21.js";
 import { chatTurn_v22 } from "./chatTurn.v22.js";
+import { chatTurn_v23 } from "./chatTurn.v23.js";
 import { claraWork_v1 } from "./claraWork.v1.js";
 import { claraWork_v2 } from "./claraWork.v2.js";
 import { claraWork_v3 } from "./claraWork.v3.js";
 import { claraWork_v4 } from "./claraWork.v4.js";
 import { claraWork_v5 } from "./claraWork.v5.js";
 import { claraWork_v6 } from "./claraWork.v6.js";
+import { claraWork_v7 } from "./claraWork.v7.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -235,7 +237,27 @@ export const workflows = {
   // ROLLBACK TO v21 stops offering the tool and changes no database state: opening targets
   // already recorded are rows on a basis a person still has to approve, authored by the
   // database's own re-derivation rather than by this image.
-  chatTurn: chatTurn_v22,
+  //
+  // THE CLOSING WAVE (2026-09-26, #1144): REPOINTED v22 -> v23. v22's own roster cell asserts
+  // seven tool names absent BY NAME and records that the absence "is a ruling, not an oversight":
+  // at that cut every door behind them was `clara_authenticated`-only, and neither pooled chat
+  // credential carries JWT claims, so a tool over one could only ever answer a grant refusal. The
+  // riders sweep wave built the machine-lane halves and hosted them on 2026-09-25, so v23 is v22's
+  // forty-five tools plus exactly those seven: `read_payroll_posting_state`,
+  // `read_payroll_settlement_state` and `read_agreement_terms` over 0352's doors;
+  // `read_tenancy_terms`, `read_rent_settlement_candidates`, `confirm_tenancy_rent_plan` and
+  // `confirm_tenancy_rent_plan_revision` over 0353's.
+  //
+  // NO COUPLED MIGRATION. Every door the seven touch has been live since 0352 and 0353, hosted on
+  // 2026-09-25 at frontier `0361_reservation_release_advice`. Against a database missing one, the
+  // tool answers a typed refusal and the TURN SURVIVES — the chat lane's own asymmetry. v22's
+  // obligations (and v21's 0225/0227/0230) are inherited unchanged.
+  //
+  // ROLLBACK TO v22 stops offering the seven. The five reads change no database state. The two
+  // CONFIRMATIONS do: a rent plan confirmed through this image is a plan on the books, and a v22
+  // image cannot confirm another one from the conversation — the human door still can, and a plan
+  // already recorded stays as it is, authored by the person named on it.
+  chatTurn: chatTurn_v23,
   // #623 — A NEW CLASS, never a repoint. `accounting_work` tasks are dispatched here by
   // src/workRoutes.ts's post-commit enqueue and by the reconciler's own `accounting_work`
   // re-enqueue arm (lib/reconciler-work.mjs); both resolve the body through THIS object, which
@@ -361,7 +383,24 @@ export const workflows = {
   // read-set rows already written stay readable. A Work parked on a v5 question stays ANSWERABLE
   // under a v4 image, but the resumed v4 run will not be told about drift — so a rollback should
   // drain parked questions first rather than assume they resume identically.
-  claraWork: claraWork_v6,
+  //
+  // THE CLOSING WAVE (2026-09-26, #1144): REPOINTED v6 -> v7. One change, and it is a step body:
+  // `loadFaProposalInputsStepV7` grounds the dependent-particulars proposal on the two registers
+  // the riders sweep wave opened to this credential (0345's `depreciation_policy` knowledge key,
+  // 0346's firm-scoped read of the retired account policies) and applies the estate's OWN
+  // six-condition completeness predicate instead of v6's two. Under the narrow form a register row
+  // with a method and a start date but no useful life reads complete, and the dependent question
+  // that would collect the missing drivers is never opened.
+  //
+  // NO COUPLED MIGRATION: 0345 and 0346 have been live since the sweep wave, hosted 2026-09-25.
+  // Against a database missing either, the two reads throw inside the step's own try, the step
+  // answers null exactly as it does for any unreadable register, and the question opens without a
+  // block — the same behaviour v6 has today. v6's 0321, v5's 0230 and v4's 0192/0216 are inherited.
+  //
+  // ROLLBACK TO v7 -> v6 narrows the proposal back to the asset's own row and its siblings and
+  // changes no database state. A question already opened keeps the block it was opened with: the
+  // proposal is a value on a durable question row, not something an image re-derives on answer.
+  claraWork: claraWork_v7,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -992,6 +1031,11 @@ export { chatTurn_v21 };
 // at cutover — and the pinned v22 body is exported too so the rollback preflight can use the same
 // uniform census for every version.
 export { chatTurn_v22 };
+// #1144 (the 2026-09-26 closing wave) repointed `chatTurn:` v22 -> v23. v22 remains exported by
+// policy (c) — it is the rollback target and the body any run parked on a v22 clarify hook resumes
+// into at cutover — and the pinned v23 body is exported too so the rollback preflight can use the
+// same uniform census for every version.
+export { chatTurn_v23 };
 // #629 repointed `claraWork:` v1 -> v2. v1 remains exported by policy (c) — it is the rollback
 // target and the body any Work parked on a v1 clarify hook resumes into at cutover — and the
 // pinned v2 body is exported too so the rollback preflight can use the same uniform census for
@@ -1010,6 +1054,11 @@ export { claraWork_v4 };
 // uniform census for every version.
 export { claraWork_v5 };
 export { claraWork_v6 };
+// #1144 (the 2026-09-26 closing wave) repointed `claraWork:` v6 -> v7. v6 remains exported by
+// policy (c) — it is the rollback target and the body any Work parked on a v6 question hook
+// resumes into at cutover — and the pinned v7 body is exported too so the rollback preflight can
+// use the same uniform census for every version.
+export { claraWork_v7 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
@@ -1095,12 +1144,14 @@ export const workflowBodies: readonly string[] = Object.freeze([
   "chatTurn_v20",
   "chatTurn_v21",
   "chatTurn_v22",
+  "chatTurn_v23",
   "claraWork_v1",
   "claraWork_v2",
   "claraWork_v3",
   "claraWork_v4",
   "claraWork_v5",
   "claraWork_v6",
+  "claraWork_v7",
   "documentIngest_v1",
   "documentIngest_v2",
   "invoiceFacts_v1",
@@ -1141,8 +1192,8 @@ export const workflowBodies: readonly string[] = Object.freeze([
  *  preflight has to enumerate. */
 export const workflowPins: Readonly<Record<string, string>> = Object.freeze({
   closeExample: "closeExampleV1",
-  chatTurn: "chatTurn_v22",
-  claraWork: "claraWork_v6",
+  chatTurn: "chatTurn_v23",
+  claraWork: "claraWork_v7",
   documentIngest: "documentIngest_v2",
   invoiceFacts: "invoiceFacts_v1",
   statementFacts: "statementFacts_v4",

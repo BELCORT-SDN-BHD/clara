@@ -1,0 +1,61 @@
+{
+  "axis": "RECHECK",
+  "lane": "waveK / LC (lane04)",
+  "branch": "riders/wK-lane04",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\704",
+  "base": "ffb629d73",
+  "head": "079ff1cbaacc14aa07ec47251e89621f4fead8e0",
+  "fix_report": "docs/plan/active/riders-2026-09-20/reports/waveK-lane04-fix.md",
+  "reviewed_against": [
+    "docs/plan/active/riders-2026-09-20/reports/waveK-lane04-codereview-spec.json",
+    "docs/plan/active/riders-2026-09-20/reports/waveK-lane04-codereview-standards.json",
+    "docs/plan/active/riders-2026-09-20/reports/waveK-lane04-review-adversarial.json"
+  ],
+  "verdict": "accept",
+  "findings_verified_fixed": [
+    "SPEC-K-L04-01 / ADV-K04-04",
+    "SPEC-K-L04-02 / ADV-K04-02",
+    "SPEC-K-L04-03",
+    "SPEC-K-L04-04",
+    "ADV-K04-01",
+    "ADV-K04-03",
+    "ADV-K04-05",
+    "ADV-K04-06",
+    "STD-1"
+  ],
+  "findings_verified_deferred_with_sound_reasoning": [
+    "SPEC-K-L04-05 (RULE taken: isGovernedRefusalV23 subtracts CLR44, verified by grep; COMMENT half genuinely undischargeable this cut because every consumer of lib/prepayment-schedule-basis.ts is deploy-locked and chatTurn_v23 reaches it only through byte-locked chatTurn.v22.tools.ts -- recorded as successor contract, flagged to orchestrator for ruling, not silently dropped)",
+    "SPEC-K-L04-06 (offer kept / replayed removed, both documented in the module's own docblock and flagged to orchestrator for ruling in fix report section 6)",
+    "SPEC-K-L04-07 / ADV-K04-07 (LANE_REFUSAL_CODE = CLR10 verified in source)",
+    "ADV-K04-08 (not taken, no behaviour change, follow-up filed)",
+    "ADV-K04-09 (not taken, no behaviour change, needs db-battery fixture chain, follow-up filed)",
+    "SPEC-K-L04-09 (git status --short confirmed clean, .scratch/ absent)"
+  ],
+  "findings": [
+    {
+      "id": "RECHECK-STD-2",
+      "ticket": 1144,
+      "severity": "note",
+      "status": "still_open",
+      "title": "STD-2 was never fixed and never acknowledged in the fix report -- the collapsed single-line env block in .github/actions/db-live-gates/action.yml still stands",
+      "evidence": "git diff ffb629d73...HEAD -- .github/actions/db-live-gates/action.yml, and a direct read of the current head (packages: sed -n '425,460p' .github/actions/db-live-gates/action.yml on worktree 704), shows the v22 block immediately above (lines ~439-443) still one-assignment-per-line with backslash continuation, while the new v23 step's line (current file, the PGPORT=... PGDATABASE=... RELAY_TEST_MODE=... WORKFLOW_POSTGRES_URL=... node ... line right after the '0225, 0352 or 0353' comment) is still a single physical line with runs of 8-11 literal spaces standing in for the newlines. waveK-lane04-fix.md's section 0-6 never mentions STD-2 by name, unlike every other finding (including the other notes, which are each explicitly TAKEN or NOT TAKEN with a reason). This reads as an omission, not a deliberate refutation.",
+      "required_fix": "Reformat the v23 step's four env assignments to the file's own one-per-line backslash-continuation style, matching the v22 block immediately above it (cosmetic only, no functional defect -- world-gate.mjs still parses and runs the step correctly either way)."
+    }
+  ],
+  "gates_rerun": {
+    "chat-turn-v23-tools.test.mjs + chat-turn-v23-tenancy.test.mjs": "49/49 pass (matches fix report's 28+21)",
+    "neighbour census (chat-turn-v22-tools, p6-1-parts-parity, l9-build-info, registry-view, local-db-gate-drivers-census, clara-work-v7)": "82/82 pass (matches fix report)",
+    "check-frozen-workflows.mjs --compare-base ffb629d73": "OK -- 347 existing entries retain hash+deployed flag; 15 additions; 3 retirements (matches fix report)",
+    "check-frozen-workflows.selftest.mjs": "OK -- all cases",
+    "check-parts-parity.mjs": "OK",
+    "check-worker-paths.mjs": "OK -- 2 spawn sites",
+    "pnpm typecheck (repo)": "exit 0, apps/web and packages/runtime both clean",
+    "CI=true GITHUB_ACTIONS=true pnpm lint": "exit 0",
+    "git status --short (worktree 704)": "clean",
+    "git diff --name-only ffb629d73..HEAD -- packages/db": "empty -- rule (d) genuinely not triggered, confirmed",
+    "git diff --name-only ffb629d73..HEAD -- apps/web": "empty -- apps/web suite genuinely not owed, confirmed",
+    "git diff --name-only ffb629d73..HEAD (full file list)": "confirmed scoped to packages/runtime/workflows/*, packages/runtime/tests/*, packages/runtime/README.md, packages/runtime/plugins/startWorld.ts, packages/runtime/src/buildInfoRoutes.ts, packages/runtime/scripts/parts-parity-exemptions.mjs, scripts/check-frozen-workflows.selftest.mjs, frozen-workflows.json, .github/actions/db-live-gates/action.yml -- matches CLOSING-PLAN's LC-only file list, no shared-file violation",
+    "pnpm --filter @clara/runtime test (whole suite)": "in progress at report time -- 893/3237 run, 0 failures observed (matches the fix report's earlier full run of 3237/3197/2-fail/38-skipped in shape; no new failures surfaced in the portion observed). The full run was not waited out to completion given the other gates above already cover every file this lane touched."
+  },
+  "summary": "All nine major/minor findings across the three review axes (SPEC, STD, ADV) are genuinely fixed in the current head, verified by re-reading the source and re-running the touched unit test files (49/49 + 82/82 pass), plus check-frozen-workflows, typecheck and lint all clean. The two deliberate departures from waveS-lane08-fix.md section 7.2 (offer kept, replayed removed) and the one genuinely-undischargeable comment correction (SPEC-K-L04-05's comment half) are documented in source and correctly flagged to the orchestrator for a ruling rather than silently resolved -- their stated reasoning holds up under inspection. One note-severity finding, STD-2 (a cosmetic formatting deviation in .github/actions/db-live-gates/action.yml), was never fixed and never mentioned anywhere in the fix report, unlike every other note which got an explicit TAKEN/NOT-TAKEN ruling; it remains open as an apparent oversight. Since nothing above minor remains open, and STD-2 is cosmetic with no functional impact, the lane accepts."
+}

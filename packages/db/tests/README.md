@@ -2397,3 +2397,93 @@ see the difference between a scoped act and a window.
 The subject was then restored byte for byte by re-running 0333's own function statement
 (`3f6f656d…` before the break, `c9ab7ff4…` while broken, `3f6f656d…` after the restore) and all
 seven were green again.
+
+## `errcode-catalog.test.mjs` — one CLR map, all 46 codes meant (#1149)
+
+`rig-helpers.mjs` and `work-journal-fixtures.mjs` each declared their own `CLR` map. The two
+agreed on every key they shared, but `rig-helpers.mjs` carried nine keys the other did not
+(`client`, `provenance`, `makerChecker`, `revision`, `lastOwner`, `stale` among them) and
+`work-journal-fixtures.mjs` carried two (`conflict`/CLR13, `period`/CLR19) `rig-helpers.mjs` did
+not — so `CLR.stale` or `CLR.conflict` resolved or read `undefined` depending on which of the 28
+importing test modules a file chained through, with no error either way. #1114 measured exactly
+that silence for `CLR.callerContract` before both maps were aligned by hand
+(`tests/refusal-errcode-partition.test.mjs`, `tests/internal-refusal-errcode-fixtures.mjs`).
+
+Separately, `packages/db/migrations` raises 46 distinct CLRxx codes — CLR00 through CLR44, plus
+CLR99, the migrations' own tail-self-test probe-rollback sentinel — and the catalog wrote down a
+meaning for 15 of them (CLR01-CLR12 and CLR44 with a comment; CLR13/CLR19 named but
+uncommented).
+
+**The fold.** `rig-helpers.mjs` keeps the one declaration, extended to all 46 codes; every new
+meaning is read off that code's own raise sites and the migration header comment that assigns
+it, never invented (0006 for CLR13/CLR14; 0007 for CLR15-CLR20; 0009 for CLR21-CLR25; 0011 for
+CLR26-CLR30; 0017 for CLR31-CLR34; 0026 for CLR35; 0028 for CLR36; 0041 for CLR37-CLR40; 0056
+for CLR41; 0068/0071 for CLR42; 0079/0080 for CLR43; the dba*/0018-era probe-rollback sentinels
+for CLR00/CLR99). `work-journal-fixtures.mjs` imports that object and re-exports it BY
+REFERENCE instead of declaring its own, so every one of the 28 importers keeps reading the exact
+same object with no change to its own import line — verified directly (`work-cancel.test.mjs`,
+`refusal-errcode-partition.test.mjs`, `legal-enforcement-mode.test.mjs`,
+`wave-a-clr-map.test.mjs`, `prepayment-close-standing-instruction.test.mjs`,
+`journal-work-evidence.test.mjs`, `merge-alias-lane.test.mjs`, `work-journal-admission.test.mjs`,
+`work-journal-post.test.mjs` all green unchanged, 190 cells).
+
+**The census, held by seven cells, NO DATABASE** (the same reason `collation-pin-scan.test.mjs`
+needs none — it reads `packages/db/migrations`' own SQL text and the imported `CLR` object):
+
+* `p1149.catalog.one_declaration` — exactly one module under `packages/db/tests` (recursively)
+  BINDS `CLR` to an object of its own, and it is `rig-helpers.mjs`. The detector reads a binding,
+  not one spelling: `const`, `let` or `var`, exported on the line or further down, bare literal or
+  wrapped in `Object.freeze(…)`, all count — and a re-export (by name or from a path) does not,
+  because it introduces no object. Each of those shapes, and four non-declarations, are asserted
+  against the detector inside the cell, so a clean scan means "no second catalog", not "no second
+  catalog written the one way this cell can see" (the gap ADV-05 named).
+* `p1149.catalog.one_object` — `work-journal-fixtures.mjs`'s `CLR` is `rig-helpers.mjs`'s own
+  object BY REFERENCE (`===`), not a second copy that can drift.
+* `p1149.catalog.every_raised_code_has_a_meaning` — every CLRxx code the migrations raise has a
+  catalog entry; a missing one fails by name.
+* `p1149.catalog.exactly_one_entry_per_code` — no code is carried by TWO keys. The membership
+  cells compare SETS, which dedupe, so a second key on an already-catalogued code passes every
+  other cell in silence; this one names the code and both keys. It is the "exactly one" half of
+  AC2 (SPEC-1149-01 / ADV-04).
+* `p1149.catalog.every_entry_has_a_written_meaning` — the "with a written meaning" half of the
+  same sentence, and the one cell that reads the SOURCE rather than the imported object, because a
+  comment does not survive being parsed: every key must carry a `//` comment on its own line or
+  directly above it. A key whose predecessor's comment wraps onto the line above it is the one
+  lenient case, and it is deliberate — the cell is about a key with no prose anywhere near it.
+* `p1149.catalog.no_stale_entry` — every catalog entry names a code something actually raises; an
+  invented one fails by name.
+* `p1149.catalog.census_is_exact` — the two 46-code sets are exactly equal.
+
+**Non-vacuity, run once for each of the seven cells (this file's whole deliverable is tests, so
+the work order's vacuity control applies to every cell in it), then restored byte for byte and
+reverified against `git status`/`sha256sum`:**
+
+1. A second declaration planted in a scratch file under `packages/db/tests` —
+   `p1149.catalog.one_declaration` alone went red, naming both sites. Re-run after ADV-05 with the
+   two EVADING shapes instead (a frozen object in one scratch file, an unexported binding exported
+   further down in another): the cell went red naming all three sites, and the other six stayed
+   green. Both scratch files were untracked and were deleted; `git status` read clean.
+2. `work-journal-fixtures.mjs` recut to declare `CLR2COPY` from a spread of the real `CLR` and
+   re-export it under the name `CLR` — `p1149.catalog.one_object` alone went red (the two objects
+   are `!==`), the other four stayed green.
+3. `rig-helpers.mjs`'s `dailyLimit: "CLR14"` entry removed — `p1149.catalog.every_raised_code_has_a_meaning`
+   and `p1149.catalog.census_is_exact` went red, both naming CLR14; the other three stayed green.
+4. An invented `invented: "CLR98"` entry added to `rig-helpers.mjs`'s `CLR` —
+   `p1149.catalog.no_stale_entry` and `p1149.catalog.census_is_exact` went red, both naming
+   `invented`; the other three stayed green.
+5. A second key on an already-catalogued code — `duplicateOfDailyLimit: "CLR14"` added beside
+   `dailyLimit` — `p1149.catalog.exactly_one_entry_per_code` ALONE went red
+   (`CLR14 is carried by dailyLimit and duplicateOfDailyLimit`) and all six others stayed green,
+   which is exactly the silence that cell exists to end.
+6. `provenance: "CLR02"`'s trailing comment removed —
+   `p1149.catalog.every_entry_has_a_written_meaning` alone went red, naming `provenance`; the other
+   six stayed green.
+
+Each break was undone with `git checkout -- <file>`; `git status` read clean and
+`sha256sum` matched the pre-break value in every case.
+
+**Out of scope, left standing on purpose (per the ticket's own text):** the individual
+`CLR27`/`CLR28`/`CLR29`/`CLR26` constants `wave-a-helpers.mjs` declares (a different pattern —
+named constants, never a `CLR` map — `wave-a-clr-map.test.mjs` reads them and is unaffected); any
+migration (none minted, moved or retired); re-classifying `invalid_op_key`, which stays on CLR10
+per #1114's own follow-up 3.

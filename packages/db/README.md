@@ -10447,3 +10447,509 @@ cell went red first against a deliberately broken map, and green again once 0361
 detects its own marker and returns without touching the body. The prestate admits exactly two
 pre-images per recut body — the sha measured on this lane's rig, or a body already carrying this
 file's own `0361` attribution — so a redo is admitted and real drift refuses by name.
+
+## 0362 — the model lane reaches the firm's standing instruction, and a withdrawal names its consequence (#1147, riders closing wave, lane 01)
+
+[0362_standing_instruction_agent_read.sql](migrations/0362_standing_instruction_agent_read.sql)
+closes two of the three halves [0338](migrations/0338_prepayment_close_standing_instruction.sql)
+was never given (#1050's own follow-ups 2, 3 and 4; candidates C10, C11 and C12 of the sweep
+wave's follow-up list) and holds the third with a census instead of a comment.
+
+**What 0338 left.** #1050 shipped the firm-level standing instruction whole on the HUMAN lane. Both
+write doors are `clara_authenticated`-only by design — *an instruction a machine recorded would
+name nobody* — and `clara.firm_standing_instructions` grants nothing to `clara_agent_ro` or
+`clara_runtime` either, which 0338's own tail asserts. The member's own web read needs no door at
+all (forced RLS plus `firm_id = clara.jwt_firm()`), which is why nothing noticed that a chat model
+asked *"does this firm let Clara do this?"* had **no door and no relation it may read**. Separately,
+withdrawing an instruction answered five keys and said nothing about the plans it had already
+authorised, which keep posting under the member who authorised them.
+
+| § | object | what it is |
+|---|---|---|
+| A | `clara.wake_get_firm_standing_instruction(text)` | the model lane's own read door — `clara_agent_ro`, one `interactive` allowlist row |
+| B | `clara.withdraw_firm_standing_instruction(text,text,text)` | 0338 §G's body plus ONE answer key, `plans_still_posting` |
+| D | ACL + allowlist | one EXECUTE, one row |
+
+**§A takes no firm argument, and that IS the tenancy wall.** The firm is `clara.wake_context()`'s
+own answer for the calling credential. A door that took a firm would be an existence oracle the
+moment anybody asked it about somebody else's, so the ticket's own criterion — *another firm's row
+and no row at all answer the same way* — is structurally true here rather than defended by a
+predicate. `p1147.read.no_oracle` drives it anyway, from three firms at once.
+
+**No shared core, and law 31 is why.** 0320, 0352 and 0353 each split a read into one ungranted
+core with two entrances because a HUMAN door and a MODEL door compute the same rows. This read has
+one entrance: the human lane reads the relation directly under RLS. A core here would be an
+ungranted body with exactly one caller.
+
+**No floor of its own, which is a measurement rather than an omission.** The read's own floor is
+VIEWER — every member of a firm may see what their firm has instructed Clara to do, which is
+exactly what 0338 §A.2's policy grants. `clara.wake_context` only returns a row when the
+credential's `on_behalf_of` is an ACTIVE BOOKKEEPER+ of the credential's firm, so the effective
+floor is STRICTLY ABOVE the read's and a viewer-rank re-check could never fire.
+`p1147.read.floor_is_the_credential` drives both halves: a viewer reads the relation herself, and no
+credential may be minted on her behalf.
+
+**§B adds one key and changes nothing else.** `plans_still_posting` is the count of this firm's
+LIVE (`status = 'active'`) plans authorised by the firm's standing instruction of this kind. The
+reference is compared as TEXT, never cast to `uuid`, because `authority_ref` is an open jsonb
+object (0193's only CHECK is that it IS an object) and a cast would turn a count into a `22P02` at
+the moment a firm is trying to withdraw. The body was taken from the LIVE catalog rather than
+retyped, and §0 refuses to apply over anything that is neither 0338 §G's pinned body nor one
+already carrying this file's own attribution.
+
+**It counts the INSTRUCTION, not the row being withdrawn, and the fix round is why.** The first cut
+keyed on `authority_ref ->> 'id' = <the row being withdrawn>`. 0338's record door is
+VERSION-FORWARD: a restated reason — or simply recording the instruction again after a withdrawal —
+withdraws the live row as *superseded by a restated standing instruction* and inserts a fresh one
+with a new id, precisely so that a plan written while the old row stood keeps reading the basis it
+was written under. That plan goes on citing the SUPERSEDED id. So a firm that had ever restated its
+instruction was answered `0` and the settings card said, in words, that nothing kept posting while
+an amortisation schedule was still active — the exact false belief this key exists to remove
+(review findings SPEC-02 and ADV-01, driven through the estate's own doors on `clara_c01`). The
+predicate is now the whole `(firm_id, instruction_key)` family, live rows and superseded ones
+alike, because withdrawing *the instruction* is what the person did.
+`p1147.withdraw.counts_across_a_restatement` drives record → real `close_prep` plan → restate →
+withdraw and asserts `1`, with the plan re-read as root and still active.
+
+**And it is a SNAPSHOT, which the wording on screen now respects.** The count is taken AFTER the
+withdrawal stamp, inside the same transaction — a count taken before would be a prediction — but
+what it reports is that transaction's snapshot, not a promise about the world afterwards. The wake
+arm of `clara._prepayment_schedule_core` resolves the live instruction with a plain
+`select … limit 1` and takes NO share lock, and the withdraw door's own `for update` is on the
+instruction row, so nothing serialises the two: a `close_prep` run in flight at the moment of
+withdrawal commits an active plan the receipt has already counted as absent (review finding ADV-04,
+driven with two real connections). Serialising them means recutting a schedule core, which is
+outside this ticket and is recorded as a successor item. What this file owns is the sentence, and
+the `=0` arm of `standingWithdrawnPlans` now states what was measured at the moment it was measured
+— *"No schedule opened under it was running when you took it back."* — rather than promising that
+nothing keeps posting.
+
+**WHAT WITHDRAWAL DOES TO A PLAN DOES NOT CHANGE, AND THAT IS THE RULING THIS FILE RECORDS.** The
+plans an instruction already authorised keep posting under the member who authorised them — #940's
+own ruling for a retired roster enrolment, restated by 0338 §G. **Whether withdrawal should also
+PAUSE them is an accounting and product question #1050 was never given and #1147 does not take.**
+It is a real question: a firm that says *"stop letting Clara do this"* may well mean the schedules
+too, and the argument the other way is that a plan is a separate, already-authorised commitment
+whose occurrences a person can pause or end one at a time (Client → Plans). The file makes the
+consequence VISIBLE — the count in the receipt, the count and the remedy on the settings card — and
+leaves the behaviour alone. The tail asserts the door names no plan-state verb at all, so the
+decision cannot drift in by accident.
+
+**The deferred-revenue asymmetry, and what closing it would cost.**
+`clara._prepayment_schedule_core` admits `('human','obo','wake')`;
+`clara._revenue_recognition_core` admits `('human','obo')` and no wake wrapper for it exists
+anywhere in the catalog, so the contract-liability side cannot be stood by a standing instruction
+at all. 0338 said so in a header comment and nothing else held it. This ticket adds no lane there;
+it adds `p1147.asymmetry.census`
+([standing-instruction-agent-read.test.mjs](tests/standing-instruction-agent-read.test.mjs)), which
+reads both cores' closed lane sets, every `clara.wake_%` body that reaches either, and the
+`clara.wake_fn_allowlist` rows for those wrappers, off the LIVE catalog — and fails the day one
+side is widened without the other, naming which half moved. **Closing the asymmetry would cost
+four moving parts**: a wake wrapper over the revenue core, the lane set widened to include `wake`,
+a `clara.wake_fn_allowlist` row for the wrapper, and a SECOND instruction key in 0338 §A's closed
+set (and in both write doors) so a firm could stand the revenue side separately. **The question
+underneath is an owner ruling, not an oversight**: should a firm that let Clara amortise its
+prepayments thereby also let Clara recognise its deferred revenue, or are those two separate
+delegations? Until that is answered, the census keeps the asymmetry a decision.
+
+**Prestate pins, measured on this rig** (riders closing wave lane 01, `clara_c01`, 337 files, max
+`0361_reservation_release_advice`; no ticket of this lane landed before this one). One recut body,
+admitting its measured pre-image or a body already carrying this file's `#1147 [0362]` attribution,
+so a redo (#957) is admitted and real drift refuses BY NAME:
+
+| body | pinned pre-image |
+|---|---|
+| `clara.withdraw_firm_standing_instruction(text,text,text)` | `c63c1fd09bc92713127a038b3565f399b8ee17fcbf27097272b7a919cbb7b6e5` |
+
+**Post-images** for the integrator's re-derivation, measured after the fix round:
+`clara.withdraw_firm_standing_instruction(text,text,text)` =
+`1d057b74827f665baef0aedf7266cebff7194238224e4a0d268fe75f94642df9`;
+`clara.wake_get_firm_standing_instruction(text)` =
+`f69794dae2da194d08561526aa09c33f57536095eb91768a624e0bb607e07e46`.
+
+**Deliberately NOT sha-pinned:** `clara._prepayment_schedule_core` and
+`clara._revenue_recognition_core`. A sha is the right instrument for a body no other lane of this
+wave writes; the schedule family is read here STRUCTURALLY (a closed lane set, off the live
+catalog) and this file recuts neither, so a pin would turn another lane's lawful recut into an
+abort of the whole chain. The rest of §0 is structural: the relation's six columns, its grants
+(the file refuses to apply over a database where a machine role already reads it directly), the
+wake context/allowlist pair, the `standing_instruction` authority kind and the four
+`clara.accounting_plans` columns §B's count keys on.
+
+**Redo-safe by construction** (#957): `create or replace function` throughout, one
+`insert … on conflict do nothing` for the allowlist row, no table, no backfill, no row of business
+data written. Both prestate branches were exercised for real on this rig rather than merely
+written: `read door FIRST` on the first apply, then `read door REDO, withdraw door FIRST` on the
+redo that landed §B, then `REDO, REDO`.
+
+**Tail (8 assertions, all read off the live catalog):** the read door resolves at exactly one
+`pg_proc` row and is STABLE SECURITY DEFINER owned by `clara_fn_owner` with its `search_path`
+pinned; `clara_agent_ro` holds it and **no other role does, asked as an ALLOWLIST** — every
+`clara\_%` role this cluster carries is read off `pg_roles`, PUBLIC is added, each is asked through
+`has_function_privilege`, and the reached set must be exactly `{clara_agent_ro}`. The first cut was
+a four-name DENYLIST under a comment claiming it caught a role the file never names; it did not
+(review finding ADV-05, measured: a grant to `clara_freeform_ro` passed both arms, and
+`clara_agent_chat_ro`, which the denylist named, is not a role this cluster carries). The new check
+was driven rather than argued: the grant was planted for real and the redo refused with
+*"clara_freeform_ro also reach(es) the read door"* before being revoked. Then: exactly one
+allowlist row and it is the `interactive` kind;
+the relation's own grants are unmoved (0338's tail assertion, re-read); both WRITE doors are still
+`clara_authenticated`'s alone across all five machine principals; the recut withdraw door still
+carries 0338's whole refusal vocabulary and its reservation pair; it names no plan-state verb; and
+no wake wrapper reaches the deferred-revenue core.
+
+## 0363 — a granted, document-scoped read of the payroll posting verdict (#1148, riders closing wave, lane 01)
+
+[0363_payroll_posting_state_read.sql](migrations/0363_payroll_posting_state_read.sql) mints ONE
+door: `clara.get_payroll_posting_state(uuid)`. Source: candidate C15 of the sweep wave's follow-up
+list, which is #1048's own report `waveS-lane04-ticket1048.md` section 10 follow-up 1.
+
+**What #1048 left.** `clara._payroll_posting_verdict(uuid)` ([0297](migrations/0297_payroll_summary_posting.sql),
+recut by [0343](migrations/0343_payroll_completeness_witness.sql) SectionH) holds the whole answer — the
+sentence naming what stopped the post, the verdict, the rung, the reason and the completeness
+state — and is **ungranted**: 0297 revokes it from public and nothing ever granted it. It is
+reached from `clara._post_payroll_run`, `clara._list_review_queue_core` and
+`clara.answer_payroll_completeness` alone, so the ONLY way to see the verdict was a Needs-you queue
+row (firm-wide or client-scoped) or the entry's own receipt. A document page that wanted to say
+*"this payslip did not post because …"* had no read to call, which is why #1048's own tool contract
+(section 9.2 of that report) had to ask `clara.list_review_queue` with a client scope and a row-kind
+filter rather than asking about the document it actually has.
+
+| section | object | what it is |
+|---|---|---|
+| 0 | prestate | six checks (below) |
+| A | `clara.get_payroll_posting_state(uuid)` | the document page's read — STABLE SECURITY DEFINER, `clara_authenticated`, VIEWER floor, firm-scoped |
+| Z | tail | 5 assertions, all off the live catalog |
+
+**The floor is VIEWER, and that is a decision rather than a default.** Every member of a firm may
+already see the document, its filing, its entries and the Needs-you row this sentence is derived
+for; a higher floor would make the document page say LESS about a payslip than the queue already
+says about the same payslip. The floor is the estate's one body, `clara._human_ctx`, and this door
+adds nothing to it. Note what that means for the ticket's *"a caller below the viewer floor is
+refused"* criterion: `clara.role_rank` puts viewer at **0** and
+`clara.firm_memberships_role_check` admits no fifth string, so there is no ROLE below this floor.
+The reachable arms are *no authenticated actor* and *no active membership*, both CLR04 from
+`clara._human_ctx`, and both are driven in `tests/payroll-posting-state-read.test.mjs`
+(`p1148.read.floor`). The third arm that body raises — *insufficient role* — is unreachable here
+and is named in the cell so the next reader does not go looking for a test that cannot exist.
+
+**The wall is `clara.documents.firm_id`, asked before anything about the document is read.** The
+internal takes no firm and cannot: every body that calls it has already resolved one. A
+document-scoped read cannot borrow that, so it asks the question itself, exactly as
+`clara.answer_payroll_completeness` (0343 SectionK) does and for the same stated reason — a document
+id that is not this firm's must not be distinguishable from one that does not exist. Both raise the
+SAME CLR11 at ONE place. `p1148.read.no_oracle` compares every discriminant a caller can see (code,
+message, detail, hint, constraint, table, column) and requires them byte-identical.
+
+**And then the door's own subject, which is the one refusal a surface answers with silence.** The
+brief's desired behaviour is a wrapper that answers *"the posting state of ONE PAYROLL SUMMARY
+document"*. Handed an invoice, the verdict underneath would answer `facts_read / payroll_not_read`
+— *"This payroll summary has not been read yet."* said over a supplier bill. SectionA therefore
+refuses `CLR10` + `{"reason":"not_a_payroll_summary"}` instead. That refusal is deliberately **not**
+the CLR11 above: the document IS the caller's firm's and its `document_kind` is already theirs to
+read, so "not found" would be the lie here, and the wall above has already decided the only question
+a stranger may ask. The web panel gates on the kind it already holds, so the refusal is a wall
+rather than a banner (`apps/web/components/documents/payroll-posting-section.tsx`).
+
+**What it projects, and what it leaves behind.** `sentence`, `verdict`, `rung`, `reason`,
+`completeness` — the brief's own list — plus `document_id`, which is the caller's own argument
+echoed back and carries no information they did not supply, and `duplicate_scope` (below). It does
+**not** project `rung_vector` (the evaluator's internal ladder), nor `detail` itself, `plan`,
+`client_id`, `firm_id`, `filing_id`, `source_doc_sha256`, `extraction_id`, `existing_entry_id`,
+`period_month`, `posting_date` or `period_label`, which are internals of the posting lane that a
+page asking *why did this not post* has no act to spend on. `p1148.read.projection` reads BOTH
+sides — the internal as root, to establish that a ladder was there to project, and the door as a
+viewer — because a cell that looked only at the door would green just as happily against a verdict
+that never carried one.
+
+**`duplicate_scope`, and the false sentence that forced it.** The verdict's tenth rung,
+`no_duplicate_entry`, stops a SECOND entry, and its FIRST scope is `same_document` — the payslip's
+own entry, found through `clara._document_posting_entry(client, document)`. So a payroll summary
+that posted **perfectly well** answers `blocked / no_duplicate_entry`, carrying 0343's sentence for
+a re-file attempt: *"… is already posted (…). This payslip was not posted again — open that entry
+to decide whether this is a correction or a re-upload."* The first cut of the document-page section
+rendered that verbatim for every payroll summary, on the accounting tab, directly under the entries
+list that already shows the very entry it names (review findings SPEC-01 and ADV-02, driven end to
+end on `clara_c01`). The fix is **not** a second sentence — one body owns the words and nothing
+above it may reword them. What the page could not work out for itself is WHOSE entry the verdict
+meant, and the verdict had already decided that, so the door projects that ONE token of `detail`
+(`detail.duplicate.scope`), null on every other rung and always present. It discloses strictly less
+than the sentence the same caller already reads, which names that entry's memo and posting date;
+the duplicate's `entry_id`, `status`, `memo` and `posting_date` stay behind.
+`blocksOnThisDocumentsOwnEntry` (`apps/web/lib/documents/payroll-posting-state.ts`) holds the rule,
+and the section renders nothing in that one state. Every other scope names somebody ELSE's entry —
+which IS the re-upload the sentence was written for — and a `ready` verdict still speaks, because
+*"ready to post but no entry exists yet"* is true and has nowhere else on the page to be shown.
+`p1148.read.posted` drives the real unattended posting path and reads the scope back off the door.
+
+**No core, and that is law 31 rather than an omission.** 0320, 0352 and 0353 each split a read into
+one ungranted core with two entrances because a HUMAN door and a MODEL door compute the same rows.
+This read has one entrance today; the model-lane twin is a successor contract for a cut after this
+wave's (#1144's roster is closed), and a core minted now would be an ungranted body with exactly
+one caller.
+
+**It is STABLE, and that is worth saying precisely.** PostgreSQL refuses a data-modifying
+STATEMENT written directly inside a non-volatile function, so a later edit that put an INSERT,
+UPDATE or DELETE in this body would fail to create. It does **not** stop a non-volatile body
+CALLING a volatile one that writes — measured on `clara_c01` inside a transaction that was rolled
+back, which is the same correction review finding ADV-03 forced on 0362's family census. So the
+declaration is a guard against a careless edit, not a proof of purity; the proof is the body
+itself, four statements long, whose text the tail pins by name. The body it wraps is STABLE too
+(0297 SectionD: *"THE GATE WRITES NOTHING"*), and the tail re-derives `provolatile = 's'` from the
+catalog rather than trusting the declaration.
+
+**Prestate pins**, measured on the lane rig (127.0.0.1:55742 / `clara_c01`, 338 files, max
+`0362_standing_instruction_agent_read` — #1147 landed first in this lane and recut nothing named
+here). All three are pinned **unconditionally**: this file recuts none of them in either mode, so a
+changed sha is always a finding and never a redo artefact.
+
+| body | pinned sha256(prosrc) | why it is pinned |
+|---|---|---|
+| `clara._payroll_posting_verdict(uuid)` | `4c350623e41527b717a1fc58e3ee8b772060b895b5353098f8cd21153585dac8` | the body this door wraps |
+| `clara._human_ctx(integer)` | `d1a8a1940ffee67f0bbe1f44f4081c8a5b1fca1775832948c2c606ced2043a46` | the floor it enters at and never mentions again |
+| `clara.role_rank(text)` | `5ced25aed03ff000519af583c5c5b89c4d59c4cb5f20e49f39877435e8c2576f` | what "viewer" means underneath that floor |
+
+The name `clara.get_payroll_posting_state(uuid)` is pinned bimodally — free, or already carrying
+this file's own `#1148 [0363]` marker (a redo, #957) — so anything else refuses BY NAME. The rest
+of section 0 is structural: the four roles; 0297 and 0343 applied; **the internal's ACL is exactly
+its owner's** (the file refuses to apply over a database where some role already holds EXECUTE on
+it, because a wrapper on top of a body the caller can already call is decoration, not a wall);
+`clara.documents` carries `id`, `firm_id` and `document_kind`; and `clara.document_capabilities`
+knows the `payroll_summary` kind, so this door's subject is not a string the file invented.
+
+**Post-image** for the integrator's re-derivation, re-measured after the fix round:
+`clara.get_payroll_posting_state(uuid)` = `c846456ffd80e51e23d02fbd652f1aebaeab822ac8ae012c961b2c03a3b1c26d`.
+
+**Redo-safe by construction** (#957): one `create or replace function`, one `revoke`, one `grant`,
+no table, no row, no backfill. Both prestate branches were exercised for real on this rig rather
+than merely written: FIRST APPLY on the first `db:migrate`, and again — after the SectionA.2b edit
+— with the door dropped inside a transaction that was rolled back; REDO on two
+`CLARA_MIGRATION_REDO` runs. All three refusal arms were driven in rolled-back transactions too (a
+foreign body squatting on the name, the wrapped body drifted, the internal granted).
+
+**Tail (5 assertions, all read off the live catalog):** the door resolves at exactly one `pg_proc`
+row and is STABLE + SECURITY DEFINER + `clara_fn_owner` with its `search_path` pinned, carrying the
+viewer floor, the firm wall, the payroll-summary subject and **no** `rung_vector`;
+`clara_authenticated` holds EXECUTE and none of the five machine principals does; the internal's
+ACL is still its owner's alone; the internal's body did not move while this file applied; and the
+two surfaces that already reach the verdict — `clara.answer_payroll_completeness` and
+`clara.list_review_queue` — keep the grants they had.
+## 0364 — one nested reservation namespace per lane, and one on-behalf-of plan body (#1150, riders closing wave, lane L2)
+
+[0364_plan_reservation_namespace_obo_fold.sql](migrations/0364_plan_reservation_namespace_obo_fold.sql)
+takes the two halves #1077 and #1137 each left open: candidate D16 (`clara._reserve_op`'s shared
+`:plan` namespace, #1077's own follow-up 1) and candidate D17 (the estate's THIRD on-behalf-of
+plan-creation body, 0353's follow-up 1). They are one file because they rewrite the same family.
+
+**What 0336 left.** `clara._reserve_op`
+([0004_governed_fns.sql](migrations/0004_governed_fns.sql):47) keys an operation receipt on
+`(firm_id, fn, op_key)` — on the **firm**, not the client — and a door that nests another door
+hands it a derived key. 0336 (#1077) moved the deferred-revenue lane onto `:rrplan` / `:rrend` and
+deliberately stopped there, which left three bodies outside that pair deriving `<key>:plan`:
+`clara.create_accrual_adjustment` and `clara._confirm_tenancy_rent_plan_core` under
+`create_accounting_plan`, and `clara.correct_accrual_adjustment` under `revise_accounting_plan`,
+beside the prepayment lane's own two. One operation key spent on two of them reserved the same row
+with different arguments and was answered `clara._reserve_op`'s own untyped `CLR10 op_key reused
+with different args`, which names neither lane. Measured before this file: a prepayment schedule
+and then an accrual adjustment under one key raised exactly that.
+
+| lane | nested suffixes | set by |
+|---|---|---|
+| prepayment | `:plan`, `:end` | 0193/0223 — **unchanged**, so every key already spent keeps its meaning |
+| deferred revenue | `:rrplan`, `:rrend` | [0336](migrations/0336_revenue_recognition_plan_op_key.sql) (#1077) |
+| accrual | `:acplan`, `:acrev` | **this file** |
+| tenancy | `:tnplan`, `:revise` | **this file** (`:revise` is 0353's, unmoved and unshared) |
+
+**Nothing is backfilled, and nothing needs to be.** 0336's own reasoning: a receipt records an act
+that happened. A genuine retry never reaches the nested call at all, because each lane's OUTER
+reservation on its own door short-circuits the whole body — driven per lane in
+`p1150.idempotent.per_lane`.
+
+| § | object | what it is |
+|---|---|---|
+| A | `clara.create_accrual_adjustment` | 0222's body verbatim; the derived key becomes `:acplan` |
+| B | `clara.correct_accrual_adjustment` | 0284's door **as 0303 and 0304 left it** (both recut it after 0284 created it, and the pin is 0304's body); `:acrev`, and #936's typed `plan_op_key_conflict` names the key it really derives |
+| C | `clara._confirm_tenancy_rent_plan_core` | 0353's body verbatim; `:tnplan` on the HUMAN branch, plus the closed lane set |
+| D | `clara._confirm_tenancy_rent_plan_revision_core` | 0353's body verbatim; the closed lane set |
+| E | `clara._obo_plan_core` | 0338's body verbatim; the closed kind set admits `recurring_journal` and stamps its entrance |
+| F | `clara._tenancy_plan_core` | **replaced**: its own client-status wall, then a call to §E |
+
+**§F is the fold 0353's follow-up 1 asked for.** `clara._tenancy_plan_core` was a third snapshot of
+the on-behalf-of plan-creation step, beside `clara._obo_plan_core`
+([0338](migrations/0338_prepayment_close_standing_instruction.sql)) and `clara._accrual_plan_core`
+([0331](migrations/0331_accrual_plan_authority_wall.sql)). The estate paid for that duplication
+twice: ADV-L08-01 found a client-status wall its siblings carried and it did not, and the sweep
+wave's integration merge had to fold its hand-copied authority wall onto
+`clara._assert_plan_authority`. It is now a caller, the shape `clara._prepayment_plan_core` has had
+since #941.
+
+**The one wall that stays where it is.** ADV-L08-01's client-status check remains in
+`clara._tenancy_plan_core`, ABOVE the delegation, because it is the **tenancy lane's** and not the
+shared body's: the prepayment and deferred-revenue on-behalf-of lanes do not carry it (measured on
+the live catalog), and moving it into `clara._obo_plan_core` would refuse acts they admit today.
+Keeping it above the delegation keeps its position in the ladder unchanged, which is what its own
+fix round measured — an archived client with no terms recorded is still answered `terms_incomplete`
+by both entrances, and a confirmation the person already made still replays after the client is
+archived. `p1150.obo.fold_parity` drives both, and `p1137.obo.refusals_match` (0353's own) is green
+unchanged.
+
+**One difference, disclosed rather than left to be found.** `clara._obo_plan_core` answers
+`authority_kind = 'standing_instruction'` with its own arm (0338 §E) where `clara._tenancy_plan_core`
+sent every kind to `clara._assert_plan_authority`, which refuses that kind `invalid_authority_kind`.
+No caller can reach the difference: `clara._confirm_tenancy_rent_plan_core` passes the literal
+`'explicit_instruction'`, the body is ungranted (`clara_fn_owner` only) and nothing else calls it.
+
+**The closed lane set** (ADV-L08-05, declined in the sweep wave's lane L8 because the cores were not
+then being rewritten). `p_lane` is a `text` argument of both tenancy confirmation cores. In the
+confirmation core it chooses the plan step and the branch tests for `obo`, so an unknown lane took
+the JWT path and failed closed on CLR04. In the **revision** core there is no lane branch at all —
+`p_lane` decides only the `via` its audit row carries — so an unknown lane stamped the HUMAN `via`
+on an act no person took. Both now refuse `CLR10 invalid_lane` in their first statement, above the
+op-key wall, because an unknown lane is a programming error in the estate's own code rather than a
+caller's mistake.
+
+**What this file does NOT do.** It does not type `clara._reserve_op`'s reuse raise (every governed
+door rides that primitive; #1077's follow-up 2 owns it). It reads, moves and deletes no
+`clara.op_receipts` row. It mints no name, so it owes `tests/rig-meta.mjs` no cohort entry, and it
+mints no database role. And it leaves the **within-lane** sharing 0336 also left standing:
+`clara._prepayment_schedule_core` and `clara.replace_prepayment_schedule` both derive `:plan`, and
+`clara._revenue_recognition_core` and `clara.replace_revenue_recognition_schedule` both derive
+`:rrplan`, so one key spent on a lane's create door and again on its replace door still collides
+inside that lane. That is one lane's own namespace rather than two lanes sharing one, which is the
+partition 0336 chose and this file follows; it is recorded as a follow-up rather than swept in.
+The collision is **driven**, not inferred: one key spent on `create_prepayment_schedule` and then on
+`replace_prepayment_schedule` is answered `CLR10 op_key reused with different args` with
+`detail = null` (`waveK-lane02-review-adversarial.json` ADV-01). The two pairs are therefore named
+body by body in `ACKNOWLEDGED_SHARED_DERIVERS` rather than tolerated in silence — see the census
+paragraph below.
+
+**The census is the guard.** `p1150.namespace.census`
+(`tests/plan-reservation-namespace.test.mjs`) discovers every `p_op_key || ':x'` derivation in the
+`clara` schema, works out which call encloses it, keeps the ones handed to a plan door — dropping
+`:approve`, `:match`, `:settle`, `:post`, `:draft`, `:resolve`, `:assess`,
+`:add_client_identifier` and `:file_document_write`, which belong to the bank, payroll, fixed-asset
+and document families — and asserts the partition. The only hand-written things are which lane each
+suffix belongs to (`LANE_SUFFIXES`) and the two within-lane pairs above
+(`ACKNOWLEDGED_SHARED_DERIVERS`).
+
+**One suffix, one body** is the other half of the same census, and it is a second cell:
+`p1150.namespace.one_suffix_one_body`. The lane partition alone reads clean on two bodies of ONE
+lane sharing a suffix, which is exactly the residual above, so the pairs are listed signature by
+signature and anything else fails by name — a third deriver of `:plan` or `:rrplan`, or a second
+body on any other suffix. The roster is measured against the live catalog in the same cell, and a
+listed body that stops deriving its suffix is itself a problem, so the day the follow-up
+consolidates a pair the cell says which entry to drop. Both directions are shown red against a
+deliberately broken subject inside the cell (a decoy body deriving `':plan'` under
+`create_accounting_plan`, a second decoy on `':tnplan'`, and the live rows with one pair member
+removed).
+
+**Redo (#957), and what the prestate's marker is.** Every one of §A–§F is a `create or replace
+function`, so the file is redo-safe by construction. Its prestate is bimodal: each of the six recut
+bodies is admitted at its pinned pre-image (FIRST) or as a body already carrying this file's own
+attribution (REDO). **That marker is a substring test**, so it is the full `#1150 [0364]` string
+every one of §A–§F writes into the body it installs, not the bare number: with the bare number a
+body that only *mentions* `0364` in a comment — "superseded by a later cut; see 0364 for the
+previous shape" — was admitted as this file's own recut and would have been spliced over in
+silence. Driven both ways in a rolled-back transaction, before and after the tightening
+(`waveK-lane02-review-adversarial.json` ADV-03, and `waveK-lane02-fix.md`). A later file reusing the
+idiom should pick a marker that cannot occur by accident for the same reason.
+
+**What the census can and cannot see.** It reads a derivation written as `p_op_key || ':x'` and
+attributes it to the nearest ENCLOSING plan-door call, walking outwards through wrapper calls
+(`coalesce(p_op_key || ':plan', …)` inside `create_accounting_plan(…)` is attributed to the door, not
+dropped). It still cannot see a key carried through a local variable first
+(`v_key := p_op_key; … v_key || ':plan'`), because both the SQL-side filter and the reader key on the
+parameter name: a clean census means "no deriver written in terms of `p_op_key`", not "no deriver".
+Nothing on the catalog takes that shape today, and the tail assertions of this file pin the six
+bodies it recuts directly rather than through the census.
+## 0365 — the accrual register reads a page at a time, and the side filter reaches the door (#1152, riders closing wave, lane 03)
+
+[0365_accrual_register_pagination.sql](migrations/0365_accrual_register_pagination.sql) closes
+candidate E28 of the closing wave's follow-up set — `waveS-followup-candidates.md`, sourced from
+`waveS-lane01-fix.md` follow-up 1 / SPEC-03 and `waveS-lane01-recheck.json` RECHECK-03, both left
+on [0334](migrations/0334_accrual_list_side_filter.sql) (#1075): that file widened
+`clara.list_accrual_adjustments` with a server-side `p_side` filter but deliberately did not wire
+it up, because the register did not paginate yet and a filter with no page is a filter with
+nothing to disagree about. This file is the follow-up 0334's own comment named: the page.
+
+**What changed, in one sentence.** `clara.list_accrual_adjustments` gains a fifth and sixth
+argument, `p_cursor jsonb default null` and `p_limit integer default null` — the SAME
+drop-and-create widen 0334 itself used for `p_side` (PostgreSQL identifies a function by argument
+types; a new trailing parameter is a different signature, so the four-argument door is dropped and
+the six-argument one created in its place, never left resolvable beside it).
+
+**Why `p_limit` defaults to `null`, not `50`.** `clara.list_review_queue` has been paginated at a
+50-row default since its first day (0011) — a firm-wide queue was never meant to answer unbounded.
+This door's history is the opposite: every caller since 0222 has read one client's whole accrual
+history in one answer, and this ticket's own second acceptance criterion states the contract to
+keep — an omitted cursor and limit answer EXACTLY what the door answers today. `LIMIT NULL` is
+PostgreSQL's own reading of "no limit at all", so an omitted pair reproduces the pre-0365 query
+byte for byte; a caller that wants a page (`apps/web`'s register) sends `p_limit` explicitly.
+`next_cursor` follows the same rule: null when no limit was requested (an unbounded read already
+answered everything, so there is no "next" of it), non-null even on the true last page of a
+LIMITED read — a caller derives "any more?" from the page's own SIZE, the same
+`lib/firm/use-review-queue.ts` idiom the sibling review-queue register already uses.
+
+**The cursor is a three-tuple, text, opaque** — the `list_review_queue` shape
+(0011:3748-3781) narrowed to what this register orders by: `(effective_from desc, created_at
+desc)`, plus the accrual's own `id` as a tiebreaker so two rows can never compare equal (a keyset
+walk over a tied pair would otherwise place either one on either side of a page boundary). The
+second element is `to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US')` rather
+than a bare `::text` cast — narrower than `list_review_queue`'s own cast, because a bare cast's
+trailing-offset digit rides on the connection's `TimeZone` GUC rather than the stored instant; the
+migration's own header measures exactly why a bare cast was never actually a correctness bug
+(trailing-zero trimming on a fixed-width prefix still orders correctly) but fixes the needless GUC
+dependency anyway.
+
+**A NULL-propagation trap the cursor guard's first draft fell into, found by this file's own
+tests.** `jsonb_typeof(p_cursor -> 'tuple') <> 'array'` is SQL NULL, not TRUE, when the `tuple` key
+is simply absent (`{}`) — a three-valued-logic `or` chain of NULLs is NULL, so the guard would
+silently NOT fire and `{}` would pass as "no cursor" instead of being refused as malformed. Fixed
+with `IS DISTINCT FROM` throughout, which never returns NULL. `p1152.cursor.malformed`'s "no tuple
+key" case is exactly this regression, caught on the first test run against the first draft.
+
+**A SECOND NULL trap in the same guard, found by the closing wave's adversarial round (ADV-01).**
+`jsonb_array_elements_text` renders a JSON `null` element as a SQL NULL, and `NULL::date`,
+`NULL::timestamptz` and `NULL::uuid` every one of them cast WITHOUT raising — so the cast probe
+alone admitted `{"tuple":[null,null,null]}` and every partially-nulled sibling. The door then
+treated such a cursor as no cursor at all, because `array[...]::text[] <
+array[null,null,null]::text[]` is TRUE, not NULL, under `array_cmp` (a NULL element sorts GREATER
+than any text): an all-null tuple re-admitted EVERY row (page one again, byte for byte) and a
+tuple with ONE null element re-admitted the boundary row, so the SAME row came back on more than
+one page — measured at the real door, five pages at `p_limit=2` returning three rows twice. Both
+break this file's own "each row exactly once" and both are exactly the "silently treated as start
+over at page one" the guard's committed comment refuses BY NAME. Fixed with an explicit
+`v_cursor[1] is null or v_cursor[2] is null or v_cursor[3] is null` refusal placed BEFORE the cast
+probe, pinned by a tail assertion, and covered by four new `p1152.cursor.malformed` cases (all
+three null, then one null in each position).
+
+**The web half** (same commit): `apps/web/lib/accruals/api.ts`'s `loadAccruals` gains a `page`
+argument (`side`/`cursor`/`limit`) and now returns the door's own envelope (`AccrualsPage`, with
+`next_cursor`) rather than a bare row array — `components/plans/plan-revise-form.tsx`'s existing
+call, which needs EVERY accrual of a client to find the one bound to a plan
+(`liveAccrualForPlan`), sends no `page` at all and so still reads everything, unpaged, exactly as
+before. `components/accruals/accruals-list.tsx` is the one caller that paginates: its former
+`all.filter((r) => r.side === side)` browser-side narrowing is deleted, and a new hook
+(`lib/accruals/use-accruals-register.ts`, the `use-review-queue.ts` idiom reimplemented narrowly
+for a register with no write half) sends `side` to the door and exposes `loadMore`/`hasMore` for a
+"Load more" affordance.
+
+**Driven, not asserted.** `accrual-register-pagination.test.mjs` walks a five-accrual client at a
+page size of 2 and checks every row arrives exactly once, in the door's own order; compares an
+omitted-cursor-and-limit read against an INDEPENDENT raw table read (never a re-derivation of the
+door's own logic); proves the side filter still composes with a limited page; drives nine shapes
+of malformed cursor through the real door (five structural, four carrying a JSON `null` element); and reads the catalog for the unchanged owner/grants/
+posture. `accrual-adjustments.test.mjs`'s own `p652.acl.grants` cell (gated on 0222 alone, so the
+`db-slice-frontiers` matrix runs it against a chain where neither 0334 nor 0365 has applied) now
+picks its probed signature off the live catalog for THREE shapes, not two.
+
+**Redo-safe by construction** (#957): `drop function if exists` on the four-argument signature (a
+no-op on a redo, where it is already gone) followed by `create or replace` on the six-argument one
+(idempotent either way) — the same shape 0334 itself uses. The prestate admits exactly two starting
+shapes — the four-argument door's live sha, or a six-argument body already carrying this file's own
+`p_cursor`/`accrual_cursor_malformed`/`next_cursor` marks — and refuses anything else. This file was
+itself redone TWICE, on this lane's own rig — once to fix the `IS DISTINCT FROM` trap above, once
+in the fix round to add the JSON-null element refusal; both redos ran under
+`CLARA_MIGRATION_REDO=0365_accrual_register_pagination` and the prestate correctly took the
+"my own body is already live" branch each time (second redo checksum
+`4983f44a3e27e6997fd1a82c5cb181eadd148ec0c17b3cf362937c8ab86bb8a4`).

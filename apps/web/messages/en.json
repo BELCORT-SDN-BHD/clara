@@ -3068,6 +3068,10 @@
     "orphanDismissReasonLabel": "Dismissal reason",
     "liveClaim": "A posted entry of {client} currently stands on this document.",
     "noLiveClaim": "No posted entry currently stands on this document.",
+    "payrollPosting": {
+      "heading": "Payroll posting",
+      "parkedNote": "Clara is waiting for somebody at your firm to answer this. The question is under Needs you."
+    },
     "tenancy": {
       "heading": "Tenancy terms and rent plan",
       "body": "What this tenancy states, where on the page each figure was read, and the recurring rent plan it would run once somebody confirms it. Nothing here posts by itself.",
@@ -6761,6 +6765,8 @@
       "billConflictAmount": "Accrual amount: {amount}",
       "listHeading": "Recorded accruals",
       "listBody": "Each accrual runs under the authority of the person who instructed it, and every due date rechecks that authority before any accounting work is created.",
+      "loadMore": "Load more",
+      "loadingMore": "Loading more…",
       "newAccrual": "New accrual",
       "empty": "No accruals recorded for this client yet.",
       "tableLabel": "Accruals",
@@ -7746,6 +7752,8 @@
     "standingDeniedTitle": "This is not yours to read",
     "standingScopeNote": "This is a firm-wide instruction. It covers every client of this firm, and only an admin or owner can give it or take it back.",
     "standingWithdrawalNote": "Taking the instruction back closes the lane to new schedules. A schedule already running keeps posting to the end of its term, under the member who authorised it.",
+    "standingWithdrawalStopNote": "To stop one, open that client and pause or end the schedule on its own Plans page (Client → Plans). Pausing blocks the next posting and keeps the schedule; ending it closes the schedule for good.",
+    "standingWithdrawnPlans": "{count, plural, =0 {No schedule opened under it was running when you took it back.} one {One schedule opened under it keeps posting, under the member who authorised it.} other {# schedules opened under it keep posting, under the member who authorised them.}}",
     "usageHeading": "Model usage",
     "usageSubheading": "What Clara's models were asked to do for this firm, by month.",
     "usagePeriodLabel": "Month",

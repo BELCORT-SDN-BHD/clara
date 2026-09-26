@@ -26,6 +26,7 @@ import { DocumentStatePanel } from "./document-state-panel";
 import { DocumentEvidence } from "./document-evidence";
 import { DocumentFactsTable } from "./document-facts-table";
 import { TenancyRentPlanSection } from "./tenancy-rent-plan-section";
+import { PayrollPostingSection } from "./payroll-posting-section";
 import { DocumentKindDialog } from "./document-kind-dialog";
 import { CorrectionWizard } from "./correction-wizard";
 import { CorrectionImpactSheet } from "./correction-impact-sheet";
@@ -392,6 +393,17 @@ export function DocumentDetail({
               <p className="text-xs text-muted-foreground" data-testid="document-no-claim">{t("noLiveClaim")}</p>
             )}
           </section>
+          {/* #1148 — WHY a payslip produced no entry. The section above can say that nothing stands
+              on this document; until migration 0363 nothing on this page could say why, because the
+              posting verdict was ungranted and reachable only from the Needs-you queue or the
+              entry's own receipt. It renders NOTHING for any other document kind and makes no door
+              call at all for one, so this mount costs an invoice page nothing. It is on the
+              ACCOUNTING tab rather than FACTS because the question it answers is about the ENTRY —
+              the tenancy panel sits on FACTS for the mirror-image reason. */}
+          <PayrollPostingSection
+            documentId={documentId}
+            documentKind={data.document.document_kind}
+          />
           <SourceDependentsPanel
             dependents={dependents.data ?? null}
             clientId={clientId}

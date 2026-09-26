@@ -1,0 +1,122 @@
+{
+  "axis": "SPEC",
+  "lane": "riders wave K, lane 03",
+  "branch": "riders/wK-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\703",
+  "fixed_point": "ffb629d73",
+  "diff_command": "git diff ffb629d73...HEAD",
+  "commits": [
+    "6ee02513d fix(db): #1152 the accrual register reads a page at a time (0365)",
+    "05aad4851 test(db): #1152 the page walk, the omitted-cursor parity and the malformed cursor",
+    "3a26bc94a feat(web): #1152 the accrual register pages, and the side filter reaches the door",
+    "b141cf186 fix(runtime): #1151 the admission drill's terminal drain scopes to its own firms",
+    "fe48906db fix(runtime): #1151 the batch drill's receipt census is by identity",
+    "aec3f45d7 docs: #1145 the Workflow DevKit schema bootstrap command's durable home"
+  ],
+  "spec_sources": [
+    "gh issue 1152 (body only; 0 comments — verified via gh api .../issues/1152/comments, empty)",
+    "gh issue 1151 (body only; 0 comments)",
+    "gh issue 1145 (body only; 0 comments)"
+  ],
+  "verdict": "accept-with-fixes",
+  "cells_re_run_by_this_review": [
+    "packages/db/tests/accrual-register-pagination.test.mjs on clara_c03 -> 5 pass / 0 fail / 0 skip",
+    "packages/db/tests/accrual-list-side-filter.test.mjs + accrual-adjustments.test.mjs on clara_c03 -> 24 pass / 0 fail / 0 skip",
+    "apps/web node scripts/run-tests.mjs (whole unit suite) -> 5252 tests, 5250 pass / 0 fail / 2 skip",
+    "packages/runtime node --test tests/queue-drain.test.mjs tests/rollback-preflight.test.mjs on clara_c03 -> 56 tests, 33 pass / 0 fail / 23 skip",
+    "FREEZE_BASE_REF=ffb629d73 node scripts/check-frozen-workflows.mjs -> OK, 347 frozen files, append-only vs base",
+    "git diff ffb629d73...HEAD --stat -- frozen-workflows.json packages/runtime/workflows registry.ts plugins/startWorld.ts -> empty"
+  ],
+  "findings": [
+    {
+      "id": "SPEC-K3-01",
+      "ticket": 1152,
+      "kind": "requirement-partial",
+      "severity": "major",
+      "title": "AC5 is proved by a hook cell, never by the register: nothing renders or drives the Load more control",
+      "evidence": "#1152 AC5: \"The register renders the first page and reaches the next one, asserted by a web cell.\" The only paging cells are apps/web/lib/accruals/use-accruals-register.test.ts, which mount the HOOK via renderHook and never render AccrualsList. The register's own file, apps/web/components/accruals/accruals-list.test.tsx, gained no load-more cell (diff shows only 942.list.filter rewritten). Consequence: apps/web/components/accruals/accruals-list.tsx:111-121 — the hasMore branch, the Button, its disabled/loadingMore states and the two new i18n keys Accruals.loadMore / Accruals.loadingMore (apps/web/messages/en.json:6764-6765) — is rendered by no cell at all. grep over apps/web for loadMore confirms: the only render-level Load more assertions in this repo are the sibling register's (apps/web/components/firm/activity/activity-feed.test.tsx:225-228, which finds the BUTTON and clicks it). The browser walk does not cover it either: apps/web/e2e/accrual-mock.mjs now hard-codes next_cursor: null and answers everything in one page (its own added comment says \"Pagination itself is not this lane's subject\"), so accrual-walk.spec.ts never sees a second page.",
+      "required_fix": "Add one cell to apps/web/components/accruals/accruals-list.test.tsx in the activity-feed shape: a mock answering a 50-row first page with a next_cursor, render AccrualsList, assert the Load more button renders, click it, assert the second page's rows appended and the button gone. Then AC5 is met by the register, not only by its hook."
+    },
+    {
+      "id": "SPEC-K3-02",
+      "ticket": 1151,
+      "kind": "requirement-missing",
+      "severity": "major",
+      "title": "AC4's stated evidence method was not performed: intake-e2e.mjs was never run",
+      "evidence": "#1151 AC4: \"waitForQueueDrain's other caller is unchanged in behaviour, asserted by running the leg that uses it.\" The lane report (waveK-lane03-ticket1151.md, AC4) states: \"PARTIAL ... What is NOT run here: intake-e2e.mjs itself, end to end, on this rig (time budget)\". The substitute is packages/runtime/tests/queue-drain.test.mjs's new wiring cell, which proves an omitted firmIds reaches the census as null against a fake in-memory rig (paramCapturingRig) — it never exercises the other caller. The criterion names running the leg, not proving a bind parameter.",
+      "required_fix": "Run packages/runtime/tests/intake-e2e.mjs once through scripts/ci/world-gate.mjs on a world-bootstrapped disposable database and record its exit code, or the integrator carries it as an explicit open AC on #1151 rather than closing the ticket on the wiring cell."
+    },
+    {
+      "id": "SPEC-K3-03",
+      "ticket": 1151,
+      "kind": "scope-creep",
+      "severity": "major",
+      "title": "A shipped runtime library was edited in a ticket whose Out of scope says \"any product code path\", and the report mis-cites the ticket to justify it",
+      "evidence": "#1151 Out of scope: \"Any migration, any door, any product code path. Neither defect is a #1044 code path; both are cell gaps.\" Its Key interfaces list names only packages/runtime/tests/queue-drain.mjs:105, packages/runtime/tests/intake-admission-e2e.mjs:1016-1026, packages/runtime/tests/intake-batch-e2e.mjs around :650, and clara.agent_tasks / clara.wake_engine_sources read-only. The diff nevertheless changes packages/runtime/lib/rollback-preflight.mjs (censusUnboundTasks gains a firmIds scope and a 4th bind parameter on both queries). That module is shipped, not a test helper: it is imported by packages/runtime/lib/runtime-contracts.mjs and packages/runtime/scripts/rollback-preflight.mjs and appears in packages/runtime/.output/server/index.mjs. waveK-lane03-ticket1151.md's \"Seams tested at\" claims it is \"the one the ticket's 'Key interfaces' names as the read boundary\" — the ticket does not name it. Mitigation verified by reading the code: firmIds defaults to null, the SQL legs are ($4::uuid[] is null or ...) / ($3::uuid[] is null or ...) no-ops, and the #1015 agentScoped/docScopeGiven rule reads only workIds/taskIds/documentTaskIds, so passing { firmIds: null } from queue-drain.mjs does not change the document half. check-frozen-workflows.mjs is clean, so no frozen body moved.",
+      "required_fix": "Either get the orchestrator to record the widen explicitly on #1151 (a one-line ruling that censusUnboundTasks was the honest seam), or move the narrowing into packages/runtime/tests/queue-drain.mjs so the ticket stays test-only. At minimum, correct the report's false claim that the ticket's Key interfaces names rollback-preflight.mjs."
+    },
+    {
+      "id": "SPEC-K3-04",
+      "ticket": 1151,
+      "kind": "evidence-unreproducible",
+      "severity": "major",
+      "title": "AC2's second half is carried only by a world-gated cell that SKIPS everywhere it can still be run",
+      "evidence": "#1151 AC2: \"... and the drain still fails, with its own named message, when the leg's own work is left live.\" The only cell asserting that is packages/runtime/tests/rollback-preflight.test.mjs's new 637.pf: #1151, declared { skip: SKIP } where SKIP is set at rollback-preflight.test.mjs:117 when the WDK world is absent. Re-run by this review on the lane database clara_c03: \"ok 22 - 637.pf: #1151 ... # SKIP the WDK world (workflow.workflow_runs), migration 0178 or the document lane is absent from this database\". CI does not save it: .github/actions/db-estate-suite/action.yml runs the @clara/runtime suite against clara_runtime_ci, a template copy of the migrated estate, with no `pnpm --filter @clara/runtime exec bootstrap` step anywhere in that action — so the cell skips in CI too. The one database where the report says it ran 56/56 unskipped, clara_151 on cluster rig151, was torn down by the same ticket (`pg_dropcluster 17 rig151 --stop`). The green is therefore not reproducible by the integrator, which is precisely the silent-skip shape this lane's own #1145 paragraph documents.",
+      "required_fix": "Re-run packages/runtime/tests/rollback-preflight.test.mjs on a world-bootstrapped disposable database at integration and record the unskipped count, or add the bootstrap to the runtime half of db-estate-suite so the cell stops skipping in CI."
+    },
+    {
+      "id": "SPEC-K3-05",
+      "ticket": 1151,
+      "kind": "requirement-partial",
+      "severity": "minor",
+      "title": "AC1's \"decided twice\" half is argued in prose, not asserted, and the assertion that used to observe it was deleted",
+      "evidence": "#1151 AC1: \"... and still fails when a child on the worklist is genuinely skipped or decided twice.\" The old cell asserted `count(*) == live.length` over cancel receipts — the one observable that a duplicate receipt row would have moved. The new census (packages/runtime/tests/intake-batch-e2e.mjs) builds `cancelledWorkIds` as a Set of work ids from op_key and asserts only that `unexplained.length === 0`; a Set collapses duplicates by construction. The \"skipped\" half is genuinely covered (a live child with neither a receipt nor a terminal status lands in `unexplained`). The \"decided twice\" half rests on the comment's claim that clara.op_receipts' primary key (firm_id, fn, op_key) makes it unobservable — correct for the same op_key, but the diff asserts nothing about it.",
+      "required_fix": "Either add one structural line asserting the receipt rows are distinct per work id (e.g. assert.equal(opReceipts.rows.length, cancelledWorkIds.size)), which costs nothing and restores the deleted observable, or have the ticket's owner accept the PK argument in writing."
+    },
+    {
+      "id": "SPEC-K3-06",
+      "ticket": 1151,
+      "kind": "implementation-fragile",
+      "severity": "minor",
+      "title": "The deliberate drift is best-effort, but the assertion that depends on it is unconditional, so a failure to force it reds with a misleading message",
+      "evidence": "packages/runtime/tests/intake-batch-e2e.mjs: `const spontaneousTask = (...).rows[0].current_task_id; if (spontaneousTask) { await settleRun(spontaneousTask, \"failed\").catch(() => {}); }` — the settle is skipped when the child carries no current task and its error is swallowed. The census below then asserts `cancelledWorkIds.has(spontaneous.work_id) === false, \"the spontaneous child settled WITHOUT a cancel receipt — the belt correctly never decided it\"`. If the drift was not forced, the belt cancels that child normally and the leg reds with a message blaming the belt, not naming the real cause. This matters because AC1 asks for the drift to be \"driven deliberately rather than waited for\" — the drive is exactly the step with no assertion on it.",
+      "required_fix": "Assert the drift actually happened right where it is forced: fail with a named message if `spontaneousTask` is null or the settle threw, and assert the child's status is terminal before the belt sweep."
+    },
+    {
+      "id": "SPEC-K3-07",
+      "ticket": 1151,
+      "kind": "evidence-inconsistent",
+      "severity": "minor",
+      "title": "AC3's round counts disagree between the report's prose, the report's gates table and the committed README",
+      "evidence": "#1151 AC3 asks that \"the rounds are reported with counts\". waveK-lane03-ticket1151.md AC1 says \"four consecutive SOLO rounds on clara_151 (round 2 through round 4 below ...)\" — four rounds named, three listed. Its own gates table says the batch leg was \"3/3 exit 0 (rounds 2, 3, 4)\". The committed packages/runtime/README.md #1151 section says \"Three consecutive solo rounds\" for the batch leg and, for the admission leg, \"drains in 6-9 polls / ~2-2.6s every time, three consecutive rounds\" — while the report lists four admission rounds, the fourth at 7163 ms, outside the stated range. The README is the durable artifact and its \"every time\" is contradicted by the report's own numbers.",
+      "required_fix": "Pick the measured set, make the three statements agree, and either widen the README's stated range to cover the 7163 ms round or drop the range claim."
+    },
+    {
+      "id": "SPEC-K3-08",
+      "ticket": 1152,
+      "kind": "requirement-deferred",
+      "severity": "note",
+      "title": "AC7's from-scratch chain is deferred to the integrator (permitted), and a lane-mate incidentally ran it but on a cluster now destroyed",
+      "evidence": "#1152 AC7: \"The migration applies from scratch and on a populated database, first-apply branch proved, and the from-scratch chain is green.\" waveK-lane03-ticket1152.md defers the from-scratch half to the integrator, which CLOSING-PLAN.md risk 1 permits (\"Nobody runs a second from-scratch chain on this cluster; the from-scratch proof is the integrator's, on a disposable cluster\"). Worth the integrator knowing: waveK-lane03-ticket1151.md records `PGDATABASE=clara_151 pnpm --filter @clara/db migrate` -> \"338/338 applied, 0001 -> 0365, exit 0\" on the disposable rig151 cluster, i.e. 0365 did apply in an ordered chain from nothing — but that cluster was dropped at the end of #1151, so the claim cannot be re-checked here. The populated-database and first-apply halves are verified on clara_c03 and stand.",
+      "required_fix": "Carry AC7's from-scratch chain in the integrator's own gate-A run; do not close #1152 on the lane's evidence alone."
+    },
+    {
+      "id": "SPEC-K3-09",
+      "ticket": 1145,
+      "kind": "requirement-partial",
+      "severity": "note",
+      "title": "RIG.md's interim copy was left in place, departing from the precedent the ticket itself is modelled on",
+      "evidence": "#1145 \"What to do\" names only the repository README, and the added paragraph (README.md, under Develop) is accurate — verified independently: no packages/db migration creates the workflow schema (the single grep hit, 0149_counterparty_merge_pr_1.sql:110, is a prose comment), and the to_regclass('workflow.workflow_runs') skip probes exist (intake-batch-e2e.mjs:232, rollback-preflight.test.mjs:103, two-build-cutover-e2e.mjs:458). But the sibling precedent the report itself cites, commit 1d91f1839 (#1124), touched README.md AND docs/plan/active/riders-2026-09-20/RIG.md, redirecting the rig copy at the durable one; this ticket's commit aec3f45d7 touches README.md only, so RIG.md's paragraph stays a free-standing second copy that dies with the wave. The report discloses the decision in full and gives three reasons, so this is a judgement to confirm, not a defect to fix silently.",
+      "required_fix": "Orchestrator decides: either accept the README-only landing as written, or ask for the one-paragraph RIG.md redirect that #1124 shipped, so the next wave's rig file points at the README instead of re-deriving the note."
+    }
+  ],
+  "verified_clean": [
+    "#1152 AC1/AC2/AC3(db)/AC6: p1152.page.walk, p1152.page.omitted, p1152.page.composes_with_side, p1152.cursor.malformed, p1152.catalog.posture all re-run green on clara_c03 (5/5, 0 skip) under this review.",
+    "#1152 AC4: apps/web/components/accruals/accruals-list.tsx carries zero `.filter(` occurrences (re-run grep -c -> 0), and the rewritten 942.list.filter asserts a SECOND request body carrying p_side: \"revenue\".",
+    "#1152 existing-caller parity: accrual-list-side-filter.test.mjs and accrual-adjustments.test.mjs re-run green (24/24) against the widened six-argument door.",
+    "#1152 scope: plan-revise-form.tsx's one-line change is the mechanical envelope unwrap forced by loadAccruals' shared return type, and it is left unpaged as the brief's out-of-scope line requires.",
+    "#1152 shared files: en.json keys at the sorted position inside Accruals, manifest.txt one sorted line, rig-meta.mjs a no-cohort note beside 0334's, packages/db/package.json $GATES one entry at migration order, packages/db/README.md a new ## 0365 section only.",
+    "#1151 behaviour preservation: censusUnboundTasks' #1015 agentScoped/documentTaskIds presence rule is untouched by the new firmIds dimension, so waitForQueueDrain's other caller keeps its unscoped answer (also asserted by the new default-path wiring cell).",
+    "Frozen law (rule a) for L3: no diff to frozen-workflows.json, packages/runtime/workflows, registry.ts or plugins/startWorld.ts, and check-frozen-workflows.mjs against ffb629d73 reports OK (347 files, append-only)."
+  ]
+}

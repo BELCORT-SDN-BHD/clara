@@ -48,8 +48,17 @@ export const ROLES = {
   runtime: "clara_runtime",
 };
 
-/** Clara SQLSTATEs (design §5). RAISE ... USING ERRCODE = 'CLRxx'. */
+/** Clara SQLSTATEs (design §5). RAISE ... USING ERRCODE = 'CLRxx'.
+ *
+ *  #1149 — THE ONE CATALOG. `packages/db/migrations` raises 46 distinct CLRxx codes (CLR00
+ *  through CLR44, plus CLR99); every one carries an entry here, with a meaning derived from
+ *  that code's own raise sites and migration header comments — never invented.
+ *  `errcode-catalog.test.mjs` holds both directions: a code raised with no entry here, and an
+ *  entry here naming a code nothing raises, each fail by name. */
 export const CLR = {
+  dbaProbeRollback: "CLR00", // migration-only tail-self-test rollback sentinel (0166+, the
+  // dba* close-gate migrations): discards a behavioural fixture the tail planted only to
+  // observe, never raised to an application caller
   client: "CLR01", // client attribution
   provenance: "CLR02", // provenance binding
   wake: "CLR03", // wake authority
@@ -62,6 +71,65 @@ export const CLR = {
   badRequest: "CLR10", // malformed args / unknown account / bad lifecycle
   notFound: "CLR11", // not-found-in-your-firm (NO existence oracle)
   stale: "CLR12", // stale context / books-version freshness gate (Slice 3, §2.5)
+  conflict: "CLR13", // state conflict (0006): a turn already live for the session, an
+  // interruption not pending/expired, an illegal agent_task transition (incl. any move out
+  // of a terminal state), or open_interruption on a non-running task
+  dailyLimit: "CLR14", // limit (0006): a firm's daily token budget is exhausted, or its
+  // concurrent compute-run cap is reached (fail-closed admission)
+  legacyDocumentWriterRetired: "CLR15", // retired legacy document writer / transport bypass
+  documentTransition: "CLR16", // illegal document intake, processing, or extraction transition
+  filingConflict: "CLR17", // filing conflict, retention-floor refusal, or filing CAS failure
+  documentReservation: "CLR18", // document reservation, daily limit, or concurrency refusal
+  period: "CLR19", // correction authorization, staleness, or lifecycle refusal (0007+): a
+  // distinct-checker/attestation requirement unmet, a stale books-version or source-revision
+  // plan, a correction touching an already-closed period (write_into_closed_period, 0056+),
+  // or an illegal correction-state transition
+  attributionAmbiguity: "CLR20", // attribution ambiguity or candidate-state refusal
+  codingAmountException: "CLR21", // coding-floor amount exception / terminal refusal:
+  // amount_conflict, currency_unsupported, vendor_malformed, evidence_invalid, double_coded,
+  // or duplicate_bill
+  codingLifecycle: "CLR22", // coding entry revise/withdraw lifecycle or missing reason
+  counterpartyShape: "CLR23", // counterparty/fingerprint/supplier-bill shape refusal, or
+  // (0011+) an alias/merge refusal: alias_collision, registration_conflict, target_retired,
+  // open_draft_blocks, cross_client
+  codingTask: "CLR24", // coding-task transition or result-proof refusal
+  staleEvidence: "CLR25", // facts newer than the coding draft's bound evidence
+  openQuestion: "CLR26", // an open question blocks an entry (detail carries question_id + scope)
+  codingRule: "CLR27", // governed coding-rule refusal: role_floor, pinned_conflict, malformed,
+  // duplicate_live, or account_not_postable
+  egress: "CLR28", // egress refusal: no_consent, kill_switch, partial_consent,
+  // evidence_mismatch, or duplicate_live
+  sweepOutcome: "CLR29", // sweep outcome/refusal: refused_budget, refused_attempts,
+  // lane_changed, noop_existing, or not_finalized
+  directionUnresolved: "CLR30", // an e-invoice/sales counterparty resolves to the client on
+  // both sides, so the sale's direction cannot be determined
+  openingSeed: "CLR31", // opening-seed family: a correction/non-correction draft blocking the
+  // opening batch, a stale or mismatched opening extraction fact, a duplicate seed, or a
+  // not-serializable opening write
+  wiki: "CLR32", // wiki family: bad_state, stale_projected_from_seq, citation_required,
+  // consent_held, sha_mismatch, reserved_slug_namespace, isolation_unsupported, or budget_unknown
+  lint: "CLR33", // lint family: bad_conclusion or finding_not_open
+  seeding: "CLR34", // seeding family: batch_not_open, duplicate_batch, not_prior_gl, or
+  // proposal_not_open
+  impossibleConflictState: "CLR35", // an ON CONFLICT fired but the row it must have collided
+  // with cannot be found -- the impossible-state silence made loud
+  vendorBinding: "CLR36", // vendor identity binding refusal family: frozen binding content, an
+  // unavailable binding client, or a missing post/post-time control
+  fixedAssetRegisterIdentity: "CLR37", // fixed-asset register identity: enrolment validation,
+  // particulars completion/revision, lifecycle-advanced hand-off, or enrolled-account
+  // deactivation
+  depreciationAuthority: "CLR38", // the fixed-asset depreciation authority + run sequencing family
+  fixedAssetDisposal: "CLR39", // fixed-asset disposal and dependency-ordered reversal refusals
+  fixedAssetBelt: "CLR40", // the SS2.4 belt family: unregistered movement, GL-balance
+  // carry-down, or cost-adjustment refusal on an enrolled fixed-asset account
+  fiscalYearClose: "CLR41", // fiscal-year close/reopen family: close_not_in_progress,
+  // close_ordering_violation, close_self_attestation_required, a drawer1 identity/state
+  // refusal, or reopen_ordering_violation
+  reportingSeal: "CLR42", // epsilon reporting seal/claim-gate family: a render manifest
+  // missing a required key, an unsealed or unclaimed dataset for the run, or a claim
+  // assessment that no longer matches its manifest
+  renderQueue: "CLR43", // the render-queue family: an unregistered render-job kind, a missing
+  // sealed/claim/FS dataset for the run, or a terminally-failed render request
   // #1114 [0335] — CALLER-CONTRACT VIOLATION, and it is the one code in this catalog that names a
   // mistake made by a PROGRAM rather than by a person. A `clara_runtime`-only door whose own
   // contract guarantees an argument (the human an on-behalf-of act names; the firm/client/entry a
@@ -70,6 +138,9 @@ export const CLR = {
   // precisely so a surface, a log or a retry policy that branches on the CODE alone can tell an
   // internal fault from a real refusal a person can act on — CLR10 now means only the latter.
   callerContract: "CLR44",
+  probeRollback: "CLR99", // migration-only tail-self-test rollback sentinel (0018+): discards
+  // a behavioural fixture the tail planted only to observe, never raised to an application
+  // caller -- reserved EXCLUSIVELY for this and never reused for a real application refusal
 };
 
 /** Standard Postgres SQLSTATEs the rig asserts directly. */

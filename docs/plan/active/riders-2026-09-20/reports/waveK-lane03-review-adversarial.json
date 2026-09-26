@@ -1,0 +1,138 @@
+{
+  "review": "riders closing wave — lane 03 — ADVERSARIAL lens (an addition to /code-review, reported separately; never merged with the Standards or Spec axes)",
+  "lane": "L3",
+  "branch": "riders/wK-lane03",
+  "worktree": "C:\\Users\\zhant\\Desktop\\clara-wt\\703",
+  "fixed_point": "ffb629d73",
+  "diff_command": "git diff ffb629d73...HEAD",
+  "commits": [
+    "6ee02513d fix(db): #1152 the accrual register reads a page at a time (0365)",
+    "05aad4851 test(db): #1152 the page walk, the omitted-cursor parity and the malformed cursor",
+    "3a26bc94a feat(web): #1152 the accrual register pages, and the side filter reaches the door",
+    "b141cf186 fix(runtime): #1151 the admission drill's terminal drain scopes to its own firms",
+    "fe48906db fix(runtime): #1151 the batch drill's receipt census is by identity",
+    "aec3f45d7 docs: #1145 the Workflow DevKit schema bootstrap command's durable home"
+  ],
+  "tickets": [1152, 1151, 1145],
+  "rig": "clara_c03 @ 127.0.0.1:55742 (338 files, max 0365_accrual_register_pagination). Every door probe below ran as clara_authenticated inside a BEGIN … ROLLBACK; no row was committed by this review.",
+  "verdict": "accept-with-fixes",
+  "findings": [
+    {
+      "id": "ADV-01",
+      "ticket": 1152,
+      "severity": "major",
+      "kind": "refusal-guard bypass / pagination correctness",
+      "title": "0365's cursor guard admits a tuple whose elements are JSON null — the door silently restarts at page one and returns duplicate rows instead of refusing CLR10 accrual_cursor_malformed",
+      "where": "packages/db/migrations/0365_accrual_register_pagination.sql, §W cursor guard (the jsonb_typeof(...) is distinct from ... block) and the 'perform v_cursor[1]::date; perform v_cursor[2]::timestamptz; perform v_cursor[3]::uuid;' cast probe",
+      "evidence": "Driven at the real door on clara_c03 as the firm's bookkeeper, inside a rolled-back transaction. Case by case: 'banana' REFUSED CLR10; {} REFUSED CLR10; {tuple:'banana'} REFUSED; a 2-element tuple REFUSED; a 4-element tuple REFUSED; ['not-a-date',...] REFUSED; [1,2,3] REFUSED; {tuple:{a:1}} REFUSED — but {\"tuple\":[null,null,null]} was ADMITTED (rows=2, next_cursor set), and its answer is byte-identical to the no-cursor page one ('IDENTICAL TO PAGE ONE: true', ids e4d74022…, 18de16a2…). jsonb_array_elements_text renders JSON null as SQL NULL, so v_cursor = {NULL,NULL,NULL}; NULL::date / NULL::timestamptz / NULL::uuid raise nothing, so the cast probe passes; and array[...]::text[] < array[null,null,null]::text[] is TRUE, not NULL (measured on this database), so every row passes 's.sort_tuple < v_cursor'. A partial null is worse than a restart: echoing the door's own next_cursor with only its THIRD element nulled and walking five pages at p_limit=2 returned ['18de16a2+9421f0c8','9421f0c8+e34acd73','e34acd73+b3373565','b3373565','b3373565'] — 9421f0c8, e34acd73 and b3373565 each appear on more than one page, because a NULL element sorts GREATER than any text under array_cmp and re-admits the boundary row.",
+      "why_it_matters": "This is the exact behaviour the file's own committed comment forbids by name ('a malformed one is refused BY NAME … rather than silently treated as \"start over at page one\", which would hide a caller's bug behind a register that quietly restarted') and it breaks #1152's AC1 ('a caller can walk to the last page and see each row exactly once'). The door is EXECUTE-granted to clara_authenticated, so any signed-in caller reaching PostgREST directly can send such a cursor. No tenant leak and no data corruption: the client/firm predicate and the CLR11 client scope are unaffected. p1152.cursor.malformed covers five shapes and none of them carries a JSON null.",
+      "required_fix": "Add the null legs to the guard — refuse when any of jsonb_typeof(p_cursor->'tuple'->0/1/2) is 'null', or when v_cursor[1] is null or v_cursor[2] is null or v_cursor[3] is null after the array_agg — and add the three cases ({tuple:[null,null,null]}, plus one null in each position) to p1152.cursor.malformed. Needs a new migration number from the orchestrator (0380 upward); 0365 is already applied on four lane databases."
+    },
+    {
+      "id": "ADV-02",
+      "ticket": 1152,
+      "severity": "minor",
+      "kind": "vacuous assertion",
+      "title": "AC2's 'six-argument call with all three explicit null' is not a six-argument call — the fixture drops every null argument, so both halves of the cell send the same three-argument call",
+      "where": "packages/db/tests/accrual-adjustments-fixtures.mjs listAccrualAdjustments (the 'if (side !== null)' / 'if (cursor !== null)' / 'if (limit !== null)' guards) vs packages/db/tests/accrual-register-pagination.test.mjs p1152.page.omitted",
+      "evidence": "The fixture appends a spec only when the value is not null, so listAccrualAdjustments(BOB(), { client, side: null, cursor: null, limit: null }) renders exactly 'select clara.list_accrual_adjustments(p_client => $1::uuid, p_from => $2::date, p_to => $3::date)' — identical to the { client } call above it. The cell's own comment claims the opposite: 'EXPLICIT NULLS, the six-argument shape — byte-identical to the three-argument call, proving the new parameters' defaults are truly null and not some other value that happens to render the same today.' waveK-lane03-ticket1152.md AC2 repeats the claim.",
+      "why_it_matters": "The one property the second half exists to prove — that p_cursor/p_limit really DEFAULT to null rather than to some value — is never exercised. A future recut that gave p_limit a default of 50 would leave this cell green. (I drove the six-argument form myself with explicit nulls and it does answer identically, so the door is correct today; the CELL is the vacuity.)",
+      "required_fix": "Either send the arguments explicitly for that assertion (a sendNulls flag, or a second fixture that always emits all six specs), or delete the claim from the cell comment and from the ticket report."
+    },
+    {
+      "id": "ADV-03",
+      "ticket": 1152,
+      "severity": "minor",
+      "kind": "vacuous assertion",
+      "title": "p1152.page.composes_with_side never creates a row of the other side, so a p_side predicate dropped from the paged path would not red it — while its own title claims it 'never admits a row of the other side'",
+      "where": "packages/db/tests/accrual-register-pagination.test.mjs, test p1152.page.composes_with_side",
+      "evidence": "The cell creates three EXPENSE accruals and no revenue accrual (its own inline comment says so: '(No revenue accrual is created in this cell …)'). page1.accruals.every((r) => r.side === 'expense') is therefore true for any implementation, including one with 'and (p_side is null or a.side = p_side)' removed from the paged query. #1152's AC3 asks for 'a cell drives the door with each side and asserts the rows'. I drove the missing half by hand on a client of clara_c03 that carries one accrual of each side (0db7bcb1-…): {side:'expense',limit:1} → ['expense'], {side:'revenue',limit:1} → ['revenue'], unfiltered limit 1 → ['revenue'] — so the composition IS correct today; the coverage is what is missing.",
+      "why_it_matters": "This lane's own second ticket (#1151) exists because two drills were 'green for the wrong reason'. The composition of p_side with p_cursor/p_limit is the one new interaction 0365 introduces on the side filter, and no cell would catch its loss. The pre-existing p1075.filter.side does drive both sides (re-run green here, 3/3) but only on the unpaged call.",
+      "required_fix": "Mint one revenue-side accrual on the cell's own client (freshTwoSideClient, as accrual-list-side-filter.test.mjs does) and assert it is absent from every page of the expense-filtered walk; or rename the cell and correct AC3's wording in the report to what it actually proves."
+    },
+    {
+      "id": "ADV-04",
+      "ticket": 1151,
+      "severity": "minor",
+      "kind": "flaky assertion / swallowed error",
+      "title": "The batch drill forces its 'spontaneous' drift conditionally but asserts on it unconditionally, and swallows the settle's own failure — a child with no current_task_id reds the leg with a message that blames the belt",
+      "where": "packages/runtime/tests/intake-batch-e2e.mjs, the #1151 block ('const spontaneous = live[live.length - 1]' … 'if (spontaneousTask) { await settleRun(spontaneousTask, \"failed\").catch(() => {}); }') and the later assert.ok(cancelledWorkIds.has(spontaneous.work_id) === false, …)",
+      "evidence": "Read of the diff at ffb629d73...HEAD. spontaneousTask comes from 'select current_task_id from clara.accounting_work where id=$1'; when it is null the settle is skipped, the child stays live, the belt sweep cancels it like every other live child, cancelledWorkIds.has(spontaneous.work_id) is true and the assertion fails with 'the spontaneous child settled WITHOUT a cancel receipt — the belt correctly never decided it'. The .catch(() => {}) produces the same outcome when the settle itself refuses (e.g. a transition the door's own table forbids — the ticket report records exactly that class of refusal for wake tasks on this rig).",
+      "why_it_matters": "The drill runs in db-live-gates. A red whose message asserts the belt misbehaved, when the real cause is that the forced drift never happened, is the same diagnosis cost #1151 was filed to remove. The report's four green rounds do not rule it out — they only show current_task_id was populated on those rounds.",
+      "required_fix": "Make the drive and the assertion share one condition: either assert that spontaneousTask is non-null (a precondition of the cell), or skip the 'cancelledWorkIds.has(...) === false' assertion when no settle was performed, and let the settle's rejection fail loudly rather than be swallowed."
+    },
+    {
+      "id": "ADV-05",
+      "ticket": 1151,
+      "severity": "minor",
+      "kind": "weakened invariant",
+      "title": "The new receipt census tolerates an unbounded number of self-settled children, so a belt sweep that cancels nothing passes whenever every live child happens to be terminal",
+      "where": "packages/runtime/tests/intake-batch-e2e.mjs, the 'unexplained' census that replaced assert.equal(opReceipts.rows[0].n, live.length, …)",
+      "evidence": "unexplained = live children with neither a cancel receipt nor a status in {completed, refused, failed, expired}. Nothing bounds cancelledWorkIds.size from below and nothing bounds how many children may be 'settled on their own'. Concretely: if clara.sweep_intake_batch_cancellations offered an empty worklist (the exact symptom the ticket quotes — {\"batchCancelOk\":true,\"batchCancelSettled\":0,\"batchCancelChildren\":0}) AND every live child had terminally failed, the census reports '0 cancelled by receipt, N settled on their own, 0 unexplained' and passes. The old assertion reddened on that state.",
+      "why_it_matters": "waveK-lane03-ticket1151.md AC1 claims 'Still fails when genuinely skipped: structural, not merely asserted'. That holds only for a skipped child left queued or running; a skipped child that later fails is now indistinguishable from the lawful drift. The ticket's own 'Desired behavior' does say a self-settled child is lawful, so this is a faithful reading of the brief rather than a breach of it — but the report's claim is stronger than the cell.",
+      "required_fix": "Bound the tolerance: assert cancelledWorkIds.size >= live.length - K for a stated K (1 for the one forced child, plus any drift the run itself observed), or snapshot each child's status immediately before the belt call and require a receipt for every child still live at that instant. At minimum, soften AC1's wording in the report to what the cell proves."
+    },
+    {
+      "id": "ADV-06",
+      "ticket": 1151,
+      "severity": "note",
+      "kind": "footgun",
+      "title": "firmIds: [] silently means 'nothing is live' — an empty scope array disables the drain rather than acting as a no-op",
+      "where": "packages/runtime/lib/rollback-preflight.mjs censusUnboundTasks (the '($4::uuid[] is null or t.firm_id = any($4::uuid[]))' leg, and $3 on the document half) and packages/runtime/tests/queue-drain.mjs waitForQueueDrain",
+      "evidence": "Measured on clara_c03: \"'{}'::uuid[] is null\" → false and \"<uuid> = any('{}'::uuid[])\" → false, so an empty array matches no row. waitForQueueDrain(rig, { firmIds: [] }) would therefore report drained on its first poll with every table full. The function's own header states a careful presence-vs-value rule for documentTaskIds but says nothing about the empty case for firmIds.",
+      "why_it_matters": "A caller computing its firms (e.g. firmIds: rig.firms.map(f => f.id)) that hands back an empty list gets a silently green drill — the failure mode #1151 exists to remove.",
+      "required_fix": "Treat an empty array as null (no filter) or throw on it, and add a cell for it beside the two new queue-drain.test.mjs wiring cells."
+    },
+    {
+      "id": "ADV-07",
+      "ticket": 1152,
+      "severity": "note",
+      "kind": "silent truncation",
+      "title": "p_limit above the clamp truncates silently and the envelope never says what limit was actually applied",
+      "where": "packages/db/migrations/0365_accrual_register_pagination.sql, 'v_limit := least(greatest(p_limit, 1), 500)' and the returned envelope (which echoes client_id/from/to/side but not the effective limit)",
+      "evidence": "Driven at the door: p_limit=1000 → 5 rows (all this client has) with next_cursor set; p_limit=0 → 1 row; p_limit=-5 → 1 row. The clamp is the documented list_review_queue idiom, so clamping is right; the gap is that the answer carries no limit field.",
+      "why_it_matters": "The house pattern (and this ticket's own web reader) derives 'any more?' from the page SIZE compared with the limit the CALLER asked for. A caller that asks for 1000 and receives 500 concludes 'that was the last page' and stops, losing rows. apps/web sends 50, so nothing live is affected today.",
+      "required_fix": "Echo the effective limit in the envelope ('limit', v_limit), or refuse a p_limit above the ceiling by name the way an unsupported p_side is refused. Either way a later migration, never an edit to 0365."
+    },
+    {
+      "id": "ADV-08",
+      "ticket": 1152,
+      "severity": "note",
+      "kind": "latent race",
+      "title": "useAccrualsRegister's reload() clears loading only when it still owns the epoch, while loadMore() clears loadingMore unconditionally and cites the R2 fix for doing so",
+      "where": "apps/web/lib/accruals/use-accruals-register.ts — reload's 'finally { if (epochRef.current === myEpoch) setLoading(false); }' vs loadMore's 'finally { setLoadingMore(false); }'",
+      "evidence": "Read of the file. Both callbacks bump one shared epochRef. If a loadMore() started while a reload() were in flight, reload's finally would skip setLoading(false) and loadMore's finally would only retire loadingMore, leaving the hook at loading: true forever. Not reachable through the one caller today: AccrualsList renders the Load More button inside DataState, and DataState returns <LoadingState> instead of its children whenever loading is true (apps/web/components/firm/data-state.tsx), so the button is unmounted for the whole of a reload.",
+      "why_it_matters": "The hook is an exported module and the asymmetry is exactly the bug the comment beside loadMore says was already paid for once in use-review-queue.ts. A second caller, or a change that keeps the table on screen during a reload, resurrects it.",
+      "required_fix": "Make reload's setLoading(false) unconditional too, for the same reason loadMore's is."
+    },
+    {
+      "id": "ADV-09",
+      "ticket": 1152,
+      "severity": "note",
+      "kind": "robustness regression",
+      "title": "loadAccruals stopped coalescing a missing accruals array when it changed from returning a list to returning the envelope",
+      "where": "apps/web/lib/accruals/api.ts — 'return answer ?? empty' replaced 'return answer?.accruals ?? []'",
+      "evidence": "Read of the diff. The old shape defended against a 200 whose body lacked accruals; the new one only defends against a null body. A non-null answer without accruals now reaches page.accruals.length in useAccrualsRegister and throws a TypeError rather than rendering an empty register.",
+      "why_it_matters": "Small, and the real door always builds coalesce(jsonb_agg(...), '[]') — but the guard was there and is gone, and the register's error path becomes a thrown TypeError rather than DataState's own empty state.",
+      "required_fix": "Normalise accruals/next_cursor before returning, e.g. return { ...empty, ...(answer ?? {}) } with accruals defaulted to []."
+    }
+  ],
+  "verified_clean": [
+    "TENANT ISOLATION (#1152): driven at the recut door as an active bookkeeper of firm a28c660e… — another firm's real client id refuses CLR11 {\"reason\":\"client_not_found\"}, and a uuid that names no client at all refuses with the identical code, reason and message. No existence oracle: the two cases are indistinguishable, and the client check runs BEFORE the side and cursor guards, so a malformed cursor cannot be used to probe another firm's client either.",
+    "RANK FLOOR AND POSTURE (#1152): a viewer reads a page (rows=2); a REMOVED member refuses CLR04 'actor has no active membership'; clara_runtime and clara_agent_ro both refuse 42501 permission denied — the recut door is reachable only by clara_authenticated. Catalog posture after the drop+create is byte-identical to the pre-image: clara_fn_owner | true | s | search_path=clara, pg_temp | clara_fn_owner=X/clara_fn_owner,clara_authenticated=X/clara_fn_owner (0365 §T re-reads it at every apply; p1152.catalog.posture re-run green).",
+    "SIDE FILTER (#1152): p_side='banana' refuses CLR10 accrual_side_filter_unsupported with the supported set in the detail; expense and revenue each narrow correctly UNDER a limit on a real two-sided client (see ADV-03 for why no cell covers that).",
+    "THE PAGE-COST CLAIM (#1152): 0365's comment says the derived occurrence_count/posted subqueries are paid 'over the bounded page rather than the whole scored set'. Verified rather than accepted — EXPLAIN (ANALYZE, VERBOSE) of the same CTE shape on clara_c03 puts a Result node carrying SubPlan 1 and SubPlan 2 ABOVE the Sort, with loops=1 at p_limit=1 over 5 scored rows.",
+    "TUPLE ORDERING (#1152): clara_c03 is C.UTF-8 / provider c, so the text[] sort tuple orders bytewise and the id tiebreaker is a strict total order; the cursor predicate and the ORDER BY use the same comparison, so a well-formed walk is exactly-once (p1152.page.walk re-run green).",
+    "MIGRATION SAFETY (#1152): 0365's prestate recognises both starting shapes, sha-pins _human_ctx / role_rank / _accrual_sides / the 0334 pre-image, refuses a dependent or a second body by name, and §T re-reads the signature census, both refusal guards, both date predicates, the projection anchors, the posture and the comment. Every failure mode I could construct on a populated database is a loud refusal, not a silent mis-apply.",
+    "THE FROZEN LAW (rule (a), all three tickets): 'git diff ffb629d73...HEAD --name-only -- packages/runtime/workflows registry.ts plugins/startWorld.ts frozen-workflows.json' is EMPTY; 'FREEZE_BASE_REF=ffb629d73 node scripts/check-frozen-workflows.mjs' → OK, 347 frozen files verified append-only, 60 'use workflow' modules frozen+registered, 3 retired entries; 'check-parts-parity.mjs' → OK.",
+    "SHARED FILES: apps/web/messages/en.json has 0 duplicate keys under an independent line scanner (7116 keys) and the two new keys sit inside the Accruals section; packages/db/package.json's $GATES gains exactly one entry at migration order; rig-meta.mjs adds a 'no cohort change' note only; apps/web/test/manifest.txt gains one line.",
+    "RE-RUN CLAIMS: packages/db tests/accrual-register-pagination.test.mjs 5/5 pass; tests/accrual-list-side-filter.test.mjs 3/3 pass; apps/web tests/firm-scope-db-pins.test.ts + lib/accruals/use-accruals-register.test.ts + components/accruals/accruals-list.test.tsx + components/plans/plan-revise-form.test.tsx → 34 tests, 34 pass, 0 fail, 0 skip.",
+    "#1145: the README paragraph sits under '## Develop' (README.md:11), names 'pnpm --filter @clara/runtime exec bootstrap', WORKFLOW_POSTGRES_URL, the dependency bin, the SKIP-not-fail trap with the 22-cell evidence and the #866 disposable-database caution — everything the issue's suggested wording and gate C's finding F5 asked for. Nothing adversarial found."
+  ],
+  "not_attempted": [
+    "A from-scratch chain on a disposable cluster (RIG.md and CLOSING-PLAN risk 1 reserve that for the integrator; this review ran no migration).",
+    "The two standalone intake e2e drivers (intake-admission-e2e.mjs, intake-batch-e2e.mjs): they need a World-bootstrapped database, which #1151's own implementer built and tore down on a disposable cluster. ADV-04 and ADV-05 are read of the diff plus the reported evidence, not a re-run.",
+    "A browser walk (accrual-walk.spec.ts): the lane's Playwright triple was not driven by this review. Note for the integrator that apps/web/e2e/accrual-mock.mjs ignores p_limit entirely and always answers next_cursor:null, so the browser walk exercises the SERVER-side side filter but never the page."
+  ],
+  "summary": "Six commits, three tickets, no frozen byte moved and no tenant wall weakened. One real defect: migration 0365's cursor guard admits a {\"tuple\":[null,null,null]} (and any tuple carrying a JSON null element), which the door then treats as no cursor at all — page one again, and with a partially nulled cursor the same rows come back on more than one page, breaking #1152's own 'each row exactly once' and the refusal the file's committed comment promises by name. Everything else adversarial I tried held: cross-firm, nonexistent-client, viewer, removed member, clara_runtime and clara_agent_ro all answer correctly and without an existence oracle; the limit clamp, the side filter and the recut posture are intact; the 0365 prestate and tail refuse loudly rather than mis-applying. The rest of the findings are test vacuity and footguns: two #1152 cells that would stay green through the regression they are named for, and on #1151 a conditionally driven drift with an unconditional assertion plus an unbounded 'settled on their own' tolerance. #1145 is clean."
+}

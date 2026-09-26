@@ -460,10 +460,23 @@ test("p936.window.extended — when a lawful revision extended the authority pas
 // clara._reserve_op's own untyped CLR10 with no DETAIL at all, so no surface could classify it.
 // ===========================================================================================
 
+/** THE SUFFIX THIS DOOR ACTUALLY DERIVES, read off the LIVE body rather than pinned. #1150 [0364]
+ *  moved it from the prepayment lane's `:plan` to the accrual lane's own `:acrev`, so a literal
+ *  here would measure a collision the door no longer takes on a post-0364 chain and none at all on
+ *  a pre-0364 one. Reading it keeps this cell true on both. */
+async function derivedPlanKeySuffix() {
+  const r = await rootQuery(
+    `select (regexp_matches(p.prosrc, 'p_op_key[[:space:]]*\\|\\|[[:space:]]*''(:[a-z_]+)'''))[1] as s
+       from pg_proc p where p.oid = 'clara.correct_accrual_adjustment(uuid,jsonb,text)'::regprocedure`);
+  assert.ok(r.rows[0]?.s, "clara.correct_accrual_adjustment derives no nested plan key at all");
+  return r.rows[0].s;
+}
+
 test("p936.refusal.plan_key_conflict — a correction whose derived plan key was already spent by a DIRECT plan revision is refused with a typed reason, never a bare untyped CLR10", async (t) => {
   if (await gateAccrualCorrection(t)) return;
   const base = await configureBase({ tag: "plankey" });
   const key = opk("p936-plankey");
+  const suffix = await derivedPlanKeySuffix();
 
   // Somebody spends the derived key on the generic plan door first.
   const before = await liveWindow(base.plan_id);
@@ -472,7 +485,7 @@ test("p936.refusal.plan_key_conflict — a correction whose derived plan key was
     dayOfMonth: before.day_of_month, timezone: before.timezone,
     effectiveFrom: before.effective_from, effectiveTo: before.effective_to,
     basis: before.basis, reversalDayRule: before.reversal_day_rule,
-    opKey: key + ":plan",
+    opKey: key + suffix,
   });
   const countBefore = await accrualCount(base.client);
 

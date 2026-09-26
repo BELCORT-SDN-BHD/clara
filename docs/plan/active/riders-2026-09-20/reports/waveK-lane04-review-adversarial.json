@@ -1,0 +1,125 @@
+{
+  "review": "adversarial",
+  "lane": "LC (wave K, lane 04)",
+  "branch": "riders/wK-lane04",
+  "base": "ffb629d73",
+  "head": "ea48a81ea",
+  "tickets": [1144],
+  "date": "2026-09-26",
+  "rig": {
+    "lane_db": "clara_c04 @ 127.0.0.1:55742 — 337 files / 0361_reservation_release_advice, re-read unchanged after this review",
+    "method": "the seven tool bodies were driven as functions against the real 0352/0353 doors, with globalThis.__claraPools replaced by a probe that mints the same interactive OBO credential (clara.mint_wake_credential) and runs the read pool as clara_agent_ro; every runtime-pool act ran inside ONE transaction that was ROLLED BACK (clara.contract_plan_confirmations for the test document is still 0 rows). Probe files were deleted; git status in the worktree is clean."
+  },
+  "verdict": "accept-with-fixes",
+  "gates_reproduced": [
+    "node scripts/check-frozen-workflows.mjs -> OK, 362 frozen files, 62 'use workflow' modules frozen+registered, 3 retired",
+    "node scripts/check-frozen-workflows.mjs --compare-base ffb629d73 -> OK, 347 existing entries retain the same hash AND deployed flag, 15 additions, 3 retirements",
+    "node scripts/check-frozen-workflows.selftest.mjs -> OK",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK; work_result gains exactly one site (claraWork.v7.impl.ts:464) and no chatTurn.v23.* site",
+    "frozen-workflows.json read directly: 362 entries, 347 deployed:true, 15 with no deployed key (the 14 new closure files plus lib/fa-proposal-grounds.ts)",
+    "node --test packages/runtime/tests/chat-turn-v23-tools.test.mjs -> 17/17 pass",
+    "clara._fa_particulars_complete read from pg_proc on clara_c04: its six conditions are byte-equal to loadFaProposalInputsStepV7's predicate (AC3 holds)",
+    "clara.confirm_tenancy_rent_plan_for and _revision_for read from pg_proc: both re-check the named author's live membership, refuse a non-active member (CLR04 authority_lost) and enforce clara.role_rank('bookkeeper') (CLR04 insufficient_role) before the core"
+  ],
+  "walls_that_held": [
+    "rank floor: runConfirmTenancyRentPlan with an ACTIVE VIEWER as ctx.createdBy -> {ok:false, code:CLR04, reason:insufficient_role, message:'confirming a rent plan requires a bookkeeper or above'}. Driven.",
+    "cross-client on the ACT: a conversation pinned to client A naming client B's tenancy document -> CLR11 'document ... is not a live filing of this client'. Driven.",
+    "second conversation, same tenancy, a different taskId -> CLR10 rent_plan_already_confirmed with the cut's own sentence and the holding plan_id. Driven.",
+    "op-key convergence: two calls with the same taskId and the same input returned ONE plan_id and ONE confirmation_id (clara._reserve_op returned the stored receipt). Driven.",
+    "no model-supplied firm reaches a credential; both confirmations send p_judgement explicitly; the ungranted verdict cores are never called (source, and the parity census agrees).",
+    "the freeze law: no diff to any v22/v6/v4 body, manifest additions only, the 347 locked entries untouched."
+  ],
+  "findings": [
+    {
+      "id": "ADV-K04-01",
+      "ticket": 1144,
+      "severity": "major",
+      "kind": "tenant-isolation / client-pin provenance",
+      "title": "read_tenancy_terms is the only tool of the 52 with no client wall, and it reads another client's tenancy out of a pinned conversation",
+      "evidence": "packages/runtime/workflows/chatTurn.v23.tenancy.ts:130-170 (runReadTenancyTerms) reaches readScoped with no ctx.clientId check. readScoped (chatTurn.v10.infra.ts:57) mints a FIRM-scoped 'interactive' credential with NO client pin, and all three doors are firm-scoped: clara.wake_get_contract_terms, clara.wake_get_tenancy_rent_plan_draft and clara.wake_propose_contract_terms each end in 'return clara._X_core(w.firm_id, p_document)' and only refuse a credential that IS client-pinned. DRIVEN on clara_c04: a ctx pinned to client feaeb93f-635a-464c-998d-58760ad8b43f calling runReadTenancyTerms({document_id: 960e0fc6-1224-47b1-ab2b-eb046eadfe96}) returned {ok:true, status:'read'} whose own payload carries client_id fd06a8f1-656e-4d63-bc03-e4449389c73d — a different client — with agreement_class 'tenancy', 4 live terms and a drafted plan (monthly rent 360000 cents, and the premises address in the memo). A scan of every chatTurn tool schema in the repo (regex over packages/runtime/workflows/chatTurn.v*.ts) shows readTenancyTermsInputSchema is the ONLY one that takes a document and no client; the three reads shipped in the same commit refuse exactly this case with 'That is not the client this conversation is about'. The module header argues a client argument 'would be one more existence surface for no gain' — but what is lost is v21's provenance wall, not an existence surface, and the terms door's own answer already names the client the tool could have compared against.",
+      "failure_scenario": "A bookkeeper working in client A's conversation pastes (or the model carries forward from an earlier turn) a document id belonging to client B of the same firm. Clara answers with B's rent, term, deposit, escalation and drafted plan inside A's workspace, and the transcript records that it did.",
+      "required_fix": "When ctx.clientId is set, wall the answer: refuse before the doors, or compare the terms door's own client_id against ctx.clientId and refuse with the module's existing not_found sentence. Three lines, no new door, and the firm-level (unpinned) use the tool was designed for is unaffected."
+    },
+    {
+      "id": "ADV-K04-02",
+      "ticket": 1144,
+      "severity": "major",
+      "kind": "correctness / a fabricated accounting statement",
+      "title": "read_payroll_posting_state answers status 'posted' for a document that does not exist or is not this client's",
+      "evidence": "packages/runtime/workflows/chatTurn.v23.reads.ts:160-180: when no blocked queue row matches, the body calls clara.get_document_state($doc,$client) and returns {ok:true, status:'posted', document_state} WITHOUT branching on a null state. MEASURED on clara_c04: clara.get_document_state returns NULL (it does not refuse) both for a document filed under another client and for a random uuid. DRIVEN through the tool: runReadPayrollPostingState(ctx pinned to A, {client_id:A, document_id: <client B's document>}) -> {ok:true, status:'posted', document_state:null}; identical for document_id 11111111-1111-4111-8111-111111111111. The tool's own description instructs the model to 'Say why a PAYROLL SUMMARY did or did not post', so the model is handed 'posted' and will say the run posted. The suite cannot see this: the only cell over this body ('the doors are the queue and the document state, in the contract's order', chat-turn-v23-tools.test.mjs:109) is a source pin, and no cell drives the posted branch.",
+      "failure_scenario": "A person mistypes a document id, or names a payroll summary belonging to another client of the firm. Clara replies that the payroll run posted. Nothing posted, and nothing in the answer says so.",
+      "required_fix": "Branch on the state: document_state === null must be a refusal (the module already carries a not_found sentence shape) or a status the model cannot read as 'posted'. Add a cell that drives the branch with a document the client does not hold."
+    },
+    {
+      "id": "ADV-K04-03",
+      "ticket": 1144,
+      "severity": "major",
+      "kind": "correctness / the read returns none of what its prompt promises",
+      "title": "read_agreement_terms asks the extract door for 200 CHARACTERS, and the agreement's own terms envelope comes back empty",
+      "evidence": "chatTurn.v23.reads.ts:39 sets AGREEMENT_EXTRACT_MAX_CHARS = 200 and passes it as clara.get_document_extract's third argument. That argument is p_max_chars (the lane's own report measures the signature as 'p_max_chars integer'), a budget over the CONCATENATED envelopes and regions: 'v_budget := least(greatest(coalesce(p_max_chars,20000),0),100000)' — the door's own default is 20000. MEASURED on clara_c04 for a real filed agreement: at 200 the envelope_text lengths are [agreement_text_facts 0, agreement_vision_facts 200, ocr 0]; at 20000 they are [4814, 898, 2]. DRIVEN through the tool: runReadAgreementTerms returned {ok:true, status:'blocked'} with agreement_text_facts starved to '' and no 'contract_state' anywhere in the payload, while agreementBankedPair(extract) still returned true (it reads the extractions[] metadata, which the budget does not touch), so nothing refuses. The budget is allocated in extraction-uuid order ('ord = 0:||c.id'), so WHICH envelope survives is arbitrary. The 200 was transcribed from waveS-lane08-ticket1136.md:410, which calls the argument 'p_limit integer' — a row limit — the same literal as the queue's 200 rows two lines below it.",
+      "failure_scenario": "Someone asks what a filed agreement says. The tool answers ok:true, SYSTEM_PROMPT_V23 tells the model to quote eleven recorded terms 'as the page printed them', and the payload contains none of them — so the model either reports nothing was recorded or composes.",
+      "required_fix": "Pass the door's own default (omit the argument, or a budget sized for an agreement envelope) and pin the chosen number with a cell asserting the text-facts envelope is non-empty. The contract's 'p_limit' naming should be corrected in the successor-contract record so the next cut does not repeat it."
+    },
+    {
+      "id": "ADV-K04-04",
+      "ticket": 1144,
+      "severity": "major",
+      "kind": "refusal mapping / dead code the report presents as delivered",
+      "title": "the queue_scope_malformed arm never fires: both tools hand the model the raw sentence 'queue scope is malformed'",
+      "evidence": "chatTurn.v23.reads.ts:196 and :455 map on reason === 'queue_scope_malformed'. That token exists in NO database function (select count(*) from pg_proc where prosrc like '%queue_scope_malformed%' -> 0 on clara_c04) and nowhere else in the repo. clara._list_review_queue_core raises the condition as \"raise exception 'queue scope is malformed' using errcode='CLR10'\" with NO detail, so authoringRefusal (chatTurn.v11.tools.ts:81) yields reason=null and governedRefusalV23 falls through to the door's own message. DRIVEN: runReadPayrollPostingState and runReadAgreementTerms with a pinned client that is not in the firm both returned {ok:false, code:'CLR10', reason:null, message:'queue scope is malformed', details:{}} — while PAYROLL_POSTING_STATE_REFUSALS.client_not_found is 'I cannot find that client under your firm.' The cell that is meant to cover this ('another firm's real client is answered IDENTICALLY to a missing one', chat-turn-v23-tools.test.mjs:126) only asserts the constant's string; it never drives the door, which is the wave-3 addendum's own rule.",
+      "failure_scenario": "A conversation pinned to a client the firm no longer holds asks about a payroll summary or an agreement. The person reads an internal sentence about a malformed scope instead of the cut's own 'I cannot find that client under your firm.'",
+      "required_fix": "Key the arm on the code (CLR10 out of the queue read), as the settlement and rent reads already key on CLR11, or have the door carry a typed detail. Then drive it with a real refusal in a cell."
+    },
+    {
+      "id": "ADV-K04-05",
+      "ticket": 1144,
+      "severity": "minor",
+      "kind": "pagination ignored / a truncation read as an absence",
+      "title": "the review-queue read takes the first 200 rows and ignores next_cursor, so a blocked row past the cap reads as 'posted' or 'read'",
+      "evidence": "reviewQueueRows (chatTurn.v23.reads.ts:58-68) calls clara.wake_list_review_queue({client_id}, null, 200) and uses only answer.rows; the answer's next_cursor is never read and rows.length is never compared to the cap. The door PAGES: 'p_limit := least(greatest(coalesce(p_limit,50),1),500)' and the result carries next_cursor. MEASURED on clara_c04 for a client with 2 queue rows: limit 1 returned 1 row (the second silently dropped), limit 2 and limit 200 returned both. Both callers (blockedRow for payroll_posting_blocked and for agreement_posting_blocked) treat 'no matching row in this page' as 'there is no block'. The module comment claims the cap 'bounds the rows this client can have waiting, not a search', which the paging contradicts.",
+      "failure_scenario": "A client with a busy Needs-you queue (more than 200 rows) has a blocked payroll summary that sorts past the cap. read_payroll_posting_state answers 'posted' (ADV-K04-02's second route) and read_agreement_terms answers 'read' with question_text null, dropping the gate's own sentence.",
+      "required_fix": "Follow next_cursor until the document is found or the queue is exhausted, or refuse when rows.length === AGENT_QUEUE_LIMIT rather than concluding an absence from a truncated page."
+    },
+    {
+      "id": "ADV-K04-06",
+      "ticket": 1144,
+      "severity": "minor",
+      "kind": "idempotency signal / a field that can never be true",
+      "title": "replayed is structurally false on both confirmations, so the model cannot tell a converged replay from a fresh act",
+      "evidence": "runConfirmTenancyRentPlan and runConfirmTenancyRentPlanRevision return 'replayed: receipt.replayed === true'. The receipt is clara._finish_op's stored payload, whose jsonb_build_object in clara._confirm_tenancy_rent_plan_core (and in the revision core) contains no replayed key, and clara._reserve_op returns that stored payload verbatim on a replay. DRIVEN inside a rolled-back transaction: two calls with the same taskId and the same input returned the SAME confirmation_id and plan_id (b802724d-1466-4bcd-96cd-2de9c1fec184 — the reservation converged exactly as waveS-lane08-fix.md section 7.3 intends) and BOTH reported replayed:false. The stable key exists for that convergence, and the one flag that would let the turn say 'this was already confirmed' never says it.",
+      "failure_scenario": "A step replay or a retried tool call re-enters the confirmation. The database correctly returns the first receipt; the tool reports it as a fresh confirmation, so the model tells the person it has just confirmed a plan that was confirmed earlier in the same conversation.",
+      "required_fix": "Either have a successor core stamp replayed (a successor-contract item, since the core is the sweep wave's), or derive it in the tool — reserve-then-read, or compare the receipt's confirmed_at — rather than shipping a field whose value is a constant. At minimum record it as a known-dead field."
+    },
+    {
+      "id": "ADV-K04-07",
+      "ticket": 1144,
+      "severity": "note",
+      "kind": "refusal vocabulary",
+      "title": "two hand-built refusals borrow CLR sqlstates the database did not raise",
+      "evidence": "chatTurn.v23.reads.ts:441 returns {ok:false, code:'CLR11', reason:'not_read_yet', ...} under a comment saying it is 'NOT a governed refusal — this lane's own'; chatTurn.v23.tenancy.ts:152 returns {ok:false, code:'CLR10', reason:'not_a_tenancy', ...} the same way. isGovernedRefusalV23 matches /^CLR[0-9]{2}$/, so both are classified as governed refusals a surface may render, and CLR11 means 'not in your firm / not found' everywhere else in this cut (it is the code both the settlement read and the tenancy read map to their own client_not_found and not_found sentences).",
+      "failure_scenario": "A surface or a later handler that branches on the code rather than the reason treats 'that agreement has not been read yet' as a not-found, or the reverse.",
+      "required_fix": "Give a lane-local condition a lane-local code, or state in the module why it deliberately reuses the door's sqlstate."
+    },
+    {
+      "id": "ADV-K04-08",
+      "ticket": 1144,
+      "severity": "note",
+      "kind": "documented ladder vs the door",
+      "title": "CONFIRM_RENT_PLAN_LADDER omits the door's two CLR04 rungs and names a client_not_found token the door never emits",
+      "evidence": "The constant is documented as 'THE REFUSAL LADDER, IN ORDER, so a tool author does not reorder it'. clara.confirm_tenancy_rent_plan_for (read from pg_proc on clara_c04) raises, between client_not_found and the core, CLR04 authority_lost (the author is no longer an active member) and CLR04 insufficient_role (below bookkeeper) — neither appears in the constant. DRIVEN: the viewer case returned reason 'insufficient_role', a rung the ladder does not list. The door's client wall is \"raise exception 'client is not in your firm' using errcode='CLR11'\" with no detail, so the ladder's client_not_found token is never produced — the driven cross-client case returned reason null.",
+      "failure_scenario": "A later tool author reads the ladder as the door's contract, orders a new wall against it, and places it above or below a rung that is not written down.",
+      "required_fix": "List the two CLR04 rungs at their measured positions and mark client_not_found as a code-only refusal, or state that the constant is the SENTENCE ladder rather than the door's."
+    },
+    {
+      "id": "ADV-K04-09",
+      "ticket": 1144,
+      "severity": "note",
+      "kind": "coverage",
+      "title": "neither confirmation was driven against its door by this lane; the two tools that WRITE have unit and source coverage only",
+      "evidence": "The lane's own report discloses this under 'Anything unverified' ('neither confirmation has been driven against clara.confirm_tenancy_rent_plan_for at all'), and chat-turn-v23-e2e.mjs drives only read_tenancy_terms and read_rent_settlement_candidates. This review drove both confirmations against the real doors inside a rolled-back transaction and found the rank floor, the cross-client wall, the already-confirmed wall and the op-key convergence all correct — so this is a coverage note rather than a defect, recorded so the integrator does not have to re-derive it.",
+      "failure_scenario": "A later change to the OBO chain (for example #1150's plan-core consolidation, which folds clara._tenancy_plan_core into clara._obo_plan_core) breaks the chat entrance and no runtime cell notices.",
+      "required_fix": "Add one e2e leg, or a runtime cell over a fixture, that drives a confirmation refusal end to end — the db battery (packages/db/tests/tenancy-agent-twins.test.mjs) covers the door, not the tool."
+    }
+  ],
+  "summary": "The cut's MECHANICS are sound and I could not break them: the freeze law holds (347 locked entries unchanged, 15 additions, all unlocked), parts parity gains exactly one v7 site and no chatTurn site, the registry, pins, banner and build-info edits are consistent, claraWork_v7's completeness predicate is byte-equal to clara._fa_particulars_complete read live from pg_proc, and the two confirmations' rank floor, membership re-check, cross-client wall and op-key convergence all held when driven against the real 0352/0353 doors. The defects are all in the five READS' handling of what the doors answer: one tool crosses the conversation's client pin (ADV-01), one reports 'posted' for a document that does not exist (ADV-02), one asks for 200 characters where the door's default is 20000 and returns an agreement whose terms envelope is empty (ADV-03), and a refusal arm keyed on a token no database function emits hands the model an internal sentence (ADV-04). Every one is invisible to the new suite because the read bodies are covered by source pins and constant assertions rather than by driving the door — the wave-3 addendum's own rule."
+}

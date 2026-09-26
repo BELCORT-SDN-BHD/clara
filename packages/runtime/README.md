@@ -19,6 +19,123 @@ The registry selects the current chat, autodraft, statement/witness facts, docum
 firm interview, client onboarding, and bank/close wake workflows. Read it for the exact versions
 and retained exports; repository state alone is not evidence of a deployed image.
 
+### The two pins the 2026-09-26 CLOSING wave moved
+
+`chatTurn → chatTurn_v23` and `claraWork → claraWork_v7` (#1144). `statementFacts` stays at
+`statementFacts_v4`. Every superseded body stays exported and in `workflowBodies` — chatTurn v2–v22
+and claraWork v1–v6 alike — because the boot census refuses to start the world database-wide if a
+body a parked run needs is missing, and that is policy (c) enforced rather than promised.
+
+**What `chatTurn_v23` carries: SEVEN tools, and the ruling they unwind.** `chatTurn_v22`'s own
+roster cell asserts these seven names absent BY NAME and records that the absence "is a ruling, not
+an oversight": at that cut every door behind them was granted to `clara_authenticated` alone, and
+neither pooled chat credential carries JWT claims, so a tool over one could only ever answer a grant
+refusal — which is not a capability. The riders sweep wave built the machine-lane halves
+(`0352_agent_read_twins_payroll_agreement.sql` and `0353_tenancy_agent_twins_obo_confirmations.sql`,
+both hosted 2026-09-25) and #1144 collected their contracts, so the roster moves from v22's measured
+**45 to 52**:
+
+| tool | door(s), argument order as called | pool |
+|---|---|---|
+| `read_payroll_posting_state` | `clara.wake_list_review_queue(p_scope, p_cursor, p_limit)`, then `clara.get_document_state(p_document, p_client)` | read |
+| `read_payroll_settlement_state` | `clara.wake_get_payroll_settlement_candidates(p_client)` | read |
+| `read_agreement_terms` | `clara.get_document_extract(p_document, p_client, p_max_chars)` plus the queue | read |
+| `read_tenancy_terms` | `clara.wake_get_contract_terms(p_document)`, `clara.wake_get_tenancy_rent_plan_draft(p_document)`, and `clara.wake_propose_contract_terms(p_document)` ONLY when nothing is recorded | read |
+| `read_rent_settlement_candidates` | `clara.wake_get_rent_settlement_candidates(p_client)`, `clara.wake_get_tenancy_deposit_coding(p_client)` | read |
+| `confirm_tenancy_rent_plan` | `clara.confirm_tenancy_rent_plan_for(p_client, p_author, p_document, p_rent_account, p_payable_account, p_judgement, p_op_key)` | runtime |
+| `confirm_tenancy_rent_plan_revision` | `clara.wake_get_tenancy_escalation_revision(p_document)` first, then `clara.confirm_tenancy_rent_plan_revision_for(p_client, p_author, p_document, p_judgement, p_op_key)` | runtime |
+
+The two confirmations take a STABLE op key, `stableOpKey(ctx.taskId, TOOL, input)`, and that is a
+deliberate departure from #949's "a FRESH `p_op_key` per act": that was written for the WEB surface,
+where two clicks are two intents, and in chat a retried tool call is ONE intent. The core's
+reservation hashes the caller's five arguments and NOT the named author, which is what makes a chat
+confirmation and a human replay of the same decision converge on one receipt — so the key must never
+be derived from anything that can outlive the initiating person, and `ctx.taskId` does not.
+
+**NO WIRE KIND IS ADDED**, and that is a measurement rather than a preference. The five reads emit
+`freeform_result`, already declared and already emittable; the two confirmations return a TYPED TOOL
+RESULT in `runStartPrepaymentScheduleWork`'s shape and emit no part of their own, because every
+construction site of `work_result` is a `claraWork.*.impl.ts` and the chat lane has never emitted it
+(`waveS-lane08-fix.md` §7.2; the census `check-parts-parity.mjs` prints re-takes it on every run).
+So `apps/web` is untouched and `chatTurn.v16.prompt.ts` stays the declarer.
+
+**What the cut does NOT add, named so a later reader does not think it was forgotten:** a settle
+tool for either family (`clara.settle_payroll_net_pay` and `clara.settle_rent_payable` are
+`clara_authenticated`-only and both migrations' tails assert they stayed that way — two candidate
+lines of the same amount in one window are two lines a PERSON adjudicates); a record-terms tool; any
+call to an ungranted verdict or plan core; and the two payroll witnesses of #1144 item 3, which
+belong to `payrollFacts`'s own next version.
+
+**What the review round changed in the seven, and why each one is a behaviour rather than a
+tidy-up.** Every item was reproduced by driving the shipped body against `clara_c04` before it was
+touched, and every one of them is a cell that drives the body rather than reading a constant.
+
+| what was shipped | what a person got | what ships now |
+|---|---|---|
+| the queue read took ONE page of 200 and ignored `next_cursor` | a blocked payroll summary sorting past the cap read as **posted**; a blocked agreement read as **read** with the gate's sentence dropped | the scan follows the cursor, terminates on the SHORT page (the door's `next_cursor` is non-null on the last page too), and at its ceiling says it could not read the queue to the end rather than concluding an absence |
+| `read_payroll_posting_state` returned `status: "posted"` whenever no block matched | `clara.get_document_state` answers SQL NULL — it does not refuse — for a document that does not exist and for another client's, so both were answered "the run posted" | an **approved** entry on the filing is what posted means (`ck_journal_entries_status`), the entries are named, and everything else is the contract's `payroll_not_read` refusal naming the reading task's own status |
+| `clara.get_document_extract`'s third argument was `200` | it is `p_max_chars`, a CHARACTER budget over the concatenated envelopes (default 20000), so the agreement's terms envelope came back EMPTY (measured: `0/198/2` at 200, `4814/898/2` at the default) while the prompt asks the model to quote eleven recorded terms | the tool states no budget and takes the door's own |
+| the `CLR10` arm keyed on `detail.reason` | `clara._list_review_queue_core` raises it with NO detail, so the arm never fired and the person read "queue scope is malformed" | both maps key on the SQLSTATE as well, which is the shape the tenancy reads already used |
+| five `CLR03` sentences declared, none reachable | `authoringRefusal` replaces any CLR03 message with the AUTHORING lane's literal, so a refused READ answered "That authoring action is not permitted in this session." | each read maps CLR03 to its own sentence; a door that sent its own token still keeps it |
+| `read_tenancy_terms` had no client wall | its three doors are FIRM-scoped, so out of a conversation pinned to one client it answered with ANOTHER client's rent, term, deposit and drafted plan | the terms door's own `client_id` is compared against the conversation's pin; the firm-level (unpinned) session it was designed for is untouched |
+| the settlement read computed the panel's empty sentence AFTER narrowing | a client with open runs, asked about one settled summary, was told no payroll run is waiting | the panel's sentence comes from the unfiltered answer; the narrowed miss gets the contract's own `not_offered` row, which points at the posting half rather than guessing |
+| both confirmations returned `replayed: receipt.replayed === true` | neither core stores a `replayed` key and `clara._reserve_op` returns the stored payload verbatim, so the flag was a constant false: every converged replay was reported as a fresh act | the flag is gone (a successor contract asks a core to stamp one), and the ONE replay the tool can see — `clara._reserve_op`'s `{"pending": true}`, which these two cores return verbatim instead of raising `CLR13` — is named `operation_in_flight` instead of "nothing was recorded" |
+
+`CLR44` is also NEVER RENDERED from this closure: `isGovernedRefusalV23` subtracts it, so a
+never-shown refusal becomes the tool's own fault sentence instead of a wiring diagnosis on screen.
+That is CLOSING-PLAN roster item 3's RULE. Its other half — the stale "CLR10, and NEVER SHOWN"
+comment in `lib/prepayment-schedule-basis.ts` — could not ride this cut: the module's only consumer
+is deploy-locked `chatTurn.v22.tools.ts`, which cannot be repointed at a successor copy, so the copy
+would be unreachable code free to drift from the original.
+
+**What `claraWork_v7` carries: ONE step body.** `loadFaProposalInputsStepV7` replaces v6's, and
+three things move, each of them a ground a PERSON already wrote down that v6 could not see: the
+completeness predicate becomes the estate's OWN six conditions (`clara._fa_particulars_complete`;
+under v6's two-condition form a register row with a method and a start date but NO useful life reads
+complete and the dependent question that would collect the drivers is never opened); the client's
+recorded depreciation note joins the inputs (#1090, migration 0345 catalogues the key); and the
+account's retired policy joins them (#1092, migration 0346 opens the relation to the read
+credential). The model sees none of it — the proposal is opened by the workflow BODY after a
+commit — so the tool roster does not move, the instructions text does not move, and the budgets do
+not move. What moves in the hashed bundle is this closure's four ids.
+
+**Deploy order: this cut adds NO obligation of its own.** Every door the seven tools touch has been
+live since 0352 and 0353, and 0345/0346 since the same wave, all hosted 2026-09-25 at frontier
+`0361_reservation_release_advice`. v6's 0321, v5's 0230 and v4's 0192/0216 are inherited unchanged.
+Against a database missing one of the seven doors the chat tool answers a typed refusal and the TURN
+SURVIVES; against one missing 0345/0346 the v7 step's reads throw inside its own `try`, the step
+answers `null` exactly as it does for any unreadable register, and the question opens without a
+block — the same behaviour v6 has today. The ORDER still stands as the runbook states it: database,
+then the runtime image by `sha256:` digest, then the web promotion, machine stopped before the
+migrate.
+
+**Rollback to v22 / v6** stops offering the seven tools and narrows the proposal back to the asset's
+own row and its siblings. The five reads changed no database state. The two CONFIRMATIONS did: a
+rent plan confirmed through this image is a plan on the books, and a v22 image cannot confirm
+another from the conversation — the human door still can, and a plan already recorded stays as it
+is, authored by the person named on it. A question already opened keeps the block it was opened
+with: the proposal is a value on a durable question row, not something an image re-derives on
+answer. That is the honest runbook line, not "rollback is free".
+
+**Refinements the digest cannot see** (CUT-PLAN §5, R5): `z.toJSONSchema` erases `.refine` /
+`.superRefine`. **v7 changes no refinement.** Stated here by hand because no gate will state it.
+
+**One module joins the frozen closure at this cut**: `lib/fa-proposal-grounds.ts`, hash-locked by
+`claraWork.v7.impl.ts` and `claraWork.v7.ts` (measured with
+`node scripts/check-frozen-workflows.mjs --print-closure`, which names both entry files). A
+hardening of either statement it exports now goes through the NEXT version closure, under the
+owner's standing ruling of 2026-09-15 — so DURABLE RULES LIVE IN MIGRATIONS 0345 and 0346, never in
+that file. It carries no module-level `node:` import, which is `lib/knowledge.mjs:44-64`'s measured
+constraint for any module entering a frozen closure.
+
+**The walk**: `tests/chat-turn-v23-e2e.mjs` with its own `chat-turn-v23-serve.mjs` child, wired into
+the `DRIVERS` roster and `.github/actions/db-live-gates/action.yml`. It drives two of the seven
+tools against the real wake doors on a real World — one refused by 0353's own CLR11 for a document
+the firm does not hold, one ANSWERING for a client it does — and shows `claraWork_v7` serving the
+Work a chat turn admits, with the committed receipt carrying the digest the boot banner logged.
+Every identifier the tools take is parsed out of the PERSON'S own message, never the leg's
+environment: v21's ADV-S-1 designed out rather than discovered.
+
 ### The three pins the 2026-09-25 cut phase moved
 
 `chatTurn → chatTurn_v22`, `claraWork → claraWork_v6` and `statementFacts → statementFacts_v4`.
@@ -1700,6 +1817,105 @@ accumulated from an earlier, out-of-order local run, `waitForQueueDrain` correct
 the queue drained and timed out (see the action.yml comment above this step).
 <!-- /#967 -->
 
+<!-- #1151 -->
+**Two intake drills that were green for the wrong reason (candidates E26/E27; #1044's follow-ups
+1 and 2, `waveS-lane06-fix.md` / `waveS-lane06-fix-2.md`).**
+
+1. **The terminal drain (this leg) now takes `firmIds`.** `waitForQueueDrain(rig, { firmIds })`
+   scopes `censusUnboundTasks`'s own census to the leg's OWN firm(s) — this file calls it with
+   `firmIds: [firm]`, the one firm `rig.buildFirm("intake-admission-e2e")` built at the top. `clara_
+   intake_ci` is always built fresh, so an unscoped drain never saw another firm's data there; a rig
+   CLONE of a used estate does, and that estate's own compliance/lint notifications can mint `held`
+   wake tasks with no `clara.wake_engine_sources` row enabled to place them — no engine this leg's
+   process runs will EVER clear a row it was never responsible for. Unscoped, the drain cannot tell
+   that stranger's stuck row from this leg's own admitted work still being live, and times out on
+   either the same way ("TIMED OUT … unbound live tasks: […]"). Measured on a disposable clone (338
+   files / `0365`, world-bootstrapped, otherwise empty) with ONE `held` wake task planted for a
+   SEPARATE firm (`tests/g1-wake-bodies.fixtures.mjs`'s `plantHeldWakeTask`, the same producer
+   contract `rollback-preflight.test.mjs` uses): unscoped, this leg's drain times out at exactly that
+   one row every time; scoped to its own firm, it drains and the stranger row is still `held`,
+   untouched, afterwards. Re-measured in the closing wave's fix round on a much harder database — a
+   world-bootstrapped clone of the lane estate carrying **1,715 `held` wake tasks across 365 OTHER
+   firms**, minted by the intake legs' own runs from that estate's transitions with both
+   `clara.wake_engine_sources` rows disabled — the scoped drain finished in **4, 5 and 6 polls
+   (1,935 ms / 1,968 ms / 2,499 ms) on three consecutive rounds**, and a fourth, run after the batch
+   leg in the action's own order, in **6 polls / 2,780 ms**. Every figure in this paragraph is a
+   round that was actually run; there is no range claimed beyond them.
+
+   **The narrowing lives in `tests/queue-drain.mjs`, not in `lib/rollback-preflight.mjs`.** The
+   first cut of this fix added a fourth bind parameter to `censusUnboundTasks`, which is SHIPPED
+   code (`lib/runtime-contracts.mjs` and `scripts/rollback-preflight.mjs` import it, and it is in
+   `.output/server/index.mjs`) — and #1151's "Out of scope" line forbids exactly that ("any product
+   code path … both are cell gaps"). `waitForQueueDrain` therefore calls `censusUnboundTasks`
+   byte-for-byte the way every other caller does and narrows its ANSWER with one further statement
+   (`narrowTasksToFirms`), which is issued only when a caller named `firmIds`. An omitted `firmIds`
+   issues no statement at all, so no existing caller's answer can have moved; an EMPTY array is
+   refused by name rather than silently meaning "nothing is live"; and a census table the narrowing
+   cannot place fails closed. `censusNonTerminalRuns` / `censusFailedRuns`
+   (`workflow.workflow_runs`) are deliberately NOT narrowed: nothing this ticket measured named
+   them, and a database this call runs against has never had a body run against it before THIS
+   leg's own process started one — `clara_intake_ci` is always built fresh, and a rig clone's own
+   `agent_tasks`/`document_processing_tasks` residue was seeded, never actually WORKED by a live
+   engine. (That last sentence is the one thing the fix round measured a limit to: on a clone that
+   ALSO carries another leg's parked `claraWork_v6` runs, the RUN census still holds the drain open,
+   because it is firm-blind by design. Settle or finish those runs first — the action's own order
+   does, since the batch leg runs last and is never followed by a drain.) The scoped gate is driven
+   against a live database in `rollback-preflight.test.mjs`'s own `#1151` cell (48/48 unskipped on a
+   world-bootstrapped clone), and against an in-memory two-firm database in `queue-drain.test.mjs`,
+   where the assertions are on the ANSWER — drained, or timed out naming which rows — never on a
+   bind parameter.
+2. **`intake-batch-e2e.mjs`'s LEG 3 receipt census is now BY IDENTITY, not by raw count.** The old
+   assertion (`op_receipts` count === `live.length`) had no allowance for a live child settling ON
+   ITS OWN — a genuine terminal ingest failure — between the cancel decision and the belt's own
+   sweep, though the lines just above it already make exactly that allowance for the earlier
+   seed-to-decision window. Under load the window widens and the belt's own worklist read
+   (`clara._intake_batch_live_children`) finds that child gone before it ever gets there —
+   `{"batchCancelOk":true,"batchCancelSettled":0,"batchCancelChildren":0}` is what an EMPTY worklist
+   looks like — so the blunt count came up short (measured on this rig, round 1: `3 of 7`). The leg
+   now FORCES exactly that drift on one live child every round (`clara.settle_work_run(task,
+   'failed', …)` on the one child the interruption loop never directly cancels), so the census is
+   proven against the drift it exists for rather than waiting for load to happen to open the window,
+   and then checks each live child BY IDENTITY: explained by its own `cancel_accounting_work` op
+   receipt, or by its Work having reached some OTHER terminal status on its own — never by neither
+   (a genuinely skipped child still reds the leg, unchanged) and never by two (`clara.op_receipts`'s
+   own primary key, `(firm_id, fn, op_key)`, makes "decided twice" structurally unobservable here,
+   which is why the old count's real job was never actually catching that half).
+
+   **The drive and the assertion now share one condition, and the tolerance is bounded.** The first
+   cut forced the drift only `if (spontaneousTask)` and swallowed the settle's own rejection, while
+   asserting on the drift unconditionally — so a child with no `current_task_id`, or a settle the
+   door refused, reddened the leg with a message blaming the BELT. The drive now asserts its own
+   precondition, lets the settle fail loudly, and proves the child terminal BEFORE the belt reads.
+   And "settled on its own" is no longer an unbounded allowance: the leg snapshots every child's
+   status ONE QUERY before the belt call, and every child NON-TERMINAL at that instant — the ones
+   the belt's own worklist offers — must carry a receipt afterwards. A belt that swept nothing
+   therefore reds whatever the children did next; only a child already terminal when the belt read
+   is lawfully receipt-less. Re-measured over four solo rounds plus one in the action's own order,
+   all green, on a clone of a used estate: `94 / 94 / 83 / 94` receipt rows over the same number of
+   DISTINCT work ids every time (the "none decided twice" observable, now asserted rather than
+   argued), `47 / 47 / 41 / 47` children live when the belt read and every one of them holding a
+   receipt, exactly `1` settled on its own (the forced drift) and `0` unexplained every round.
+   Vacuity control: with the belt call replaced by
+   `{batchCancelOk:true,batchCancelSettled:0,batchCancelChildren:0}` the leg reds at "every child
+   STILL LIVE when the belt read must carry a cancel receipt — 47 were live, 47 have none"; the
+   call was then restored byte for byte.
+
+**Reproduction rig, for whoever needs to re-run this.** A disposable WSL Postgres 17 cluster on a
+free port (never `rigl06ac3`, never a lane's own shared cluster — migration 0154 forbids a second
+from-scratch chain on a cluster that already ran one), migrated 0001→0365 and seeded from scratch,
+`WORKFLOW_POSTGRES_URL` bootstrapped once (`pnpm --filter @clara/runtime exec bootstrap`), then the
+three legs through `scripts/ci/world-gate.mjs` in the action's own order. A TEMPLATE COPY of a used
+lane database works too and is the harder case — `create database clara_rt_test template <lane db>`,
+then the same one bootstrap — but it is not CI-shaped: it arrives carrying that estate's own live
+rows, and each intake leg mints hundreds more `held` wake tasks for other firms as it runs. Settle
+that residue (and any parked `workflow.workflow_runs`) before a leg that ENDS in a drain, or the
+drain will time out on rows that were never that leg's, which is the very condition this ticket
+documents rather than a defect in it. A stranger firm's held wake
+task is planted with `tests/g1-wake-bodies.fixtures.mjs`'s `plantHeldWakeTask({ owner, client,
+payload })` — no `registerSource` call, so it is born `held` with no source to place it, exactly the
+production shape.
+<!-- /#1151 -->
+
 NAMED RESIDUAL: leg 5 proves the LOST-FINALIZE-RESPONSE convergence, not a SIGKILL
 between finalize and checkpoint. This file boots the runtime in-process (as
 `intake-e2e.mjs` does) so it can inject the OCR fixture; a true SIGKILL variant needs the
@@ -1731,6 +1947,13 @@ undefined, and the failure is a RUN-TIME one no build gate sees.
   to the hash-locked v1 (`capability-registry.mjs:29-34`'s own rule; `layout-sandbox.mjs` is the
   estate's precedent for a sibling).
 - **`lib/work-trace-bounds.mjs`** — #847's owed writer half; see the section below.
+
+**The ledger has grown twice since.** The 2026-09-25 cut added `lib/prepayment-schedule-basis.ts`,
+`lib/fa-particulars-proposal.ts` and `lib/opening-parse.mjs` the same way, and the 2026-09-26
+CLOSING wave (#1144) added **`lib/fa-proposal-grounds.ts`**, hash-locked by `claraWork.v7.impl.ts`
+and `claraWork.v7.ts`. Every one of them entered BY CLOSURE rather than by a marker somebody
+added, and the rule is the same for all: a hardening ships with the NEXT version, and the durable
+rule lives in the migration (0345 and 0346 for this one), never in the file.
 
 **The status mapping, exported ONCE as `faceStatusOf`.** The runtime keeps its own frozen two
 words; every human face and the `clara.work_knowledge_reads.status` column use the estate's

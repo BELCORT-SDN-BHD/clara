@@ -47,6 +47,7 @@ import { claraWorkBundleIdentityV3 } from "../workflows/claraWork.v3.bundle.js";
 import { claraWorkBundleIdentityV4 } from "../workflows/claraWork.v4.bundle.js";
 import { claraWorkBundleIdentityV5 } from "../workflows/claraWork.v5.bundle.js";
 import { claraWorkBundleIdentityV6 } from "../workflows/claraWork.v6.bundle.js";
+import { claraWorkBundleIdentityV7 } from "../workflows/claraWork.v7.bundle.js";
 
 export function buildInfoRoutes(): express.Router {
   const router = express.Router();
@@ -81,7 +82,8 @@ export function buildInfoRoutes(): express.Router {
         // operator unable to tell, from an HTTP read alone, which bodies this process can still
         // run for a parked Work.
         bundles: [
-          claraWorkBundleIdentityV6(), claraWorkBundleIdentityV5(), claraWorkBundleIdentityV4(),
+          claraWorkBundleIdentityV7(), claraWorkBundleIdentityV6(), claraWorkBundleIdentityV5(),
+          claraWorkBundleIdentityV4(),
           claraWorkBundleIdentityV3(), claraWorkBundleIdentityV2(), claraWorkBundleIdentity(),
         ],
       }),

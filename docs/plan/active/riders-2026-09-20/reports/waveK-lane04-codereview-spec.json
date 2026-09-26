@@ -1,0 +1,132 @@
+{
+  "axis": "SPEC",
+  "lane": "waveK / LC (lane04)",
+  "branch": "riders/wK-lane04",
+  "base": "ffb629d73",
+  "head_commits": [
+    "15974c5a7 feat(runtime): #1144 chatTurn_v23 read_payroll_posting_state, the first of the seven",
+    "7253ad661 feat(runtime): #1144 chatTurn_v23 read_payroll_settlement_state and read_agreement_terms",
+    "7353c7be3 feat(runtime): #1144 chatTurn_v23 the four tenancy tools of #1137",
+    "3967e3e63 feat(runtime): #1144 chatTurn_v23 is cut and the registry pins it",
+    "7f0e5bec4 feat(runtime): #1144 claraWork_v7 is cut and grounds the particulars proposal",
+    "5344c2771 test(runtime): #1144 the cut's walks - chatTurn_v23 and claraWork_v7 on a real World",
+    "872cbeea1 docs(runtime): #1144 the README section for the pins this cut moved",
+    "1bf051771 test(runtime): #1144 the closure-attribution roster measures this cut's growth",
+    "ea48a81ea test(runtime): #1144 the two censuses the whole suite caught"
+  ],
+  "spec_sources": [
+    "GitHub issue #1144 (body is the newest Agent Brief; gh api confirms zero comments)",
+    "docs/plan/active/riders-2026-09-20/CLOSING-PLAN.md, section 'LC, the version cut, in detail' (the operative, narrowed roster)",
+    "reports/waveS-lane08-ticket1136.md, section 'Successor contract for the next chatTurn cut'",
+    "reports/waveS-lane08-ticket1137.md, section 'Successor contracts for the next chatTurn cut'",
+    "reports/waveS-lane08-fix.md, section 7 (7.1-7.4, which supersedes the ticket reports)",
+    "reports/waveS-lane05-fix.md, section 'Successor contract - the proposal input-loading step'"
+  ],
+  "verdict": "accept-with-fixes",
+  "summary": "The cut's MECHANICS are right and re-measured here: 15 manifest additions with no deployed key while the 347 locked entries keep hash and flag, the five registry edits per class, the seventh boot banner, the build-info roster newest-first, claraWork_v7 actually wired to loadFaProposalInputsStepV7 with the estate's six-condition predicate and both grounds at the contract's argument orders, no packages/db and no apps/web file touched, no work_result construction site in any chatTurn, and the 41 + 83 unit cells green at exactly the counts the report gives. The SPEC gaps are all in the REFUSAL and STATUS halves of the three #1136 reads, where the contract tables were transcribed into frozen constants but not into reachable code paths: two mapped sentences can never fire (proven by driving the shipped mapper), one whole contract row has no implementation at all, and the CLR03 arm answers a READ with an unrelated authoring sentence. Two further items are roster deviations the orchestrator should rule on rather than defects of craft.",
+  "findings": [
+    {
+      "id": "SPEC-K-L04-01",
+      "ticket": 1144,
+      "severity": "major",
+      "kind": "requirement-implemented-wrongly",
+      "title": "The CLR10 tenant-masking sentence can never fire in read_payroll_posting_state or read_agreement_terms; the person is handed the raw 'queue scope is malformed'",
+      "evidence": "waveS-lane08-ticket1136.md sections 1 and 3 both carry the row: 'CLR10 (queue scope is malformed) | client_not_found | \"I cannot find that client under your firm.\" This is also the answer for another firm's real client - that is deliberate, and a tool must not distinguish them.' The implementation keys that map on the TYPED REASON: packages/runtime/workflows/chatTurn.v23.reads.ts:196 (reason === \"queue_scope_malformed\") and :455 (if (reason === \"queue_scope_malformed\")). But the door raises it with NO detail payload: packages/db/migrations/0352_agent_read_twins_payroll_agreement.sql:686,690,692 and 0011_daily_loop.sql:3757,3761,3763 are all `raise exception 'queue scope is malformed' using errcode='CLR10';` with no detail=, and authoringRefusal (packages/runtime/workflows/chatTurn.v11.tools.ts:81-82) derives reason ONLY from detail.reason. Driven rather than reasoned: a probe cell run in packages/runtime against the SHIPPED chatTurn.v23.refusals.ts, with Object.assign(new Error('queue scope is malformed'), {code:'CLR10'}) and the module's own mapper, returned {\"ok\":false,\"code\":\"CLR10\",\"reason\":null,\"fix\":null,\"message\":\"queue scope is malformed\",\"details\":{}} - the mapper returned null and the door's internal wording was carried through to the model. The two cells that look like coverage, chat-turn-v23-tools.test.mjs:126 ('another firm's real client is answered IDENTICALLY to a missing one') and :244, assert only the CONSTANT's text; no cell drives the mapper. The same cut's tenancy modules key on the CODE instead (chatTurn.v23.tenancy.ts:181, :291, code === \"CLR11\") and are correct, so the fix is a shape this cut already uses.",
+      "required_fix": "Key both maps on the sqlstate (code === \"CLR10\") as well as on the reason, returning {reason: \"client_not_found\", message: ...}, and add a cell that drives governedRefusalV23 with a CLR10 carrying no detail - the exact shape 0352 and 0011 raise."
+    },
+    {
+      "id": "SPEC-K-L04-02",
+      "ticket": 1144,
+      "severity": "major",
+      "kind": "requirement-missing",
+      "title": "read_payroll_posting_state has no payroll_not_read arm: a summary that was never read is answered status \"posted\"",
+      "evidence": "waveS-lane08-ticket1136.md section 1's refusal table carries TWO distinct rows for the no-blocked-row branch: 'no payroll_posting_blocked row AND an approved entry on the filing | NOT a refusal | report the entry: its date, its memo and its total. The run posted.' and 'no payroll_posting_blocked row AND no entry | payroll_not_read | \"That payroll summary has not been read yet.\" Name the task's own status from clara.get_document_state, never a guess.' chatTurn.v23.reads.ts:169-192 collapses both into one: when blocked === null it reads clara.get_document_state and returns {ok:true, status:\"posted\", document_state} unconditionally. No entry is read, the two states are never distinguished, and the token payroll_not_read appears nowhere in packages/runtime (grep returns no hit; PAYROLL_POSTING_STATE_REFUSALS at :133-141 carries only not_permitted and client_not_found). The result type's own comment at :180-181 admits the ambiguity - 'the run either posted or was never read' - while the field the model reads says \"posted\". No cell covers it: the four payroll_posting cells in chat-turn-v23-tools.test.mjs (:68, :92, :109, :126) drive the input schema, the client wall, the door source pins and the refusal constants, none of them this branch. The prompt stanza cannot compensate; it tells the model to report what the tool returned.",
+      "required_fix": "Implement the contract's two branches: read the filing's approved entry, answer posted only when one exists (with its date, memo and total), and otherwise return the payroll_not_read refusal naming clara.get_document_state's own status. One cell per branch."
+    },
+    {
+      "id": "SPEC-K-L04-03",
+      "ticket": 1144,
+      "severity": "minor",
+      "kind": "requirement-implemented-wrongly",
+      "title": "Every not_permitted (CLR03) sentence the five read contracts specify is declared but unreachable; a refused READ answers 'That authoring action is not permitted in this session.'",
+      "evidence": "The contracts name a per-tool CLR03 sentence: 'I cannot read your firm's inbox in this conversation.' (1136 section 1), 'I cannot read this client's payroll in this conversation.' (section 2), 'I cannot read this client's documents in this conversation.' (section 3), 'I cannot read your firm's agreements in this conversation.' (1137 section 1), 'I cannot read this client's rent in this conversation.' (1137 section 2). All five ship as frozen constants (chatTurn.v23.reads.ts:133, :234, :391; chatTurn.v23.tenancy.ts:72, :213) and none is referenced by a mapper: every governedRefusalV23 map in the two modules returns null for CLR03, so the message falls through to authoringRefusal's own CLR03 literal at chatTurn.v11.tools.ts:86-88, 'That authoring action is not permitted in this session.' Driven: the same probe cell with {code:'CLR03'} returned exactly that message. Calling a READ an 'authoring action' is also wrong on its face. Every cell that touches these constants (chat-turn-v23-tools.test.mjs:126, :180; chat-turn-v23-tenancy.test.mjs:86) asserts the string's value, never that any refusal carries it.",
+      "required_fix": "Map CLR03 in each of the five reads to that tool's own sentence, or delete the five constants and record in the report that the estate's generic CLR03 sentence is what ships - but not both."
+    },
+    {
+      "id": "SPEC-K-L04-04",
+      "ticket": 1144,
+      "severity": "minor",
+      "kind": "requirement-implemented-wrongly",
+      "title": "read_payroll_settlement_state answers the panel's 'no run is waiting' sentence for a document-narrowed read that simply did not match",
+      "evidence": "waveS-lane08-ticket1136.md section 2's table separates the two cases: 'document_id named, no matching run | NOT a refusal | this run's net pay is either already settled or not yet posted - never guess which; point at read_payroll_posting_state for the posting half.' and 'runs is [] | NOT a refusal | \"No payroll run is waiting on its bank payment.\" (the panel's own empty-state sentence, reused verbatim)'. chatTurn.v23.reads.ts:293-302 filters first and then sets empty_sentence: runs.length === 0 ? NO_PAYROLL_RUN_AWAITING_PAYMENT : null on the POST-filter list, so a client with three open runs, asked about one already-settled summary, is told that no payroll run is waiting on its bank payment. The cell at chat-turn-v23-tools.test.mjs:180 asserts the constant's text only.",
+      "required_fix": "Compute empty_sentence from the unfiltered door answer, and give the narrowed-no-match case its own status pointing at read_payroll_posting_state, as the contract row says."
+    },
+    {
+      "id": "SPEC-K-L04-05",
+      "ticket": 1144,
+      "severity": "minor",
+      "kind": "roster-item-not-taken",
+      "title": "CLOSING-PLAN roster item 3 - the invalid_author / CLR44 correction - was not taken, and the plan's escape clause does not apply",
+      "evidence": "CLOSING-PLAN.md, 'What the cut carries', third bullet: 'One correction to a body being succeeded. packages/runtime/lib/prepayment-schedule-basis.ts:119 still documents invalid_author as \"CLR10, and NEVER SHOWN\" ... The module is inside the frozen closure and deploy-locked, so the correction rides the successor copy. If the cut finds the mapping already correct in the file it copies, it records that rather than claiming the fix.' Measured at HEAD: prepayment-schedule-basis.ts:119 still reads '/** CLR10, and NEVER SHOWN: the successor always has the actor, so this is a wiring error. */', and frozen-workflows.json carries that path with \"deployed\": true. The mapping is NOT already correct, so the escape clause is unavailable; the lane declined the item and recorded it as a successor contract instead (waveK-lane04-ticket1144.md, 'The one correction to a body being succeeded - NOT taken'). The reasoning is sound and its supporting measurement is confirmed here (grep -rn CLR44 packages/runtime returns nothing, so nothing behaves wrongly today), but this is one of the three items in a roster the plan declared closed.",
+      "required_fix": "Orchestrator ruling: either accept the deferral explicitly in the integration record and carry the successor contract to the mainline cut, or have the item taken. It should not pass as silently discharged."
+    },
+    {
+      "id": "SPEC-K-L04-06",
+      "ticket": 1144,
+      "severity": "minor",
+      "kind": "not-asked-for",
+      "title": "confirm_tenancy_rent_plan_revision returns an extra offer key the settled section 7.2 shape does not carry",
+      "evidence": "waveS-lane08-fix.md section 7.2 - the section that SETTLED the part-kind question by measurement - spells the return literally: 'return { ok: true, status: \"revised\", plan: rentPlanRevisionPart(receipt), replayed: receipt.replayed === true };'. chatTurn.v23.tenancy.ts:692-698 returns {ok:true, status:\"revised\", plan, offer, replayed}, adding the raw clara.wake_get_tenancy_escalation_revision answer. The addition is defensible - it is how the turn can say both figures out loud - but it widens a shape a fix round settled byte for byte, and no cell asserts the result's key set: chat-turn-v23-tenancy.test.mjs:374 shapes rentPlanRevisionPart in isolation.",
+      "required_fix": "Either drop offer to match the settled shape, or record the widening in the ticket report as a deliberate departure from 7.2 with its reason, as the lane did for its other departures."
+    },
+    {
+      "id": "SPEC-K-L04-07",
+      "ticket": 1144,
+      "severity": "note",
+      "kind": "requirement-implemented-wrongly",
+      "title": "Two non-database conditions are dressed as CLR sqlstates the database never raised, and one reuses this cut's own tenant-wall code",
+      "evidence": "chatTurn.v23.reads.ts:432-439 returns the not_read_yet answer with code: \"CLR11\", and chatTurn.v23.tenancy.ts:152-159 returns not_a_tenancy with code: \"CLR10\". Neither contract assigns a code to either (1136 section 3: 'no banked pair | not_read_yet'; 1137 section 1: 'draft.agreement_class is not tenancy ... | not_a_tenancy'), and in this very cut CLR11 is what both tenancy reads map to not_found / client_not_found (chatTurn.v23.tenancy.ts:181, :291). isGovernedRefusalV23 (chatTurn.v23.refusals.ts:26) treats any /^CLR nn $/ as governed and renderable, so a surface or a later tool branching on the code will read 'the reading has not finished' as 'not in your firm'.",
+      "required_fix": "Give the two lane-own refusals a code that is not a door's sqlstate, or record in the report which sqlstate each was deliberately dressed as and why."
+    },
+    {
+      "id": "SPEC-K-L04-08",
+      "ticket": 1144,
+      "severity": "note",
+      "kind": "requirement-partial",
+      "title": "Three rows of #1137's confirmation table are not rendered: CLR13 to in_flight, and the two CLR04 arms",
+      "evidence": "waveS-lane08-ticket1137.md section 3's table carries 'CLR13 | in_flight | an in-flight sibling holds this key.', 'CLR04 authority_lost | not_permitted | \"Your membership of this firm is no longer active, so I cannot record a confirmation as yours.\"' and 'CLR04 insufficient_role | not_permitted | \"Confirming a rent plan needs a bookkeeper or above.\"'. CONFIRM_RENT_PLAN_REFUSALS (chatTurn.v23.tenancy.ts:383-405) carries none of the three, so all three fall through to the door's own message; the module's doc comment at :372-381 names the CLR04 pair as a deliberate carry but does not mention CLR13. CONFIRM_RENT_PLAN_LADDER (:352-365) also names the token operation_in_flight where the contract writes in_flight. Unlike SPEC-K-L04-01 these tokens DO reach a mapper - 0353_tenancy_agent_twins_obo_confirmations.sql:1561,1579,1601,1615,1633 raise with detail=jsonb_build_object('reason',...) - so this is a rendering choice, not a dead path.",
+      "required_fix": "Either add the three sentences, or extend the module's existing 'deliberately absent' comment to name CLR13 as well, so the deviation is visible to the integrator."
+    },
+    {
+      "id": "SPEC-K-L04-09",
+      "ticket": 1144,
+      "severity": "note",
+      "kind": "report-claim-not-true",
+      "title": "The ticket report's 'the worktree's git status is clean' is false",
+      "evidence": "waveK-lane04-ticket1144.md, 'Anything unverified', last bullet: '.scratch/two-build/ holds the drill's three scratch images. They are gitignored (the worktree's git status is clean) and left in place.' git status --porcelain in C:\\\\Users\\\\zhant\\\\Desktop\\\\clara-wt\\\\704 reports '?? .advq.mjs' - a 503-byte untracked pg probe script at the worktree root, mtime 2026-09-26 02:46, written by the lane rather than by this review (the review's own probe was created under packages/runtime/tests and removed). Harmless, but it stands against a claim that no scratch was left.",
+      "required_fix": "Remove .advq.mjs before integration, or name it in the report as scratch left in place."
+    }
+  ],
+  "verified_claims": [
+    "node scripts/check-frozen-workflows.mjs --compare-base ffb629d73 -> 'OK - 347 existing entr(ies) retain the same hash and deployed flag; 15 addition(s); 3 recorded retirement(s).' RE-RUN here.",
+    "node scripts/check-frozen-workflows.mjs -> 'OK - 362 frozen file(s) verified ...; 62 \"use workflow\" module(s) all frozen+registered; 3 retired entr(ies) recorded.' RE-RUN.",
+    "The 15 manifest additions carry NO deployed key (read out of frozen-workflows.json at HEAD), which is the manifest's own shape for 'not locked' until the release ceremony.",
+    "node --test tests/chat-turn-v23-tools.test.mjs tests/chat-turn-v23-tenancy.test.mjs tests/clara-work-v7.test.mjs -> 41 pass / 0 fail, i.e. 17 + 17 + 7, the report's counts.",
+    "node --test on the six touched predecessor test files -> 83 pass / 0 fail, i.e. 21 + 8 + 22 + 17 + 8 + 7, the report's counts.",
+    "node packages/runtime/scripts/check-parts-parity.mjs -> OK; work_result's construction sites are claraWork.v1..v7.impl.ts and none is in any chatTurn, so section 7.2's measurement still holds with v23 added.",
+    "node scripts/check-frozen-workflows.selftest.mjs -> OK, all cases, with the extended #815 closure-attribution roster.",
+    "git diff --name-only ffb629d73..HEAD -- packages/db apps/web -> empty. No migration file, so CLOSING-PLAN rule (d) is genuinely not triggered.",
+    "grep -rn CLR44 packages/runtime --include=*.ts --include=*.mjs -> no hit, so nothing branches on the stale mapping today.",
+    "clara_c04 on 127.0.0.1:55742 reads 337 files / max 0361_reservation_release_advice (queried directly); rigl06ac3 on 55710 holds clara_pristine, clara_intake_ci, clara_wave_b_ci and clara_rt_test, as the report says LC built.",
+    "claraWork_v7 is WIRED, not merely written: claraWork.v7.ts:295 calls loadFaProposalInputsStepV7, and claraWork.v7.impl.ts:677-691 carries the estate's six-condition particulars_complete where claraWork.v6.impl.ts:1336-1337 carries the two-condition form; both grounds are imported from ../lib/fa-proposal-grounds.js at the contract's argument orders ([work.clientId, null] and [work.clientId, assetAccount], the second guarded by assetAccount === null ? null :), and v6's OMITTED comment does not ride into the v7 body.",
+    "registry.ts repoints both pins (chatTurn_v23, claraWork_v7), keeps every predecessor imported, exported and rostered; startWorld.ts logs the seventh banner; buildInfoRoutes.ts lists seven identities newest-first.",
+    "The seven prompt stanzas in chatTurn.v23.prompt.ts match the two reports' 'Prompt stanza' blocks, including the two sentences the reports themselves add for the conversational entrance, and SYSTEM_PROMPT_V23 is SYSTEM_PROMPT_V22 plus exactly those seven.",
+    "The v22 deferral cell (chat-turn-v22-tools.test.mjs:361) still stands and still asserts the seven names absent from v22 - the ruling is unwound in v23 rather than deleted from v22."
+  ],
+  "not_findings": [
+    "The parts-parity-exemptions.mjs additions are the AI SDK's own message-content discriminants (tool-call / tool-result / json) at each new entry file, with fingerprints byte-equal to the predecessors' - the standard per-cut ledger entry, not a new part kind and not a parity entry for the seven tools.",
+    "read_tenancy_terms correctly takes the DOCUMENT alone and read_agreement_terms correctly takes {document_id, client_id}; section 7.4's obligation is discharged by a driven cell (chat-turn-v23-tools.test.mjs:214) rather than by prose, and the narrower of the report's two routes was taken.",
+    "Section 7.1's client_inactive sits LAST in CONFIRM_RENT_PLAN_LADDER with clara.create_accounting_plan's own sentence word for word; section 7.3's stable op key is exported and driven for its four convergence properties; the seven door arguments are named with p_judgement sent explicitly even when null.",
+    "Only two of the seven tools have an end-to-end leg and neither confirmation was ever driven against clara.confirm_tenancy_rent_plan_for - but the lane states both limits plainly under 'Anything unverified' rather than implying coverage, so this is a disclosed limit rather than a spec finding."
+  ]
+}
