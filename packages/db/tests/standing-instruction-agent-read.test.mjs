@@ -263,13 +263,21 @@ async (t) => {
   // and the reached set must be EXACTLY the read role. clara_fn_owner is excluded because it OWNS
   // the body and always holds EXECUTE; this is 0363's own `p1148.acl.census` shape, applied to the
   // door it was written for.
+  //
+  // `collate "C"` ON THE ORDER BY, #1047's house rule. `r` is a TEXT element of an array -- the
+  // roster mixes `array(select rolname from pg_roles ...)` with the literal 'public' -- not a
+  // catalog `name`, so a bare `order by 1` ranks it under the DATABASE collation. #1156's own report
+  // names this exact site as the shape's second occurrence, not red today only because every member
+  // of the current roster happens to share the `clara_` prefix or is `public`: one new role name
+  // away from a reorder under CI's `en_US.UTF-8`. Named by expression rather than position, so
+  // `collation-pin-scan.mjs` can see it too.
   const reached = (await rootQuery(
     `select r as role from unnest(
              array(select rolname from pg_roles
                     where rolname like 'clara\\_%' and rolname <> 'clara_fn_owner')
              || array['public']) r
       where has_function_privilege(r, 'clara.${READ_DOOR}(text)'::regprocedure, 'EXECUTE')
-      order by 1`)).rows.map((r) => r.role);
+      order by r collate "C"`)).rows.map((r) => r.role);
   assert.deepEqual(reached, [ROLES.agentRo],
     `the read door is reached by ${reached.join(", ") || "nobody"} -- it is the model lane's read `
     + "role's alone, and every other role on this cluster was asked by name");
