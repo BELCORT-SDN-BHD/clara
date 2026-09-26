@@ -1,4 +1,23 @@
-// STANDALONE chatTurn_v22 + claraWork_v6 e2e — THE CUT'S OWN CHAT WALK AND WORK WALK.
+// STANDALONE chatTurn_v22 + claraWork_v6 e2e — ONCE THAT CUT'S OWN CHAT WALK AND WORK WALK, NOW A
+// RETIRED-BODY WALK.
+//
+// #1144 (the 2026-09-26 closing wave) repointed `chatTurn` to v23 and `claraWork` to v7, so the
+// engine this file spawns no longer serves the bodies in its name, and the cut's own walk is
+// `tests/chat-turn-v23-e2e.mjs`. THIS FILE STAYS, AND IT STAYS IN THE SHAPE ITS PREDECESSORS TOOK
+// when they were succeeded: `chat-turn-v19-e2e.mjs`, v20's and v21's all run their whole walk
+// against whatever the registry pins and assert the boot BANNER rather than a version literal on
+// the provenance line — measured, the v22 cut merge (`061a6992b`) edited none of the three, because
+// none of them ever claimed to be the current cut. What each still buys is a REGRESSION: the
+// behaviour a superseded chat body established has to keep working on the body that succeeded it,
+// and a successor that quietly dropped it is visible here rather than in a hosted incident.
+//
+// SO THE TWO PIN LITERALS THIS FILE CARRIED — `chatTurn=chatTurn_v22` and `claraWork=claraWork_v6`
+// on the serving line — ARE GONE, and nothing else about the legs moves. They were the cut's own
+// "I am current" claim, correct on the day and false the moment the pin moved past them; CI run
+// 36199022506 is where the first of them red. Every remaining bundle assertion in this file is
+// already read from the REGISTRY'S OWN PIN (`pinned-work-bundle.mjs`), so the Work walk below
+// measures the serving body whichever one that is, and `waitReady` still refuses to proceed until
+// the child has logged BOTH the provenance line and the bundle banner.
 //
 // NOT a `node --test` file: it SPAWNS scripts/serve.mjs (through tests/chat-turn-v22-serve.mjs,
 // which installs the scripted model first) as a CHILD process, so the real Workflow World, the real
@@ -33,10 +52,12 @@
 //      agrees, and one Work is admitted. The run posts ONE entry with ONE credit leg per advance
 //      account and leaves TWO `clara.staff_advance_applications` rows.
 //
-//   3. THE WORK WALK: claraWork_v6 SERVES THESE RUNS. The boot banner names v6's bundle, the
-//      registry's own pin is what this file reads rather than a version literal, and the committed
-//      receipt records v6's digest — so a run whose receipt named a contract it was not served
-//      under would be visible here rather than in a hosted incident.
+//   3. THE WORK WALK: THE PINNED claraWork BODY SERVES THESE RUNS. The boot banner names that
+//      body's bundle, the registry's own pin is what this file reads rather than a version
+//      literal, and the committed receipt records that bundle's digest — so a run whose receipt
+//      named a contract it was not served under would be visible here rather than in a hosted
+//      incident. It was v6 when this file was written and it is whatever `registry.ts` pins on the
+//      day it runs; the measurement is the AGREEMENT between banner and receipt, never the number.
 //
 // GATED. `CLARA_SKIP_WORK_E2E=1` opts out (the heavy-test precedent shared with its siblings), and
 // the file SKIPS CLEANLY when migration 0225, 0275 or 0301 is absent — this cut wires all three
@@ -431,9 +452,12 @@ async function main() {
   try {
     await waitReady(60000, engine);
     assert.ok(engine.state.banner, "the world-start banner names the serving bundle digest");
-    assert.match(engine.state.serving ?? "", /chatTurn=chatTurn_v22/, "the engine serves THIS cut's chat body");
-    assert.match(engine.state.serving ?? "", /claraWork=claraWork_v6/, "…and THIS cut's Work body");
+    // NO PIN LITERAL HERE, and that is the retired-body shape rather than an omission — see the
+    // header. `waitReady` -> `waitBooted` has already refused to return until the child logged its
+    // provenance line AND its bundle banner, so "the engine came up on a real registry" is
+    // measured; WHICH cut it came up on is the successor's walk to assert, not this one's.
     console.log(`[v22-e2e] engine ready; serving bundle=${WORK_BUNDLE_ID} digest=${engine.state.banner}`);
+    console.log(`[v22-e2e] retired-body walk; the engine's own pins: ${engine.state.serving}`);
 
     /** ONE SESSION PER RECORDING, and that is the shape the measurement wants rather than a
      *  convenience. Two recordings of one document are two REQUESTS — a preparer comes back to it,
@@ -600,7 +624,7 @@ async function main() {
       "the acknowledgement names the invoice the probe actually showed, and nothing else");
     console.log(`[v22-e2e] PASS 2b: the person answered in a turn of their own, and one acknowledgement rode with the recording`);
 
-    // ---- 3. the two Works run on claraWork_v6 -----------------------------
+    // ---- 3. the two Works run on the PINNED claraWork body ----------------
     for (const [label, work] of [["first", firstInvoice.work_id], ["second", secondInvoice.work_id]]) {
       const done = await pollWork(work, one.jwt, (b) => TERMINAL.has(b.work.status), `v22 ${label} invoice work settles`);
       assert.equal(done.work.status, "completed",
