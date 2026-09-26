@@ -437,10 +437,15 @@ test("p1148.acl.census: the internal stays nobody's, the door is the human lane'
     `a role reaches the ungranted verdict body directly: ${reachInternal.join(", ")} -- the wrapper exists BECAUSE nothing does`);
 
   // (b) THE DOOR. One role, and it is the human lane's.
+  //
+  //     `collate "C"` ON THE ORDER BY, #1047's house rule, AND IT IS THE SAME RULE (c) BELOW WAS
+  //     RED FOR. `r` is a TEXT element of an array, not a catalog `name`, so a bare `order by 1`
+  //     ranks it under the DATABASE collation; a role list carries the same leading underscores
+  //     and the same reordering risk as (c)'s signatures.
   const reachDoor = (await rootQuery(
     `select r as role from unnest($1::text[]) r
       where has_function_privilege(r, 'clara.get_payroll_posting_state(uuid)'::regprocedure, 'EXECUTE')
-      order by 1`,
+      order by r collate "C"`,
     [[...appRoles, "public"]],
   )).rows.map((r) => r.role);
   assert.deepEqual(reachDoor, ["clara_authenticated"],
@@ -448,9 +453,22 @@ test("p1148.acl.census: the internal stays nobody's, the door is the human lane'
 
   // (c) THE CALL SITES. Three before this file, four after, and the fourth is this door. Read off
   //     prosrc across the whole schema, so a body added anywhere shows up here.
+  //
+  //     `collate "C"` IS LOAD-BEARING HERE AND THE PIN BELOW IS WRITTEN IN ITS ORDER (#1047).
+  //     `p.oid::regprocedure::text` is a CAST TO TEXT, so it ranks under the database collation
+  //     rather than under `name`'s own `C`. Two of the four signatures lead with an underscore,
+  //     and glibc's `en_US.UTF-8` — which is what the GitHub runner's cluster is initdb'd with —
+  //     gives punctuation no primary weight, so `clara._list_…` ranks as `claralist…` and BOTH
+  //     underscore-led names fall AFTER the two letter-led ones. Measured 2026-09-26 on
+  //     `clara_intK` (C.UTF-8) by ordering the same four rows under an ICU collation with
+  //     `ka-shifted`, which reproduces CI run 36199022506's `actual` array exactly. A bare
+  //     `order by 1` also slips past `collation-pin-scan.mjs`, whose `INTEGER_KEY` reads a lone
+  //     digit as an integer key rather than as a positional reference to a text column — so this
+  //     ORDER BY names the expression rather than its position.
   const callers = (await rootQuery(
     `select p.oid::regprocedure::text as sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-      where n.nspname = 'clara' and p.prosrc like '%_payroll_posting_verdict(%' order by 1`,
+      where n.nspname = 'clara' and p.prosrc like '%_payroll_posting_verdict(%'
+      order by (p.oid::regprocedure::text) collate "C"`,
   )).rows.map((r) => r.sig);
   assert.deepEqual(callers, [
     "clara._list_review_queue_core(uuid,jsonb,jsonb,integer)",
