@@ -217,3 +217,29 @@ All four databases verified at 337 rows / max `0361_reservation_release_advice` 
 (the pristine 312-file template) and `clara_intS6` itself were touched read-only (one `select
 count(*), max(version)` each) and are otherwise untouched. Full detail, commands and timings:
 `reports/waveK-rig-prep.md`.
+
+## Hosted (2026-09-26, closing wave)
+
+Hosted is released to the closing wave: database **341 files / head `0365_accrual_register_pagination`**,
+runtime **`refresh-11119675`** =
+`registry.fly.io/clara-runtime@sha256:a3a07a992b60208a4fe5e5a1cc26cb9a93a36c9b5fd84e69173f61632a062394`
+with pins `chatTurn_v23` / `claraWork_v7` and `bodies=62`, web
+**`cb003d14-9239-4653-b289-7c8a0faa7f6a`** (`RELEASE-WK-RUNBOOK.md` § RESULTS, 2026-09-26). The
+previous runtime `refresh-322fdf29` and previous web `fa2c6c0b-474c-40dc-9f6e-5064a2488a47` remain
+lawful rollback targets only while no run on `chatTurn_v23` or `claraWork_v7` is non-terminal: step
+9's rollback preflight against `refresh-322fdf29` read ALLOWED, but that snapshot is a blank-estate
+reading, not a durable one, and the first live chat turn or Work item closes it. Since the factory
+reset of 2026-09-26 (`docs/plan/active/factory-reset-2026-09-26/RUNBOOK.md`), the runtime's DSN
+secrets point at the **direct** database host rather than the shared pooler (owner ruling
+2026-09-26); the shared pooler is not used by the runtime, only by tooling (e.g. `pg_dump` under
+WSL, which still needs the pooler route because WSL2 cannot reach the direct host's IPv6 address).
+The estate itself is blank except the one operator firm.
+
+Rig databases as left after the closing release:
+
+- `clara_w4_hosted` (55701) and `clara_w4_coll` (55702) are now at 341 after gate B's replay.
+- `clara_intK` (55742) is the closing wave's own merge database.
+- `clara_c01` through `clara_c04` (55742) are the four closing-wave lane databases.
+- `clara_closing_e2e` (55701) is gate B's browser copy.
+- `rigclose` (55711) and `rigclosec` (55712) were dropped after the closing gates closed.
+- Worktrees `clara-wt/701` through `clara-wt/704` and `clara-wt/710` are still present.

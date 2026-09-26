@@ -91,7 +91,8 @@ as-run record. DB reads `files / frontier` at the ledger position that release l
 | Wave 3 | 2026-09-23 | #1039 | `46cf7c852790e7e935be1e7454aab3726bca8a7e` | 288 / `0293_fa_arrears_judgement_scope` | `refresh-46cf7c85` | `b659a3d4-a253-4f49-8a7e-c89306f6ab82` |
 | Wave 4 | 2026-09-24 | #1053 | `6da02a8dec786015a68209d08f3391af5156081e` | 309 / `0318_knowledge_fye_pair_applicability` | `refresh-6da02a8d` | `57c5dbab-5706-4a8b-a50a-a96fa37f6d97` |
 | Cut phase | 2026-09-25 | #1140 | `061a6992bca2bef457410f876454d719e766df64` | 312 / `0323_trade_invoice_probe_self_exclusion` | `refresh-061a6992` | `3089d906-5bae-48cb-9666-72dff5aa8ef4` |
-| **Sweep wave** | **RELEASED 2026-09-25** | **#1143** | **`322fdf29105c76132ec874dd70a7d3e24c5453e4`** | **337 / `0361_reservation_release_advice`** | **`refresh-322fdf29`** (`sha256:20ab8c8352fd4372f1c8a6f50f2f163f742e92c65c7fa6dc1f227435a608344f`) | **`fa2c6c0b-474c-40dc-9f6e-5064a2488a47`** |
+| Sweep wave | 2026-09-25 | #1143 | `322fdf29105c76132ec874dd70a7d3e24c5453e4` | 337 / `0361_reservation_release_advice` | `refresh-322fdf29` (`sha256:20ab8c8352fd4372f1c8a6f50f2f163f742e92c65c7fa6dc1f227435a608344f`) | `fa2c6c0b-474c-40dc-9f6e-5064a2488a47` |
+| **Closing wave** | **RELEASED 2026-09-26** | **#1154** | **`111196753305886a0891560ca122adca5d6d6991`** | **341 / `0365_accrual_register_pagination`** | **`refresh-11119675`** (`sha256:a3a07a992b60208a4fe5e5a1cc26cb9a93a36c9b5fd84e69173f61632a062394`) | **`cb003d14-9239-4653-b289-7c8a0faa7f6a`** |
 
 ### Wave 4 as integrated
 
