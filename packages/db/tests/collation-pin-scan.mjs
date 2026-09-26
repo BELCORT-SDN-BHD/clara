@@ -34,9 +34,16 @@ const CATALOG_NAME =
  *  list and were therefore declared FREE. They are not integers in this estate, they are FROM-item
  *  aliases — `0132:1545` writes `array_agg(k order by k) … from jsonb_object_keys(…) k`, where `k`
  *  is TEXT — and a one-letter alias is exactly the case the module header promises to classify
- *  `unresolved`, which is movable. Only names that cannot be a bare alias stay. */
+ *  `unresolved`, which is movable. Only names that cannot be a bare alias stay.
+ *
+ *  #1156 FIX ROUND: a bare digit used to sit in this list too, and a digit is not an integer KEY —
+ *  it is a POSITIONAL reference to whatever the select list's expression at that ordinal happens to
+ *  be. `order by 1` over `p.oid::regprocedure::text` is `order by <a text cast>`, and this text
+ *  scanner cannot resolve the position back to the expression behind it, which is exactly the
+ *  blindness `unresolved` already names for an alias. A bare digit now falls through to that same
+ *  answer instead of being hard-freed. */
 const INTEGER_KEY =
-  /^(?:\d+|(?:[a-z_][a-z0-9_]*\.)?(?:ord|seq|idx|rn|oid|ordinal|ordinality|sort_order|sort_ordinal|ordinal_position|attnum|pronargs|enumsortorder|line_no|level|depth|objsubid|indexrelid))$/i;
+  /^(?:(?:[a-z_][a-z0-9_]*\.)?(?:ord|seq|idx|rn|oid|ordinal|ordinality|sort_order|sort_ordinal|ordinal_position|attnum|pronargs|enumsortorder|line_no|level|depth|objsubid|indexrelid))$/i;
 
 /** Surrogate keys that order by a TYPE, never by a collation.
  *
@@ -504,6 +511,12 @@ export const RECORDED_SITES = [
     why: "clara.wake_fn_allowlist.fn_name is ordinary text and DOES move, but each of the two EXCEPT censuses takes a ONE-MEMBER verdict, and one member has no ordering; the live roster is re-measured per wake_kind in collation-pin-portability" },
   { path: "migrations/0132_f_a5b_pr1_sandbox_export.sql", keys: ["k", "k"],
     why: "`k` is jsonb_object_keys' TEXT alias, movable by type; both verdicts are the same four refusal-payload keys, proved stable by the array-verdict cell" },
+  // #1156: `order by 1` here is POSITION, not a resolved integer key — the aggregate's own and only
+  // argument is `a.grantee::regrole::text`, so position 1 IS that regrole-cast-to-text expression,
+  // the same movable shape 0150/0290 and the checkout batteries already spell by name. The verdict
+  // at this loop iteration (the T.9c human-door census) is one grantee, `clara_authenticated` alone.
+  { path: "migrations/0138_f_a4_pr_1c_close_agent_limb.sql", keys: ["1"],
+    why: "position 1 is the aggregate's own `a.grantee::regrole::text`; a regrole cast to text is movable, and the human-door loop's verdict is one grantee, `clara_authenticated` alone" },
   { path: "migrations/0139_statutory_deadlines.sql", keys: ["x"],
     why: "`x` re-sorts the file's own expected constraint-name array for the comparison against a conname census; the live constraint names of clara.statutory_deadlines are re-measured in collation-pin-portability and the literal's order is proved by the array-verdict cell" },
   { path: "migrations/0150_coa_template_pr_a.sql",
@@ -511,6 +524,11 @@ export const RECORDED_SITES = [
     why: "the seeded chart vocabularies and the template grant matrix; each value set is proved in collation-pin-portability" },
   { path: "migrations/0152_f_t3_pr_1_tax_platform.sql", keys: ["p.oid::regprocedure::text"],
     why: "the set is the functions this file added, and the verdict is ONE signature — with a second member the verdict fails whatever the order" },
+  // #1156: the same POSITIONAL shape as 0138 — the aggregate's only argument is
+  // `a.grantee::regrole::text`, so `order by 1` is that expression by position. The verdict is
+  // mint_chat_close_credential's grantee census, one role, `clara_runtime` alone.
+  { path: "migrations/0159_f_a4_pr_2c_close_chat_lane.sql", keys: ["1"],
+    why: "position 1 is the aggregate's own `a.grantee::regrole::text`; the mint_chat_close_credential grantee census verdict is one role, `clara_runtime` alone" },
   { path: "migrations/0160_checkout_gate_c2_stripe_events.sql",
     keys: ["coalesce(r.rolname,'PUBLIC')", "coalesce(r.rolname,'PUBLIC')", "p.oid::regprocedure::text"],
     why: "pg_roles.rolname is `name`, so the coalesce keeps C; the regprocedure census takes a two-member verdict proved stable by the array-verdict cell, and the regprocedure cohort is re-measured live" },

@@ -49,7 +49,47 @@ test("collation-pin · an ORDER BY key is classified by the TYPE that decides wh
 
   // Ordering that is not text at all is free by construction.
   assert.equal(classifyOrderKey("sort_order").free, true);
-  assert.equal(classifyOrderKey("1").free, true);
+});
+
+// #1156 — a bare digit is a POSITIONAL reference to a select-list expression, not a resolved
+// integer key. The module already answers `unresolved` for an alias it cannot look behind
+// (`order by x`); a positional reference is the same kind of blindness and must get the same
+// answer, not the free pass `INTEGER_KEY`'s `^\d+` used to hand it.
+test("collation-pin · a bare positional ORDER BY key is UNRESOLVED, not free — position 1 may be a text expression the scanner cannot see", () => {
+  assert.equal(classifyOrderKey("1").free, false, "a positional reference is not a resolved integer key");
+  assert.equal(classifyOrderKey("1").domain, "unresolved");
+  assert.equal(classifyOrderKey("2").free, false);
+  // A NAMED integer/ordinal key is unaffected — narrowing the digit case must not widen it away.
+  assert.equal(classifyOrderKey("sort_order").free, true);
+  assert.equal(classifyOrderKey("oid").free, true);
+
+  // The shape #1148's report measured: a pinned census whose aggregate orders by POSITION over a
+  // select-list expression that is a ::text cast, invisible to the scanner before this fix because
+  // `1` read as an integer key rather than as "position 1, whatever type that turns out to be".
+  const positionalOverText = `
+do $pre$
+declare v_txt text;
+begin
+  select string_agg(p.oid::regprocedure::text, ',' order by 1) into v_txt
+    from pg_proc p where p.pronamespace = 'clara'::regnamespace;
+  if v_txt is distinct from 'clara.get_payroll_posting_state(uuid)' then
+    raise exception 'prestate: the signature census drifted -- got %', v_txt using errcode = 'CLR10';
+  end if;
+end $pre$;
+`;
+  const findings = scanSqlText(positionalOverText);
+  assert.equal(findings.length, 1, "a positional ORDER BY over the select list's own text expression must be found");
+  assert.equal(findings[0].keys[0].key, "1");
+  assert.equal(findings[0].keys[0].domain, "unresolved");
+
+  // Naming the collation on the positional key — the house fix — silences the finding.
+  const fixed = positionalOverText.replace("order by 1", 'order by 1 collate "C"');
+  assert.notEqual(fixed, positionalOverText, "positive control: the fix must actually change the fixture");
+  assert.deepEqual(scanSqlText(fixed), [], "a collated positional key is not a finding");
+
+  // A genuine integer key stays green: an ordinal-shaped NAME, not a bare digit, is unaffected.
+  const genuineInteger = positionalOverText.replace("order by 1", "order by ordinal_position");
+  assert.deepEqual(scanSqlText(genuineInteger), [], "a named ordinal key is still free");
 });
 
 // The fixtures below are the shapes the estate actually writes, reduced to the smallest text that
